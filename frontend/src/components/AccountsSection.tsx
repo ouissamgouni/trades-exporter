@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Tabs } from '@chakra-ui/react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
 import AccountsManagement from './AccountsManagement';
 import { RawAccountsEditor } from './RawAccountsEditor';
 import ConnectorsManager from './ConnectorsManager';
@@ -11,33 +11,33 @@ export const AccountsSection: React.FC = () => {
     const [activeTab, setActiveTab] = useState<string>('accounts');
 
     return (
-        <Box>
-            <Tabs.Root value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
-                <Tabs.List mb={4}>
-                    <Tabs.Trigger value="accounts">
+        <div>
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <TabsList className="mb-4">
+                    <TabsTrigger value="accounts">
                         👤 Accounts
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="connectors">
+                    </TabsTrigger>
+                    <TabsTrigger value="connectors">
                         🔌 Connectors
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="raw-accounts">
+                    </TabsTrigger>
+                    <TabsTrigger value="raw-accounts">
                         🔗 Raw Mappings
-                    </Tabs.Trigger>
-                </Tabs.List>
+                    </TabsTrigger>
+                </TabsList>
 
-                <Tabs.Content value="accounts">
+                <TabsContent value="accounts">
                     <AccountsManagement />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="connectors">
+                <TabsContent value="connectors">
                     <ConnectorsManager />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="raw-accounts">
+                <TabsContent value="raw-accounts">
                     <RawAccountsEditor />
-                </Tabs.Content>
-            </Tabs.Root>
-        </Box>
+                </TabsContent>
+            </Tabs>
+        </div>
     );
 };
 

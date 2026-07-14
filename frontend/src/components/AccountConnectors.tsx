@@ -1,16 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    HStack,
-    IconButton,
-    Switch,
-    Table,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import { Badge, type BadgeColorScheme, Button } from './ui/primitives';
 import { FiEdit2, FiPlus, FiRefreshCw, FiTrash2 } from 'react-icons/fi';
 import { LuEraser } from 'react-icons/lu';
 
@@ -123,13 +112,13 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
     const getStatusBadge = (status?: string) => {
         switch (status) {
             case 'success':
-                return <Badge colorScheme="green" size="xs" fontSize="2xs">OK</Badge>;
+                return <Badge colorScheme="green" className="text-[10px]">OK</Badge>;
             case 'failed':
-                return <Badge colorScheme="red" size="xs" fontSize="2xs">Fail</Badge>;
+                return <Badge colorScheme="red" className="text-[10px]">Fail</Badge>;
             case 'running':
-                return <Badge colorScheme="blue" size="xs" fontSize="2xs">Run</Badge>;
+                return <Badge colorScheme="blue" className="text-[10px]">Run</Badge>;
             default:
-                return <Badge colorScheme="gray" size="xs" fontSize="2xs">—</Badge>;
+                return <Badge colorScheme="gray" className="text-[10px]">—</Badge>;
         }
     };
 
@@ -148,14 +137,14 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
         const info = connectorTypes.find(t => t.type === connectorType);
         if (!info) return null;
 
-        const colors: Record<string, string> = {
+        const colors: Record<string, BadgeColorScheme> = {
             cex: 'blue',
             onchain: 'purple',
             broker: 'green',
         };
 
         return (
-            <Badge colorScheme={colors[info.category] || 'gray'} size="xs" fontSize="2xs">
+            <Badge colorScheme={colors[info.category] || 'gray'} className="text-[10px]">
                 {info.category}
             </Badge>
         );
@@ -178,178 +167,176 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
     );
 
     return (
-        <Box>
-            <VStack align="stretch" gap={2}>
+        <div>
+            <div className="flex flex-col items-stretch gap-2">
                 {/* Connectors Table */}
                 {connectors.length === 0 ? (
-                    <Box p={4} textAlign="center" borderWidth="1px" borderRadius="md" bg="gray.50">
-                        <Text color="gray.600" mb={2} fontSize="xs">No connectors configured</Text>
-                        <Button size="xs" colorScheme="blue" onClick={handleCreate}>
+                    <div className="border border-slate-200 bg-slate-50 p-4 text-center">
+                        <span className="mb-2 block text-xs text-slate-600">No connectors configured</span>
+                        <Button size="sm" colorScheme="blue" onClick={handleCreate}>
                             <FiPlus size={10} /> Add Connector
                         </Button>
-                    </Box>
+                    </div>
                 ) : (
                     <>
-                        <Flex justify="flex-end" gap={1}>
-                            <IconButton
+                        <div className="flex justify-end gap-1">
+                            <Button
                                 aria-label="Refresh"
-                                size="2xs"
+                                size="sm"
                                 variant="ghost"
                                 onClick={fetchConnectors}
                             >
                                 <FiRefreshCw size={10} />
-                            </IconButton>
+                            </Button>
                             <Button
-                                size="2xs"
+                                size="sm"
                                 colorScheme="blue"
                                 onClick={handleCreate}
                                 disabled={availableTypes.length === 0}
                             >
                                 <FiPlus size={10} /> Add
                             </Button>
-                        </Flex>
-                        <Box borderWidth="1px" borderRadius="lg" overflowX="auto">
-                            <Table.Root size="sm" fontSize="xs" minW="480px">
-                                <Table.Header>
-                                    <Table.Row>
-                                        <Table.ColumnHeader fontSize="2xs">Connector</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="2xs">Config</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="2xs">Status</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="2xs">Enabled</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="2xs" textAlign="right">Actions</Table.ColumnHeader>
-                                    </Table.Row>
-                                </Table.Header>
-                                <Table.Body>
+                        </div>
+                        <div className="overflow-x-auto border border-slate-200">
+                            <table className="w-full min-w-[480px] text-xs">
+                                <thead>
+                                    <tr>
+                                        <th className="p-2 text-left text-[10px]">Connector</th>
+                                        <th className="p-2 text-left text-[10px]">Config</th>
+                                        <th className="p-2 text-left text-[10px]">Status</th>
+                                        <th className="p-2 text-left text-[10px]">Enabled</th>
+                                        <th className="p-2 text-right text-[10px]">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
                                     {connectors.map((connector) => (
-                                        <Table.Row key={connector.id}>
-                                            <Table.Cell whiteSpace="nowrap">
-                                                <VStack align="start" gap={0.5}>
-                                                    <Text fontWeight="medium" fontSize="xs">
+                                        <tr key={connector.id} className="border-t border-slate-100">
+                                            <td className="whitespace-nowrap p-2">
+                                                <div className="flex flex-col items-start gap-0.5">
+                                                    <span className="text-xs font-medium">
                                                         {getConnectorDisplayName(connector.connector_type)}
-                                                    </Text>
-                                                    <HStack gap={1}>
+                                                    </span>
+                                                    <div className="flex items-center gap-1">
                                                         {getCategoryBadge(connector.connector_type)}
                                                         {connector.config?.test_mode && (
                                                             <Badge
-                                                                colorPalette="orange"
-                                                                size="xs"
-                                                                fontSize="2xs"
-                                                                cursor="pointer"
+                                                                colorScheme="orange"
+                                                                className="cursor-pointer text-[10px]"
                                                                 onClick={(e) => { e.stopPropagation(); handleEdit(connector); }}
                                                                 title="Click to manage test fixture"
                                                             >
                                                                 🧪 Test
                                                             </Badge>
                                                         )}
-                                                    </HStack>
-                                                </VStack>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <VStack align="start" gap={0}>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="p-2">
+                                                <div className="flex flex-col items-start gap-0">
                                                     {connector.config?.chain && (
-                                                        <Text fontSize="2xs">{connector.config.chain}</Text>
+                                                        <span className="text-[10px]">{connector.config.chain}</span>
                                                     )}
                                                     {connector.config?.address && (
-                                                        <Text fontSize="2xs" color="gray.500" maxW="100px" truncate>
+                                                        <span className="max-w-[100px] truncate text-[10px] text-slate-500">
                                                             {connector.config.address}
-                                                        </Text>
+                                                        </span>
                                                     )}
                                                     {connector.config?.wallet_address && (
-                                                        <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.wallet_address}>
+                                                        <span className="max-w-[100px] truncate text-[10px] text-slate-500" title={connector.config.wallet_address}>
                                                             {connector.config.wallet_address}
-                                                        </Text>
+                                                        </span>
                                                     )}
                                                     {connector.config?.symbols && (
-                                                        <Text fontSize="2xs">
+                                                        <span className="text-[10px]">
                                                             {connector.config.symbols.slice(0, 3).join(', ')}
                                                             {connector.config.symbols.length > 3 && '...'}
-                                                        </Text>
+                                                        </span>
                                                     )}
                                                     {connector.config?.start_datetime && (
-                                                        <Text fontSize="2xs" color="gray.500">
+                                                        <span className="text-[10px] text-slate-500">
                                                             Since: {new Date(connector.config.start_datetime).toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' })}
-                                                        </Text>
+                                                        </span>
                                                     )}
                                                     {connector.config?.default_file_name && (
-                                                        <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.default_file_name}>
+                                                        <span className="max-w-[100px] truncate text-[10px] text-slate-500" title={connector.config.default_file_name}>
                                                             📁 {connector.config.default_file_name}
-                                                        </Text>
+                                                        </span>
                                                     )}
-                                                </VStack>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <VStack align="start" gap={0.5}>
-                                                    <HStack gap={1}>
+                                                </div>
+                                            </td>
+                                            <td className="p-2">
+                                                <div className="flex flex-col items-start gap-0.5">
+                                                    <div className="flex items-center gap-1">
                                                         {getStatusBadge(connector.last_sync_status)}
-                                                        <Text fontSize="2xs" color="gray.500">
+                                                        <span className="text-[10px] text-slate-500">
                                                             {connector.last_sync_at
                                                                 ? formatRelativeTime(connector.last_sync_at)
                                                                 : 'Never'}
-                                                        </Text>
-                                                    </HStack>
+                                                        </span>
+                                                    </div>
                                                     {connector.last_error && (
-                                                        <Text fontSize="2xs" color="red.500" maxW="150px" truncate title={connector.last_error}>
+                                                        <span className="max-w-[150px] truncate text-[10px] text-red-500" title={connector.last_error}>
                                                             {connector.last_error}
-                                                        </Text>
+                                                        </span>
                                                     )}
-                                                </VStack>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Switch.Root
-                                                    size="sm"
-                                                    checked={connector.enabled}
-                                                    onCheckedChange={() => handleToggle(connector)}
-                                                    colorPalette="green"
+                                                </div>
+                                            </td>
+                                            <td className="p-2">
+                                                <button
+                                                    type="button"
+                                                    role="switch"
+                                                    aria-checked={connector.enabled}
+                                                    onClick={() => handleToggle(connector)}
+                                                    className={`relative inline-flex h-[12px] w-[22px] items-center transition-colors ${connector.enabled ? 'bg-green-500' : 'bg-slate-300'}`}
                                                 >
-                                                    <Switch.HiddenInput />
-                                                    <Switch.Control w="22px" h="12px">
-                                                        <Switch.Thumb w="10px" h="10px" />
-                                                    </Switch.Control>
-                                                </Switch.Root>
-                                            </Table.Cell>
-                                            <Table.Cell whiteSpace="nowrap">
-                                                <HStack justify="flex-end" gap={0.5}>
-                                                    <IconButton
+                                                    <span
+                                                        className={`inline-block h-[10px] w-[10px] transform bg-white transition-transform ${connector.enabled ? 'translate-x-[10px]' : 'translate-x-[1px]'}`}
+                                                    />
+                                                </button>
+                                            </td>
+                                            <td className="whitespace-nowrap p-2">
+                                                <div className="flex items-center justify-end gap-0.5">
+                                                    <Button
                                                         aria-label="Purge data"
-                                                        size="2xs"
+                                                        size="sm"
                                                         variant="ghost"
                                                         title="Purge connector data (keep config)"
                                                         onClick={() => handlePurge(connector)}
                                                     >
                                                         <LuEraser size={10} />
-                                                    </IconButton>
-                                                    <IconButton
+                                                    </Button>
+                                                    <Button
                                                         aria-label="Edit"
-                                                        size="2xs"
+                                                        size="sm"
                                                         variant="ghost"
                                                         onClick={() => handleEdit(connector)}
                                                     >
                                                         <FiEdit2 size={10} />
-                                                    </IconButton>
-                                                    <IconButton
+                                                    </Button>
+                                                    <Button
                                                         aria-label="Delete"
-                                                        size="2xs"
+                                                        size="sm"
                                                         variant="ghost"
                                                         colorScheme="red"
                                                         onClick={() => handleDelete(connector)}
                                                     >
                                                         <FiTrash2 size={10} />
-                                                    </IconButton>
-                                                </HStack>
-                                            </Table.Cell>
-                                        </Table.Row>
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
                                     ))}
-                                </Table.Body>
-                            </Table.Root>
-                        </Box>
+                                </tbody>
+                            </table>
+                        </div>
                     </>
                 )}
 
                 {/* Priority Note */}
-                <Text fontSize="2xs" color="gray.500">
+                <span className="text-[10px] text-slate-500">
                     Synced by priority (lower = first)
-                </Text>
-            </VStack>
+                </span>
+            </div>
 
             {/* Connector Form Dialog */}
             <ConnectorFormDialog
@@ -371,7 +358,7 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                 title={cleanupTarget?.title ?? ''}
                 onCompleted={handleCleanupCompleted}
             />
-        </Box>
+        </div>
     );
 };
 

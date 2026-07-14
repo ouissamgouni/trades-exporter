@@ -7,16 +7,15 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-    Badge, Box, Button, Flex, IconButton, Input, NativeSelect,
-    Spinner, Table, Text, Textarea,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import { LuPlay } from 'react-icons/lu';
 import { API_URL, Asset, AssetPriceGetter } from '../types';
 import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
-import { Dialog, Portal } from '@chakra-ui/react';
+import {
+    Badge, Button, Input, Spinner, Text, Textarea,
+} from './ui/primitives';
 
 interface PriceGetterFormData {
     price_getter: string;
@@ -292,23 +291,23 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
     const getters = asset.price_getters || [];
 
     return (
-        <Box>
+        <div>
 
             {/* Unified getters table with inline add row */}
-            <Box overflowX="auto">
-                <Table.Root size="sm" css={{ '& td, & th': { py: '2px', px: '4px', fontSize: 'xs' }, '& th': { fontSize: '10px' } }}>
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader>Source</Table.ColumnHeader>
-                            <Table.ColumnHeader>External ID</Table.ColumnHeader>
-                            <Table.ColumnHeader>Parameters</Table.ColumnHeader>
-                            <Table.ColumnHeader>Priority</Table.ColumnHeader>
-                            <Table.ColumnHeader>Enabled</Table.ColumnHeader>
-                            <Table.ColumnHeader>Test</Table.ColumnHeader>
-                            <Table.ColumnHeader>Actions</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto">
+                <table className="w-full [&_td]:px-1 [&_td]:py-0.5 [&_td]:text-xs [&_th]:px-1 [&_th]:py-0.5 [&_th]:text-[10px]">
+                    <thead>
+                        <tr>
+                            <th className="text-left">Source</th>
+                            <th className="text-left">External ID</th>
+                            <th className="text-left">Parameters</th>
+                            <th className="text-left">Priority</th>
+                            <th className="text-left">Enabled</th>
+                            <th className="text-left">Test</th>
+                            <th className="text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {getters.map(pg => {
                             const isEditing = editingGetterId === pg.id;
                             const isMock = pg.price_getter === 'mock';
@@ -324,138 +323,140 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
                             const hasParams = isMock ? (mockMin != null || mockMax != null || hasConfiguredPrices) : paramsEntries.length > 0;
 
                             return (
-                                <Table.Row key={pg.id}>
-                                    <Table.Cell>
-                                        <Badge colorPalette={isMock ? 'orange' : 'purple'} fontSize="xs">{pg.price_getter}</Badge>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                <tr key={pg.id}>
+                                    <td>
+                                        <Badge colorScheme={isMock ? 'orange' : 'purple'} className="text-xs">{pg.price_getter}</Badge>
+                                    </td>
+                                    <td>
                                         {isEditing ? (
-                                            <Input size="xs" value={editingValues.external_id}
+                                            <Input value={editingValues.external_id}
                                                 onChange={e => setEditingValues(v => ({ ...v, external_id: e.target.value }))}
-                                                placeholder="e.g. BTC-USD" fontFamily="mono" fontSize="xs" width="120px" />
+                                                placeholder="e.g. BTC-USD" className="h-6 w-[120px] font-mono text-xs" />
                                         ) : (
-                                            <Text fontSize="xs" fontFamily="mono">
-                                                {pg.external_id || <Text as="span" color="gray.400">(auto)</Text>}
+                                            <Text className="font-mono text-xs">
+                                                {pg.external_id || <Text className="text-gray-400">(auto)</Text>}
                                             </Text>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td>
                                         {isEditing && isMock && !hasConfiguredPrices ? (
                                             (() => {
                                                 let minVal: number | string = '', maxVal: number | string = '';
                                                 try { const p = JSON.parse(editingValues.params); minVal = p.min_price ?? ''; maxVal = p.max_price ?? ''; } catch { /* */ }
                                                 return (
-                                                    <Flex gap={1} align="center">
-                                                        <Input size="xs" type="number" placeholder="Min" width="60px" fontSize="xs" value={minVal}
+                                                    <div className="flex items-center gap-1">
+                                                        <Input type="number" placeholder="Min" className="h-6 w-[60px] text-xs" value={minVal}
                                                             onChange={e => { try { const p = JSON.parse(editingValues.params || '{}'); p.min_price = e.target.value ? parseFloat(e.target.value) : 0; setEditingValues(v => ({ ...v, params: JSON.stringify(p) })); } catch { /* */ } }} />
-                                                        <Text fontSize="xs" color="gray.400">–</Text>
-                                                        <Input size="xs" type="number" placeholder="Max" width="60px" fontSize="xs" value={maxVal}
+                                                        <Text className="text-xs text-gray-400">–</Text>
+                                                        <Input type="number" placeholder="Max" className="h-6 w-[60px] text-xs" value={maxVal}
                                                             onChange={e => { try { const p = JSON.parse(editingValues.params || '{}'); p.max_price = e.target.value ? parseFloat(e.target.value) : 0; setEditingValues(v => ({ ...v, params: JSON.stringify(p) })); } catch { /* */ } }} />
-                                                    </Flex>
+                                                    </div>
                                                 );
                                             })()
                                         ) : isEditing ? (
-                                            <Textarea size="sm" value={editingValues.params}
+                                            <Textarea value={editingValues.params}
                                                 onChange={e => setEditingValues(v => ({ ...v, params: e.target.value }))}
-                                                placeholder='{"key": "value"}' fontFamily="mono" fontSize="xs" rows={2} width="150px" />
+                                                placeholder='{"key": "value"}' rows={2} className="w-[150px] font-mono text-xs" />
                                         ) : isMock && hasConfiguredPrices ? (
                                             <Tooltip content={
-                                                <Box fontFamily="mono" fontSize="xs" whiteSpace="pre">
+                                                <div className="whitespace-pre font-mono text-xs">
                                                     {Object.entries(mockPrices!).map(([k, v]) => (
-                                                        <Box key={k}>{k} → {v}</Box>
+                                                        <div key={k}>{k} → {v}</div>
                                                     ))}
-                                                </Box>
-                                            } showArrow>
-                                                <Text fontSize="xs" fontFamily="mono" color="orange.600" cursor="default">
+                                                </div>
+                                            }>
+                                                <Text className="cursor-default font-mono text-xs text-orange-600">
                                                     {Object.keys(mockPrices!).length} price{Object.keys(mockPrices!).length !== 1 ? 's' : ''}{mockQuoteCurrency ? ` (${mockQuoteCurrency})` : ''}
                                                 </Text>
                                             </Tooltip>
                                         ) : isMock ? (
-                                            <Text fontSize="xs" fontFamily="mono" color="orange.600">
-                                                {mockMin != null && mockMax != null ? `${mockMin} – ${mockMax}` : <Text as="span" color="gray.400">no range</Text>}
+                                            <Text className="font-mono text-xs text-orange-600">
+                                                {mockMin != null && mockMax != null ? `${mockMin} – ${mockMax}` : <Text className="text-gray-400">no range</Text>}
                                             </Text>
                                         ) : hasParams ? (
-                                            <Flex gap={1} flexWrap="wrap">
+                                            <div className="flex flex-wrap gap-1">
                                                 {paramsEntries.map(([k, v]) => (
-                                                    <Badge key={k} colorPalette="gray" fontSize="xs">{k}: {String(v)}</Badge>
+                                                    <Badge key={k} colorScheme="gray" className="text-xs">{k}: {String(v)}</Badge>
                                                 ))}
-                                            </Flex>
+                                            </div>
                                         ) : (
-                                            <Text fontSize="xs" color="gray.400">—</Text>
+                                            <Text className="text-xs text-gray-400">—</Text>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td>
                                         {isEditing ? (
-                                            <Input size="xs" type="number" fontSize="xs" value={editingValues.priority}
-                                                onChange={e => setEditingValues(v => ({ ...v, priority: parseInt(e.target.value) || 100 }))} width="50px" />
-                                        ) : <Text fontSize="xs">{pg.priority}</Text>}
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Badge colorPalette={pg.enabled ? 'green' : 'gray'} cursor="pointer" fontSize="xs" onClick={() => togglePriceGetter(pg)}>
+                                            <Input type="number" className="h-6 w-[50px] text-xs" value={editingValues.priority}
+                                                onChange={e => setEditingValues(v => ({ ...v, priority: parseInt(e.target.value) || 100 }))} />
+                                        ) : <Text className="text-xs">{pg.priority}</Text>}
+                                    </td>
+                                    <td>
+                                        <Badge colorScheme={pg.enabled ? 'green' : 'gray'} className="cursor-pointer text-xs" onClick={() => togglePriceGetter(pg)}>
                                             {pg.enabled ? 'Yes' : 'No'}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Flex align="center" gap={1}>
+                                    </td>
+                                    <td>
+                                        <div className="flex items-center gap-1">
                                             {autoResult && (
-                                                <Tooltip content={autoResult.loading ? 'Testing...' : autoResult.success ? `✅ ${autoResult.price?.toFixed(6) ?? 'OK'}` : `❌ ${autoResult.error || 'Failed'}`} showArrow>
-                                                    <Box cursor="default">
-                                                        {autoResult.loading ? <Spinner size="xs" /> : autoResult.success ? <Text color="green.500" fontSize="xs">✅</Text> : <Text color="red.500" fontSize="xs">❌</Text>}
-                                                    </Box>
+                                                <Tooltip content={autoResult.loading ? 'Testing...' : autoResult.success ? `✅ ${autoResult.price?.toFixed(6) ?? 'OK'}` : `❌ ${autoResult.error || 'Failed'}`}>
+                                                    <div className="cursor-default">
+                                                        {autoResult.loading ? <Spinner size="xs" /> : autoResult.success ? <Text className="text-xs text-green-500">✅</Text> : <Text className="text-xs text-red-500">❌</Text>}
+                                                    </div>
                                                 </Tooltip>
                                             )}
-                                            <IconButton size="xs" variant="ghost" colorPalette="blue" aria-label="Test getter" onClick={() => openTestModal(pg)}>
+                                            <Button size="sm" variant="ghost" colorScheme="blue" aria-label="Test getter" onClick={() => openTestModal(pg)} className="h-6 w-6 min-w-0 p-0">
                                                 <LuPlay size={12} />
-                                            </IconButton>
-                                        </Flex>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                            </Button>
+                                        </div>
+                                    </td>
+                                    <td>
                                         {isEditing ? (
-                                            <Flex gap={1}>
-                                                <Button size="xs" colorPalette="green" variant="ghost" onClick={saveEditingGetter}>✓</Button>
-                                                <Button size="xs" colorPalette="gray" variant="ghost" onClick={cancelEditingGetter}>✕</Button>
-                                            </Flex>
+                                            <div className="flex gap-1">
+                                                <Button size="sm" colorScheme="green" variant="ghost" onClick={saveEditingGetter} className="h-6 min-w-0 px-1">✓</Button>
+                                                <Button size="sm" colorScheme="gray" variant="ghost" onClick={cancelEditingGetter} className="h-6 min-w-0 px-1">✕</Button>
+                                            </div>
                                         ) : (
-                                            <Flex gap={1}>
-                                                <Button size="xs" colorPalette="blue" variant="ghost" onClick={() => startEditingGetter(pg)}>✏️</Button>
-                                                {!isMock && <Button size="xs" colorPalette="red" variant="ghost" onClick={() => deleteConfirm.open(pg.id)}>🗑️</Button>}
-                                            </Flex>
+                                            <div className="flex gap-1">
+                                                <Button size="sm" colorScheme="blue" variant="ghost" onClick={() => startEditingGetter(pg)} className="h-6 min-w-0 px-1">✏️</Button>
+                                                {!isMock && <Button size="sm" colorScheme="red" variant="ghost" onClick={() => deleteConfirm.open(pg.id)} className="h-6 min-w-0 px-1">🗑️</Button>}
+                                            </div>
                                         )}
-                                    </Table.Cell>
-                                </Table.Row>
+                                    </td>
+                                </tr>
                             );
                         })}
                         {/* Inline add row */}
-                        <Table.Row bg="blue.50">
-                            <Table.Cell>
-                                <NativeSelect.Root size="xs">
-                                    <NativeSelect.Field value={newGetter.price_getter} fontSize="xs"
-                                        onChange={e => setNewGetter({ ...newGetter, price_getter: e.target.value })}>
-                                        <option value="">source…</option>
-                                        {availableGetters.filter(g => g !== 'mock').map(g => (
-                                            <option key={g} value={g}>{g}</option>
-                                        ))}
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Table.Cell>
-                            <Table.Cell>
-                                <Input size="xs" fontSize="xs" fontFamily="mono" placeholder={asset.symbol || 'ext. id'}
+                        <tr className="bg-blue-50">
+                            <td>
+                                <select
+                                    value={newGetter.price_getter}
+                                    onChange={e => setNewGetter({ ...newGetter, price_getter: e.target.value })}
+                                    className="h-6 border border-gray-200 text-xs"
+                                    aria-label="Price getter source"
+                                >
+                                    <option value="">source…</option>
+                                    {availableGetters.filter(g => g !== 'mock').map(g => (
+                                        <option key={g} value={g}>{g}</option>
+                                    ))}
+                                </select>
+                            </td>
+                            <td>
+                                <Input placeholder={asset.symbol || 'ext. id'} className="h-6 font-mono text-xs"
                                     value={newGetter.external_id || ''}
                                     onChange={e => setNewGetter({ ...newGetter, external_id: e.target.value || '' })} />
-                            </Table.Cell>
-                            <Table.Cell>
-                                <Input size="xs" fontSize="xs" fontFamily="mono" placeholder='{"key":"val"}'
+                            </td>
+                            <td>
+                                <Input placeholder='{"key":"val"}' className="h-6 font-mono text-xs"
                                     value={Object.keys(newGetter.params).length > 0 ? JSON.stringify(newGetter.params) : ''}
                                     onChange={e => { try { setNewGetter({ ...newGetter, params: e.target.value ? JSON.parse(e.target.value) : {} }); } catch { /* keep current */ } }} />
-                            </Table.Cell>
-                            <Table.Cell>
-                                <Input size="xs" fontSize="xs" type="number" width="50px" value={newGetter.priority}
+                            </td>
+                            <td>
+                                <Input type="number" className="h-6 w-[50px] text-xs" value={newGetter.priority}
                                     onChange={e => setNewGetter({ ...newGetter, priority: parseInt(e.target.value) || 100 })} />
-                            </Table.Cell>
-                            <Table.Cell />
-                            <Table.Cell>
+                            </td>
+                            <td />
+                            <td>
                                 {newGetterTestLoading ? <Spinner size="xs" /> : (
-                                    <IconButton colorPalette="blue" size="xs" variant="ghost" aria-label="Test new getter" onClick={() => {
+                                    <Button colorScheme="blue" size="sm" variant="ghost" aria-label="Test new getter" className="h-6 w-6 min-w-0 p-0" onClick={() => {
                                         // Open the test modal with the new getter data
                                         setTestModalGetter({
                                             id: -1,
@@ -469,79 +470,76 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
                                         setTestResult(null);
                                         setShowTestModal(true);
                                     }}
-                                        disabled={!newGetter.price_getter}><LuPlay size={12} /></IconButton>
+                                        disabled={!newGetter.price_getter}><LuPlay size={12} /></Button>
                                 )}
-                            </Table.Cell>
-                            <Table.Cell>
-                                <Button colorPalette="blue" size="xs" variant="ghost" onClick={addPriceGetter}
+                            </td>
+                            <td>
+                                <Button colorScheme="blue" size="sm" variant="ghost" className="h-6 min-w-0 px-1" onClick={addPriceGetter}
                                     disabled={!newGetter.price_getter}>➕</Button>
-                            </Table.Cell>
-                        </Table.Row>
+                            </td>
+                        </tr>
                         {newGetterTestResult && (
-                            <Table.Row>
-                                <Table.Cell colSpan={7}>
-                                    <Box p={1} bg={newGetterTestResult.success ? 'green.50' : 'red.50'} borderRadius="sm" fontSize="xs">
+                            <tr>
+                                <td colSpan={7}>
+                                    <div className={`p-1 text-xs ${newGetterTestResult.success ? 'bg-green-50' : 'bg-red-50'}`}>
                                         {newGetterTestResult.success ? (
-                                            <Text color="green.700">✅ {newGetterTestResult.price?.toFixed(6)}</Text>
+                                            <Text className="text-green-700">✅ {newGetterTestResult.price?.toFixed(6)}</Text>
                                         ) : (
-                                            <Text color="red.700">❌ {newGetterTestResult.error}</Text>
+                                            <Text className="text-red-700">❌ {newGetterTestResult.error}</Text>
                                         )}
-                                    </Box>
-                                </Table.Cell>
-                            </Table.Row>
+                                    </div>
+                                </td>
+                            </tr>
                         )}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
 
             {/* Test Price Getter Modal */}
-            <Dialog.Root open={showTestModal} onOpenChange={(e) => { setShowTestModal(e.open); if (!e.open) { setTestResult(null); setTestModalGetter(null); } }}>
-                <Portal>
-                    <Dialog.Backdrop css={{ zIndex: 1600 }} />
-                    <Dialog.Positioner css={{ zIndex: 1600 }}>
-                        <Dialog.Content maxWidth="420px">
-                            <Dialog.Header>
-                                <Dialog.Title fontSize="md">
-                                    🧪 Test: {testModalGetter?.price_getter}
-                                    {testModalGetter?.external_id && (
-                                        <Text as="span" fontWeight="normal" fontSize="sm" color="gray.500"> ({testModalGetter.external_id})</Text>
-                                    )}
-                                </Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={3}>
-                                    <Box>
-                                        <Text fontSize="sm" fontWeight="medium" mb={1}>Test Date</Text>
-                                        <Input size="sm" type="date" value={testDate} onChange={e => setTestDate(e.target.value)} />
-                                    </Box>
-                                    <Button colorPalette="blue" size="sm" onClick={runTestFromModal} disabled={testLoading}>
-                                        {testLoading ? <Spinner size="xs" mr={2} /> : null}
-                                        Run Test
-                                    </Button>
-                                    {testResult && (
-                                        <Box p={3} bg={testResult.success ? 'green.50' : 'red.50'} borderRadius="md"
-                                            border="1px solid" borderColor={testResult.success ? 'green.200' : 'red.200'}>
-                                            {testResult.success ? (
-                                                <Flex direction="column" gap={1}>
-                                                    <Text color="green.700" fontWeight="medium">✅ Price: {testResult.price?.toFixed(6)}</Text>
-                                                    {testResult.source && <Text fontSize="xs" color="gray.600">Source: {testResult.source}</Text>}
-                                                    {testResult.quote_currency && <Text fontSize="xs" color="gray.600">Quote: {testResult.quote_currency}</Text>}
-                                                    {testResult.ticker_used && <Text fontSize="xs" color="gray.600">Ticker: {testResult.ticker_used}</Text>}
-                                                </Flex>
-                                            ) : (
-                                                <Text color="red.700" fontSize="sm">❌ {testResult.error}</Text>
-                                            )}
-                                        </Box>
-                                    )}
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Button variant="outline" size="sm" onClick={() => setShowTestModal(false)}>Close</Button>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+            <RadixDialog.Root open={showTestModal} onOpenChange={(open) => { setShowTestModal(open); if (!open) { setTestResult(null); setTestModalGetter(null); } }}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-[1600] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[1600] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 bg-white shadow-xl">
+                        <div className="border-b border-gray-100 px-4 py-3">
+                            <RadixDialog.Title className="text-base font-semibold">
+                                🧪 Test: {testModalGetter?.price_getter}
+                                {testModalGetter?.external_id && (
+                                    <Text className="text-sm font-normal text-gray-500"> ({testModalGetter.external_id})</Text>
+                                )}
+                            </RadixDialog.Title>
+                        </div>
+                        <div className="px-4 py-3">
+                            <div className="flex flex-col gap-3">
+                                <div>
+                                    <Text className="mb-1 text-sm font-medium">Test Date</Text>
+                                    <Input type="date" value={testDate} onChange={e => setTestDate(e.target.value)} className="h-8" />
+                                </div>
+                                <Button colorScheme="blue" size="sm" onClick={runTestFromModal} disabled={testLoading}>
+                                    {testLoading ? <Spinner size="xs" className="mr-2" /> : null}
+                                    Run Test
+                                </Button>
+                                {testResult && (
+                                    <div className={`border p-3 ${testResult.success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+                                        {testResult.success ? (
+                                            <div className="flex flex-col gap-1">
+                                                <Text className="font-medium text-green-700">✅ Price: {testResult.price?.toFixed(6)}</Text>
+                                                {testResult.source && <Text className="text-xs text-gray-600">Source: {testResult.source}</Text>}
+                                                {testResult.quote_currency && <Text className="text-xs text-gray-600">Quote: {testResult.quote_currency}</Text>}
+                                                {testResult.ticker_used && <Text className="text-xs text-gray-600">Ticker: {testResult.ticker_used}</Text>}
+                                            </div>
+                                        ) : (
+                                            <Text className="text-sm text-red-700">❌ {testResult.error}</Text>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-end border-t border-gray-100 px-4 py-3">
+                            <Button variant="outline" size="sm" onClick={() => setShowTestModal(false)}>Close</Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Delete Confirm Dialog */}
             <ConfirmDialog
@@ -553,7 +551,7 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
                 isDestructive
                 onConfirm={executeDelete}
             />
-        </Box>
+        </div>
     );
 };
 

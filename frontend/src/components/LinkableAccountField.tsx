@@ -11,7 +11,6 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Box, Flex, Input, Text } from '@chakra-ui/react';
 import { FiEdit2, FiCopy, FiCheck, FiLink, FiPlusCircle } from 'react-icons/fi';
 import { LuLoader } from 'react-icons/lu';
 import { Account } from '../types';
@@ -155,21 +154,18 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
     // ---- Edit mode: show selector + suggestions ----
     if (isEditing) {
         return (
-            <Box ref={containerRef} py={0.5}>
-                <Flex justify="space-between" gap={2} align="center" mb={1}>
-                    <Text fontSize={fontSize} color="blue.600" fontWeight="medium" flexShrink={0}>{label}</Text>
+            <div ref={containerRef} className="py-0.5">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="shrink-0 font-medium text-blue-600" style={{ fontSize }}>{label}</span>
                     {isSaving && <LuLoader size={10} className="animate-spin" />}
-                </Flex>
+                </div>
 
                 {/* Editable source text */}
                 {onSourceChange && (
-                    <Flex align="center" gap={1} mb={1}>
-                        <Text fontSize="9px" color="gray.500" flexShrink={0}>Source:</Text>
+                    <div className="mb-1 flex items-center gap-1">
+                        <span className="shrink-0 text-[9px] text-slate-500">Source:</span>
                         {editingSource ? (
-                            <Input
-                                size="xs"
-                                fontSize="9px"
-                                fontFamily="mono"
+                            <input
                                 value={localSource}
                                 onChange={(e) => setLocalSource(e.target.value)}
                                 onBlur={handleSourceSave}
@@ -177,22 +173,17 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                                     if (e.key === 'Enter') { e.preventDefault(); handleSourceSave(); }
                                 }}
                                 autoFocus
-                                flex={1}
+                                className="flex-1 border border-slate-300 bg-white px-1 py-0.5 font-mono text-[9px] outline-none focus:border-blue-500"
                             />
                         ) : (
-                            <Text
-                                fontSize="9px"
-                                fontFamily="mono"
-                                color={sourceValue ? 'gray.600' : 'gray.400'}
-                                cursor="pointer"
-                                _hover={{ color: 'blue.500' }}
+                            <span
+                                className={`flex-1 cursor-pointer font-mono text-[9px] hover:text-blue-500 ${sourceValue ? 'text-slate-600' : 'text-slate-400'}`}
                                 onClick={() => setEditingSource(true)}
-                                flex={1}
                             >
                                 {sourceValue || '(empty)'}
-                            </Text>
+                            </span>
                         )}
-                    </Flex>
+                    </div>
                 )}
 
                 {/* Account selector */}
@@ -209,7 +200,7 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
 
                 {/* Suggestions */}
                 {sourceValue && !isLinked && (
-                    <Box mt={1}>
+                    <div className="mt-1">
                         <AccountSuggestionBadges
                             label={sourceValue}
                             source={source}
@@ -219,80 +210,49 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                             minConfidence={0.4}
                             fontSize="8px"
                         />
-                    </Box>
+                    </div>
                 )}
-            </Box>
+            </div>
         );
     }
 
     // ---- View mode ----
     return (
-        <Flex
-            justify="space-between"
-            py={0.5}
-            gap={2}
-            align="center"
-            cursor="pointer"
+        <div
+            className="group -mx-1 flex cursor-pointer items-center justify-between gap-2 border border-transparent px-1 py-0.5 transition-all hover:border-blue-200 hover:bg-blue-50"
             onClick={() => setIsEditing(true)}
-            px={1}
-            mx={-1}
-            borderWidth="1px"
-            borderColor="transparent"
-            borderRadius="sm"
-            transition="all 0.1s"
-            _hover={{ borderColor: 'blue.200', bg: 'blue.50' }}
-            css={{ '&:hover .ef-pencil': { opacity: 0.5 } }}
         >
-            <Text fontSize={fontSize} color="gray.500" flexShrink={0}>{label}</Text>
-            <Flex
-                align="center"
-                gap={1}
-                minW={0}
-            >
-                <Box
-                    className="ef-pencil"
-                    opacity={0}
-                    transition="opacity 0.15s"
-                    flexShrink={0}
-                    color="blue.400"
-                >
+            <span className="shrink-0 text-slate-500" style={{ fontSize }}>{label}</span>
+            <div className="flex min-w-0 items-center gap-1">
+                <span className="shrink-0 text-blue-400 opacity-0 transition-opacity group-hover:opacity-50">
                     <FiEdit2 size={9} />
-                </Box>
+                </span>
 
                 {isLinked ? (
-                    <Flex align="center" gap={1}>
+                    <div className="flex items-center gap-1">
                         {/* Show truncated source address when copyable and different from account name */}
                         {copyable && sourceValue && (
                             <>
-                                <Text
-                                    fontSize="9px"
-                                    fontFamily="mono"
-                                    color="gray.500"
-                                    css={{ wordBreak: 'break-all' }}
-                                >
+                                <span className="break-all font-mono text-[9px] text-slate-500">
                                     {truncateLength && sourceValue.length > truncateLength
                                         ? `${sourceValue.slice(0, truncateLength)}…`
                                         : sourceValue}
-                                </Text>
+                                </span>
                                 <Tooltip content={copied ? 'Copied!' : 'Copy'} openDelay={100} closeDelay={copied ? 1000 : 200}>
-                                    <Box
-                                        as="button"
+                                    <button
+                                        type="button"
                                         onClick={(e: React.MouseEvent) => {
                                             e.stopPropagation();
                                             navigator.clipboard.writeText(sourceValue);
                                             setCopied(true);
                                             setTimeout(() => setCopied(false), 2000);
                                         }}
-                                        opacity={0.5}
-                                        color={copied ? 'green.500' : 'gray.400'}
-                                        _hover={{ color: copied ? 'green.500' : 'blue.500' }}
-                                        cursor="pointer"
-                                        flexShrink={0}
+                                        className={`shrink-0 cursor-pointer opacity-50 ${copied ? 'text-green-500 hover:text-green-500' : 'text-slate-400 hover:text-blue-500'}`}
                                     >
                                         {copied ? <FiCheck size={9} /> : <FiCopy size={9} />}
-                                    </Box>
+                                    </button>
                                 </Tooltip>
-                                <Text fontSize="9px" color="gray.400">→</Text>
+                                <span className="text-[9px] text-slate-400">→</span>
                             </>
                         )}
                         <AccountBadge
@@ -304,70 +264,57 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                             colorPalette={colorPalette}
                             maxLength={maxLength}
                         />
-                    </Flex>
+                    </div>
                 ) : sourceValue ? (
-                    <Flex align="center" gap={1}>
-                        <Text
-                            fontSize={fontSize}
-                            fontFamily="mono"
-                            color="orange.500"
-                            textAlign="right"
-                            css={{ wordBreak: 'break-all' }}
+                    <div className="flex items-center gap-1">
+                        <span
+                            className="break-all text-right font-mono text-orange-500"
+                            style={{ fontSize }}
                         >
                             {truncateLength && sourceValue.length > truncateLength
                                 ? `${sourceValue.slice(0, truncateLength)}…`
                                 : sourceValue}
-                        </Text>
+                        </span>
                         {copyable && (
                             <Tooltip content={copied ? 'Copied!' : 'Copy'} openDelay={100} closeDelay={copied ? 1000 : 200}>
-                                <Box
-                                    as="button"
+                                <button
+                                    type="button"
                                     onClick={(e: React.MouseEvent) => {
                                         e.stopPropagation();
                                         navigator.clipboard.writeText(sourceValue);
                                         setCopied(true);
                                         setTimeout(() => setCopied(false), 2000);
                                     }}
-                                    opacity={0.5}
-                                    color={copied ? 'green.500' : 'gray.400'}
-                                    _hover={{ color: copied ? 'green.500' : 'blue.500' }}
-                                    cursor="pointer"
-                                    flexShrink={0}
+                                    className={`shrink-0 cursor-pointer opacity-50 ${copied ? 'text-green-500 hover:text-green-500' : 'text-slate-400 hover:text-blue-500'}`}
                                 >
                                     {copied ? <FiCheck size={9} /> : <FiCopy size={9} />}
-                                </Box>
+                                </button>
                             </Tooltip>
                         )}
                         <Tooltip content="Link account" openDelay={200}>
-                            <Box
-                                as="button"
+                            <button
+                                type="button"
                                 onClick={(e: React.MouseEvent) => {
                                     e.stopPropagation();
                                     setIsEditing(true);
                                 }}
-                                color="orange.400"
-                                _hover={{ color: 'blue.500' }}
-                                cursor="pointer"
-                                flexShrink={0}
+                                className="shrink-0 cursor-pointer text-orange-400 hover:text-blue-500"
                             >
                                 <FiLink size={9} />
-                            </Box>
+                            </button>
                         </Tooltip>
                         {onCreateNew && (
                             <Tooltip content="Create new account" openDelay={100}>
-                                <Box
-                                    as="button"
+                                <button
+                                    type="button"
                                     onClick={(e: React.MouseEvent) => {
                                         e.stopPropagation();
                                         onCreateNew();
                                     }}
-                                    color="green.500"
-                                    cursor="pointer"
-                                    flexShrink={0}
-                                    _hover={{ color: 'green.700' }}
+                                    className="shrink-0 cursor-pointer text-green-500 hover:text-green-700"
                                 >
                                     <FiPlusCircle size={9} />
-                                </Box>
+                                </button>
                             </Tooltip>
                         )}
                         <AccountSuggestionBadges
@@ -379,12 +326,12 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                             minConfidence={0.5}
                             fontSize="7px"
                         />
-                    </Flex>
+                    </div>
                 ) : (
-                    <Text fontSize={fontSize} color="gray.400">-</Text>
+                    <span className="text-slate-400" style={{ fontSize }}>-</span>
                 )}
-            </Flex>
-        </Flex>
+            </div>
+        </div>
     );
 };
 

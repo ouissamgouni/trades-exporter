@@ -13,18 +13,11 @@
  */
 
 import React from 'react';
-import {
-    Box,
-    Button,
-    Flex,
-    Heading,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_URL, Bundle } from '../../types';
 import { BundleTable } from '../BundleTable';
 import { toaster } from '../ui/toaster';
+import { Button, Spinner } from '../ui/primitives';
 
 // ============================================================================
 // Types
@@ -151,12 +144,12 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
     };
 
     return (
-        <Box>
+        <div>
             {/* Header — only when title is provided */}
             {title && (
-                <Flex justify="space-between" align="center" mb={4}>
-                    <Heading size="sm">{title} ({isLoading ? '...' : bundles.length})</Heading>
-                    <Flex gap={2}>
+                <div className="mb-4 flex items-center justify-between">
+                    <span className="text-sm font-semibold">{title} ({isLoading ? '...' : bundles.length})</span>
+                    <div className="flex gap-2">
                         <Button
                             size="sm"
                             variant="outline"
@@ -165,47 +158,47 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
                         >
                             {isLoading ? <Spinner size="xs" /> : '↻'} Refresh
                         </Button>
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
             )}
 
             {/* Error state */}
             {error && (
-                <Box p={4} bg="red.50" borderRadius="md" textAlign="center">
-                    <Text color="red.600" fontWeight="bold">
+                <div className="bg-red-50 p-4 text-center">
+                    <span className="block font-bold text-red-600">
                         Error loading bundles
-                    </Text>
-                    <Text color="red.600" fontSize="sm">
+                    </span>
+                    <span className="block text-sm text-red-600">
                         {error instanceof Error ? error.message : 'Unknown error'}
-                    </Text>
+                    </span>
                     <Button
-                        mt={3}
+                        className="mt-3"
                         size="sm"
-                        colorPalette="red"
+                        colorScheme="red"
                         onClick={() => refetch()}
                     >
                         🔄 Retry
                     </Button>
-                </Box>
+                </div>
             )}
 
             {/* Loading state */}
             {isLoading && !error && (
-                <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                    <Spinner size="lg" color="blue.500" />
-                    <Text mt={4}>Loading bundles...</Text>
-                </Box>
+                <div className="bg-slate-50 py-10 text-center">
+                    <Spinner size="lg" className="text-blue-500" />
+                    <span className="mt-4 block">Loading bundles...</span>
+                </div>
             )}
 
             {/* Bundle table */}
             {!isLoading && !error && (
                 <>
                     {bundles.length === 0 ? (
-                        <Box p={6} bg="gray.50" borderRadius="md" textAlign="center">
-                            <Text color="gray.600">
+                        <div className="bg-slate-50 p-6 text-center">
+                            <span className="text-slate-600">
                                 No bundles yet. Select transactions to create a bundle, or accept a suggestion.
-                            </Text>
-                        </Box>
+                            </span>
+                        </div>
                     ) : (
                         <BundleTable
                             bundles={bundles}
@@ -218,7 +211,7 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
                     )}
                 </>
             )}
-        </Box>
+        </div>
     );
 };
 

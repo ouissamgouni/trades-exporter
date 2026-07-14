@@ -1,5 +1,5 @@
-import { Badge } from '@chakra-ui/react';
 import React from 'react';
+import { Badge } from './ui/primitives';
 import { PipelineStage } from '../types';
 
 interface PipelineStageIndicatorProps {
@@ -19,7 +19,7 @@ export const PipelineStageIndicator: React.FC<PipelineStageIndicatorProps> = ({
     if (!currentStage) return null;
 
     return (
-        <Badge colorPalette="blue" size="sm" variant="subtle">
+        <Badge colorScheme="blue">
             {STAGE_LABELS[currentStage]}
         </Badge>
     );

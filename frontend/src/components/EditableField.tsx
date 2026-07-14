@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Box, Flex, Input, NativeSelect, Switch, Text } from '@chakra-ui/react';
 import { FiEdit2, FiCopy, FiCheck } from 'react-icons/fi';
 import { LuLoader } from 'react-icons/lu';
 import { Tooltip } from './ui/tooltip';
@@ -180,14 +179,16 @@ export const EditableField: React.FC<EditableFieldProps> = ({
     // ---- Checkbox type: render as toggle, no edit mode needed ----
     if (type === 'checkbox') {
         return (
-            <Flex justify="space-between" py={0.5} gap={2} align="center">
-                <Text fontSize={fontSize} color="gray.500" flexShrink={0}>{label}</Text>
-                <Flex align="center" gap={1}>
+            <div className="flex items-center justify-between gap-2 py-0.5">
+                <span className="shrink-0 text-slate-500" style={{ fontSize }}>{label}</span>
+                <div className="flex items-center gap-1">
                     {isSaving && <LuLoader size={10} className="animate-spin" />}
-                    <Switch.Root
-                        size="sm"
-                        checked={value === 'true'}
-                        onCheckedChange={async () => {
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={value === 'true'}
+                        disabled={!editable || isSaving}
+                        onClick={async () => {
                             if (!editable || isSaving) return;
                             const newVal = value === 'true' ? 'false' : 'true';
                             setIsSaving(true);
@@ -199,208 +200,161 @@ export const EditableField: React.FC<EditableFieldProps> = ({
                                 setIsSaving(false);
                             }
                         }}
-                        disabled={!editable || isSaving}
+                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${value === 'true' ? 'bg-blue-500' : 'bg-slate-300'} ${(!editable || isSaving) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                     >
-                        <Switch.HiddenInput />
-                        <Switch.Control />
-                    </Switch.Root>
-                </Flex>
-            </Flex>
+                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${value === 'true' ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                    </button>
+                </div>
+            </div>
         );
     }
 
     // ---- View mode ----
     if (!isEditing) {
         return (
-            <Flex
-                justify="space-between"
-                py={0.5}
-                gap={2}
-                align="center"
+            <div
+                className={`group -mx-1 flex items-center justify-between gap-2 border border-transparent px-1 py-0.5 transition-all ${editable ? 'cursor-pointer hover:border-blue-200 hover:bg-blue-50' : 'cursor-default'}`}
                 onClick={editable ? startEditing : undefined}
-                cursor={editable ? 'pointer' : 'default'}
-                px={1}
-                mx={-1}
-                borderWidth="1px"
-                borderColor="transparent"
-                borderRadius="sm"
-                transition="all 0.1s"
-                _hover={editable ? { borderColor: 'blue.200', bg: 'blue.50' } : undefined}
-                css={editable ? { '&:hover .ef-pencil': { opacity: 0.5 } } : undefined}
             >
-                <Text fontSize={fontSize} color="gray.500" flexShrink={0}>{label}</Text>
-                <Flex
-                    align="center"
-                    gap={1}
-                    minW={0}
-                >
+                <span className="shrink-0 text-slate-500" style={{ fontSize }}>{label}</span>
+                <div className="flex min-w-0 items-center gap-1">
                     {editable && (
-                        <Box
-                            className="ef-pencil"
-                            opacity={0}
-                            transition="opacity 0.15s"
-                            flexShrink={0}
-                            color="blue.400"
-                        >
+                        <span className="shrink-0 text-blue-400 opacity-0 transition-opacity group-hover:opacity-50">
                             <FiEdit2 size={9} />
-                        </Box>
+                        </span>
                     )}
                     {copyable && value ? (
-                        <Flex align="center" gap={1}>
-                            <Box
-                                as="span"
-                                fontSize={fontSize}
-                                color={alert ? 'orange.500' : muted ? 'gray.400' : 'gray.700'}
-                                fontFamily="mono"
-                                textAlign="right"
-                                css={{ wordBreak: 'break-all', userSelect: 'text' }}
+                        <div className="flex items-center gap-1">
+                            <span
+                                className={`break-all text-right font-mono ${alert ? 'text-orange-500' : muted ? 'text-slate-400' : 'text-slate-700'}`}
+                                style={{ fontSize, userSelect: 'text' }}
                             >
                                 {displayValue ?? (truncateLength && value.length > truncateLength
                                     ? `${value.slice(0, truncateLength)}…`
                                     : value)}
-                            </Box>
+                            </span>
                             <Tooltip content={copied ? 'Copied!' : 'Copy'} openDelay={100} closeDelay={copied ? 1000 : 200}>
-                                <Box
-                                    as="button"
+                                <button
+                                    type="button"
                                     onClick={(e: React.MouseEvent) => {
                                         e.stopPropagation();
                                         navigator.clipboard.writeText(value);
                                         setCopied(true);
                                         setTimeout(() => setCopied(false), 2000);
                                     }}
-                                    opacity={0.5}
-                                    color={copied ? 'green.500' : 'gray.400'}
-                                    _hover={{ color: copied ? 'green.500' : 'blue.500' }}
-                                    cursor="pointer"
-                                    flexShrink={0}
+                                    className={`shrink-0 cursor-pointer opacity-50 ${copied ? 'text-green-500 hover:text-green-500' : 'text-slate-400 hover:text-blue-500'}`}
                                 >
                                     {copied ? <FiCheck size={9} /> : <FiCopy size={9} />}
-                                </Box>
+                                </button>
                             </Tooltip>
-                        </Flex>
+                        </div>
                     ) : (
-                        <Box
-                            as="span"
-                            fontSize={fontSize}
-                            color={alert ? 'orange.500' : muted ? 'gray.400' : 'gray.700'}
-                            fontFamily="mono"
-                            textAlign="right"
-                            css={{ wordBreak: 'break-all', userSelect: 'text' }}
+                        <span
+                            className={`break-all text-right font-mono ${alert ? 'text-orange-500' : muted ? 'text-slate-400' : 'text-slate-700'}`}
+                            style={{ fontSize, userSelect: 'text' }}
                         >
                             {displayValue ?? (value || '-')}
-                        </Box>
+                        </span>
                     )}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
         );
     }
 
     // ---- Edit mode ----
-    const borderColor = hasError ? 'red.500' : 'blue.300';
+    const inputBorderClass = hasError ? 'border-red-500' : 'border-blue-300';
 
     // Custom renderer
     if (renderEdit) {
         return (
-            <Flex
-                justify="space-between"
-                py={0.5}
-                gap={2}
-                align="center"
-                ref={editContainerRef}
-            >
-                <Text fontSize={fontSize} color="blue.600" fontWeight="medium" flexShrink={0}>{label}</Text>
-                <Box flex="1" maxW="65%">
+            <div className="flex items-center justify-between gap-2 py-0.5" ref={editContainerRef}>
+                <span className="shrink-0 font-medium text-blue-600" style={{ fontSize }}>{label}</span>
+                <div className="max-w-[65%] flex-1">
                     {isSaving ? (
-                        <Flex justify="flex-end">
+                        <div className="flex justify-end">
                             <LuLoader size={12} className="animate-spin" />
-                        </Flex>
+                        </div>
                     ) : (
                         renderEdit(localValue, setLocalValue, handleSave, handleCancel)
                     )}
-                </Box>
-            </Flex>
+                </div>
+            </div>
         );
     }
 
     // Select type
     if (type === 'select' && options) {
         return (
-            <Flex justify="space-between" py={0.5} gap={2} align="center">
-                <Text fontSize={fontSize} color="blue.600" fontWeight="medium" flexShrink={0}>{label}</Text>
-                <Box flex="1" maxW="65%">
+            <div className="flex items-center justify-between gap-2 py-0.5">
+                <span className="shrink-0 font-medium text-blue-600" style={{ fontSize }}>{label}</span>
+                <div className="max-w-[65%] flex-1">
                     {isSaving ? (
-                        <Flex justify="flex-end">
+                        <div className="flex justify-end">
                             <LuLoader size={12} className="animate-spin" />
-                        </Flex>
+                        </div>
                     ) : (
-                        <NativeSelect.Root size="xs">
-                            <NativeSelect.Field
-                                ref={inputRef as React.RefObject<HTMLSelectElement>}
-                                value={localValue}
-                                onChange={(e) => {
-                                    setLocalValue(e.target.value);
-                                    // Auto-save on select change
-                                    const newVal = e.target.value;
-                                    setLocalValue(newVal);
-                                    // We need to save after state update
-                                    setTimeout(async () => {
-                                        setIsSaving(true);
-                                        try {
-                                            await onSave(newVal);
-                                            setIsEditing(false);
-                                        } catch {
-                                            setHasError(true);
-                                            setTimeout(() => {
-                                                setLocalValue(value);
-                                                setHasError(false);
-                                            }, 1500);
-                                        } finally {
-                                            setIsSaving(false);
-                                        }
-                                    }, 0);
-                                }}
-                                onBlur={handleCancel}
-                                onKeyDown={handleKeyDown}
-                                fontSize="10px"
-                                borderColor={borderColor}
-                            >
-                                {options.map(opt => (
-                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                ))}
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
+                        <select
+                            ref={inputRef as React.RefObject<HTMLSelectElement>}
+                            value={localValue}
+                            onChange={(e) => {
+                                setLocalValue(e.target.value);
+                                // Auto-save on select change
+                                const newVal = e.target.value;
+                                setLocalValue(newVal);
+                                // We need to save after state update
+                                setTimeout(async () => {
+                                    setIsSaving(true);
+                                    try {
+                                        await onSave(newVal);
+                                        setIsEditing(false);
+                                    } catch {
+                                        setHasError(true);
+                                        setTimeout(() => {
+                                            setLocalValue(value);
+                                            setHasError(false);
+                                        }, 1500);
+                                    } finally {
+                                        setIsSaving(false);
+                                    }
+                                }, 0);
+                            }}
+                            onBlur={handleCancel}
+                            onKeyDown={handleKeyDown}
+                            className={`w-full border bg-white px-1 py-0.5 text-[10px] outline-none focus:border-blue-500 ${inputBorderClass}`}
+                        >
+                            {options.map(opt => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
                     )}
-                </Box>
-            </Flex>
+                </div>
+            </div>
         );
     }
 
     // Text / number / datetime input
     return (
-        <Flex justify="space-between" py={0.5} gap={2} align="center">
-            <Text fontSize={fontSize} color="blue.600" fontWeight="medium" flexShrink={0}>{label}</Text>
-            <Box flex="1" maxW="65%">
+        <div className="flex items-center justify-between gap-2 py-0.5">
+            <span className="shrink-0 font-medium text-blue-600" style={{ fontSize }}>{label}</span>
+            <div className="max-w-[65%] flex-1">
                 {isSaving ? (
-                    <Flex justify="flex-end">
+                    <div className="flex justify-end">
                         <LuLoader size={12} className="animate-spin" />
-                    </Flex>
+                    </div>
                 ) : (
-                    <Input
+                    <input
                         ref={inputRef as React.RefObject<HTMLInputElement>}
-                        size="xs"
                         type={type === 'datetime' ? 'datetime-local' : type}
                         step={type === 'number' ? 'any' : undefined}
                         value={localValue}
                         onChange={(e) => setLocalValue(e.target.value)}
                         onBlur={handleSave}
                         onKeyDown={handleKeyDown}
-                        fontSize="10px"
-                        borderColor={borderColor}
-                        fontFamily="mono"
+                        className={`w-full border bg-white px-1 py-0.5 font-mono text-[10px] outline-none focus:border-blue-500 ${inputBorderClass}`}
                     />
                 )}
-            </Box>
-        </Flex>
+            </div>
+        </div>
     );
 };
 

@@ -11,14 +11,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-    Box,
-    Flex,
-    Text,
-    Spinner,
-    Badge,
-    Button,
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner, Text } from './ui/primitives';
 import { FiX, FiPieChart, FiRefreshCw, FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { useBalance } from '../hooks/useBalance';
 import { useAssets } from '../hooks/useAssets';
@@ -240,22 +233,16 @@ const TokenRow: React.FC<{
     const [expanded, setExpanded] = useState(false);
 
     return (
-        <Box>
-            <Flex
-                justify="space-between"
-                align="center"
-                py={1.5}
-                px={2}
-                _hover={{ bg: 'gray.50' }}
-                borderRadius="sm"
-                cursor={showDrillDown ? 'pointer' : 'default'}
+        <div>
+            <div
+                className={`flex items-center justify-between px-2 py-1.5 hover:bg-gray-50 ${showDrillDown ? 'cursor-pointer' : 'cursor-default'}`}
                 onClick={() => showDrillDown && setExpanded(!expanded)}
             >
-                <Flex align="center" gap={1.5}>
+                <div className="flex items-center gap-1.5">
                     {showDrillDown && (
-                        <Box color="gray.400" fontSize="xs">
+                        <div className="text-xs text-gray-400">
                             {expanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                        </Box>
+                        </div>
                     )}
                     <AssetBadge
                         asset={assetMap.get(token.symbol.toUpperCase())}
@@ -264,141 +251,130 @@ const TokenRow: React.FC<{
                         showWarning={false}
                     />
                     {showDrillDown && (
-                        <Flex gap={0.5} flexWrap="wrap" maxW="180px">
+                        <div className="flex max-w-[180px] flex-wrap gap-0.5">
                             {token.accounts.slice(0, 3).map((h, i) => (
                                 <AccountBadge key={`${h.accountName}-${i}`} accountName={h.accountName} size="xs" />
                             ))}
                             {token.accounts.length > 3 && (
-                                <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
+                                <Badge colorScheme="gray" className="text-[10px]">
                                     +{token.accounts.length - 3}
                                 </Badge>
                             )}
-                        </Flex>
+                        </div>
                     )}
-                </Flex>
-                <Text fontSize="sm" fontFamily="mono" fontWeight="medium">
+                </div>
+                <Text className="font-mono text-sm font-medium">
                     {formatBalance(token.totalAmount)}
                 </Text>
-            </Flex>
+            </div>
 
             {/* Drill-down: per-account breakdown */}
             {expanded && showDrillDown && (
-                <Box ml={5} mb={1} borderLeft="2px solid" borderColor="gray.100" pl={2}>
+                <div className="mb-1 ml-5 border-l-2 border-gray-100 pl-2">
                     {token.accounts.map((h, i) => (
-                        <Flex
+                        <div
                             key={`${h.accountName}-${h.connectorType}-${i}`}
-                            justify="space-between"
-                            align="center"
-                            py={0.5}
-                            px={1}
+                            className="flex items-center justify-between px-1 py-0.5"
                         >
-                            <Flex align="center" gap={1} flexWrap="wrap">
+                            <div className="flex flex-wrap items-center gap-1">
                                 <AccountBadge accountName={h.accountName} size="xs" />
-                                <Badge size="xs" variant="outline" colorPalette="blue" fontSize="2xs">
+                                <Badge colorScheme="blue" className="text-[10px]">
                                     {h.connectorType}
                                 </Badge>
                                 {h.chain && (
-                                    <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
+                                    <Badge colorScheme="gray" className="text-[10px]">
                                         {h.chain}
                                     </Badge>
                                 )}
-                            </Flex>
-                            <Text fontSize="xs" fontFamily="mono" color="gray.600">
+                            </div>
+                            <Text className="font-mono text-xs text-gray-600">
                                 {formatBalance(h.amount)}
                             </Text>
-                        </Flex>
+                        </div>
                     ))}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
+
 
 const AccountRow: React.FC<{ account: AggregatedAccount; assetMap: Map<string, AssetRef> }> = ({ account, assetMap }) => {
     const [expanded, setExpanded] = useState(false);
 
     return (
-        <Box>
-            <Flex
-                justify="space-between"
-                align="center"
-                py={1.5}
-                px={2}
-                _hover={{ bg: 'gray.50' }}
-                borderRadius="sm"
-                cursor="pointer"
+        <div>
+            <div
+                className="flex cursor-pointer items-center justify-between px-2 py-1.5 hover:bg-gray-50"
                 onClick={() => setExpanded(!expanded)}
             >
-                <Flex align="center" gap={1.5}>
-                    <Box color="gray.400" fontSize="xs">
+                <div className="flex items-center gap-1.5">
+                    <div className="text-xs text-gray-400">
                         {expanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                    </Box>
-                    <Text fontSize="sm" fontWeight="medium">
+                    </div>
+                    <Text className="text-sm font-medium">
                         {account.accountName}
                     </Text>
-                    <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
+                    <Badge colorScheme="gray" className="text-[10px]">
                         {account.totalTokens} token{account.totalTokens !== 1 ? 's' : ''}
                     </Badge>
-                </Flex>
-                <Flex gap={1} flexWrap="wrap">
+                </div>
+                <div className="flex flex-wrap gap-1">
                     {account.connectors.map((ct) => (
-                        <Badge key={ct} size="xs" variant="outline" colorPalette="blue" fontSize="2xs">
+                        <Badge key={ct} colorScheme="blue" className="text-[10px]">
                             {ct}
                         </Badge>
                     ))}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {expanded && (
-                <Box ml={5} mb={1} borderLeft="2px solid" borderColor="gray.100" pl={2}>
+                <div className="mb-1 ml-5 border-l-2 border-gray-100 pl-2">
                     {account.entries.map((e, i) => (
-                        <Flex
+                        <div
                             key={`${e.symbol}-${e.connectorType}-${i}`}
-                            justify="space-between"
-                            align="center"
-                            py={0.5}
-                            px={1}
+                            className="flex items-center justify-between px-1 py-0.5"
                         >
-                            <Flex align="center" gap={1} flexWrap="wrap">
+                            <div className="flex flex-wrap items-center gap-1">
                                 <AssetBadge
                                     asset={assetMap.get(e.symbol.toUpperCase())}
                                     sourceSymbol={e.symbol}
                                     size="xs"
                                     showWarning={false}
                                 />
-                                <Badge size="xs" variant="outline" colorPalette="blue" fontSize="2xs">
+                                <Badge colorScheme="blue" className="text-[10px]">
                                     {e.connectorType}
                                 </Badge>
                                 {e.chain && (
-                                    <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
+                                    <Badge colorScheme="gray" className="text-[10px]">
                                         {e.chain}
                                     </Badge>
                                 )}
-                            </Flex>
-                            <Text fontSize="xs" fontFamily="mono" color="gray.600">
+                            </div>
+                            <Text className="font-mono text-xs text-gray-600">
                                 {formatBalance(e.amount)}
                             </Text>
-                        </Flex>
+                        </div>
                     ))}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
 const ErrorSection: React.FC<{ errors: string[] }> = ({ errors }) => {
     if (errors.length === 0) return null;
     return (
-        <Box mt={3} p={2} bg="red.50" borderRadius="md">
-            <Text fontSize="xs" fontWeight="semibold" color="red.600" mb={1}>
+        <div className="mt-3 bg-red-50 p-2">
+            <Text className="mb-1 block text-xs font-semibold text-red-600">
                 Connector errors ({errors.length})
             </Text>
             {errors.map((err, i) => (
-                <Text key={i} fontSize="xs" color="red.500">
+                <Text key={i} className="block text-xs text-red-500">
                     {err}
                 </Text>
             ))}
-        </Box>
+        </div>
     );
 };
 
@@ -526,134 +502,105 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
     return (
         <>
             {/* Backdrop */}
-            <Box
-                position="fixed"
-                inset={0}
-                bg="blackAlpha.400"
-                zIndex={2000}
+            <div
+                className="fixed inset-0 z-[2000] cursor-pointer bg-black/40"
                 onClick={onClose}
-                cursor="pointer"
             />
 
             {/* Panel */}
-            <Box
-                position="fixed"
-                right={0}
-                top={0}
-                bottom={0}
-                width={width}
-                maxW="90vw"
-                bg="white"
-                boxShadow="xl"
-                zIndex={2001}
-                overflowY="auto"
-                borderLeft="1px solid"
-                borderColor="gray.200"
+            <div
+                className="fixed bottom-0 right-0 top-0 z-[2001] max-w-[90vw] overflow-y-auto border-l border-gray-200 bg-white shadow-xl"
+                style={{ width }}
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Sticky header */}
-                <Flex
-                    justify="space-between"
-                    align="center"
-                    px={3}
-                    py={2}
-                    borderBottom="1px solid"
-                    borderColor="gray.200"
-                    bg="gray.50"
-                    position="sticky"
-                    top={0}
-                    zIndex={1}
-                >
-                    <Flex align="center" gap={1.5}>
+                <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">
+                    <div className="flex items-center gap-1.5">
                         <FiPieChart size={16} />
-                        <Text fontWeight="semibold" fontSize="sm">
+                        <Text className="text-sm font-semibold">
                             {headerTitle}
                         </Text>
                         {!isLoading && (
-                            <Badge size="xs" variant="subtle" colorPalette="gray">
+                            <Badge colorScheme="gray">
                                 {itemCount} {itemLabel}{itemCount !== 1 ? 's' : ''}
                             </Badge>
                         )}
-                    </Flex>
-                    <Flex gap={1}>
+                    </div>
+                    <div className="flex gap-1">
                         {mode !== 'connector' && (
-                            <Flex bg="gray.200" borderRadius="md" p="1px" gap={0}>
+                            <div className="flex gap-0 bg-gray-200 p-px">
                                 <Button
-                                    size="xs"
+                                    size="sm"
                                     variant={viewMode === 'byAsset' ? 'solid' : 'ghost'}
                                     onClick={() => setViewMode('byAsset')}
-                                    px={2}
-                                    borderRadius="md"
-                                    fontWeight={viewMode === 'byAsset' ? 'semibold' : 'normal'}
+                                    className={`px-2 ${viewMode === 'byAsset' ? 'font-semibold' : 'font-normal'}`}
                                 >
                                     By Asset
                                 </Button>
                                 <Button
-                                    size="xs"
+                                    size="sm"
                                     variant={viewMode === 'byAccount' ? 'solid' : 'ghost'}
                                     onClick={() => setViewMode('byAccount')}
-                                    px={2}
-                                    borderRadius="md"
-                                    fontWeight={viewMode === 'byAccount' ? 'semibold' : 'normal'}
+                                    className={`px-2 ${viewMode === 'byAccount' ? 'font-semibold' : 'font-normal'}`}
                                 >
                                     By Account
                                 </Button>
-                            </Flex>
+                            </div>
                         )}
                         <Button
                             variant="ghost"
-                            size="xs"
+                            size="sm"
                             onClick={handleRefresh}
-                            p={1}
+                            className="min-w-0 p-1"
                             disabled={isLoading}
                         >
                             <FiRefreshCw size={14} />
                         </Button>
-                        <Button variant="ghost" size="xs" onClick={onClose} p={1}>
+                        <Button variant="ghost" size="sm" onClick={onClose} className="min-w-0 p-1">
                             <FiX size={16} />
                         </Button>
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
 
                 {/* Content */}
-                <Box p={2}>
+                <div className="p-2">
                     {isLoading && accountBalances.length === 0 && (
-                        <Flex justify="center" align="center" direction="column" py={8} gap={2}>
-                            <Flex align="center">
+                        <div className="flex flex-col items-center justify-center gap-2 py-8">
+                            <div className="flex items-center">
                                 <Spinner size="lg" />
-                                <Text ml={3} color="gray.500" fontSize="sm">
+                                <Text className="ml-3 text-sm text-gray-500">
                                     Fetching live balances…
                                 </Text>
-                            </Flex>
+                            </div>
                             {pendingCount > 0 && (
-                                <Text fontSize="xs" color="gray.400">
+                                <Text className="text-xs text-gray-400">
                                     {pendingCount} account{pendingCount !== 1 ? 's' : ''} remaining
                                 </Text>
                             )}
-                        </Flex>
+                        </div>
                     )}
 
                     {isLoading && accountBalances.length > 0 && pendingCount > 0 && (
-                        <Flex align="center" gap={2} px={2} py={1} mb={1} bg="blue.50" borderRadius="md">
+                        <div className="mb-1 flex items-center gap-2 bg-blue-50 px-2 py-1">
                             <Spinner size="xs" />
-                            <Text fontSize="xs" color="blue.600">
+                            <Text className="text-xs text-blue-600">
                                 {pendingCount} account{pendingCount !== 1 ? 's' : ''} remaining…
                             </Text>
-                        </Flex>
+                        </div>
                     )}
 
                     {error && !isLoading && (
-                        <Box p={3} bg="red.50" borderRadius="md" color="red.600">
-                            <Text fontWeight="bold" fontSize="sm">
+                        <div className="bg-red-50 p-3 text-red-600">
+                            <Text className="block text-sm font-bold">
                                 Error
                             </Text>
-                            <Text fontSize="xs">{error}</Text>
-                        </Box>
+                            <Text className="block text-xs">{error}</Text>
+                        </div>
                     )}
 
                     {/* By Asset view */}
                     {!error && viewMode === 'byAsset' && tokens.length > 0 && (
-                        <Box>
+                        <div>
                             {tokens.map((token) => (
                                 <TokenRow
                                     key={token.symbol}
@@ -662,12 +609,12 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
                                     assetMap={assetMap}
                                 />
                             ))}
-                        </Box>
+                        </div>
                     )}
 
                     {/* By Account view */}
                     {!error && viewMode === 'byAccount' && accountAggs.length > 0 && (
-                        <Box>
+                        <div>
                             {accountAggs.map((acc) => (
                                 <AccountRow
                                     key={acc.accountName}
@@ -675,25 +622,20 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
                                     assetMap={assetMap}
                                 />
                             ))}
-                        </Box>
+                        </div>
                     )}
 
                     {/* Empty state */}
                     {!isLoading && !error && pendingCount === 0 && itemCount === 0 && (
-                        <Text
-                            color="gray.400"
-                            textAlign="center"
-                            py={8}
-                            fontSize="sm"
-                        >
+                        <Text className="block py-8 text-center text-sm text-gray-400">
                             No balance data available
                         </Text>
                     )}
 
                     {/* Connector errors */}
                     {!isLoading && <ErrorSection errors={errors} />}
-                </Box>
-            </Box>
+                </div>
+            </div>
         </>
     );
 };

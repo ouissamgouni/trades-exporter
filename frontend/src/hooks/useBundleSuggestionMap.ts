@@ -10,14 +10,15 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { API_URL, BundleSuggestion } from '../types';
 
-// Color palette for suggestion groups — each group gets a unique color
+// Color palette for suggestion groups — each group gets a unique color (literal hex,
+// consumed directly as CSS values by non-Chakra components).
 const SUGGESTION_GROUP_COLORS = [
-    'teal.400',
-    'cyan.400',
-    'blue.400',
-    'purple.400',
-    'orange.400',
-    'pink.400',
+    '#2dd4bf', // teal-400
+    '#22d3ee', // cyan-400
+    '#60a5fa', // blue-400
+    '#c084fc', // purple-400
+    '#fb923c', // orange-400
+    '#f472b6', // pink-400
 ];
 
 export interface SuggestionEntry {

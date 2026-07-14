@@ -6,7 +6,7 @@ frontend/.vite
 frontend/.cache
 frontend/.vscode
 frontend/.pytest_cache
-backend/.venv
+.venv
 backend/.pytest_cache
 backend/__pycache__
 **/__pycache__

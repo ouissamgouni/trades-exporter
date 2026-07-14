@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { Box, Flex, Heading, Button } from '@chakra-ui/react';
+import { Button } from '../ui/primitives';
 import { FiX } from 'react-icons/fi';
 
 interface SlidePanelProps {
@@ -34,57 +34,34 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
     return (
         <>
             {/* Backdrop overlay - clicking closes the panel */}
-            <Box
-                position="fixed"
-                inset={0}
-                bg="blackAlpha.400"
-                zIndex={zIndex - 1}
+            <div
+                className="fixed inset-0 cursor-pointer bg-black/40"
+                style={{ zIndex: zIndex - 1 }}
                 onClick={(e) => { e.stopPropagation(); onClose(); }}
-                cursor="pointer"
             />
 
             {/* Panel */}
-            <Box
-                position="fixed"
-                right={0}
-                top={0}
-                bottom={0}
-                width={width}
-                maxW="90vw"
-                bg="white"
-                boxShadow="xl"
-                zIndex={zIndex}
-                overflowY="auto"
-                borderLeft="1px solid"
-                borderColor="gray.200"
+            <div
+                className="fixed bottom-0 right-0 top-0 overflow-y-auto border-l border-slate-200 bg-white shadow-xl"
+                style={{ width, maxWidth: '90vw', zIndex }}
                 onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
             >
                 {/* Header */}
-                <Flex
-                    justify="space-between"
-                    align="center"
-                    p={4}
-                    borderBottom="1px solid"
-                    borderColor="gray.200"
-                    bg="gray.50"
-                    position="sticky"
-                    top={0}
-                    zIndex={1}
-                >
-                    <Flex align="center" gap={2}>
+                <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center gap-2">
                         {titleIcon}
-                        <Heading size="md">{title}</Heading>
-                    </Flex>
+                        <span className="text-base font-semibold">{title}</span>
+                    </div>
                     <Button variant="ghost" size="sm" onClick={onClose}>
                         <FiX size={20} />
                     </Button>
-                </Flex>
+                </div>
 
                 {/* Content */}
-                <Box p={4}>
+                <div className="p-4">
                     {children}
-                </Box>
-            </Box>
+                </div>
+            </div>
         </>
     );
 };

@@ -8,7 +8,7 @@
  */
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { Badge } from '../ui/primitives';
 import { FiChevronLeft, FiChevronRight } from 'react-icons/fi';
 import { LuBanknote, LuFilter, LuX } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
@@ -134,39 +134,39 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
 
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Income Events" titleIcon={<LuBanknote size={18} />} width="800px">
-            <Box p={4}>
+            <div className="p-4">
                 {/* Summary bar */}
-                <Flex gap={4} mb={4} p={3} bg="teal.50" borderRadius="md" align="center" wrap="wrap">
-                    <Box>
-                        <Text fontSize="xs" color="gray.500">Total Events</Text>
-                        <Text fontWeight="bold" color="teal.700">{total}</Text>
-                    </Box>
-                    <Box>
-                        <Text fontSize="xs" color="gray.500">Gross Income</Text>
-                        <Text fontWeight="bold" color="teal.700">
+                <div className="mb-4 flex flex-wrap items-center gap-4 bg-teal-50 p-3">
+                    <div>
+                        <span className="block text-xs text-slate-500">Total Events</span>
+                        <span className="block font-bold text-teal-700">{total}</span>
+                    </div>
+                    <div>
+                        <span className="block text-xs text-slate-500">Gross Income</span>
+                        <span className="block font-bold text-teal-700">
                             <ValueDisplay value={visibleTotals.gross} currency={baseCurrency} />
-                        </Text>
-                    </Box>
-                    <Box>
-                        <Text fontSize="xs" color="gray.500">Withholding</Text>
-                        <Text fontWeight="bold" color="red.500">
+                        </span>
+                    </div>
+                    <div>
+                        <span className="block text-xs text-slate-500">Withholding</span>
+                        <span className="block font-bold text-red-500">
                             <ValueDisplay value={-visibleTotals.wht} currency={baseCurrency} />
-                        </Text>
-                    </Box>
-                    <Box>
-                        <Text fontSize="xs" color="gray.500">Net Income</Text>
-                        <Text fontWeight="bold" color="teal.700">
+                        </span>
+                    </div>
+                    <div>
+                        <span className="block text-xs text-slate-500">Net Income</span>
+                        <span className="block font-bold text-teal-700">
                             <ValueDisplay value={visibleTotals.net} currency={baseCurrency} />
-                        </Text>
-                    </Box>
-                </Flex>
+                        </span>
+                    </div>
+                </div>
 
                 {/* Filter row */}
-                <Flex gap={2} mb={3} wrap="wrap" align="center">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
                     <LuFilter size={14} />
                     {filterOpts?.assets && filterOpts.assets.length > 0 && (
                         <select
-                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
                             value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)}>
                             <option value="">All Assets</option>
                             {filterOpts.assets.map(o => (
@@ -176,7 +176,7 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                     )}
                     {filterOpts?.income_types && filterOpts.income_types.length > 1 && (
                         <select
-                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
                             value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
                             <option value="">All Types</option>
                             {filterOpts.income_types.map(o => (
@@ -186,7 +186,7 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                     )}
                     {filterOpts?.accounts && filterOpts.accounts.length > 1 && (
                         <select
-                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
                             value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}>
                             <option value="">All Accounts</option>
                             {filterOpts.accounts.map(o => (
@@ -196,7 +196,7 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                     )}
                     {filterOpts?.jurisdictions && filterOpts.jurisdictions.length > 0 && (
                         <select
-                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}
                             value={jurisdictionFilter} onChange={(e) => setJurisdictionFilter(e.target.value)}>
                             <option value="">All Countries</option>
                             {filterOpts.jurisdictions.map(o => (
@@ -205,11 +205,11 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                         </select>
                     )}
                     {hasAnyFilter && (
-                        <Box as="button" fontSize="xs" color="red.500" onClick={clearFilters} cursor="pointer" display="flex" alignItems="center" gap={1}>
+                        <button type="button" onClick={clearFilters} className="flex cursor-pointer items-center gap-1 text-xs text-red-500">
                             <LuX size={12} /> Clear
-                        </Box>
+                        </button>
                     )}
-                </Flex>
+                </div>
 
                 {/* Table */}
                 {isLoading ? (
@@ -220,38 +220,34 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                     <TabEmptyState title="No income events found" description="No income events match the current filters." />
                 ) : (
                     <>
-                        <Box overflowX="auto" mb={3}>
-                            <Box as="table" width="100%" fontSize="xs">
-                                <Box as="thead">
-                                    <Box as="tr" bg="gray.50">
-                                        <Box as="th" px={2} py={1} textAlign="left" cursor="pointer" onClick={() => handleSort('date')} whiteSpace="nowrap">
+                        <div className="mb-3 overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="bg-slate-50">
+                                        <th className="cursor-pointer whitespace-nowrap px-2 py-1 text-left" onClick={() => handleSort('date')}>
                                             Date {sortBy === 'date' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
-                                        </Box>
-                                        <Box as="th" px={2} py={1} textAlign="left">Asset</Box>
-                                        <Box as="th" px={2} py={1} textAlign="left">Type</Box>
-                                        <Box as="th" px={2} py={1} textAlign="left">Account</Box>
-                                        <Box as="th" px={2} py={1} textAlign="right" cursor="pointer" onClick={() => handleSort('amount')} whiteSpace="nowrap">
+                                        </th>
+                                        <th className="px-2 py-1 text-left">Asset</th>
+                                        <th className="px-2 py-1 text-left">Type</th>
+                                        <th className="px-2 py-1 text-left">Account</th>
+                                        <th className="cursor-pointer whitespace-nowrap px-2 py-1 text-right" onClick={() => handleSort('amount')}>
                                             Gross {sortBy === 'amount' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
-                                        </Box>
-                                        <Box as="th" px={2} py={1} textAlign="right">WHT</Box>
-                                        <Box as="th" px={2} py={1} textAlign="right">Net</Box>
-                                        <Box as="th" px={2} py={1} textAlign="left">Country</Box>
-                                    </Box>
-                                </Box>
-                                <Box as="tbody">
+                                        </th>
+                                        <th className="px-2 py-1 text-right">WHT</th>
+                                        <th className="px-2 py-1 text-right">Net</th>
+                                        <th className="px-2 py-1 text-left">Country</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
                                     {entries.map(e => {
                                         const asset = e.attributed_asset ?? e.asset;
                                         const assetId = asset?.id;
                                         return (
-                                            <Box as="tr" key={e.id} _hover={{ bg: 'gray.50' }} borderBottom="1px solid" borderColor="gray.100">
-                                                <Box as="td" px={2} py={1.5} whiteSpace="nowrap">{fmtDate(e.income_at)}</Box>
-                                                <Box as="td" px={2} py={1.5}>
-                                                    <Text
-                                                        fontSize="xs"
-                                                        fontWeight="semibold"
-                                                        color="blue.600"
-                                                        cursor={assetId ? 'pointer' : undefined}
-                                                        _hover={assetId ? { textDecoration: 'underline' } : undefined}
+                                            <tr key={e.id} className="border-b border-slate-100 hover:bg-slate-50">
+                                                <td className="whitespace-nowrap px-2 py-1.5">{fmtDate(e.income_at)}</td>
+                                                <td className="px-2 py-1.5">
+                                                    <span
+                                                        className={`text-xs font-semibold text-blue-600 ${assetId ? 'cursor-pointer hover:underline' : ''}`}
                                                         onClick={() => {
                                                             if (assetId && assetPanelCtx) {
                                                                 assetPanelCtx.openAssetPanel(assetId, { pnlVersionId: versionId });
@@ -261,65 +257,65 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                                                         }}
                                                     >
                                                         {asset?.symbol || '—'}
-                                                    </Text>
-                                                </Box>
-                                                <Box as="td" px={2} py={1.5}>
-                                                    <Badge size="xs" colorPalette="teal" variant="subtle">
+                                                    </span>
+                                                </td>
+                                                <td className="px-2 py-1.5">
+                                                    <Badge colorScheme="green">
                                                         {e.income_type}
                                                     </Badge>
-                                                </Box>
-                                                <Box as="td" px={2} py={1.5} color="gray.600">{e.account_name || '—'}</Box>
-                                                <Box as="td" px={2} py={1.5} textAlign="right" fontWeight="medium" color="teal.700">
+                                                </td>
+                                                <td className="px-2 py-1.5 text-slate-600">{e.account_name || '—'}</td>
+                                                <td className="px-2 py-1.5 text-right font-medium text-teal-700">
                                                     <ValueDisplay value={e.gross_amount_in_base} currency={baseCurrency} />
-                                                </Box>
-                                                <Box as="td" px={2} py={1.5} textAlign="right" color="red.500">
+                                                </td>
+                                                <td className="px-2 py-1.5 text-right text-red-500">
                                                     {e.withholding_amount_in_base > 0 ? (
                                                         <>
                                                             -<ValueDisplay value={e.withholding_amount_in_base} currency={baseCurrency} />
                                                             {e.withholding_rate != null && (
-                                                                <Text as="span" fontSize="2xs" color="gray.400" ml={1}>
+                                                                <span className="ml-1 text-[10px] text-slate-400">
                                                                     ({(e.withholding_rate * 100).toFixed(0)}%)
-                                                                </Text>
+                                                                </span>
                                                             )}
                                                         </>
                                                     ) : '—'}
-                                                </Box>
-                                                <Box as="td" px={2} py={1.5} textAlign="right" fontWeight="semibold" color="teal.600">
+                                                </td>
+                                                <td className="px-2 py-1.5 text-right font-semibold text-teal-600">
                                                     <ValueDisplay value={e.net_amount_in_base} currency={baseCurrency} />
-                                                </Box>
-                                                <Box as="td" px={2} py={1.5} color="gray.500" fontSize="2xs">
+                                                </td>
+                                                <td className="px-2 py-1.5 text-[10px] text-slate-500">
                                                     {e.withholding_jurisdiction || '—'}
-                                                </Box>
-                                            </Box>
+                                                </td>
+                                            </tr>
                                         );
                                     })}
-                                </Box>
-                            </Box>
-                        </Box>
+                                </tbody>
+                            </table>
+                        </div>
 
                         {/* Pagination */}
                         {pageCount > 1 && (
-                            <Flex align="center" justify="space-between" fontSize="xs" color="gray.500" pt={2} borderTop="1px solid" borderColor="gray.100">
-                                <Text>
+                            <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-xs text-slate-500">
+                                <span>
                                     {((pagination.page - 1) * (pagination.pageSize || PAGE_SIZE)) + 1}–
                                     {Math.min(pagination.page * (pagination.pageSize || PAGE_SIZE), total)} of {total}
-                                </Text>
-                                <Flex gap={1}>
-                                    <Box as="button" aria-disabled={pagination.page <= 1} onClick={() => pagination.page > 1 && pagination.setPage(pagination.page - 1)}
-                                        opacity={pagination.page <= 1 ? 0.3 : 1} cursor={pagination.page <= 1 ? 'not-allowed' : 'pointer'}>
+                                </span>
+                                <div className="flex gap-1">
+                                    <button type="button" aria-disabled={pagination.page <= 1} onClick={() => pagination.page > 1 && pagination.setPage(pagination.page - 1)}
+                                        className={pagination.page <= 1 ? 'cursor-not-allowed opacity-30' : 'cursor-pointer opacity-100'}>
                                         <FiChevronLeft size={14} />
-                                    </Box>
-                                    <Text>Page {pagination.page} / {pageCount}</Text>
-                                    <Box as="button" aria-disabled={pagination.page >= pageCount} onClick={() => pagination.page < pageCount && pagination.setPage(pagination.page + 1)}
-                                        opacity={pagination.page >= pageCount ? 0.3 : 1} cursor={pagination.page >= pageCount ? 'not-allowed' : 'pointer'}>
+                                    </button>
+                                    <span>Page {pagination.page} / {pageCount}</span>
+                                    <button type="button" aria-disabled={pagination.page >= pageCount} onClick={() => pagination.page < pageCount && pagination.setPage(pagination.page + 1)}
+                                        className={pagination.page >= pageCount ? 'cursor-not-allowed opacity-30' : 'cursor-pointer opacity-100'}>
                                         <FiChevronRight size={14} />
-                                    </Box>
-                                </Flex>
-                            </Flex>
+                                    </button>
+                                </div>
+                            </div>
                         )}
                     </>
                 )}
-            </Box>
+            </div>
         </SlidePanel>
     );
 };

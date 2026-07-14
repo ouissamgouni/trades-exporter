@@ -10,8 +10,8 @@
  */
 
 import React, { useMemo } from 'react';
-import { Badge, Box, Card, Flex, Heading, Text } from '@chakra-ui/react';
 import { FiArrowRight, FiTrendingUp, FiTrendingDown, FiAlertTriangle } from 'react-icons/fi';
+import { Badge, Heading } from '../ui/primitives';
 import { usePnL } from './PnLContext';
 import { fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import type { DrillDownState } from './pnlState';
@@ -25,10 +25,10 @@ interface DrillSidebarProps {
 
 /** Small metric display for sidebar */
 const SidebarMetric: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color }) => (
-    <Box py={1}>
-        <Text fontSize="2xs" color="gray.500" textTransform="uppercase" letterSpacing="wide">{label}</Text>
-        <Text fontSize="sm" fontWeight="bold" color={color ?? 'gray.800'} fontFamily="mono">{value}</Text>
-    </Box>
+    <div className="py-1">
+        <span className="block text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
+        <span className={`block font-mono text-sm font-bold ${color ?? 'text-slate-800'}`}>{value}</span>
+    </div>
 );
 
 /** Clickable asset row in sidebar */
@@ -37,33 +37,27 @@ const SidebarAssetRow: React.FC<{
     baseCurrency: string;
     onClick: () => void;
 }> = ({ asset, baseCurrency, onClick }) => {
-    const returnColor = asset.unrealized_pnl >= 0 ? 'green.600' : 'red.600';
+    const returnColor = asset.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600';
     return (
-        <Flex
-            align="center"
-            justify="space-between"
-            py={1.5}
-            px={2}
-            cursor="pointer"
-            _hover={{ bg: 'gray.50' }}
-            borderRadius="sm"
+        <div
+            className="flex cursor-pointer items-center justify-between px-2 py-1.5 hover:bg-slate-50"
             onClick={onClick}
         >
-            <Flex align="center" gap={2} flex={1} minW={0}>
-                <Text fontSize="xs" fontWeight="semibold" color="gray.700" truncate>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="truncate text-xs font-semibold text-slate-700">
                     {asset.asset.symbol}
-                </Text>
+                </span>
                 {asset.warning_count > 0 && (
-                    <FiAlertTriangle size={10} color="var(--chakra-colors-orange-500)" />
+                    <span className="text-orange-500"><FiAlertTriangle size={10} /></span>
                 )}
-            </Flex>
-            <Flex align="center" gap={2}>
-                <Text fontSize="xs" fontWeight="bold" color={returnColor}>
+            </div>
+            <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold ${returnColor}`}>
                     {fmtCurrencySigned(asset.unrealized_pnl, baseCurrency)}
-                </Text>
-                <FiArrowRight size={10} color="var(--chakra-colors-gray-400)" />
-            </Flex>
-        </Flex>
+                </span>
+                <span className="text-slate-400"><FiArrowRight size={10} /></span>
+            </div>
+        </div>
     );
 };
 
@@ -102,63 +96,57 @@ export const DrillSidebar: React.FC<DrillSidebarProps> = ({
             ? state.accountBalances.get(asset.asset.id)
             : undefined;
 
-        const returnColor = asset.unrealized_pnl >= 0 ? 'green.600' : 'red.600';
+        const returnColor = asset.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600';
         const totalReturn = asset.unrealized_pnl + asset.realized_pnl;
 
         return (
-            <Box p={3} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" h="100%">
-                <Heading size="sm" mb={2}>{asset.asset.symbol}</Heading>
-                {asset.asset.label && <Text fontSize="xs" color="gray.500" mb={2}>{asset.asset.label}</Text>}
+            <div className="h-full border border-slate-200 bg-white p-3">
+                <Heading className="mb-2 text-sm">{asset.asset.symbol}</Heading>
+                {asset.asset.label && <span className="mb-2 block text-xs text-slate-500">{asset.asset.label}</span>}
 
-                <Box display="grid" gridTemplateColumns="1fr 1fr" gap={1} mb={3}>
+                <div className="mb-3 grid grid-cols-2 gap-1">
                     <SidebarMetric label="Market Value" value={fmtCurrency(asset.market_value, baseCurrency)} />
                     <SidebarMetric label="Cost Basis" value={fmtCurrency(asset.cost_basis, baseCurrency)} />
                     <SidebarMetric label="Unrealized" value={fmtCurrencySigned(asset.unrealized_pnl, baseCurrency)} color={returnColor} />
-                    <SidebarMetric label="Realized" value={fmtCurrencySigned(asset.realized_pnl, baseCurrency)} color={asset.realized_pnl >= 0 ? 'green.600' : 'red.600'} />
-                    <SidebarMetric label="Total Return" value={fmtCurrencySigned(totalReturn, baseCurrency)} color={totalReturn >= 0 ? 'green.600' : 'red.600'} />
+                    <SidebarMetric label="Realized" value={fmtCurrencySigned(asset.realized_pnl, baseCurrency)} color={asset.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'} />
+                    <SidebarMetric label="Total Return" value={fmtCurrencySigned(totalReturn, baseCurrency)} color={totalReturn >= 0 ? 'text-green-600' : 'text-red-600'} />
                     <SidebarMetric label="Fees" value={fmtCurrency(asset.total_fees, baseCurrency)} />
-                </Box>
+                </div>
 
-                <Flex gap={1} mb={3} flexWrap="wrap">
-                    <Badge size="xs" colorPalette="blue">{asset.lot_count} lots</Badge>
-                    <Badge size="xs" colorPalette="purple">{asset.realized_event_count} realized</Badge>
+                <div className="mb-3 flex flex-wrap gap-1">
+                    <Badge colorScheme="blue">{asset.lot_count} lots</Badge>
+                    <Badge colorScheme="purple">{asset.realized_event_count} realized</Badge>
                     {asset.warning_count > 0 && (
-                        <Badge size="xs" colorPalette="orange">{asset.warning_count} warnings</Badge>
+                        <Badge colorScheme="orange">{asset.warning_count} warnings</Badge>
                     )}
-                </Flex>
+                </div>
 
                 {/* Per-account breakdown */}
                 {accountBreakdown && accountBreakdown.length > 0 && (
-                    <Box>
-                        <Text fontSize="2xs" fontWeight="semibold" color="gray.500" mb={1} textTransform="uppercase">
+                    <div>
+                        <span className="mb-1 block text-[10px] font-semibold uppercase text-slate-500">
                             Accounts
-                        </Text>
+                        </span>
                         {accountBreakdown.map(ab => {
                             const acct = state.accounts.find(a => a.id === ab.account_id);
                             const isActive = drill.accountFilter === ab.account_id;
                             return (
-                                <Flex
+                                <div
                                     key={ab.account_id}
-                                    align="center"
-                                    justify="space-between"
-                                    py={1}
-                                    px={2}
-                                    cursor="pointer"
-                                    bg={isActive ? 'blue.50' : 'transparent'}
-                                    borderRadius="sm"
-                                    _hover={{ bg: isActive ? 'blue.50' : 'gray.50' }}
+                                    className={`flex cursor-pointer items-center justify-between px-2 py-1 ${isActive ? 'bg-blue-50 hover:bg-blue-50' : 'hover:bg-slate-50'
+                                        }`}
                                     onClick={() => onAccountFilterClick?.(ab.account_id)}
                                 >
-                                    <Text fontSize="xs" color="gray.700">{acct?.name ?? `#${ab.account_id}`}</Text>
-                                    <Text fontSize="xs" fontFamily="mono" color="gray.600">
+                                    <span className="text-xs text-slate-700">{acct?.name ?? `#${ab.account_id}`}</span>
+                                    <span className="font-mono text-xs text-slate-600">
                                         {ab.qty.toFixed(4)}
-                                    </Text>
-                                </Flex>
+                                    </span>
+                                </div>
                             );
                         })}
-                    </Box>
+                    </div>
                 )}
-            </Box>
+            </div>
         );
     }
 
@@ -201,24 +189,24 @@ export const DrillSidebar: React.FC<DrillSidebarProps> = ({
         const totals = aggregateAssets(assets);
 
         return (
-            <Box p={3} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" h="100%">
-                <Heading size="sm" mb={2}>{metricLabel}</Heading>
+            <div className="h-full border border-slate-200 bg-white p-3">
+                <Heading className="mb-2 text-sm">{metricLabel}</Heading>
                 {state.timeframeRange !== 'all' && (
-                    <Badge colorPalette="blue" variant="subtle" size="xs" mb={2}>
+                    <Badge colorScheme="blue" className="mb-2">
                         {state.timeframeRange.toUpperCase()}
                     </Badge>
                 )}
 
-                <Box display="grid" gridTemplateColumns="1fr 1fr" gap={1} mb={3}>
+                <div className="mb-3 grid grid-cols-2 gap-1">
                     <SidebarMetric label="Total Value" value={fmtCurrency(totals.marketValue, baseCurrency)} />
                     <SidebarMetric label="Cost Basis" value={fmtCurrency(totals.costBasis, baseCurrency)} />
-                    <SidebarMetric label="Unrealized" value={fmtCurrencySigned(totals.unrealizedPnl, baseCurrency)} color={totals.unrealizedPnl >= 0 ? 'green.600' : 'red.600'} />
-                    <SidebarMetric label="Realized" value={fmtCurrencySigned(totals.realizedPnl, baseCurrency)} color={totals.realizedPnl >= 0 ? 'green.600' : 'red.600'} />
-                </Box>
+                    <SidebarMetric label="Unrealized" value={fmtCurrencySigned(totals.unrealizedPnl, baseCurrency)} color={totals.unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'} />
+                    <SidebarMetric label="Realized" value={fmtCurrencySigned(totals.realizedPnl, baseCurrency)} color={totals.realizedPnl >= 0 ? 'text-green-600' : 'text-red-600'} />
+                </div>
 
-                <Text fontSize="2xs" fontWeight="semibold" color="gray.500" mb={1} textTransform="uppercase">
+                <span className="mb-1 block text-[10px] font-semibold uppercase text-slate-500">
                     Top Contributors
-                </Text>
+                </span>
                 {rankedAssets.map(a => (
                     <SidebarAssetRow
                         key={a.asset.id}
@@ -227,7 +215,7 @@ export const DrillSidebar: React.FC<DrillSidebarProps> = ({
                         onClick={() => a.asset.id != null && a.asset.symbol && onAssetClick(a.asset.id, a.asset.symbol)}
                     />
                 ))}
-            </Box>
+            </div>
         );
     }
 
@@ -260,38 +248,38 @@ const SidebarAggregateView: React.FC<{
     baseCurrency: string;
     onAssetClick: (assetId: number, assetSymbol: string) => void;
 }> = ({ title, totals, assetList, baseCurrency, onAssetClick }) => (
-    <Box p={3} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" h="100%">
-        <Heading size="sm" mb={1}>{title}</Heading>
-        <Text fontSize="xs" color="gray.500" mb={2}>{totals.assetCount} assets</Text>
+    <div className="h-full border border-slate-200 bg-white p-3">
+        <Heading className="mb-1 text-sm">{title}</Heading>
+        <span className="mb-2 block text-xs text-slate-500">{totals.assetCount} assets</span>
 
-        <Box display="grid" gridTemplateColumns="1fr 1fr" gap={1} mb={3}>
+        <div className="mb-3 grid grid-cols-2 gap-1">
             <SidebarMetric label="Total Value" value={fmtCurrency(totals.marketValue, baseCurrency)} />
             <SidebarMetric label="Cost Basis" value={fmtCurrency(totals.costBasis, baseCurrency)} />
             <SidebarMetric
                 label="Unrealized"
                 value={fmtCurrencySigned(totals.unrealizedPnl, baseCurrency)}
-                color={totals.unrealizedPnl >= 0 ? 'green.600' : 'red.600'}
+                color={totals.unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}
             />
             <SidebarMetric
                 label="Realized"
                 value={fmtCurrencySigned(totals.realizedPnl, baseCurrency)}
-                color={totals.realizedPnl >= 0 ? 'green.600' : 'red.600'}
+                color={totals.realizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}
             />
             <SidebarMetric label="Fees" value={fmtCurrency(totals.totalFees, baseCurrency)} />
             <SidebarMetric label="Lots" value={String(totals.lotCount)} />
-        </Box>
+        </div>
 
         {totals.warningCount > 0 && (
-            <Flex align="center" gap={1} mb={2}>
-                <FiAlertTriangle size={12} color="var(--chakra-colors-orange-500)" />
-                <Text fontSize="xs" color="orange.600">{totals.warningCount} warnings</Text>
-            </Flex>
+            <div className="mb-2 flex items-center gap-1">
+                <span className="text-orange-500"><FiAlertTriangle size={12} /></span>
+                <span className="text-xs text-orange-600">{totals.warningCount} warnings</span>
+            </div>
         )}
 
-        <Text fontSize="2xs" fontWeight="semibold" color="gray.500" mb={1} textTransform="uppercase">
+        <span className="mb-1 block text-[10px] font-semibold uppercase text-slate-500">
             Assets
-        </Text>
-        <Box maxH="300px" overflowY="auto">
+        </span>
+        <div className="max-h-[300px] overflow-y-auto">
             {assetList.map(a => (
                 <SidebarAssetRow
                     key={a.asset.id ?? a.asset.symbol}
@@ -300,6 +288,6 @@ const SidebarAggregateView: React.FC<{
                     onClick={() => a.asset.id != null && a.asset.symbol && onAssetClick(a.asset.id, a.asset.symbol)}
                 />
             ))}
-        </Box>
-    </Box>
+        </div>
+    </div>
 );

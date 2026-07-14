@@ -10,7 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { Badge } from '../ui/primitives';
 import { FiGrid } from 'react-icons/fi';
 import { usePnL } from './PnLContext';
 import { AssetPnLTable, PnlStatusFilter, BalanceStatusFilter } from './AssetPnLTable';
@@ -240,7 +240,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
                 renderAfterFilters={<ViewModeToggle value={assetsView} onChange={setAssetsView} />}
             />
             {assetsView === 'treemap' && (
-                <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
+                <div className="mx-3 mb-3 mt-1 overflow-hidden border-2 border-blue-100">
                     <AllocationTreemap
                         points={effectiveTimeline.data?.points || []}
                         assetCategoryMaps={assetCategoryMaps}
@@ -253,10 +253,10 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
                         onAssetNavigate={onAssetNavigate}
                         assetCurrencyMap={assetCurrencyMap}
                     />
-                </Box>
+                </div>
             )}
             {assetsView === 'pie' && (
-                <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
+                <div className="mx-3 mb-3 mt-1 overflow-hidden border-2 border-blue-100">
                     <MarketValuePieChart
                         assets={filteredTreemapAssets}
                         dimensions={dimensions}
@@ -272,14 +272,14 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
                             );
                         }}
                     />
-                </Box>
+                </div>
             )}
         </>
     );
 
     // ── Shared audit block ──
     const auditBlock = currentVersionId ? (
-        <Box p={3}>
+        <div className="p-3">
             <InvestigationView
                 versionId={currentVersionId}
                 baseCurrency={config.base_currency_symbol}
@@ -297,7 +297,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
                     if (auditDefaultPanel) dispatch({ type: 'SET_AUDIT_DEFAULT_PANEL', panel: null });
                 }}
             />
-        </Box>
+        </div>
     ) : null;
 
     // =====================================================================
@@ -331,30 +331,29 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
             <DrillDownBreadcrumb />
 
             {showMismatchedOnly && (
-                <Flex align="center" gap={2} mb={3} px={1}>
-                    <Badge colorPalette="orange" size="sm">
+                <div className="mb-3 flex items-center gap-2 px-1">
+                    <Badge colorScheme="orange">
                         Showing {displayAssets.length} mismatched asset{displayAssets.length !== 1 ? 's' : ''} only
                     </Badge>
-                    <Text as="span" fontSize="xs" color="blue.500" cursor="pointer"
-                        _hover={{ textDecoration: 'underline' }}
+                    <span className="cursor-pointer text-xs text-blue-500 hover:underline"
                         onClick={() => dispatch({ type: 'SET_SHOW_MISMATCHED_ONLY', value: false })}>
                         Clear filter
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
             )}
 
-            <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mt={2}>
+            <div className="mt-2 border border-slate-200 bg-white">
                 <SectionToggle label="Assets" defaultOpen open={assetsOpen} onOpenChange={() => setAssetsOpen(v => !v)} badge={`${displayAssets.length}`}>
                     {assetsTable}
                 </SectionToggle>
-            </Box>
+            </div>
 
             {currentVersionId && (
-                <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mt={2}>
+                <div className="mt-2 border border-slate-200 bg-white">
                     <SectionToggle label="PnL Audit" defaultOpen open={auditOpen} onOpenChange={() => setAuditOpen(v => !v)}>
                         {auditBlock}
                     </SectionToggle>
-                </Box>
+                </div>
             )}
         </>
     );

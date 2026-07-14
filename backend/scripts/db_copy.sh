@@ -253,7 +253,7 @@ if $MIGRATE; then
   _BACKEND_DIR="${BACKEND_DIR:-$(dirname "$SCRIPT_DIR")}"
   _ROOT_DIR="${ROOT_DIR:-$(dirname "$_BACKEND_DIR")}"
   ALEMBIC_INI="$_BACKEND_DIR/alembic.ini"
-  ALEMBIC_BIN="$_BACKEND_DIR/.venv/bin/alembic"
+  ALEMBIC_BIN="$_ROOT_DIR/.venv/bin/alembic"
 
   if [[ ! -f "$ALEMBIC_INI" ]]; then
     echo "⚠️  Cannot migrate: alembic.ini not found at $ALEMBIC_INI"

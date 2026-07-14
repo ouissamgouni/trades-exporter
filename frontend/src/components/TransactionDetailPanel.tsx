@@ -15,17 +15,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Input,
-    NativeSelect,
-    Spinner,
-    Text,
-    Textarea,
-} from '@chakra-ui/react';
+import { Badge, Button, Input, Textarea, Spinner } from './ui/primitives';
 import { FiCopy, FiCheck, FiLoader, FiTag, FiX, FiChevronDown, FiChevronRight, FiAlertTriangle, FiArrowDown, FiArrowUp } from 'react-icons/fi';
 import { Transaction, Account, Bundle, API_URL } from '../types';
 import { UnitPattern, TaxabilityStatus } from '../enums';
@@ -72,22 +62,17 @@ interface InfoRowProps {
 }
 
 const InfoRow: React.FC<InfoRowProps> = ({ label, value, muted, alert }) => (
-    <Flex justify="space-between" py={0.5} gap={2} align="center">
-        <Text fontSize="10px" color="gray.500" flexShrink={0}>{label}</Text>
-        <Flex align="center" gap={1}>
+    <div className="flex items-center justify-between gap-2 py-0.5">
+        <span className="shrink-0 text-[10px] text-slate-500">{label}</span>
+        <div className="flex items-center gap-1">
             {alert && <FiAlertTriangle size={10} color="orange" />}
-            <Box
-                as="span"
-                fontSize="10px"
-                color={alert ? 'orange.500' : muted ? 'gray.400' : 'gray.700'}
-                fontFamily="mono"
-                textAlign="right"
-                css={{ wordBreak: 'break-all' }}
+            <span
+                className={`break-all text-right font-mono text-[10px] ${alert ? 'text-orange-500' : muted ? 'text-slate-400' : 'text-slate-700'}`}
             >
                 {value}
-            </Box>
-        </Flex>
-    </Flex>
+            </span>
+        </div>
+    </div>
 );
 
 interface SectionProps {
@@ -98,6 +83,14 @@ interface SectionProps {
     level?: 'main' | 'sub';
     colorScheme?: string;
 }
+
+const SECTION_COLORS: Record<string, { mainBg: string; mainHoverBg: string; subBg: string; subHoverBg: string; text: string }> = {
+    blue: { mainBg: 'bg-blue-100', mainHoverBg: 'hover:bg-blue-200', subBg: 'bg-blue-50', subHoverBg: 'hover:bg-blue-100', text: 'text-blue-700' },
+    purple: { mainBg: 'bg-purple-100', mainHoverBg: 'hover:bg-purple-200', subBg: 'bg-purple-50', subHoverBg: 'hover:bg-purple-100', text: 'text-purple-700' },
+    green: { mainBg: 'bg-green-100', mainHoverBg: 'hover:bg-green-200', subBg: 'bg-green-50', subHoverBg: 'hover:bg-green-100', text: 'text-green-700' },
+    orange: { mainBg: 'bg-orange-100', mainHoverBg: 'hover:bg-orange-200', subBg: 'bg-orange-50', subHoverBg: 'hover:bg-orange-100', text: 'text-orange-700' },
+    gray: { mainBg: 'bg-slate-100', mainHoverBg: 'hover:bg-slate-200', subBg: 'bg-slate-50', subHoverBg: 'hover:bg-slate-100', text: 'text-slate-700' },
+};
 
 const Section: React.FC<SectionProps> = ({
     title,
@@ -110,36 +103,27 @@ const Section: React.FC<SectionProps> = ({
     const [isOpen, setIsOpen] = useState(defaultOpen);
 
     const isMain = level === 'main';
+    const colors = SECTION_COLORS[colorScheme] ?? SECTION_COLORS.gray;
 
     return (
-        <Box mb={isMain ? 2 : 1}>
-            <Flex
-                align="center"
-                gap={1}
-                py={isMain ? 1.5 : 1}
-                px={2}
-                bg={isMain ? `${colorScheme}.100` : `${colorScheme}.50`}
-                borderRadius="sm"
-                cursor="pointer"
+        <div className={isMain ? 'mb-2' : 'mb-1'}>
+            <div
+                className={`flex cursor-pointer items-center gap-1 px-2 ${isMain ? 'py-1.5' : 'py-1'} ${isMain ? colors.mainBg : colors.subBg} ${isMain ? colors.mainHoverBg : colors.subHoverBg}`}
                 onClick={() => setIsOpen(!isOpen)}
-                _hover={{ bg: isMain ? `${colorScheme}.200` : `${colorScheme}.100` }}
             >
                 {isOpen ? <FiChevronDown size={isMain ? 14 : 12} /> : <FiChevronRight size={isMain ? 14 : 12} />}
-                <Text
-                    fontSize={isMain ? "11px" : "10px"}
-                    fontWeight="bold"
-                    color={`${colorScheme}.700`}
-                    textTransform={isMain ? "uppercase" : "none"}
+                <span
+                    className={`font-bold ${isMain ? 'text-[11px] uppercase' : 'text-[10px]'} ${colors.text}`}
                 >
                     {icon && `${icon} `}{title}
-                </Text>
-            </Flex>
+                </span>
+            </div>
             {isOpen && (
-                <Box px={isMain ? 1 : 2} py={1} ml={isMain ? 0 : 2}>
+                <div className={`py-1 ${isMain ? 'px-1 ml-0' : 'px-2 ml-2'}`}>
                     {children}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -158,28 +142,20 @@ const TagChip: React.FC<TagChipProps> = ({ tag, onRemove, editable }) => {
             {entries.map(([key, value], index) => (
                 <Badge
                     key={index}
-                    size="xs"
-                    colorPalette="blue"
-                    variant="subtle"
-                    display="flex"
-                    alignItems="center"
-                    gap={0.5}
-                    px={1}
-                    py={0.5}
-                    fontSize="9px"
+                    colorScheme="blue"
+                    className="flex items-center gap-0.5 px-1 py-0.5 text-[9px]"
                 >
                     <FiTag size={8} />
-                    <Text fontSize="9px">{key === 'value' ? String(value) : `${key}: ${value}`}</Text>
+                    <span className="text-[9px]">{key === 'value' ? String(value) : `${key}: ${value}`}</span>
                     {editable && onRemove && index === entries.length - 1 && (
-                        <Box
-                            as="button"
+                        <button
+                            type="button"
+                            title="Remove tag"
                             onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRemove(); }}
-                            ml={0.5}
-                            cursor="pointer"
-                            _hover={{ color: 'red.500' }}
+                            className="ml-0.5 cursor-pointer hover:text-red-500"
                         >
                             <FiX size={8} />
-                        </Box>
+                        </button>
                     )}
                 </Badge>
             ))}
@@ -359,7 +335,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     };
 
     return (
-        <Box>
+        <div>
             {/* ============================================================ */}
             {/* OVERVIEW SECTION */}
             {/* ============================================================ */}
@@ -369,44 +345,44 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                 <Section title="Key Infos" icon="📊" defaultOpen={true} colorScheme="purple">
                     <InfoRow label="Date/Time" value={formatDateTimeLocale(tx.date_time)} />
                     <InfoRow label="Account" value={
-                        <Box>
-                            <Text fontSize="10px" fontFamily="mono" fontWeight="medium">{getAccountName(tx.account_id ?? null)}</Text>
+                        <div>
+                            <p className="font-mono text-[10px] font-medium">{getAccountName(tx.account_id ?? null)}</p>
                             {tx.source_account && (
-                                <Text fontSize="8px" color="gray.500" fontFamily="mono" mt={0.5}>
+                                <p className="mt-0.5 font-mono text-[8px] text-slate-500">
                                     {tx.source_account}
-                                </Text>
+                                </p>
                             )}
-                        </Box>
+                        </div>
                     } />
                     <InfoRow label="Source" value={tx.source || '-'} muted />
                     <InfoRow
                         label="Type"
                         value={
-                            <Flex align="center" gap={1} wrap="wrap">
+                            <div className="flex flex-wrap items-center gap-1">
                                 {tx.source_transaction_type && (
-                                    <Badge size="xs" colorPalette="blue" variant="subtle" fontSize="9px">
+                                    <Badge colorScheme="blue" className="text-[9px]">
                                         {tx.source_transaction_type}
                                     </Badge>
                                 )}
                                 {tx.source_transaction_type && tx.transaction_type && (
-                                    <Text fontSize="9px" color="gray.400">→</Text>
+                                    <span className="text-[9px] text-slate-400">→</span>
                                 )}
-                                <Badge size="xs" colorPalette="gray" fontSize="9px">
+                                <Badge colorScheme="gray" className="text-[9px]">
                                     {tx.transaction_type || '-'}
                                 </Badge>
                                 {tx.direction && (
-                                    <Flex align="center" gap={0.5} ml={1}>
+                                    <div className="ml-1 flex items-center gap-0.5">
                                         {tx.direction === 'inflow' ? (
-                                            <FiArrowDown size={10} color="var(--chakra-colors-green-500)" />
+                                            <FiArrowDown size={10} className="text-green-500" />
                                         ) : tx.direction === 'outflow' ? (
-                                            <FiArrowUp size={10} color="var(--chakra-colors-red-500)" />
+                                            <FiArrowUp size={10} className="text-red-500" />
                                         ) : null}
-                                        <Text fontSize="8px" color="gray.500">
+                                        <span className="text-[8px] text-slate-500">
                                             {tx.direction}
-                                        </Text>
-                                    </Flex>
+                                        </span>
+                                    </div>
                                 )}
-                            </Flex>
+                            </div>
                         }
                     />
                     <InfoRow
@@ -425,8 +401,8 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                     <InfoRow
                         label="Price"
                         value={
-                            <Flex align="center" gap={1}>
-                                <Text fontSize="10px" fontFamily="mono"><ValueDisplay value={tx.price} /></Text>
+                            <div className="flex items-center gap-1">
+                                <span className="font-mono text-[10px]"><ValueDisplay value={tx.price} /></span>
                                 <AssetBadge
                                     asset={tx.price_quote_asset}
                                     sourceSymbol={tx.source_price_quote_asset_symbol}
@@ -434,16 +410,16 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                                     colorPalette="cyan"
                                     maxLength={12}
                                 />
-                            </Flex>
+                            </div>
                         }
                     />
                     <InfoRow
                         label="Total"
                         value={
-                            <Flex align="center" gap={1}>
-                                <Text fontSize="10px" fontFamily="mono">
+                            <div className="flex items-center gap-1">
+                                <span className="font-mono text-[10px]">
                                     <ValueDisplay value={tx.total} />
-                                </Text>
+                                </span>
                                 <AssetBadge
                                     asset={tx.price_quote_asset}
                                     sourceSymbol={tx.source_price_quote_asset_symbol}
@@ -451,14 +427,14 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                                     colorPalette="cyan"
                                     maxLength={12}
                                 />
-                            </Flex>
+                            </div>
                         }
                     />
                     <InfoRow
                         label="Fee"
                         value={tx.fee ? (
-                            <Flex align="center" gap={1}>
-                                <Text fontSize="10px" fontFamily="mono"><ValueDisplay value={tx.fee} /></Text>
+                            <div className="flex items-center gap-1">
+                                <span className="font-mono text-[10px]"><ValueDisplay value={tx.fee} /></span>
                                 <AssetBadge
                                     asset={tx.fee_quote_asset}
                                     sourceSymbol={tx.source_fee_quote_asset_symbol}
@@ -466,16 +442,16 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                                     colorPalette="orange"
                                     maxLength={12}
                                 />
-                            </Flex>
+                            </div>
                         ) : '-'}
                     />
                     {tx.source_transaction_id && (
                         <InfoRow
                             label="Source Transaction ID"
                             value={
-                                <Text fontSize="9px" fontFamily="mono" maxW="200px" truncate title={tx.source_transaction_id}>
+                                <span className="max-w-[200px] truncate font-mono text-[9px]" title={tx.source_transaction_id}>
                                     {tx.source_transaction_id}
-                                </Text>
+                                </span>
                             }
                         />
                     )}
@@ -483,9 +459,8 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="Review"
                         value={
                             <Badge
-                                size="xs"
-                                colorPalette={tx.review_status === 'valid' ? 'green' : tx.review_status === 'invalid' ? 'red' : 'yellow'}
-                                fontSize="9px"
+                                colorScheme={tx.review_status === 'valid' ? 'green' : tx.review_status === 'invalid' ? 'red' : 'yellow'}
+                                className="text-[9px]"
                             >
                                 {tx.review_status}
                             </Badge>
@@ -495,11 +470,11 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         <InfoRow
                             label="From Account"
                             value={
-                                <Badge size="xs" colorPalette={tx.from_account_id ? "cyan" : "orange"} variant="subtle" fontSize="9px">
+                                <Badge colorScheme={tx.from_account_id ? "blue" : "orange"} className="text-[9px]">
                                     {tx.source_from_account && (
                                         <>
                                             Source: {tx.source_from_account}
-                                            {tx.from_account_id && <Text as="span" mx={1}>→</Text>}
+                                            {tx.from_account_id && <span className="mx-1">→</span>}
                                         </>
                                     )}
                                     {tx.from_account_id && (
@@ -513,11 +488,11 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         <InfoRow
                             label="To Account"
                             value={
-                                <Badge size="xs" colorPalette={tx.to_account_id ? "cyan" : "orange"} variant="subtle" fontSize="9px">
+                                <Badge colorScheme={tx.to_account_id ? "blue" : "orange"} className="text-[9px]">
                                     {tx.source_to_account && (
                                         <>
                                             Source: {tx.source_to_account}
-                                            {tx.to_account_id && <Text as="span" mx={1}>→</Text>}
+                                            {tx.to_account_id && <span className="mx-1">→</span>}
                                         </>
                                     )}
                                     {tx.to_account_id && (
@@ -530,9 +505,9 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                     <InfoRow label="Network" value={tx.network || '-'} />
                     <InfoRow label="Network TX ID" value={
                         tx.network_transaction_id ? (
-                            <Text fontSize="9px" maxW="150px" truncate title={tx.network_transaction_id}>
+                            <span className="max-w-[150px] truncate text-[9px]" title={tx.network_transaction_id}>
                                 {tx.network_transaction_id}
-                            </Text>
+                            </span>
                         ) : '-'
                     } />
                     {/* Bundle/Calculation Unit - link to full section */}
@@ -540,12 +515,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         <InfoRow
                             label="Bundle"
                             value={
-                                <Badge
-                                    size="xs"
-                                    colorPalette="purple"
-                                    fontSize="9px"
-                                    variant="subtle"
-                                >
+                                <Badge colorScheme="purple" className="text-[9px]">
                                     📦 #{bundleData.id} {bundleData.pattern ? `• ${bundleData.pattern}` : ''}
                                 </Badge>
                             }
@@ -553,24 +523,17 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                     )}
                     {/* Spam/Phishing Detection Alert */}
                     {tx.review_status === 'invalid' && tx.review_notes && tx.review_notes.includes('Auto-flagged') && (
-                        <Box
-                            mt={2}
-                            p={2}
-                            bg="red.950"
-                            borderWidth="1px"
-                            borderColor="red.700"
-                            borderRadius="md"
-                        >
-                            <Flex align="center" gap={1.5} mb={1}>
-                                <Box color="red.400"><FiAlertTriangle size={14} /></Box>
-                                <Text fontSize="10px" fontWeight="bold" color="red.300">
+                        <div className="mt-2 border border-red-700 bg-red-950 p-2">
+                            <div className="mb-1 flex items-center gap-1.5">
+                                <span className="text-red-400"><FiAlertTriangle size={14} /></span>
+                                <span className="text-[10px] font-bold text-red-300">
                                     Spam / Phishing Detection
-                                </Text>
-                            </Flex>
-                            <Text fontSize="9px" color="red.200" whiteSpace="pre-wrap" fontFamily="mono">
+                                </span>
+                            </div>
+                            <p className="whitespace-pre-wrap font-mono text-[9px] text-red-200">
                                 {tx.review_notes}
-                            </Text>
-                        </Box>
+                            </p>
+                        </div>
                     )}
                 </Section>
 
@@ -585,9 +548,8 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="Taxability"
                         value={
                             <Badge
-                                size="xs"
-                                colorPalette={tx.taxability_status === 'taxable' ? 'orange' : tx.taxability_status === 'non_taxable' ? 'green' : 'yellow'}
-                                fontSize="9px"
+                                colorScheme={tx.taxability_status === 'taxable' ? 'orange' : tx.taxability_status === 'non_taxable' ? 'green' : 'yellow'}
+                                className="text-[9px]"
                             >
                                 {(tx.taxability_status || 'unknown').toUpperCase()}
                             </Badge>
@@ -597,7 +559,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
 
                 {/* Tags */}
                 <Section title="Tags" icon="🏷️" defaultOpen={false} colorScheme="blue">
-                    <Flex gap={1} wrap="wrap" mb={1}>
+                    <div className="mb-1 flex flex-wrap gap-1">
                         {normalizedTags && normalizedTags.length > 0 ? (
                             normalizedTags.map((tag: Record<string, unknown>, i: number) => (
                                 <TagChip
@@ -608,75 +570,67 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                                 />
                             ))
                         ) : (
-                            <Text fontSize="9px" color="gray.400">No tags</Text>
+                            <span className="text-[9px] text-slate-400">No tags</span>
                         )}
-                    </Flex>
+                    </div>
                     {onTagsChange && (
-                        <Flex gap={1} mt={1}>
+                        <div className="mt-1 flex gap-1">
                             <Input
-                                size="xs"
                                 placeholder="Key"
                                 value={newTagKey}
                                 onChange={(e) => setNewTagKey(e.target.value)}
-                                width="50px"
-                                fontSize="9px"
+                                className="w-[50px] text-[9px]"
                             />
                             <Input
-                                size="xs"
                                 placeholder="Value"
                                 value={newTagValue}
                                 onChange={(e) => setNewTagValue(e.target.value)}
-                                flex="1"
-                                fontSize="9px"
+                                className="flex-1 text-[9px]"
                                 onKeyDown={(e) => e.key === 'Enter' && addTag()}
                             />
-                            <Button size="xs" onClick={addTag} disabled={!newTagValue.trim()} px={2}>
+                            <Button size="sm" onClick={addTag} disabled={!newTagValue.trim()} className="px-2">
                                 +
                             </Button>
-                        </Flex>
+                        </div>
                     )}
                 </Section>
 
                 {/* Notes */}
                 <Section title="Notes" icon="📝" defaultOpen={false} colorScheme="orange">
                     {isEditingNotes ? (
-                        <Flex direction="column" gap={1}>
+                        <div className="flex flex-col gap-1">
                             <Textarea
-                                size="xs"
                                 value={notesValue}
                                 onChange={(e) => setNotesValue(e.target.value)}
                                 placeholder="Add notes..."
                                 rows={2}
-                                fontSize="10px"
+                                className="text-[10px]"
                             />
-                            <Flex gap={1} justify="flex-end">
-                                <Button size="xs" variant="ghost" onClick={() => {
+                            <div className="flex justify-end gap-1">
+                                <Button variant="ghost" onClick={() => {
                                     setNotesValue(tx.review_notes || '');
                                     setIsEditingNotes(false);
-                                }} fontSize="9px" px={2}>
+                                }} className="px-2 text-[9px]">
                                     Cancel
                                 </Button>
-                                <Button size="xs" colorPalette="blue" onClick={saveNotes} fontSize="9px" px={2}>
+                                <Button colorScheme="blue" onClick={saveNotes} className="px-2 text-[9px]">
                                     Save
                                 </Button>
-                            </Flex>
-                        </Flex>
+                            </div>
+                        </div>
                     ) : (
-                        <Flex justify="space-between" align="flex-start">
-                            <Text
-                                fontSize="10px"
-                                color={tx.review_notes ? 'gray.700' : 'gray.400'}
-                                whiteSpace="pre-wrap"
-                                flex="1"
+                        <div className="flex items-start justify-between">
+                            <p
+                                className={`flex-1 whitespace-pre-wrap text-[10px] ${tx.review_notes ? 'text-slate-700' : 'text-slate-400'}`}
                             >
                                 {tx.review_notes || 'No notes'}
-                            </Text>
+                            </p>
                             {onNotesChange && (
-                                <Button size="xs" variant="ghost" onClick={() => setIsEditingNotes(true)} px={1} fontSize="9px">
+                                <Button variant="ghost" onClick={() => setIsEditingNotes(true)} className="px-1 text-[9px]">
                                     Edit
                                 </Button>
                             )}
-                        </Flex>
+                        </div>
                     )}
                 </Section>
             </Section>
@@ -687,93 +641,88 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
             {tx.user_calculation_unit_id && (
                 <Section title="Bundle" level="main" defaultOpen={true} colorScheme="purple">
                     {bundleLoading ? (
-                        <Flex align="center" gap={2} py={2}>
+                        <div className="flex items-center gap-2 py-2">
                             <Spinner size="xs" />
-                            <Text fontSize="xs" color="gray.500">Loading bundle...</Text>
-                        </Flex>
+                            <span className="text-xs text-slate-500">Loading bundle...</span>
+                        </div>
                     ) : bundleError ? (
-                        <Text fontSize="xs" color="red.500">{bundleError}</Text>
+                        <span className="text-xs text-red-500">{bundleError}</span>
                     ) : bundleData ? (
-                        <Box>
+                        <div>
                             {/* Header: pattern badge + ID */}
-                            <Flex justify="space-between" align="center" mb={2}>
-                                <Flex align="center" gap={1.5}>
+                            <div className="mb-2 flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
                                     <Badge
-                                        size="sm"
-                                        colorPalette={
+                                        colorScheme={
                                             bundleData.pattern === UnitPattern.INTERNAL_TRANSFER ? 'blue' :
                                                 bundleData.pattern === UnitPattern.SWAP ? 'orange' :
                                                     bundleData.pattern === UnitPattern.SPLIT ? 'purple' :
-                                                        bundleData.pattern === UnitPattern.FLOW ? 'cyan' :
+                                                        bundleData.pattern === UnitPattern.FLOW ? 'blue' :
                                                             bundleData.pattern === UnitPattern.CUSTOM ? 'purple' : 'gray'
                                         }
                                     >
                                         {bundleData.pattern || 'unknown'}
                                     </Badge>
                                     {bundleData.label && (
-                                        <Text fontSize="10px" fontWeight="bold" color="purple.800">
+                                        <span className="text-[10px] font-bold text-purple-800">
                                             {bundleData.label}
-                                        </Text>
+                                        </span>
                                     )}
-                                </Flex>
-                                <Badge size="sm" colorPalette="purple" variant="subtle">
+                                </div>
+                                <Badge colorScheme="purple">
                                     📦 #{bundleData.id}
                                 </Badge>
-                            </Flex>
+                            </div>
 
                             {/* Notes */}
                             {bundleData.notes && (
-                                <Text fontSize="9px" color="gray.600" mb={2}>
+                                <p className="mb-2 text-[9px] text-slate-600">
                                     {bundleData.notes}
-                                </Text>
+                                </p>
                             )}
 
                             {/* Taxability Override */}
-                            <Flex align="center" gap={2} mb={2}>
-                                <Text fontSize="10px" color="gray.500" flexShrink={0}>
+                            <div className="mb-2 flex items-center gap-2">
+                                <span className="shrink-0 text-[10px] text-slate-500">
                                     Taxability:
-                                </Text>
-                                <NativeSelect.Root size="sm" width="130px">
-                                    <NativeSelect.Field
-                                        value={bundleTaxability}
-                                        onChange={(e) => handleBundleTaxabilityChange(e.target.value)}
-                                        _disabled={{ opacity: 0.5, cursor: 'not-allowed' }}
-                                        aria-disabled={taxabilityLoading || undefined}
-                                        style={{
-                                            fontSize: '11px',
-                                            padding: '2px 6px',
-                                            backgroundColor:
-                                                bundleTaxability === TaxabilityStatus.TAXABLE
-                                                    ? '#FED7AA'
-                                                    : bundleTaxability === TaxabilityStatus.NON_TAXABLE
-                                                        ? '#C6F6D5'
-                                                        : '#FEFCBF',
-                                            borderRadius: '4px',
-                                        }}
-                                    >
-                                        <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
-                                        <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
-                                        <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
+                                </span>
+                                <select
+                                    title="Taxability"
+                                    value={bundleTaxability}
+                                    onChange={(e) => handleBundleTaxabilityChange(e.target.value)}
+                                    disabled={taxabilityLoading}
+                                    className="rounded-none border border-slate-200 px-1.5 py-0.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                                    style={{
+                                        backgroundColor:
+                                            bundleTaxability === TaxabilityStatus.TAXABLE
+                                                ? '#FED7AA'
+                                                : bundleTaxability === TaxabilityStatus.NON_TAXABLE
+                                                    ? '#C6F6D5'
+                                                    : '#FEFCBF',
+                                    }}
+                                >
+                                    <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
+                                    <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
+                                    <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
+                                </select>
                                 {taxabilityLoading && <Spinner size="xs" />}
-                            </Flex>
+                            </div>
 
                             {/* Transaction count */}
-                            <Text fontSize="xs" color="gray.500" mb={1} fontWeight="medium">
+                            <p className="mb-1 text-xs font-medium text-slate-500">
                                 {bundleData.transaction_count} transaction
                                 {bundleData.transaction_count !== 1 ? 's' : ''}
-                            </Text>
+                            </p>
 
                             {/* Embedded transactions table */}
                             <BundleMemberTransactionsTable
                                 transactionIds={bundleData.transactions.map(t => t.id)}
                             />
-                        </Box>
+                        </div>
                     ) : (
-                        <Text fontSize="xs" color="gray.500">
+                        <span className="text-xs text-slate-500">
                             Bundle #{tx.user_calculation_unit_id}
-                        </Text>
+                        </span>
                     )}
                 </Section>
             )}
@@ -786,32 +735,28 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                 {/* Source Data - Raw Data Button */}
                 <Section title="Source" icon="📤" defaultOpen={true} colorScheme="orange">
                     {!tx.raw_transaction_id ? (
-                        <Box p={2} bg="gray.50" borderRadius="md" textAlign="center">
-                            <Text fontSize="9px" color="gray.500">
+                        <div className="bg-slate-50 p-2 text-center">
+                            <span className="text-[9px] text-slate-500">
                                 No raw transaction linked (manual entry)
-                            </Text>
-                        </Box>
+                            </span>
+                        </div>
                     ) : !hasFetchedRaw ? (
                         <Button
-                            size="xs"
                             onClick={fetchRawData}
-                            fontSize="9px"
-                            w="100%"
+                            className="w-full text-[9px]"
                         >
                             Raw Data (Raw TX ID: {tx.raw_transaction_id})
                         </Button>
                     ) : rawDataLoading ? (
-                        <Flex align="center" justify="center" py={2} gap={2}>
+                        <div className="flex items-center justify-center gap-2 py-2">
                             <FiLoader className="animate-spin" size={12} />
-                            <Text fontSize="9px" color="gray.500">Loading...</Text>
-                        </Flex>
+                            <span className="text-[9px] text-slate-500">Loading...</span>
+                        </div>
                     ) : rawDataError ? (
-                        <Box p={2} bg="red.50" borderRadius="md">
-                            <Text fontSize="9px" color="red.500">Error: {rawDataError}</Text>
+                        <div className="bg-red-50 p-2">
+                            <p className="text-[9px] text-red-500">Error: {rawDataError}</p>
                             <Button
-                                size="xs"
-                                mt={1}
-                                fontSize="9px"
+                                className="mt-1 text-[9px]"
                                 onClick={() => {
                                     setHasFetchedRaw(false);
                                     setRawDataError(null);
@@ -819,45 +764,32 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                             >
                                 Retry
                             </Button>
-                        </Box>
+                        </div>
                     ) : rawData ? (
-                        <Box>
-                            <Flex justify="space-between" align="center" mb={1}>
-                                <Flex align="center" gap={1}>
-                                    <Badge size="xs" colorPalette="gray" fontSize="8px">{rawData.source}</Badge>
-                                    <Text fontSize="8px" color="gray.500">ID: {rawData.source_transaction_id}</Text>
-                                </Flex>
+                        <div>
+                            <div className="mb-1 flex items-center justify-between">
+                                <div className="flex items-center gap-1">
+                                    <Badge colorScheme="gray" className="text-[8px]">{rawData.source}</Badge>
+                                    <span className="text-[8px] text-slate-500">ID: {rawData.source_transaction_id}</span>
+                                </div>
                                 <Button
-                                    size="xs"
                                     variant="ghost"
                                     onClick={copyJson}
-                                    px={1}
-                                    fontSize="9px"
+                                    className="px-1 text-[9px]"
                                 >
                                     {copied ? <FiCheck size={10} /> : <FiCopy size={10} />}
                                 </Button>
-                            </Flex>
-                            <Box
-                                bg="gray.900"
-                                color="green.300"
-                                p={2}
-                                borderRadius="md"
-                                fontSize="8px"
-                                fontFamily="mono"
-                                maxH="200px"
-                                overflowY="auto"
-                                whiteSpace="pre-wrap"
-                                wordBreak="break-all"
-                            >
+                            </div>
+                            <div className="max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all bg-slate-900 p-2 font-mono text-[8px] text-green-300">
                                 {JSON.stringify(rawData.raw_data, null, 2)}
-                            </Box>
+                            </div>
                             {/* Connector Metadata */}
                             {tx.connector_name && (
-                                <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.200">
+                                <div className="mt-2 border-t border-slate-200 pt-2">
                                     <InfoRow
                                         label="Connector"
                                         value={
-                                            <Badge size="xs" colorPalette="blue" fontSize="8px">
+                                            <Badge colorScheme="blue" className="text-[8px]">
                                                 {tx.connector_name}
                                             </Badge>
                                         }
@@ -868,37 +800,37 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                                     {tx.run_datetime && (
                                         <InfoRow label="Run Datetime" value={formatDateTimeLocale(tx.run_datetime)} muted />
                                     )}
-                                </Box>
+                                </div>
                             )}
                             {/* Raw Transaction Ingestion Time */}
                             {rawData?.ingestion_time && (
                                 <InfoRow label="Ingestion Time" value={formatDateTimeLocale(rawData.ingestion_time)} muted />
                             )}
-                        </Box>
+                        </div>
                     ) : null}
                 </Section>
 
                 {/* Source Mappings */}
                 <Section title="Source-Mappings" icon="🔗" defaultOpen={true} colorScheme="blue">
-                    <Text fontSize="9px" color="gray.500" mb={1}>Source value → Resolved ID</Text>
+                    <p className="mb-1 text-[9px] text-slate-500">Source value → Resolved ID</p>
 
                     <InfoRow
                         label="Account"
                         value={
                             tx.account_id ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_account || '-'}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Badge size="xs" colorPalette="cyan" fontSize="8px">
+                                <div className="flex items-center gap-1">
+                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500">{tx.source_account || '-'}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <Badge colorScheme="blue" className="text-[8px]">
                                         #{tx.account_id} {getAccountName(tx.account_id)}
                                     </Badge>
-                                </Flex>
+                                </div>
                             ) : tx.source_account ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_account}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
-                                </Flex>
+                                <div className="flex items-center gap-1">
+                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500">{tx.source_account}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                </div>
                             ) : '-'
                         }
                         alert={!tx.account_id && !!tx.source_account}
@@ -908,22 +840,22 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="Asset"
                         value={
                             tx.asset_id ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500">{tx.source_asset_symbol}</Text>
-                                    <Text fontSize="9px">→</Text>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-500">{tx.source_asset_symbol}</span>
+                                    <span className="text-[9px]">→</span>
                                     <AssetBadge
                                         asset={tx.linked_asset}
                                         size="xs"
                                         colorPalette="purple"
                                         maxLength={15}
                                     />
-                                </Flex>
+                                </div>
                             ) : (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500">{tx.source_asset_symbol || '-'}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
-                                </Flex>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-500">{tx.source_asset_symbol || '-'}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                </div>
                             )
                         }
                         alert={!tx.asset_id && !!tx.source_asset_symbol}
@@ -933,22 +865,22 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="Price Quote"
                         value={
                             tx.price_quote_asset_id ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500">{tx.source_price_quote_asset_symbol}</Text>
-                                    <Text fontSize="9px">→</Text>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-500">{tx.source_price_quote_asset_symbol}</span>
+                                    <span className="text-[9px]">→</span>
                                     <AssetBadge
                                         asset={tx.price_quote_asset}
                                         size="xs"
                                         colorPalette="green"
                                         maxLength={15}
                                     />
-                                </Flex>
+                                </div>
                             ) : (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500">{tx.source_price_quote_asset_symbol || '-'}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
-                                </Flex>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-500">{tx.source_price_quote_asset_symbol || '-'}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                </div>
                             )
                         }
                         alert={!tx.price_quote_asset_id && !!tx.source_price_quote_asset_symbol}
@@ -958,22 +890,22 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="Fee Quote"
                         value={
                             tx.fee_quote_asset_id ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500">{tx.source_fee_quote_asset_symbol}</Text>
-                                    <Text fontSize="9px">→</Text>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-500">{tx.source_fee_quote_asset_symbol}</span>
+                                    <span className="text-[9px]">→</span>
                                     <AssetBadge
                                         asset={tx.fee_quote_asset}
                                         size="xs"
                                         colorPalette="green"
                                         maxLength={15}
                                     />
-                                </Flex>
+                                </div>
                             ) : tx.source_fee_quote_asset_symbol ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500">{tx.source_fee_quote_asset_symbol}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
-                                </Flex>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-500">{tx.source_fee_quote_asset_symbol}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                </div>
                             ) : '-'
                         }
                         alert={!tx.fee_quote_asset_id && !!tx.source_fee_quote_asset_symbol}
@@ -983,19 +915,19 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="From Account"
                         value={
                             tx.from_account_id ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_from_account || undefined}>{tx.source_from_account || '-'}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Badge size="xs" colorPalette="cyan" fontSize="8px" title={`Source: ${tx.source_from_account || '-'}`}>
+                                <div className="flex items-center gap-1">
+                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_from_account || undefined}>{tx.source_from_account || '-'}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <Badge colorScheme="blue" className="text-[8px]" title={`Source: ${tx.source_from_account || '-'}`}>
                                         #{tx.from_account_id} {getAccountName(tx.from_account_id)}
                                     </Badge>
-                                </Flex>
+                                </div>
                             ) : tx.source_from_account ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_from_account}>{tx.source_from_account}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
-                                </Flex>
+                                <div className="flex items-center gap-1">
+                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_from_account}>{tx.source_from_account}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                </div>
                             ) : '-'
                         }
                     />
@@ -1004,19 +936,19 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="To Account"
                         value={
                             tx.to_account_id ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_to_account || undefined}>{tx.source_to_account || '-'}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Badge size="xs" colorPalette="cyan" fontSize="8px" title={`Source: ${tx.source_to_account || '-'}`}>
+                                <div className="flex items-center gap-1">
+                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_to_account || undefined}>{tx.source_to_account || '-'}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <Badge colorScheme="blue" className="text-[8px]" title={`Source: ${tx.source_to_account || '-'}`}>
                                         #{tx.to_account_id} {getAccountName(tx.to_account_id)}
                                     </Badge>
-                                </Flex>
+                                </div>
                             ) : tx.source_to_account ? (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_to_account}>{tx.source_to_account}</Text>
-                                    <Text fontSize="9px">→</Text>
-                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
-                                </Flex>
+                                <div className="flex items-center gap-1">
+                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_to_account}>{tx.source_to_account}</span>
+                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                </div>
                             ) : '-'
                         }
                     />
@@ -1024,7 +956,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
 
 
             </Section>
-        </Box>
+        </div>
     );
 };
 

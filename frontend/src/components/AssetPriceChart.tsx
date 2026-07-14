@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Badge, Box, Flex, Spinner, Text } from '@chakra-ui/react';
+import { Badge, Spinner } from './ui/primitives';
 import { ResponsiveLine } from '@nivo/line';
 import { API_URL, GapRange } from '../types';
 import { useBaseCurrency } from '../hooks/useBaseCurrency';
@@ -219,25 +219,25 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
 
     if (isLoading) {
         return (
-            <Flex justify="center" align="center" h={mini ? '100%' : CHART_HEIGHT}>
+            <div className="flex items-center justify-center" style={{ height: mini ? '100%' : CHART_HEIGHT }}>
                 <Spinner size="xs" />
-            </Flex>
+            </div>
         );
     }
 
     if (error) {
         return (
-            <Flex justify="center" align="center" h={mini ? '100%' : 60}>
-                <Text fontSize="xs" color="red.500">{error}</Text>
-            </Flex>
+            <div className="flex items-center justify-center" style={{ height: mini ? '100%' : 60 }}>
+                <span className="text-xs text-red-500">{error}</span>
+            </div>
         );
     }
 
     if (points.length === 0) {
         return (
-            <Flex justify="center" align="center" h={mini ? '100%' : 60}>
-                <Text fontSize="xs" color="gray.400">No price data</Text>
-            </Flex>
+            <div className="flex items-center justify-center" style={{ height: mini ? '100%' : 60 }}>
+                <span className="text-xs text-gray-400">No price data</span>
+            </div>
         );
     }
 
@@ -245,9 +245,9 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
     if (mini) {
         if (filteredPoints.length < 2) {
             return (
-                <Flex justify="center" align="center" h="100%">
-                    <Text fontSize="9px" color="gray.400">—</Text>
-                </Flex>
+                <div className="flex h-full items-center justify-center">
+                    <span className="text-[9px] text-gray-400">—</span>
+                </div>
             );
         }
 
@@ -255,7 +255,7 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
         if (gapLayer) layers.push(gapLayer);
 
         return (
-            <Box h="100%" w="100%" overflow="hidden">
+            <div className="h-full w-full overflow-hidden">
                 <ResponsiveLine
                     data={chartData}
                     animate={false}
@@ -275,7 +275,7 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
                     isInteractive={false}
                     layers={layers}
                 />
-            </Box>
+            </div>
         );
     }
 
@@ -283,33 +283,29 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
     const chartHeight = heightProp ? undefined : CHART_HEIGHT;
 
     return (
-        <Box h={heightProp}>
+        <div style={{ height: heightProp }}>
             {/* Zoom presets */}
             {!hideControls && (
-                <Flex gap={1} mb={1} justify="flex-end">
+                <div className="mb-1 flex justify-end gap-1">
                     {(Object.keys(ZOOM_PRESETS) as ZoomKey[]).map(k => (
                         <Badge
                             key={k}
-                            cursor="pointer"
-                            variant={zoom === k ? 'solid' : 'outline'}
-                            colorPalette={zoom === k ? 'blue' : 'gray'}
+                            colorScheme={zoom === k ? 'blue' : 'gray'}
                             onClick={() => setZoom(k)}
-                            size="xs"
-                            px={1.5}
-                            fontSize="9px"
+                            className={`cursor-pointer px-1.5 text-[9px] ${zoom === k ? 'ring-2 ring-blue-400' : ''}`}
                         >
                             {ZOOM_PRESETS[k].label}
                         </Badge>
                     ))}
-                </Flex>
+                </div>
             )}
 
             {filteredPoints.length < 2 ? (
-                <Flex justify="center" align="center" h={chartHeight}>
-                    <Text fontSize="xs" color="gray.400">Not enough data for selected range</Text>
-                </Flex>
+                <div className="flex items-center justify-center" style={{ height: chartHeight }}>
+                    <span className="text-xs text-gray-400">Not enough data for selected range</span>
+                </div>
             ) : (
-                <Box h={heightProp ? '100%' : CHART_HEIGHT}>
+                <div style={{ height: heightProp ? '100%' : CHART_HEIGHT }}>
                     <ResponsiveLine
                         data={chartData}
                         animate={false}
@@ -352,16 +348,16 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
                             'legends',
                         ] as any}
                         sliceTooltip={({ slice }) => (
-                            <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="120px">
-                                <Text fontSize="10px" fontWeight="bold" color="gray.600" mb={0.5}>
+                            <div className="min-w-[120px] rounded-md border border-gray-200 bg-white p-2 shadow-md">
+                                <div className="mb-0.5 text-[10px] font-bold text-gray-600">
                                     {slice.points[0]?.data.xFormatted}
-                                </Text>
+                                </div>
                                 {slice.points.map(p => (
-                                    <Text key={p.id} fontSize="xs" fontWeight="medium" color="blue.600">
+                                    <div key={p.id} className="text-xs font-medium text-blue-600">
                                         {formatPrice(Number(p.data.yFormatted?.toString().replace(/[$,k]/g, '') || p.data.y))}
-                                    </Text>
+                                    </div>
                                 ))}
-                            </Box>
+                            </div>
                         )}
                         theme={{
                             axis: {
@@ -371,24 +367,24 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
                             crosshair: { line: { stroke: '#aaa', strokeDasharray: '4 4' } },
                         }}
                     />
-                </Box>
+                </div>
             )}
 
             {/* Summary line */}
             {!hideControls && (
-                <Flex justify="space-between" mt={1}>
-                    <Text fontSize="9px" color="gray.400">
+                <div className="mt-1 flex justify-between">
+                    <span className="text-[9px] text-gray-400">
                         {filteredPoints.length} data points
                         {filteredPoints.length > 0 && ` · ${filteredPoints[0].date} → ${filteredPoints[filteredPoints.length - 1].date}`}
-                    </Text>
+                    </span>
                     {filteredPoints.length > 0 && (
-                        <Text fontSize="9px" color="gray.500" fontWeight="medium">
+                        <span className="text-[9px] font-medium text-gray-500">
                             Latest: {formatPrice(filteredPoints[filteredPoints.length - 1].price)}
-                        </Text>
+                        </span>
                     )}
-                </Flex>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

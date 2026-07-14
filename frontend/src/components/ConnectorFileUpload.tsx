@@ -1,14 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import {
-    Box,
-    Button,
-    Flex,
-    Text,
-    Badge,
-    Spinner,
-    Stack,
-    IconButton,
-} from '@chakra-ui/react';
+import { Button, Badge, Spinner } from './ui/primitives';
 import { LuUpload, LuFile, LuX, LuCheck, LuHistory, LuTrash2, LuTriangleAlert, LuEye, LuPin } from 'react-icons/lu';
 import { API_URL } from '../types';
 import { FileUploadPreviewModal } from './FileUploadPreviewModal';
@@ -318,130 +309,101 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
     const pendingImports = importHistory.filter((h) => h.status === 'pending');
 
     return (
-        <Box mt={2} pl={6}>
+        <div className="mt-2 pl-6">
             {/* File Upload Section - always visible for file connectors */}
-            <Box
-                p={3}
-                borderWidth="1px"
-                borderRadius="md"
-                borderColor="gray.200"
-                bg="gray.50"
-            >
+            <div className="border border-slate-200 bg-slate-50 p-3">
                 {/* Default File Indicator */}
                 {defaultFileName && (
-                    <Box
-                        mb={3}
-                        p={2}
-                        bg="teal.50"
-                        borderRadius="md"
-                        borderWidth="1px"
-                        borderColor="teal.200"
-                    >
-                        <Flex align="center" gap={2} minW={0}>
+                    <div className="mb-3 border border-teal-200 bg-teal-50 p-2">
+                        <div className="flex min-w-0 items-center gap-2">
                             <LuPin size={12} style={{ flexShrink: 0 }} />
-                            <Text fontSize="xs" color="teal.700" truncate flex="1">
-                                Default: <Text as="span" fontWeight="medium">{defaultFileName}</Text>
-                            </Text>
-                            <IconButton
+                            <span className="flex-1 truncate text-xs text-teal-700">
+                                Default: <span className="font-medium">{defaultFileName}</span>
+                            </span>
+                            <Button
                                 aria-label="Preview default file"
-                                size="2xs"
+                                size="sm"
                                 variant="ghost"
-                                colorPalette="teal"
+                                colorScheme="gray"
+                                className="text-teal-600 hover:bg-teal-50"
                                 onClick={() => setShowDefaultFilePreview(true)}
                             >
-                                <LuEye />
-                            </IconButton>
-                        </Flex>
-                    </Box>
+                                <LuEye size={12} />
+                            </Button>
+                        </div>
+                    </div>
                 )}
 
                 {/* Pending Imports Indicator */}
                 {pendingImports.length > 0 && (
-                    <Box
-                        mb={3}
-                        p={2}
-                        bg="yellow.50"
-                        borderRadius="md"
-                        borderWidth="1px"
-                        borderColor="yellow.200"
-                    >
-                        <Flex align="center" gap={2}>
-                            <Badge colorPalette="yellow">{pendingImports.length}</Badge>
-                            <Text fontSize="sm" color="yellow.800">
+                    <div className="mb-3 border border-yellow-200 bg-yellow-50 p-2">
+                        <div className="flex items-center gap-2">
+                            <Badge colorScheme="yellow">{pendingImports.length}</Badge>
+                            <span className="text-sm text-yellow-800">
                                 {pendingImports.length === 1
                                     ? 'file ready to be processed on next sync'
                                     : 'files ready to be processed on next sync'}
-                            </Text>
-                        </Flex>
-                    </Box>
+                            </span>
+                        </div>
+                    </div>
                 )}
 
                 {/* File Selection / Preview */}
                 {!selectedFile && !preview && (
-                    <Box>
+                    <div>
                         <input
                             type="file"
                             accept={(connectorType.includes('okx') || connectorType.includes('degiro')) ? '.csv' : '.xlsx,.xls'}
                             onChange={handleFileSelect}
-                            style={{ display: 'none' }}
+                            className="hidden"
                             id={`file-input-${connectorId}`}
                             disabled={disabled || isLoading}
                         />
                         <label htmlFor={`file-input-${connectorId}`}>
-                            <Flex
-                                direction="column"
-                                align="center"
-                                gap={2}
-                                p={4}
-                                borderWidth="2px"
-                                borderStyle="dashed"
-                                borderColor="gray.300"
-                                borderRadius="md"
-                                cursor={disabled ? 'not-allowed' : 'pointer'}
-                                opacity={disabled ? 0.6 : 1}
-                                _hover={!disabled ? { borderColor: 'blue.400', bg: 'blue.50' } : undefined}
-                                transition="all 0.2s"
+                            <div
+                                className={`flex flex-col items-center gap-2 border-2 border-dashed border-slate-300 p-4 transition-colors ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50'
+                                    }`}
                             >
                                 <LuUpload size={24} color="gray" />
-                                <Text fontSize="sm" color="gray.600">
+                                <span className="text-sm text-slate-600">
                                     Upload {(connectorType.includes('okx-funding') || connectorType.includes('okx-trades') || connectorType.includes('degiro')) ? 'CSV file' : 'trades file (.xlsx)'}
-                                </Text>
-                                <Text fontSize="xs" color="gray.400">
+                                </span>
+                                <span className="text-xs text-slate-400">
                                     Export from exchange and upload here
-                                </Text>
-                            </Flex>
+                                </span>
+                            </div>
                         </label>
-                    </Box>
+                    </div>
                 )}
 
                 {/* Loading State */}
                 {isLoading && (
-                    <Flex align="center" justify="center" gap={2} py={4}>
+                    <div className="flex items-center justify-center gap-2 py-4">
                         <Spinner size="sm" />
-                        <Text fontSize="sm" color="gray.500">Processing file...</Text>
-                    </Flex>
+                        <span className="text-sm text-slate-500">Processing file...</span>
+                    </div>
                 )}
 
                 {/* Preview - Show only basic file info, modal handles full preview */}
                 {preview && selectedFile && !isLoading && (
-                    <Stack gap={3}>
-                        <Flex align="center" gap={2}>
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center gap-2">
                             <LuFile size={16} />
-                            <Text fontSize="sm" fontWeight="medium">{selectedFile.name}</Text>
-                            <Badge colorPalette="blue" size="xs">{preview.row_count} rows</Badge>
-                        </Flex>
+                            <span className="text-sm font-medium">{selectedFile.name}</span>
+                            <Badge colorScheme="blue">{preview.row_count} rows</Badge>
+                        </div>
 
-                        <Flex gap={2}>
+                        <div className="flex gap-2">
                             <Button
-                                size="xs"
-                                colorPalette="blue"
+                                size="sm"
+                                colorScheme="blue"
                                 onClick={() => setShowPreviewModal(true)}
                             >
                                 <LuEye size={14} />
                                 View Preview
                             </Button>
                             <Button
-                                size="xs"
+                                size="sm"
                                 variant="ghost"
                                 onClick={handleCancelUpload}
                                 disabled={disabled}
@@ -449,52 +411,45 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                                 <LuX size={14} />
                                 Cancel
                             </Button>
-                        </Flex>
-                    </Stack>
+                        </div>
+                    </div>
                 )}
 
                 {/* Error */}
                 {error && (
-                    <Text fontSize="sm" color="red.500" mt={2}>
+                    <p className="mt-2 text-sm text-red-500">
                         {error}
-                    </Text>
+                    </p>
                 )}
 
                 {/* Success Message */}
                 {successMessage && (
-                    <Box
-                        mt={2}
-                        p={2}
-                        bg="green.50"
-                        borderRadius="md"
-                        borderWidth="1px"
-                        borderColor="green.200"
-                    >
-                        <Text fontSize="sm" color="green.700">
+                    <div className="mt-2 border border-green-200 bg-green-50 p-2">
+                        <p className="text-sm text-green-700">
                             {successMessage}
-                        </Text>
-                    </Box>
+                        </p>
+                    </div>
                 )}
 
                 {/* Import History Toggle */}
-                <Box mt={3}>
-                    <Flex align="center" gap={2}>
+                <div className="mt-3">
+                    <div className="flex items-center gap-2">
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="ghost"
                             onClick={() => setShowHistory(!showHistory)}
                         >
                             <LuHistory size={14} />
                             {showHistory ? 'Hide' : 'Show'} import history
                             {importHistory.length > 0 && ` (${importHistory.length})`}
-                            {historyLoading && <Spinner size="xs" ml={1} />}
+                            {historyLoading && <Spinner size="xs" className="ml-1" />}
                         </Button>
-                    </Flex>
+                    </div>
 
                     {showHistory && (
-                        <Stack gap={2} mt={2}>
+                        <div className="mt-2 flex flex-col gap-2">
                             {importHistory.length === 0 && !historyLoading && (
-                                <Text fontSize="xs" color="gray.500">No import history</Text>
+                                <span className="text-xs text-slate-500">No import history</span>
                             )}
 
                             {importHistory.map((entry) => {
@@ -502,53 +457,47 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                                     (entry.status === 'pending' || entry.status === 'failed');
 
                                 return (
-                                    <Box key={entry.id}>
-                                        <Flex
-                                            align="center"
-                                            gap={2}
-                                            fontSize="xs"
-                                            color={hasOrphanedFile ? 'orange.600' : 'gray.500'}
-                                            p={2}
-                                            borderWidth="1px"
-                                            borderRadius="sm"
-                                            borderColor={hasOrphanedFile ? 'orange.300' : 'gray.200'}
-                                            bg={hasOrphanedFile ? 'orange.50' : 'white'}
+                                    <div key={entry.id}>
+                                        <div
+                                            className={`flex items-center gap-2 border p-2 text-xs ${hasOrphanedFile
+                                                ? 'border-orange-300 bg-orange-50 text-orange-600'
+                                                : 'border-slate-200 bg-white text-slate-500'
+                                                }`}
                                         >
                                             {hasOrphanedFile && (
                                                 <LuTriangleAlert size={14} color="orange" />
                                             )}
-                                            <Text>{formatDateTime(entry.uploaded_at)}</Text>
-                                            <Text fontWeight="medium" flex={1} truncate>
+                                            <span>{formatDateTime(entry.uploaded_at)}</span>
+                                            <span className="flex-1 truncate font-medium">
                                                 {entry.original_filename}
-                                            </Text>
+                                            </span>
                                             <Badge
-                                                size="xs"
-                                                colorPalette={
+                                                colorScheme={
                                                     entry.status === 'completed' ? 'green' :
                                                         entry.status === 'pending' ? 'yellow' :
                                                             entry.status === 'processing' ? 'blue' :
-                                                                entry.status === 'default' ? 'teal' : 'red'
+                                                                entry.status === 'default' ? 'purple' : 'red'
                                                 }
                                             >
                                                 {entry.status}
                                             </Badge>
                                             {entry.status === 'completed' && (
-                                                <Badge size="xs" colorPalette="green">
+                                                <Badge colorScheme="green">
                                                     +{entry.new_count} new
                                                 </Badge>
                                             )}
                                             {hasOrphanedFile && (
-                                                <Badge size="xs" colorPalette="orange">
+                                                <Badge colorScheme="orange">
                                                     file missing
                                                 </Badge>
                                             )}
                                             {/* Preview button for pending/failed with existing file */}
                                             {entry.file_exists && (entry.status === 'pending' || entry.status === 'failed') && (
-                                                <IconButton
+                                                <Button
                                                     aria-label="Preview file"
-                                                    size="xs"
+                                                    size="sm"
                                                     variant="ghost"
-                                                    colorPalette="blue"
+                                                    colorScheme="blue"
                                                     onClick={() => fetchImportPreview(entry.id)}
                                                     disabled={importPreviewLoading}
                                                 >
@@ -557,118 +506,103 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                                                     ) : (
                                                         <LuEye size={12} />
                                                     )}
-                                                </IconButton>
+                                                </Button>
                                             )}
-                                            <IconButton
+                                            <Button
                                                 aria-label="Delete import"
-                                                size="xs"
+                                                size="sm"
                                                 variant="ghost"
-                                                colorPalette="red"
+                                                colorScheme="red"
                                                 onClick={() => handleDeleteImport(entry.id)}
                                                 disabled={entry.status === 'processing'}
                                             >
                                                 <LuTrash2 size={12} />
-                                            </IconButton>
-                                        </Flex>
+                                            </Button>
+                                        </div>
 
                                         {/* Preview panel for this import */}
                                         {previewingImportId === entry.id && importPreview && (
-                                            <Box
-                                                mt={2}
-                                                ml={4}
-                                                p={3}
-                                                bg="blue.50"
-                                                borderRadius="md"
-                                                borderWidth="1px"
-                                                borderColor="blue.200"
-                                            >
-                                                <Flex justify="space-between" align="center" mb={2}>
-                                                    <Text fontSize="sm" fontWeight="medium" color="blue.800">
+                                            <div className="ml-4 mt-2 border border-blue-200 bg-blue-50 p-3">
+                                                <div className="mb-2 flex items-center justify-between">
+                                                    <span className="text-sm font-medium text-blue-800">
                                                         File Preview: {entry.original_filename}
-                                                    </Text>
-                                                    <IconButton
+                                                    </span>
+                                                    <Button
                                                         aria-label="Close preview"
-                                                        size="xs"
+                                                        size="sm"
                                                         variant="ghost"
                                                         onClick={closeImportPreview}
                                                     >
                                                         <LuX size={12} />
-                                                    </IconButton>
-                                                </Flex>
+                                                    </Button>
+                                                </div>
 
-                                                <Stack gap={2} fontSize="xs">
-                                                    <Flex gap={4}>
-                                                        <Text color="gray.600">
-                                                            Rows: <Text as="span" fontWeight="medium">{importPreview.row_count}</Text>
-                                                        </Text>
+                                                <div className="flex flex-col gap-2 text-xs">
+                                                    <div className="flex gap-4">
+                                                        <span className="text-slate-600">
+                                                            Rows: <span className="font-medium">{importPreview.row_count}</span>
+                                                        </span>
                                                         {importPreview.date_range && (
-                                                            <Text color="gray.600">
-                                                                Dates: <Text as="span" fontWeight="medium">
+                                                            <span className="text-slate-600">
+                                                                Dates: <span className="font-medium">
                                                                     {formatDate(importPreview.date_range.min_date)} - {formatDate(importPreview.date_range.max_date)}
-                                                                </Text>
-                                                            </Text>
+                                                                </span>
+                                                            </span>
                                                         )}
-                                                    </Flex>
+                                                    </div>
 
                                                     {importPreview.pairs.length > 0 && (
-                                                        <Flex gap={1} wrap="wrap">
-                                                            <Text color="gray.600">Pairs:</Text>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            <span className="text-slate-600">Pairs:</span>
                                                             {importPreview.pairs.slice(0, 10).map((pair) => (
-                                                                <Badge key={pair} size="xs" colorPalette="gray">
+                                                                <Badge key={pair} colorScheme="gray">
                                                                     {pair}
                                                                 </Badge>
                                                             ))}
                                                             {importPreview.pairs.length > 10 && (
-                                                                <Text color="gray.500">
+                                                                <span className="text-slate-500">
                                                                     +{importPreview.pairs.length - 10} more
-                                                                </Text>
+                                                                </span>
                                                             )}
-                                                        </Flex>
+                                                        </div>
                                                     )}
 
                                                     {importPreview.sample_rows.length > 0 && (
-                                                        <Box>
-                                                            <Text color="gray.600" mb={1}>Sample rows:</Text>
-                                                            <Box
-                                                                bg="white"
-                                                                p={2}
-                                                                borderRadius="sm"
-                                                                maxH="150px"
-                                                                overflowY="auto"
-                                                                fontFamily="mono"
-                                                                fontSize="xs"
-                                                            >
+                                                        <div>
+                                                            <span className="mb-1 block text-slate-600">Sample rows:</span>
+                                                            <div className="max-h-[150px] overflow-y-auto bg-white p-2 font-mono text-xs">
                                                                 {importPreview.sample_rows.map((row, idx) => (
-                                                                    <Text key={idx} color="gray.700" mb={1}>
+                                                                    <p key={idx} className="mb-1 text-slate-700">
                                                                         {JSON.stringify(row)}
-                                                                    </Text>
+                                                                    </p>
                                                                 ))}
-                                                            </Box>
-                                                        </Box>
+                                                            </div>
+                                                        </div>
                                                     )}
-                                                </Stack>
-                                            </Box>
+                                                </div>
+                                            </div>
                                         )}
-                                    </Box>
+                                    </div>
                                 );
                             })}
 
                             {/* Cleanup orphans button */}
                             {importHistory.some(e => !e.file_exists && (e.status === 'pending' || e.status === 'failed')) && (
                                 <Button
-                                    size="xs"
+                                    size="sm"
                                     variant="outline"
-                                    colorPalette="orange"
+                                    colorScheme="gray"
+                                    className="border-orange-300 text-orange-700 hover:bg-orange-50"
                                     onClick={handleCleanupOrphans}
                                 >
                                     <LuTrash2 size={12} />
                                     Clean up orphaned imports
                                 </Button>
                             )}
-                        </Stack>
+                        </div>
                     )}
-                </Box>
-            </Box>
+                </div>
+            </div>
 
             {/* Preview Modal */}
             {preview && selectedFile && (
@@ -694,7 +628,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                     fileName={defaultFileName}
                 />
             )}
-        </Box>
+        </div>
     );
 };
 

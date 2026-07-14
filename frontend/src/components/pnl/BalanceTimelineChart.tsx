@@ -12,14 +12,7 @@
  */
 
 import React, { useMemo, useState, useCallback } from 'react';
-import {
-    Box,
-    Flex,
-    Heading,
-    Text,
-    Badge,
-    Button,
-} from '@chakra-ui/react';
+import { Badge, Button } from '../ui/primitives';
 import { ResponsiveLine } from '@nivo/line';
 import { CostLotEventEntry } from './types';
 
@@ -200,60 +193,51 @@ export const BalanceTimelineChart: React.FC<BalanceTimelineChartProps> = ({
 
     if (chartData.length === 0 || chartData.every(s => s.data.length === 0)) {
         return (
-            <Flex
-                direction="column"
-                align="center"
-                justify="center"
-                py={12}
-                px={4}
-                bg="gray.50"
-                borderRadius="md"
-                minH="300px"
-            >
-                <Text fontSize="lg" fontWeight="medium" color="gray.600" mb={2}>
+            <div className="flex min-h-[300px] flex-col items-center justify-center gap-2 bg-slate-50 px-4 py-12">
+                <span className="mb-2 text-lg font-medium text-slate-600">
                     No Balance Data
-                </Text>
-                <Text fontSize="sm" color="gray.500" textAlign="center">
+                </span>
+                <span className="text-center text-sm text-slate-500">
                     Balance timeline will appear after events with balance data are available.
-                </Text>
-            </Flex>
+                </span>
+            </div>
         );
     }
 
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={3} wrap="wrap" gap={3}>
-                <Flex align="center" gap={3}>
-                    <Heading size="sm">
+        <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                    <span className="block text-sm font-semibold">
                         {assetSymbol} Balance Over Time
-                    </Heading>
-                    <Badge colorPalette="blue">
+                    </span>
+                    <Badge colorScheme="blue">
                         {filteredEvents.length} event{filteredEvents.length !== 1 ? 's' : ''}
                     </Badge>
                     {eventDensity.length > 0 && (
-                        <Badge colorPalette="orange" size="sm">
+                        <Badge colorScheme="orange">
                             {eventDensity.length} dense day{eventDensity.length !== 1 ? 's' : ''}
                         </Badge>
                     )}
-                </Flex>
+                </div>
 
                 {/* Zoom Controls */}
-                <Flex gap={1} wrap="wrap">
+                <div className="flex flex-wrap gap-1">
                     {(Object.keys(ZOOM_PRESETS) as ZoomPreset[]).map(preset => (
                         <Button
                             key={preset}
-                            size="xs"
+                            size="sm"
                             variant={activeZoom === preset ? 'solid' : 'outline'}
-                            colorPalette={activeZoom === preset ? 'blue' : 'gray'}
+                            colorScheme={activeZoom === preset ? 'blue' : 'gray'}
                             onClick={() => handleZoomPreset(preset)}
                         >
                             {ZOOM_PRESETS[preset].label}
                         </Button>
                     ))}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
-            <Box height="400px">
+            <div className="h-[400px]">
                 <ResponsiveLine
                     data={chartData}
                     margin={{ top: 20, right: 120, bottom: 60, left: 80 }}
@@ -313,50 +297,42 @@ export const BalanceTimelineChart: React.FC<BalanceTimelineChartProps> = ({
                     tooltip={({ point }: any) => {
                         const event = (point.data as any).event as CostLotEventEntry;
                         return (
-                            <Box
-                                bg="white"
-                                p={3}
-                                border="1px solid"
-                                borderColor="gray.200"
-                                borderRadius="md"
-                                boxShadow="md"
-                                fontSize="xs"
-                            >
-                                <Flex direction="column" gap={1}>
-                                    <Text fontWeight="bold">{formatDate(point.data.x as Date)}</Text>
-                                    <Flex align="center" gap={2}>
-                                        <Badge size="xs" colorPalette={
+                            <div className="border border-slate-200 bg-white p-3 text-xs shadow-md">
+                                <div className="flex flex-col gap-1">
+                                    <span className="font-bold">{formatDate(point.data.x as Date)}</span>
+                                    <div className="flex items-center gap-2">
+                                        <Badge className="text-xs" colorScheme={
                                             event.event_type === 'created' ? 'green' :
                                                 event.event_type === 'consumed' ? 'orange' : 'blue'
                                         }>
                                             {event.event_type}
                                         </Badge>
-                                        <Text>Lot #{event.lot_id}</Text>
-                                    </Flex>
-                                    <Text>
-                                        <Text as="span" color="gray.600">Balance: </Text>
-                                        <Text as="span" fontWeight="bold" color={Number(point.data.y) >= 0 ? 'green.600' : 'red.600'}>
+                                        <span>Lot #{event.lot_id}</span>
+                                    </div>
+                                    <span>
+                                        <span className="text-slate-600">Balance: </span>
+                                        <span className={`font-bold ${Number(point.data.y) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                             {formatQty(Number(point.data.y))}
-                                        </Text>
-                                    </Text>
-                                    <Text>
-                                        <Text as="span" color="gray.600">Change: </Text>
-                                        <Text as="span" color={event.quantity_delta >= 0 ? 'green.600' : 'red.600'}>
+                                        </span>
+                                    </span>
+                                    <span>
+                                        <span className="text-slate-600">Change: </span>
+                                        <span className={event.quantity_delta >= 0 ? 'text-green-600' : 'text-red-600'}>
                                             {event.quantity_delta >= 0 ? '+' : ''}{formatQty(event.quantity_delta)}
-                                        </Text>
-                                    </Text>
+                                        </span>
+                                    </span>
                                     {event.account_name && (
-                                        <Text color="gray.600">
+                                        <span className="text-slate-600">
                                             Account: {event.account_name}
-                                        </Text>
+                                        </span>
                                     )}
-                                </Flex>
-                            </Box>
+                                </div>
+                            </div>
                         );
                     }}
                 />
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 };
 

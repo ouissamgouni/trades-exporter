@@ -13,16 +13,7 @@
  */
 
 import React, { useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Flex,
-    NativeSelect,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, type BadgeColorScheme, Button, Spinner } from '../ui/primitives';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_URL, BundleSuggestion, TaxabilityStatus } from '../../types';
 import { TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../../enums';
@@ -54,6 +45,11 @@ const patternColors: Record<string, string> = {
     [UnitPattern.FLOW]: 'cyan',
     [UnitPattern.SPINOFF]: 'pink',
 };
+
+// `cyan`/`pink` above aren't valid BadgeColorScheme values - coerce with a safe fallback.
+const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toBadgeColor = (color: string): BadgeColorScheme =>
+    (VALID_BADGE_COLORS as string[]).includes(color) ? (color as BadgeColorScheme) : 'blue';
 
 // ============================================================================
 // Component
@@ -178,33 +174,26 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
     }
 
     return (
-        <Box
-            mb={mb}
-            borderWidth={1}
-            borderColor="teal.200"
-            borderRadius="md"
-            bg="teal.50"
+        <div
+            style={mb !== undefined ? { marginBottom: typeof mb === 'number' ? `${mb * 4}px` : mb } : undefined}
+            className="border border-teal-200 bg-teal-50"
         >
             {/* Header */}
-            <Flex
-                p={3}
-                justify="space-between"
-                align="center"
-                cursor="pointer"
+            <div
+                className="flex cursor-pointer items-center justify-between p-3 hover:bg-teal-100"
                 onClick={() => setExpanded(!expanded)}
-                _hover={{ bg: 'teal.100' }}
-                borderRadius="md"
             >
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="bold" color="teal.700">
+                <div className="flex items-center gap-2">
+                    <span className="font-bold text-teal-700">
                         💡 Suggested Bundles ({isLoading ? '...' : suggestions.length})
-                    </Text>
-                </Flex>
-                <Flex align="center" gap={2}>
+                    </span>
+                </div>
+                <div className="flex items-center gap-2">
                     <Button
-                        size="xs"
+                        size="sm"
                         variant="ghost"
-                        colorPalette="teal"
+                        colorScheme="gray"
+                        className="text-teal-600 hover:bg-teal-50"
                         onClick={(e) => {
                             e.stopPropagation();
                             refetch();
@@ -212,168 +201,165 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
                     >
                         ↻ Refresh
                     </Button>
-                    <Text color="teal.600">{expanded ? '▼' : '▶'}</Text>
-                </Flex>
-            </Flex>
+                    <span className="text-teal-600">{expanded ? '▼' : '▶'}</span>
+                </div>
+            </div>
 
             {/* Content */}
             {expanded && (
-                <Box p={3} pt={0}>
+                <div className="p-3 pt-0">
                     {/* Loading state */}
                     {isLoading && (
-                        <Flex justify="center" align="center" py={4}>
-                            <Spinner size="sm" color="teal.500" />
-                            <Text ml={2} color="teal.600" fontSize="sm">
+                        <div className="flex items-center justify-center py-4">
+                            <Spinner size="sm" />
+                            <span className="ml-2 text-sm text-teal-600">
                                 Loading suggestions...
-                            </Text>
-                        </Flex>
+                            </span>
+                        </div>
                     )}
 
                     {/* Error state */}
                     {error && (
-                        <Box p={3} bg="red.50" borderRadius="md">
-                            <Text color="red.600" fontSize="sm">
+                        <div className="bg-red-50 p-3">
+                            <span className="text-sm text-red-600">
                                 Failed to load suggestions.{' '}
                                 <Button
-                                    size="xs"
+                                    size="sm"
                                     variant="ghost"
-                                    colorPalette="red"
+                                    colorScheme="red"
                                     onClick={() => refetch()}
                                 >
                                     Retry
                                 </Button>
-                            </Text>
-                        </Box>
+                            </span>
+                        </div>
                     )}
 
                     {/* Empty state */}
                     {!isLoading && !error && suggestions.length === 0 && (
-                        <Text color="teal.600" fontSize="sm">
+                        <span className="text-sm text-teal-600">
                             No bundle suggestions available. Add more transactions to get pattern-based suggestions.
-                        </Text>
+                        </span>
                     )}
 
                     {/* Suggestion cards */}
                     {!isLoading && !error && suggestions.length > 0 && (
-                        <Flex gap={3} flexWrap="wrap">
+                        <div className="flex flex-wrap gap-3">
                             {suggestions.map((suggestion, idx) => {
                                 const currentTaxability = taxabilityOverrides[idx] ?? suggestion.taxability_suggestion;
                                 const isAccepting = acceptingIndex === idx;
 
                                 return (
-                                    <Card.Root key={idx} size="sm" width="320px" bg="white">
-                                        <Card.Body p={3}>
-                                            {/* Pattern and confidence */}
-                                            <Flex justify="space-between" align="center" mb={2}>
-                                                <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
-                                                    {suggestion.pattern}
-                                                </Badge>
-                                                <Text fontSize="xs" color="gray.500">
-                                                    {Math.round(suggestion.confidence * 100)}% confidence
-                                                </Text>
-                                            </Flex>
+                                    <div key={idx} className="w-[320px] border border-slate-200 bg-white p-3">
+                                        {/* Pattern and confidence */}
+                                        <div className="mb-2 flex items-center justify-between">
+                                            <Badge colorScheme={toBadgeColor(patternColors[suggestion.pattern] || 'gray')}>
+                                                {suggestion.pattern}
+                                            </Badge>
+                                            <span className="text-xs text-slate-500">
+                                                {Math.round(suggestion.confidence * 100)}% confidence
+                                            </span>
+                                        </div>
 
-                                            {/* Label and reason */}
-                                            <Text fontWeight="bold" fontSize="sm">
-                                                {suggestion.label}
-                                            </Text>
-                                            <Text fontSize="xs" color="gray.600" mt={1}>
-                                                {suggestion.reason}
-                                            </Text>
+                                        {/* Label and reason */}
+                                        <div className="text-sm font-bold">
+                                            {suggestion.label}
+                                        </div>
+                                        <div className="mt-1 text-xs text-slate-600">
+                                            {suggestion.reason}
+                                        </div>
 
-                                            {/* Quantity info */}
-                                            {suggestion.total_quantity && (
-                                                <Text fontSize="xs" mt={1}>
-                                                    {suggestion.total_quantity} {suggestion.asset_symbol}
-                                                </Text>
-                                            )}
+                                        {/* Quantity info */}
+                                        {suggestion.total_quantity && (
+                                            <div className="mt-1 text-xs">
+                                                {suggestion.total_quantity} {suggestion.asset_symbol}
+                                            </div>
+                                        )}
 
-                                            {/* Taxability selector */}
-                                            <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                <Flex align="center" gap={2}>
-                                                    <Text fontSize="xs" color="gray.500">
-                                                        Taxability:
-                                                    </Text>
-                                                    <NativeSelect.Root size="sm" width="100px">
-                                                        <NativeSelect.Field
-                                                            value={currentTaxability || TaxabilityStatusEnum.UNKNOWN}
-                                                            onChange={(e) => {
-                                                                setTaxabilityOverrides(prev => ({
-                                                                    ...prev,
-                                                                    [idx]: e.target.value as TaxabilityStatus,
-                                                                }));
-                                                            }}
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            style={{
-                                                                fontSize: '10px',
-                                                                padding: '2px 4px',
-                                                                backgroundColor:
-                                                                    currentTaxability === TaxabilityStatusEnum.TAXABLE
-                                                                        ? '#FED7AA'
-                                                                        : currentTaxability === TaxabilityStatusEnum.NON_TAXABLE
-                                                                            ? '#C6F6D5'
-                                                                            : '#FEFCBF',
-                                                                borderRadius: '4px',
-                                                            }}
-                                                        >
-                                                            <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
-                                                            <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
-                                                            <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
-                                                        </NativeSelect.Field>
-                                                    </NativeSelect.Root>
-                                                </Flex>
-                                            </Box>
-
-                                            {/* Transaction list */}
-                                            <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                <Text fontSize="xs" color="gray.500" mb={1}>
-                                                    {suggestion.transactions.length} transaction
-                                                    {suggestion.transactions.length !== 1 ? 's' : ''}:
-                                                </Text>
-                                                <BundleMemberTransactionsTable
-                                                    transactionIds={suggestion.transactions.map(t => t.id)}
-                                                    onTransactionClick={onTransactionClick}
-                                                />
-                                            </Box>
-
-                                            {/* Actions */}
-                                            <Flex mt={3} gap={2}>
-                                                <Button
-                                                    size="xs"
-                                                    colorPalette="green"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        acceptSuggestion(suggestion, idx);
+                                        {/* Taxability selector */}
+                                        <div className="mt-2 border-t border-slate-100 pt-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-slate-500">
+                                                    Taxability:
+                                                </span>
+                                                <select
+                                                    value={currentTaxability || TaxabilityStatusEnum.UNKNOWN}
+                                                    onChange={(e) => {
+                                                        setTaxabilityOverrides(prev => ({
+                                                            ...prev,
+                                                            [idx]: e.target.value as TaxabilityStatus,
+                                                        }));
                                                     }}
-                                                    disabled={isAccepting}
-                                                >
-                                                    {isAccepting ? (
-                                                        <Spinner size="xs" />
-                                                    ) : (
-                                                        '✓ Create Bundle'
-                                                    )}
-                                                </Button>
-                                                <Button
-                                                    size="xs"
-                                                    variant="ghost"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        dismissSuggestion(suggestion, idx);
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="w-[100px]"
+                                                    style={{
+                                                        fontSize: '10px',
+                                                        padding: '2px 4px',
+                                                        backgroundColor:
+                                                            currentTaxability === TaxabilityStatusEnum.TAXABLE
+                                                                ? '#FED7AA'
+                                                                : currentTaxability === TaxabilityStatusEnum.NON_TAXABLE
+                                                                    ? '#C6F6D5'
+                                                                    : '#FEFCBF',
+                                                        borderRadius: '4px',
                                                     }}
-                                                    disabled={isAccepting}
                                                 >
-                                                    Dismiss
-                                                </Button>
-                                            </Flex>
-                                        </Card.Body>
-                                    </Card.Root>
+                                                    <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
+                                                    <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
+                                                    <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        {/* Transaction list */}
+                                        <div className="mt-2 border-t border-slate-100 pt-2">
+                                            <span className="mb-1 block text-xs text-slate-500">
+                                                {suggestion.transactions.length} transaction
+                                                {suggestion.transactions.length !== 1 ? 's' : ''}:
+                                            </span>
+                                            <BundleMemberTransactionsTable
+                                                transactionIds={suggestion.transactions.map(t => t.id)}
+                                                onTransactionClick={onTransactionClick}
+                                            />
+                                        </div>
+
+                                        {/* Actions */}
+                                        <div className="mt-3 flex gap-2">
+                                            <Button
+                                                size="sm"
+                                                colorScheme="green"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    acceptSuggestion(suggestion, idx);
+                                                }}
+                                                disabled={isAccepting}
+                                            >
+                                                {isAccepting ? (
+                                                    <Spinner size="xs" />
+                                                ) : (
+                                                    '✓ Create Bundle'
+                                                )}
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    dismissSuggestion(suggestion, idx);
+                                                }}
+                                                disabled={isAccepting}
+                                            >
+                                                Dismiss
+                                            </Button>
+                                        </div>
+                                    </div>
                                 );
                             })}
-                        </Flex>
+                        </div>
                     )}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

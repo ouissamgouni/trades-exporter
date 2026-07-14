@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Box, Flex, Text } from '@chakra-ui/react';
 import { FiActivity, FiCheckCircle, FiClipboard } from 'react-icons/fi';
 import { useDataHealth } from '../contexts/DataHealthContext';
 import { useQaContext } from './QaTestPlanPanel';
@@ -25,31 +24,17 @@ const envDotColors: Record<string, string> = {
 
 /** Thin divider between segments */
 const Divider = () => (
-    <Box
-        w="1px"
-        h="12px"
-        bg="blackAlpha.200"
-        mx={1}
-        flexShrink={0}
-    />
+    <div className="mx-1 h-3 w-px shrink-0 bg-black/10" />
 );
 
 /** Clickable segment wrapper */
 const Segment: React.FC<{ onClick?: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
-    <Flex
-        align="center"
-        gap={1}
-        px={1.5}
-        h="100%"
-        cursor={onClick ? 'pointer' : 'default'}
+    <div
+        className={`flex h-full shrink-0 items-center gap-1 px-1.5 text-[11px] transition-colors ${onClick ? 'cursor-pointer hover:bg-black/5' : 'cursor-default'}`}
         onClick={onClick}
-        _hover={onClick ? { bg: 'blackAlpha.100' } : undefined}
-        transition="background 0.15s"
-        flexShrink={0}
-        fontSize="11px"
     >
         {children}
-    </Flex>
+    </div>
 );
 
 export const StatusBar: React.FC = () => {
@@ -85,22 +70,13 @@ export const StatusBar: React.FC = () => {
 
     return (
         <>
-            <Box
-                position="fixed"
-                bottom={0}
-                left={0}
-                right={0}
-                h={`${STATUS_BAR_HEIGHT}px`}
-                bg={barBg}
-                color="gray.600"
-                borderTop="1px solid"
-                borderColor="gray.200"
-                zIndex={50}
-                display="flex"
-                alignItems="center"
-                justifyContent="flex-end"
-                fontFamily="system-ui, -apple-system, sans-serif"
-                userSelect="none"
+            <div
+                className="fixed bottom-0 left-0 right-0 z-50 flex select-none items-center justify-end border-t border-slate-200 text-slate-600"
+                style={{
+                    height: `${STATUS_BAR_HEIGHT}px`,
+                    backgroundColor: barBg,
+                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                }}
             >
                 {/* ── Right-aligned segments: Data Health | QA | Env ── */}
 
@@ -114,14 +90,14 @@ export const StatusBar: React.FC = () => {
                             {validationSummary.has_issues ? (
                                 <>
                                     <FiActivity size={11} color="#dd6b20" />
-                                    <Text color="#dd6b20" fontWeight="600">
+                                    <span className="font-semibold" style={{ color: '#dd6b20' }}>
                                         {validationSummary.total_issues} Issues
-                                    </Text>
+                                    </span>
                                 </>
                             ) : (
                                 <>
                                     <FiCheckCircle size={11} color="#38a169" />
-                                    <Text color="#38a169">Healthy</Text>
+                                    <span style={{ color: '#38a169' }}>Healthy</span>
                                 </>
                             )}
                         </Segment>
@@ -134,11 +110,11 @@ export const StatusBar: React.FC = () => {
                     <>
                         <Segment onClick={() => setQaIsOpen(!qaIsOpen)}>
                             <FiClipboard size={11} />
-                            <Text>QA</Text>
+                            <span>QA</span>
                             {totalSteps > 0 && (
-                                <Text fontWeight="600" opacity={0.85}>
+                                <span className="font-semibold" style={{ opacity: 0.85 }}>
                                     {doneCount}/{totalSteps}
-                                </Text>
+                                </span>
                             )}
                         </Segment>
                         <Divider />
@@ -149,27 +125,24 @@ export const StatusBar: React.FC = () => {
                 <Segment>
                     {!isProd && (
                         <>
-                            <Box
-                                w="7px"
-                                h="7px"
-                                borderRadius="full"
-                                bg={dotColor}
-                                flexShrink={0}
+                            <span
+                                className="inline-block h-[7px] w-[7px] shrink-0 rounded-full"
+                                style={{ backgroundColor: dotColor }}
                             />
-                            <Text fontWeight="700">{env.toUpperCase()}</Text>
+                            <span className="font-bold">{env.toUpperCase()}</span>
                         </>
                     )}
                     {appInfo?.backend_version && (
-                        <Text opacity={0.6}>{appInfo.backend_version}</Text>
+                        <span style={{ opacity: 0.6 }}>{appInfo.backend_version}</span>
                     )}
                     {appInfo?.db_schema_version && (
-                        <Text opacity={0.5}>DB {appInfo.db_schema_version}</Text>
+                        <span style={{ opacity: 0.5 }}>DB {appInfo.db_schema_version}</span>
                     )}
                 </Segment>
 
                 {/* Right edge padding */}
-                <Box w={1} flexShrink={0} />
-            </Box>
+                <span className="w-1 shrink-0" />
+            </div>
 
             {/* Data Health Drawer — triggered from status bar */}
             <DataHealthCheckDrawer

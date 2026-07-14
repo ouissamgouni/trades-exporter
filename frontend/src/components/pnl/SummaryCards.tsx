@@ -10,14 +10,7 @@
  */
 
 import React from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Slider,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button } from '../ui/primitives';
 import { FiAlertTriangle, FiActivity, FiRefreshCw } from 'react-icons/fi';
 import { Tooltip } from '../ui/tooltip';
 import { PnLSummary, UnmappedLiveAsset } from './types';
@@ -74,62 +67,50 @@ export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
     const highErrorRate = priceableCount > 0 && priceErrorCount / priceableCount > 0.2;
 
     return (
-        <Box
-            py={1}
-            px={2.5}
-            bg="white"
-            borderRadius="lg"
-            border="1px solid"
-            borderColor="gray.200"
-            h="100%"
-            display="flex"
-            alignItems="center"
-            overflow="hidden"
-        >
-            <Flex align="center" gap={1.5} flex={1} wrap="nowrap" overflow="hidden">
+        <div className="flex h-full items-center overflow-hidden rounded-lg border border-gray-200 bg-white px-2.5 py-1">
+            <div className="flex flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
                 <FiRefreshCw size={12} color="#3182ce" style={{ flexShrink: 0 }} />
-                <Text fontSize="2xs" fontWeight="semibold" color="gray.700" whiteSpace="nowrap">Prices</Text>
+                <span className="whitespace-nowrap text-[10px] font-semibold text-gray-700">Prices</span>
                 {pnlAssetCount != null && (
-                    <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap">{pnlAssetCount}a</Text>
+                    <span className="whitespace-nowrap text-[10px] text-gray-400">{pnlAssetCount}a</span>
                 )}
                 {priceSuccessCount > 0 && (
-                    <Badge colorPalette="green" variant="solid" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>✅{priceSuccessCount}</Badge>
+                    <Badge colorScheme="green" className="cursor-pointer" onClick={onPriceBadgeClick}>✅{priceSuccessCount}</Badge>
                 )}
                 {priceStaleCount > 0 && (
-                    <Badge colorPalette="orange" variant="solid" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>⏳{priceStaleCount}</Badge>
+                    <Badge colorScheme="orange" className="cursor-pointer" onClick={onPriceBadgeClick}>⏳{priceStaleCount}</Badge>
                 )}
                 {priceErrorCount > 0 && (
-                    <Badge colorPalette="red" variant="solid" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>⚠️{priceErrorCount}</Badge>
+                    <Badge colorScheme="red" className="cursor-pointer" onClick={onPriceBadgeClick}>⚠️{priceErrorCount}</Badge>
                 )}
                 {priceSuccessCount === 0 && priceStaleCount === 0 && priceErrorCount === 0 && (
-                    <Text fontSize="2xs" color="gray.400">—</Text>
+                    <span className="text-[10px] text-gray-400">—</span>
                 )}
                 {naCount > 0 && (
                     <Tooltip content="Only assets with cost lots need live pricing">
-                        <Badge colorPalette="gray" variant="outline" size="xs">{naCount} N/A</Badge>
+                        <Badge colorScheme="gray">{naCount} N/A</Badge>
                     </Tooltip>
                 )}
                 {pendingCount > 0 && (
-                    <Badge colorPalette="gray" variant="outline" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>⏳{pendingCount}</Badge>
+                    <Badge colorScheme="gray" className="cursor-pointer" onClick={onPriceBadgeClick}>⏳{pendingCount}</Badge>
                 )}
                 {highErrorRate && (
-                    <Badge colorPalette="orange" variant="subtle" size="xs">⚠️</Badge>
+                    <Badge colorScheme="orange">⚠️</Badge>
                 )}
                 <Button
                     onClick={onRefreshPrices}
                     loading={isRefreshingPrices}
-                    colorPalette="blue"
+                    colorScheme="blue"
                     variant="outline"
-                    size="2xs"
+                    size="sm"
                     disabled={refreshDisabled}
                     title="Refresh all prices"
-                    ml="auto"
-                    flexShrink={0}
+                    className="ml-auto h-6 w-6 shrink-0 px-0"
                 >
                     <FiRefreshCw size={12} />
                 </Button>
-            </Flex>
-        </Box>
+            </div>
+        </div>
     );
 };
 
@@ -155,39 +136,24 @@ export const WarningsCard: React.FC<WarningsCardProps> = ({
             showArrow
             content={
                 warningTypeCounts && Object.keys(warningTypeCounts).length > 0 ? (
-                    <Box p={1}>
+                    <div className="p-1">
                         {Object.entries(warningTypeCounts)
                             .sort((a, b) => b[1] - a[1])
                             .map(([type, count]) => (
-                                <Text key={type} fontSize="xs">{type.replace(/_/g, ' ')}: {count}</Text>
+                                <div key={type} className="text-xs">{type.replace(/_/g, ' ')}: {count}</div>
                             ))}
-                    </Box>
+                    </div>
                 ) : hasWarnings ? `${summary.warning_count} warnings detected` : 'No warnings'
             }
         >
-            <Box
-                py={1}
-                px={2.5}
-                bg="white"
-                borderRadius="lg"
-                border="1px solid"
-                borderColor="gray.200"
-                h="100%"
-                display="flex"
-                alignItems="center"
-                cursor={hasWarnings && onWarningsClick ? 'pointer' : 'default'}
+            <div
+                className={`flex h-full items-center overflow-hidden rounded-lg border bg-white px-2.5 py-1 transition-all duration-150 ${hasWarnings && onWarningsClick ? 'cursor-pointer hover:border-orange-300 hover:shadow-sm' : 'cursor-default'} border-gray-200`}
                 onClick={hasWarnings ? onWarningsClick : undefined}
-                _hover={hasWarnings && onWarningsClick ? { borderColor: 'orange.300', shadow: 'sm' } : undefined}
-                transition="all 0.15s"
-                overflow="hidden"
             >
-                <Flex align="center" gap={1.5} flex={1} wrap="nowrap" overflow="hidden">
+                <div className="flex flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
                     <FiAlertTriangle size={12} color={hasWarnings ? '#dd6b20' : '#38a169'} style={{ flexShrink: 0 }} />
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.700" whiteSpace="nowrap">Warnings</Text>
-                    <Badge
-                        colorPalette={summary.error_count > 0 ? 'red' : hasWarnings ? 'orange' : 'green'}
-                        size="xs"
-                    >
+                    <span className="whitespace-nowrap text-[10px] font-semibold text-gray-700">Warnings</span>
+                    <Badge colorScheme={summary.error_count > 0 ? 'red' : hasWarnings ? 'orange' : 'green'}>
                         {hasWarnings ? summary.warning_count : '✓'}
                     </Badge>
                     {/* Inline type breakdown */}
@@ -197,22 +163,22 @@ export const WarningsCard: React.FC<WarningsCardProps> = ({
                                 .sort((a, b) => b[1] - a[1])
                                 .slice(0, 3)
                                 .map(([type, count]) => (
-                                    <Badge key={type} size="xs" variant="subtle" colorPalette="orange">
+                                    <Badge key={type} colorScheme="orange">
                                         {type.replace(/_/g, ' ').substring(0, 12)}:{count}
                                     </Badge>
                                 ))}
                             {Object.keys(warningTypeCounts).length > 3 && (
-                                <Badge size="xs" variant="subtle" colorPalette="gray">
+                                <Badge colorScheme="gray">
                                     +{Object.keys(warningTypeCounts).length - 3}
                                 </Badge>
                             )}
                         </>
                     )}
                     {!hasWarnings && !warningTypeCounts && (
-                        <Text fontSize="2xs" color="green.600">✓ ok</Text>
+                        <span className="text-[10px] text-green-600">✓ ok</span>
                     )}
-                </Flex>
-            </Box>
+                </div>
+            </div>
         </Tooltip>
     );
 };
@@ -245,63 +211,43 @@ export const BalanceHealthCard: React.FC<BalanceHealthCardProps> = ({
     const uncovered = balanceHealth.uncoveredAssets ?? [];
 
     return (
-        <Box
-            py={1}
-            px={2.5}
-            bg="white"
-            borderRadius="lg"
-            border="1px solid"
-            borderColor={hasFailed ? 'red.200' : 'gray.200'}
-            h="100%"
-            display="flex"
-            alignItems="center"
-            cursor={onBalanceHealthClick ? 'pointer' : 'default'}
+        <div
+            className={`flex h-full items-center overflow-hidden rounded-lg border bg-white px-2.5 py-1 transition-all duration-150 ${hasFailed ? 'border-red-200' : 'border-gray-200'} ${onBalanceHealthClick ? 'cursor-pointer hover:border-orange-300 hover:shadow-sm' : 'cursor-default'}`}
             onClick={onBalanceHealthClick}
-            _hover={onBalanceHealthClick ? { borderColor: 'orange.300', shadow: 'sm' } : undefined}
-            transition="all 0.15s"
-            overflow="hidden"
         >
-            <Flex align="center" gap={1.5} flex={1} wrap="nowrap" overflow="hidden">
+            <div className="flex flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
                 <FiActivity size={12} color={hasFailed ? '#e53e3e' : hasMismatches ? '#dd6b20' : '#38a169'} style={{ flexShrink: 0 }} />
-                <Text fontSize="2xs" fontWeight="semibold" color="gray.700" whiteSpace="nowrap">Balance</Text>
-                <Badge colorPalette={hasMismatches ? 'orange' : 'green'} size="xs">
+                <span className="whitespace-nowrap text-[10px] font-semibold text-gray-700">Balance</span>
+                <Badge colorScheme={hasMismatches ? 'orange' : 'green'}>
                     {covered}/{total}
                 </Badge>
                 {hasMismatches && (
-                    <Badge size="xs" colorPalette="orange">{balanceHealth.mismatchCount}Δ</Badge>
+                    <Badge colorScheme="orange">{balanceHealth.mismatchCount}Δ</Badge>
                 )}
                 {hasFailed && (
-                    <Badge size="xs" colorPalette="red">⚠{balanceHealth.failedAssets!.length}</Badge>
+                    <Badge colorScheme="red">⚠{balanceHealth.failedAssets!.length}</Badge>
                 )}
                 {!hasMismatches && !hasFailed && (
-                    <Badge size="xs" colorPalette="green">✓</Badge>
+                    <Badge colorScheme="green">✓</Badge>
                 )}
                 {unmappedLiveAssets.length > 0 && (
-                    <Badge size="xs" colorPalette="purple">📦{unmappedLiveAssets.length}</Badge>
+                    <Badge colorScheme="purple">📦{unmappedLiveAssets.length}</Badge>
                 )}
                 {/* Inline tolerance slider */}
-                <Flex align="center" gap={1} ml="auto" flexShrink={0} onClick={(e) => e.stopPropagation()}>
-                    <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap">{deltaThreshold}%</Text>
-                    <Box w="50px">
-                        <Slider.Root
-                            size="sm"
-                            min={0}
-                            max={50}
-                            step={1}
-                            value={[deltaThreshold]}
-                            onValueChange={(details) => onDeltaThresholdChange?.(details.value[0])}
-                        >
-                            <Slider.Control>
-                                <Slider.Track>
-                                    <Slider.Range />
-                                </Slider.Track>
-                                <Slider.Thumb index={0} />
-                            </Slider.Control>
-                        </Slider.Root>
-                    </Box>
-                </Flex>
-            </Flex>
-        </Box>
+                <div className="ml-auto flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <span className="whitespace-nowrap text-[10px] text-gray-400">{deltaThreshold}%</span>
+                    <input
+                        type="range"
+                        min={0}
+                        max={50}
+                        step={1}
+                        value={deltaThreshold}
+                        onChange={(e) => onDeltaThresholdChange?.(Number(e.target.value))}
+                        className="h-1 w-[50px] accent-blue-500"
+                    />
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -343,55 +289,46 @@ export const SummaryBar: React.FC<{
     summary: PnLSummary;
     baseCurrency: string;
 }> = ({ summary, baseCurrency }) => {
-    const realizedColor = summary.total_realized_pnl >= 0 ? 'green.600' : 'red.600';
+    const realizedColor = summary.total_realized_pnl >= 0 ? 'text-green-600' : 'text-red-600';
 
     return (
-        <Flex
-            gap={6}
-            py={2}
-            px={4}
-            bg="gray.50"
-            borderRadius="md"
-            mb={4}
-            wrap="wrap"
-            align="center"
-        >
-            <Box>
-                <Text fontSize="xs" color="gray.500">Portfolio</Text>
-                <Text fontSize="sm" fontWeight="bold">
+        <div className="mb-4 flex flex-wrap items-center gap-6 rounded-md bg-gray-50 px-4 py-2">
+            <div>
+                <div className="text-xs text-gray-500">Portfolio</div>
+                <div className="text-sm font-bold">
                     {formatCurrency(summary.total_portfolio_value, baseCurrency)}
-                </Text>
-            </Box>
-            <Box>
-                <Text fontSize="xs" color="gray.500">Unrealized</Text>
-                <Text fontSize="sm" fontWeight="bold" color={summary.total_unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                </div>
+            </div>
+            <div>
+                <div className="text-xs text-gray-500">Unrealized</div>
+                <div className={`text-sm font-bold ${summary.total_unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {formatCurrency(summary.total_unrealized_pnl, baseCurrency)}
-                </Text>
-            </Box>
-            <Box>
-                <Text fontSize="xs" color="gray.500">Realized</Text>
-                <Text fontSize="sm" fontWeight="bold" color={realizedColor}>
+                </div>
+            </div>
+            <div>
+                <div className="text-xs text-gray-500">Realized</div>
+                <div className={`text-sm font-bold ${realizedColor}`}>
                     {formatCurrency(summary.total_realized_pnl, baseCurrency)}
-                </Text>
+                </div>
                 {summary.taxable_realized_pnl !== 0 && (
-                    <Text fontSize="2xs" color="gray.500">
+                    <div className="text-[10px] text-gray-500">
                         Taxable: {formatCurrency(summary.taxable_realized_pnl, baseCurrency)}
-                    </Text>
+                    </div>
                 )}
-            </Box>
-            <Box>
-                <Text fontSize="xs" color="gray.500">Fees</Text>
-                <Text fontSize="sm" fontWeight="bold">
+            </div>
+            <div>
+                <div className="text-xs text-gray-500">Fees</div>
+                <div className="text-sm font-bold">
                     {formatCurrency(summary.total_fees, baseCurrency)}
-                </Text>
-            </Box>
+                </div>
+            </div>
             {summary.warning_count > 0 && (
-                <Badge colorPalette="orange" size="sm">
+                <Badge colorScheme="orange">
                     <FiAlertTriangle style={{ marginRight: 4 }} />
                     {summary.warning_count} warnings
                 </Badge>
             )}
-        </Flex>
+        </div>
     );
 };
 

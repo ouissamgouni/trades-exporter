@@ -1,11 +1,13 @@
 # Fly.io app configuration — staging
-# Differences vs fly.toml: separate app name, sleeps when idle.
+# Differences vs config/fly.toml: separate app name, sleeps when idle.
+# Always pass -c config/fly.staging.toml to flyctl commands.
 
 app = "trades-exporter-staging"
 primary_region = "cdg"
 
 [build]
-  dockerfile = "backend/Dockerfile"
+  # Path is relative to this toml file (config/ → repo root → backend/Dockerfile)
+  dockerfile = "../backend/Dockerfile"
 
 [env]
   PYTHONPATH = "/app"

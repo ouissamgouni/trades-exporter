@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { Badge, type BadgeColorScheme } from '../ui/primitives';
 import { Tooltip } from '../ui/tooltip';
 import { ValueDisplay } from '../ValueDisplay';
 
@@ -25,9 +25,9 @@ export interface FmvBadgeProps {
     stale?: boolean;
 }
 
-const SOURCE_COLORS: Record<string, string> = {
-    fmv_lookup: 'cyan',
-    fmv: 'cyan',
+const SOURCE_COLORS: Record<string, BadgeColorScheme> = {
+    fmv_lookup: 'blue',
+    fmv: 'blue',
     provisional: 'orange',
     base_currency: 'gray',
     transfer: 'blue',
@@ -45,7 +45,7 @@ export const FmvBadge: React.FC<FmvBadgeProps> = ({
     stale,
 }) => {
     const hasFmvDetails = price != null || priceSource || timestamp;
-    const colorPalette = stale ? 'yellow' : SOURCE_COLORS[source || ''] || 'gray';
+    const colorScheme: BadgeColorScheme = stale ? 'yellow' : SOURCE_COLORS[source || ''] || 'gray';
 
     if (!hasFmvDetails) {
         // No FMV details — just show value plainly
@@ -53,41 +53,34 @@ export const FmvBadge: React.FC<FmvBadgeProps> = ({
     }
 
     const tooltipContent = (
-        <Box fontSize="xs" lineHeight="tall">
-            <Text fontWeight="semibold" mb={0.5}>
+        <div className="text-xs leading-relaxed">
+            <span className="mb-0.5 block font-semibold">
                 {stale ? '⚠ Stale FMV Price' : 'FMV Price Details'}
-            </Text>
+            </span>
             {price != null && (
-                <Flex gap={1}>
-                    <Text color="gray.300">Price:</Text>
-                    <Text>{Number(price).toFixed(6)} {baseCurrency}</Text>
-                </Flex>
+                <div className="flex gap-1">
+                    <span className="text-slate-300">Price:</span>
+                    <span>{Number(price).toFixed(6)} {baseCurrency}</span>
+                </div>
             )}
             {priceSource && (
-                <Flex gap={1}>
-                    <Text color="gray.300">Source:</Text>
-                    <Text>{priceSource}</Text>
-                </Flex>
+                <div className="flex gap-1">
+                    <span className="text-slate-300">Source:</span>
+                    <span>{priceSource}</span>
+                </div>
             )}
             {timestamp && (
-                <Flex gap={1}>
-                    <Text color="gray.300">Time:</Text>
-                    <Text>{new Date(timestamp).toLocaleString()}</Text>
-                </Flex>
+                <div className="flex gap-1">
+                    <span className="text-slate-300">Time:</span>
+                    <span>{new Date(timestamp).toLocaleString()}</span>
+                </div>
             )}
-        </Box>
+        </div>
     );
 
     return (
         <Tooltip content={tooltipContent} openDelay={200}>
-            <Badge
-                size="xs"
-                colorPalette={colorPalette}
-                cursor="help"
-                fontFamily="mono"
-                fontWeight="medium"
-                variant="subtle"
-            >
+            <Badge colorScheme={colorScheme} className="cursor-help font-mono font-medium">
                 <ValueDisplay value={value} currency={baseCurrency} />
             </Badge>
         </Tooltip>

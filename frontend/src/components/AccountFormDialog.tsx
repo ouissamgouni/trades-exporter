@@ -1,14 +1,5 @@
-import {
-    Box,
-    Button,
-    Dialog,
-    Flex,
-    Input,
-    NativeSelect,
-    Portal,
-    Text,
-    Textarea,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Button, Input, Textarea } from './ui/primitives';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Account, API_URL } from '../types';
 import { ComboSelect } from './ComboSelect';
@@ -201,190 +192,183 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     };
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(undefined); }}>
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content>
-                        <Dialog.Header>
-                            <Dialog.Title>
-                                {account ? 'Edit Account' : 'Create New Account'}
-                            </Dialog.Title>
-                        </Dialog.Header>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(undefined); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-200 px-5 py-4">
+                        <RadixDialog.Title className="text-base font-semibold">
+                            {account ? 'Edit Account' : 'Create New Account'}
+                        </RadixDialog.Title>
+                    </div>
 
-                        <form onSubmit={handleSubmit}>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    {error && (
-                                        <Text color="red.500" fontSize="sm">
-                                            {error}
-                                        </Text>
-                                    )}
+                    <form onSubmit={handleSubmit}>
+                        <div className="px-5 py-4">
+                            <div className="flex flex-col gap-4">
+                                {error && (
+                                    <span className="text-sm text-red-500">
+                                        {error}
+                                    </span>
+                                )}
 
-                                    {duplicateWarning && (
-                                        <Box bg="orange.50" p={3} borderRadius="md" borderWidth={1} borderColor="orange.200">
-                                            <Text color="orange.700" fontSize="sm">
-                                                ⚠️ {duplicateWarning}
-                                            </Text>
-                                        </Box>
-                                    )}
+                                {duplicateWarning && (
+                                    <div className="border border-orange-200 bg-orange-50 p-3">
+                                        <span className="text-sm text-orange-700">
+                                            ⚠️ {duplicateWarning}
+                                        </span>
+                                    </div>
+                                )}
 
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Name <Text as="span" color="red.500">*</Text></Text>
-                                        <Input
-                                            value={formData.name}
-                                            onChange={(e) =>
-                                                setFormData({ ...formData, name: e.target.value })
-                                            }
-                                            placeholder="My Binance Account"
-                                            required
-                                        />
-                                    </Box>
-
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Account Type <Text as="span" color="red.500">*</Text></Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={formData.account_type}
-                                                onChange={(e) =>
-                                                    setFormData({
-                                                        ...formData,
-                                                        account_type: e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment',
-                                                    })
-                                                }
-                                            >
-                                                <option value="cex">CEX (Centralized Exchange)</option>
-                                                <option value="dex">DEX (Decentralized Exchange)</option>
-                                                <option value="broker">Broker</option>
-                                                <option value="wallet">Wallet</option>
-                                                <option value="bank">Bank</option>
-                                                <option value="investment">Investment</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
-
-                                    {(formData.account_type === 'broker' || formData.account_type === 'investment') && (
-                                        <Box>
-                                            <Text fontWeight="medium" mb={1}>Tax Envelope</Text>
-                                            <NativeSelect.Root>
-                                                <NativeSelect.Field
-                                                    value={formData.envelope}
-                                                    onChange={(e) =>
-                                                        setFormData({
-                                                            ...formData,
-                                                            envelope: e.target.value as '' | 'cto' | 'pea' | 'av',
-                                                        })
-                                                    }
-                                                >
-                                                    <option value="">None (standard taxable)</option>
-                                                    <option value="cto">CTO (Compte-Titres Ordinaire)</option>
-                                                    <option value="pea">PEA (Plan d'Épargne en Actions)</option>
-                                                    <option value="av">AV (Assurance Vie)</option>
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
-                                            <Text fontSize="sm" color="gray.500" mt={1}>
-                                                French tax envelope. PEA and AV are tax-advantaged and excluded from standard tax reporting.
-                                            </Text>
-                                        </Box>
-                                    )}
-
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Address or Identifier</Text>
-                                        <Input
-                                            value={formData.address_or_identifier}
-                                            onChange={(e) =>
-                                                setFormData({
-                                                    ...formData,
-                                                    address_or_identifier: e.target.value,
-                                                })
-                                            }
-                                            placeholder="0x1234... or account ID"
-                                        />
-                                    </Box>
-
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Group</Text>
-                                        <ComboSelect
-                                            value={formData.group}
-                                            onChange={(value) =>
-                                                setFormData({
-                                                    ...formData,
-                                                    group: value,
-                                                })
-                                            }
-                                            options={existingGroups}
-                                            placeholder="Select or type new group..."
-                                            size="md"
-                                            width="100%"
-                                        />
-                                        <Text fontSize="sm" color="gray.500" mt={1}>
-                                            Select an existing group or type a new one
-                                        </Text>
-                                    </Box>
-
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Owned <Text as="span" color="red.500">*</Text></Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={formData.owned ? 'true' : 'false'}
-                                                onChange={(e) =>
-                                                    setFormData({
-                                                        ...formData,
-                                                        owned: e.target.value === 'true',
-                                                    })
-                                                }
-                                            >
-                                                <option value="true">Yes (my account)</option>
-                                                <option value="false">No (external/counterparty)</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                        <Text fontSize="sm" color="gray.500" mt={1}>
-                                            Mark as owned if this account belongs to you. External accounts are used for tracking counterparties.
-                                        </Text>
-                                    </Box>
-
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Tags</Text>
-                                        <Textarea
-                                            value={tagsInput}
-                                            onChange={(e) => setTagsInput(e.target.value)}
-                                            placeholder="trading, main, long-term"
-                                            rows={2}
-                                        />
-                                        <Text fontSize="sm" color="gray.500" mt={1}>Comma-separated tags</Text>
-                                    </Box>
-
-                                    <ColorPaletteField
-                                        value={formData.color}
-                                        onChange={(color) => setFormData({ ...formData, color })}
-                                        usedColors={usedColors}
+                                <div>
+                                    <span className="mb-1 block font-medium">Name <span className="text-red-500">*</span></span>
+                                    <Input
+                                        value={formData.name}
+                                        onChange={(e) =>
+                                            setFormData({ ...formData, name: e.target.value })
+                                        }
+                                        placeholder="My Binance Account"
+                                        required
                                     />
-                                </Flex>
-                            </Dialog.Body>
+                                </div>
 
-                            <Dialog.Footer>
-                                <Flex gap={3}>
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => onClose(undefined)}
-                                        disabled={loading}
+                                <div>
+                                    <span className="mb-1 block font-medium">Account Type <span className="text-red-500">*</span></span>
+                                    <select
+                                        value={formData.account_type}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                account_type: e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment',
+                                            })
+                                        }
+                                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
                                     >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        type="submit"
-                                        colorPalette="blue"
-                                        loading={loading}
+                                        <option value="cex">CEX (Centralized Exchange)</option>
+                                        <option value="dex">DEX (Decentralized Exchange)</option>
+                                        <option value="broker">Broker</option>
+                                        <option value="wallet">Wallet</option>
+                                        <option value="bank">Bank</option>
+                                        <option value="investment">Investment</option>
+                                    </select>
+                                </div>
+
+                                {(formData.account_type === 'broker' || formData.account_type === 'investment') && (
+                                    <div>
+                                        <span className="mb-1 block font-medium">Tax Envelope</span>
+                                        <select
+                                            value={formData.envelope}
+                                            onChange={(e) =>
+                                                setFormData({
+                                                    ...formData,
+                                                    envelope: e.target.value as '' | 'cto' | 'pea' | 'av',
+                                                })
+                                            }
+                                            className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
+                                        >
+                                            <option value="">None (standard taxable)</option>
+                                            <option value="cto">CTO (Compte-Titres Ordinaire)</option>
+                                            <option value="pea">PEA (Plan d'Épargne en Actions)</option>
+                                            <option value="av">AV (Assurance Vie)</option>
+                                        </select>
+                                        <span className="mt-1 block text-sm text-slate-500">
+                                            French tax envelope. PEA and AV are tax-advantaged and excluded from standard tax reporting.
+                                        </span>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <span className="mb-1 block font-medium">Address or Identifier</span>
+                                    <Input
+                                        value={formData.address_or_identifier}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                address_or_identifier: e.target.value,
+                                            })
+                                        }
+                                        placeholder="0x1234... or account ID"
+                                    />
+                                </div>
+
+                                <div>
+                                    <span className="mb-1 block font-medium">Group</span>
+                                    <ComboSelect
+                                        value={formData.group}
+                                        onChange={(value) =>
+                                            setFormData({
+                                                ...formData,
+                                                group: value,
+                                            })
+                                        }
+                                        options={existingGroups}
+                                        placeholder="Select or type new group..."
+                                        size="md"
+                                        width="100%"
+                                    />
+                                    <span className="mt-1 block text-sm text-slate-500">
+                                        Select an existing group or type a new one
+                                    </span>
+                                </div>
+
+                                <div>
+                                    <span className="mb-1 block font-medium">Owned <span className="text-red-500">*</span></span>
+                                    <select
+                                        value={formData.owned ? 'true' : 'false'}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                owned: e.target.value === 'true',
+                                            })
+                                        }
+                                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
                                     >
-                                        {account ? 'Update' : 'Create'}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </form>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                                        <option value="true">Yes (my account)</option>
+                                        <option value="false">No (external/counterparty)</option>
+                                    </select>
+                                    <span className="mt-1 block text-sm text-slate-500">
+                                        Mark as owned if this account belongs to you. External accounts are used for tracking counterparties.
+                                    </span>
+                                </div>
+
+                                <div>
+                                    <span className="mb-1 block font-medium">Tags</span>
+                                    <Textarea
+                                        value={tagsInput}
+                                        onChange={(e) => setTagsInput(e.target.value)}
+                                        placeholder="trading, main, long-term"
+                                        rows={2}
+                                    />
+                                    <span className="mt-1 block text-sm text-slate-500">Comma-separated tags</span>
+                                </div>
+
+                                <ColorPaletteField
+                                    value={formData.color}
+                                    onChange={(color) => setFormData({ ...formData, color })}
+                                    usedColors={usedColors}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 border-t border-slate-100 px-5 py-4">
+                            <Button
+                                variant="outline"
+                                onClick={() => onClose(undefined)}
+                                disabled={loading}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                colorScheme="blue"
+                                loading={loading}
+                            >
+                                {account ? 'Update' : 'Create'}
+                            </Button>
+                        </div>
+                    </form>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

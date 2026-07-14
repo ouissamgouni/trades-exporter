@@ -4,10 +4,17 @@
 # Source this at the top of start.yml/stop.yml/db.yml/logs.yml cmd blocks:
 #   source .taskfiles/scenario_ports.sh "{{.SCENARIO}}"
 #
+# Naming/variable convention mirrors salsa-events-calendar's
+# scenario_ports.sh (SC_* prefix, ENV_NAME unprefixed, "scenario-<name>"
+# labels). The unnamed/default instance uses "scenario-default" (rather
+# than bare "scenario") to avoid colliding with the tracked
+# config/scenario.env template that the runtime config/${ENV_NAME}.env
+# symlink is created from.
+#
 # Exports:
-#   QA_PORT_OFFSET, QA_DB_PORT, QA_API_PORT, QA_WEB_PORT,
-#   QA_ENV_NAME, QA_PROJECT, QA_DB_CONTAINER, QA_BACKEND_CONTAINER,
-#   QA_FRONTEND_CONTAINER
+#   SC_PORT_OFFSET, SC_DB_PORT, SC_API_PORT, SC_WEB_PORT,
+#   ENV_NAME, SC_PROJECT_NAME, SC_DB_CONTAINER, SC_BACKEND_CONTAINER,
+#   SC_FRONTEND_CONTAINER
 #
 # Port assignment:
 #   - default / empty     → offset 0  (ports 5435/8002/3002)
@@ -23,37 +30,37 @@ _SCENARIO="${1:-}"
 # ── Port offset resolution (hash-based) ────────────────────
 if [ -n "${PORT_OFFSET:-}" ]; then
   # Explicit override always wins
-  QA_PORT_OFFSET=$PORT_OFFSET
+  SC_PORT_OFFSET=$PORT_OFFSET
 elif [ -z "$_SCENARIO" ] || [ "$_SCENARIO" = "default" ]; then
-  QA_PORT_OFFSET=0
+  SC_PORT_OFFSET=0
 else
   # Deterministic hash: cksum of name → offset 1–9999
-  QA_PORT_OFFSET=$(printf '%s' "$_SCENARIO" | cksum | awk '{print ($1 % 9999) + 1}')
+  SC_PORT_OFFSET=$(printf '%s' "$_SCENARIO" | cksum | awk '{print ($1 % 9999) + 1}')
 fi
 
 # ── Compute ports ───────────────────────────────────────────
-QA_DB_PORT=$((5435 + QA_PORT_OFFSET))
-QA_API_PORT=$((8002 + QA_PORT_OFFSET))
-QA_WEB_PORT=$((3002 + QA_PORT_OFFSET))
+SC_DB_PORT=$((5435 + SC_PORT_OFFSET))
+SC_API_PORT=$((8002 + SC_PORT_OFFSET))
+SC_WEB_PORT=$((3002 + SC_PORT_OFFSET))
 
-# ── Naming (backward compat: empty/default = same as today) ─
+# ── Naming ────────────────────────────────────────────────────
 if [ -z "$_SCENARIO" ] || [ "$_SCENARIO" = "default" ]; then
-  QA_ENV_NAME=qa
-  QA_PROJECT=trades-exporter-qa
-  QA_DB_CONTAINER=trades_db_qa
-  QA_BACKEND_CONTAINER=trades_backend_qa
-  QA_FRONTEND_CONTAINER=trades_frontend_qa
+  ENV_NAME=scenario-default
+  SC_PROJECT_NAME=trades-exporter-scenario-default
+  SC_DB_CONTAINER=trades_db_scenario-default
+  SC_BACKEND_CONTAINER=trades_backend_scenario-default
+  SC_FRONTEND_CONTAINER=trades_frontend_scenario-default
 else
-  QA_ENV_NAME="qa-${_SCENARIO}"
-  QA_PROJECT="trades-exporter-qa-${_SCENARIO}"
-  QA_DB_CONTAINER="trades_db_qa-${_SCENARIO}"
-  QA_BACKEND_CONTAINER="trades_backend_qa-${_SCENARIO}"
-  QA_FRONTEND_CONTAINER="trades_frontend_qa-${_SCENARIO}"
+  ENV_NAME="scenario-${_SCENARIO}"
+  SC_PROJECT_NAME="trades-exporter-scenario-${_SCENARIO}"
+  SC_DB_CONTAINER="trades_db_scenario-${_SCENARIO}"
+  SC_BACKEND_CONTAINER="trades_backend_scenario-${_SCENARIO}"
+  SC_FRONTEND_CONTAINER="trades_frontend_scenario-${_SCENARIO}"
 fi
 
 # ── Export for docker compose substitution ──────────────────
-export POSTGRES_PORT=$QA_DB_PORT
-export BACKEND_PORT=$QA_API_PORT
-export FRONTEND_PORT=$QA_WEB_PORT
-export ENV_NAME=$QA_ENV_NAME
-export IMAGE_TAG=$QA_ENV_NAME
+export POSTGRES_PORT=$SC_DB_PORT
+export BACKEND_PORT=$SC_API_PORT
+export FRONTEND_PORT=$SC_WEB_PORT
+export ENV_NAME
+export IMAGE_TAG=$ENV_NAME

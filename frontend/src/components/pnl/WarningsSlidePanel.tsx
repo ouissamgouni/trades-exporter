@@ -3,7 +3,7 @@
  */
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Badge, Box, Button, Checkbox, Flex, Text } from '@chakra-ui/react';
+import { Badge, type BadgeColorScheme, Button } from '../ui/primitives';
 import { FiSearch } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { useLazyPaginatedQuery } from '../../hooks/useLazyPaginatedQuery';
@@ -33,11 +33,15 @@ interface WarningEntry {
     details?: Record<string, unknown>;
 }
 
-const LEVEL_COLORS: Record<string, string> = {
+const LEVEL_COLORS: Record<string, BadgeColorScheme> = {
     error: 'red',
     warning: 'orange',
     info: 'blue',
 };
+
+// Button primitive only supports blue/red/green/gray - orange levels need a className override.
+const LEVEL_ORANGE_OUTLINE = 'border-orange-300 text-orange-700 hover:bg-orange-50';
+const LEVEL_ORANGE_SOLID = 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600';
 
 const TYPE_LEVEL: Record<string, string> = {
     insufficient_lots: 'error',
@@ -187,36 +191,42 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
 
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Warnings" width="900px">
-            <Flex gap={2} mb={3} wrap="wrap" align="center">
-                <Flex align="center" gap={1} bg="gray.50" borderRadius="md" px={2} py={0.5}>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 bg-slate-50 px-2 py-0.5">
                     <FiSearch size={12} color="gray" />
                     <input
                         type="text" placeholder="Search message"
                         value={searchInput} onChange={e => setSearchInput(e.target.value)}
                         style={{ width: 120, fontSize: 11, background: 'transparent', border: 'none', outline: 'none' }}
                     />
-                </Flex>
+                </div>
                 {/* Level toggles */}
-                {filterOpts?.levels?.map(o => (
-                    <Button key={o.value} size="2xs"
-                        variant={levelFilter === o.value ? 'solid' : 'outline'}
-                        colorPalette={LEVEL_COLORS[o.value] || 'gray'}
-                        onClick={() => setLevelFilter(levelFilter === o.value ? 'all' : o.value)}
-                    >
-                        {o.label} ({o.count})
-                    </Button>
-                ))}
-                {hasAnyFilter && <Button size="2xs" variant="ghost" onClick={clearFilters}>Clear</Button>}
+                {filterOpts?.levels?.map(o => {
+                    const color = LEVEL_COLORS[o.value] || 'gray';
+                    const isActive = levelFilter === o.value;
+                    const isOrange = color === 'orange';
+                    return (
+                        <Button key={o.value} size="sm"
+                            variant={isActive ? 'solid' : 'outline'}
+                            colorScheme={isOrange ? 'gray' : (color as 'blue' | 'red' | 'green' | 'gray')}
+                            className={isOrange ? (isActive ? LEVEL_ORANGE_SOLID : LEVEL_ORANGE_OUTLINE) : undefined}
+                            onClick={() => setLevelFilter(levelFilter === o.value ? 'all' : o.value)}
+                        >
+                            {o.label} ({o.count})
+                        </Button>
+                    );
+                })}
+                {hasAnyFilter && <Button size="sm" variant="ghost" onClick={clearFilters}>Clear</Button>}
                 {selectedLotIds.size > 0 && (
-                    <Button size="2xs" colorPalette="orange" loading={settling} onClick={settleBulk}>
+                    <Button size="sm" colorScheme="gray" className={LEVEL_ORANGE_SOLID} loading={settling} onClick={settleBulk}>
                         Settle Selected ({selectedLotIds.size})
                     </Button>
                 )}
-            </Flex>
+            </div>
 
             {/* Type + Asset dropdowns */}
             {filterOpts && (filterOpts.warning_types.length > 1 || filterOpts.assets.length > 1) && (
-                <Flex gap={2} mb={3} wrap="wrap">
+                <div className="mb-3 flex flex-wrap gap-2">
                     {filterOpts.warning_types.length > 1 && (
                         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
                             style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid #e2e8f0' }}>
@@ -237,15 +247,15 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                             ))}
                         </select>
                     )}
-                </Flex>
+                </div>
             )}
 
             {isLoading ? <TabLoadingState message="Loading warnings…" /> :
                 error ? <TabErrorState error={error} onRetry={refetch} /> :
                     warnings.length === 0 ? <TabEmptyState title="No warnings" description={hasAnyFilter ? 'Try adjusting filters.' : 'No warnings found.'} /> : (
-                        <Box>
-                            <Text fontSize="2xs" color="gray.500" mb={2}>{total} warning{total !== 1 ? 's' : ''}</Text>
-                            <Box overflowX="auto" fontSize="11px">
+                        <div>
+                            <span className="mb-2 block text-[10px] text-slate-500">{total} warning{total !== 1 ? 's' : ''}</span>
+                            <div className="overflow-x-auto text-[11px]">
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -269,63 +279,53 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                                     <tr style={{ borderBottom: isUnsettled ? 'none' : '1px solid #f1f3f5' }}>
                                                         <td style={{ padding: '3px 4px', textAlign: 'center' }}>
                                                             {isUnsettled && lotId && (
-                                                                <Checkbox.Root
-                                                                    size="sm"
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="h-3.5 w-3.5"
                                                                     checked={selectedLotIds.has(lotId)}
-                                                                    onCheckedChange={() => toggleLot(lotId)}
-                                                                >
-                                                                    <Checkbox.HiddenInput />
-                                                                    <Checkbox.Control />
-                                                                </Checkbox.Root>
+                                                                    onChange={() => toggleLot(lotId)}
+                                                                />
                                                             )}
                                                         </td>
                                                         <td style={{ padding: '3px 6px' }}>
-                                                            <Text fontSize="2xs" color="gray.500">
+                                                            <span className="text-[10px] text-slate-500">
                                                                 {w.timestamp ? new Date(w.timestamp).toLocaleDateString() : '-'}
-                                                            </Text>
+                                                            </span>
                                                         </td>
                                                         <td style={{ padding: '3px 6px' }}>
-                                                            <Badge size="xs" colorPalette={LEVEL_COLORS[level] || 'gray'}>
+                                                            <Badge colorScheme={LEVEL_COLORS[level] || 'gray'} className="text-[10px]">
                                                                 {w.warning_type.replace(/_/g, ' ')}
                                                             </Badge>
                                                         </td>
                                                         <td style={{ padding: '3px 6px', maxWidth: 250 }}>
                                                             <Tooltip content={w.message} openDelay={300}>
-                                                                <Text fontSize="2xs" color="gray.600" lineClamp={2}>
+                                                                <span className="line-clamp-2 text-[10px] text-slate-600">
                                                                     {w.message}
-                                                                </Text>
+                                                                </span>
                                                             </Tooltip>
                                                         </td>
                                                         <td style={{ padding: '3px 6px' }}>
                                                             {w.transaction_id ? (
-                                                                <Text
-                                                                    fontSize="2xs"
-                                                                    color="blue.500"
-                                                                    fontFamily="mono"
-                                                                    cursor={onTransactionClick ? 'pointer' : undefined}
-                                                                    _hover={onTransactionClick ? { textDecoration: 'underline' } : undefined}
+                                                                <span
+                                                                    className={`font-mono text-[10px] text-blue-500 ${onTransactionClick ? 'cursor-pointer hover:underline' : ''}`}
                                                                     onClick={() => onTransactionClick?.(w.transaction_id!)}
                                                                 >
                                                                     #{w.transaction_id}
-                                                                </Text>
+                                                                </span>
                                                             ) : (
-                                                                <Text fontSize="2xs" color="gray.400">-</Text>
+                                                                <span className="text-[10px] text-slate-400">-</span>
                                                             )}
                                                         </td>
                                                         <td style={{ padding: '3px 6px' }}>
                                                             {w.unit_id ? (
-                                                                <Text
-                                                                    fontSize="2xs"
-                                                                    color="blue.500"
-                                                                    fontFamily="mono"
-                                                                    cursor={onUnitClick ? 'pointer' : undefined}
-                                                                    _hover={onUnitClick ? { textDecoration: 'underline' } : undefined}
+                                                                <span
+                                                                    className={`font-mono text-[10px] text-blue-500 ${onUnitClick ? 'cursor-pointer hover:underline' : ''}`}
                                                                     onClick={() => onUnitClick?.(w.unit_id!)}
                                                                 >
                                                                     #{w.unit_id}
-                                                                </Text>
+                                                                </span>
                                                             ) : (
-                                                                <Text fontSize="2xs" color="gray.400">-</Text>
+                                                                <span className="text-[10px] text-slate-400">-</span>
                                                             )}
                                                         </td>
                                                         <td style={{ padding: '3px 6px', textAlign: 'center' }}>
@@ -336,28 +336,28 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                                                     baseCurrency={baseCurrency}
                                                                     onTransactionClick={onTransactionClick}
                                                                 >
-                                                                    <Text fontSize="2xs" color="blue.400" cursor="help" _hover={{ textDecoration: 'underline' }}>🔗</Text>
+                                                                    <span className="cursor-help text-[10px] text-blue-400 hover:underline">🔗</span>
                                                                 </CostBasisChainTooltip>
                                                             ) : (
-                                                                <Text fontSize="2xs" color="gray.300">—</Text>
+                                                                <span className="text-[10px] text-slate-300">—</span>
                                                             )}
                                                         </td>
                                                         <td style={{ padding: '3px 6px' }}>
-                                                            <Flex gap={1} align="center">
+                                                            <div className="flex items-center gap-1">
                                                                 {lotId && onLotClick && (
-                                                                    <Button size="2xs" variant="ghost" colorPalette="purple"
+                                                                    <Button size="sm" variant="ghost" colorScheme="gray" className="text-purple-600 hover:bg-purple-50"
                                                                         onClick={() => onLotClick(lotId)}>
                                                                         View Lot
                                                                     </Button>
                                                                 )}
                                                                 {isUnsettled && lotId && (
-                                                                    <Button size="2xs" variant="outline" colorPalette="orange"
+                                                                    <Button size="sm" variant="outline" colorScheme="gray" className={LEVEL_ORANGE_OUTLINE}
                                                                         loading={settling}
                                                                         onClick={() => settleOne(lotId)}>
                                                                         Settle
                                                                     </Button>
                                                                 )}
-                                                            </Flex>
+                                                            </div>
                                                         </td>
                                                     </tr>
 
@@ -366,13 +366,13 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                         })}
                                     </tbody>
                                 </table>
-                            </Box>
+                            </div>
                             <TablePagination
                                 page={pagination.page} pageSize={pagination.pageSize}
                                 total={total} onPageChange={pagination.setPage}
                                 onPageSizeChange={pagination.setPageSize}
                             />
-                        </Box>
+                        </div>
                     )}
         </SlidePanel>
     );

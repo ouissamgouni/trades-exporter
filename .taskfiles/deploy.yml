@@ -235,7 +235,7 @@ tasks:
           exit 1
         fi
         echo "Running migrations on Neon staging: $(echo "$DATABASE_URL" | sed 's|.*@||' | cut -d'/' -f1)"
-        PYTHONPATH=. backend/.venv/bin/alembic -c backend/alembic.ini upgrade head
+        PYTHONPATH=. .venv/bin/alembic -c backend/alembic.ini upgrade head
         echo "✅ Migrations applied"
 
   staging:remote:backend:
@@ -318,7 +318,7 @@ tasks:
           exit 1
         fi
         echo "Running migrations on Neon prod: $(echo "$DATABASE_URL" | sed 's|.*@||' | cut -d'/' -f1)"
-        PYTHONPATH=. backend/.venv/bin/alembic -c backend/alembic.ini upgrade head
+        PYTHONPATH=. .venv/bin/alembic -c backend/alembic.ini upgrade head
 
   prod:remote:backend:
     desc: "Stage Fly secrets + deploy backend to trades-exporter.fly.dev"

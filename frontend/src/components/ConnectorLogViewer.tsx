@@ -1,4 +1,3 @@
-import { Box, Flex, IconButton, Text } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { LogEntry } from '../types';
 
@@ -10,15 +9,15 @@ interface ConnectorLogViewerProps {
 const getLevelColor = (level: string): string => {
     switch (level) {
         case 'ERROR':
-            return 'red.400';
+            return 'text-red-400';
         case 'WARNING':
-            return 'yellow.400';
+            return 'text-yellow-400';
         case 'INFO':
-            return 'gray.100';
+            return 'text-slate-100';
         case 'DEBUG':
-            return 'gray.500';
+            return 'text-slate-500';
         default:
-            return 'gray.300';
+            return 'text-slate-300';
     }
 };
 
@@ -80,114 +79,74 @@ export const ConnectorLogViewer: React.FC<ConnectorLogViewerProps> = ({
 
     if (logs.length === 0) {
         return (
-            <Box
-                bg="gray.900"
-                borderRadius="md"
-                p={3}
-                fontFamily="mono"
-                fontSize="xs"
-            >
-                <Text color="gray.500" textAlign="center">
+            <div className="bg-slate-900 p-3 font-mono text-xs">
+                <span className="block text-center text-slate-500">
                     No logs yet...
-                </Text>
-            </Box>
+                </span>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {/* Controls */}
-            <Flex justify="space-between" align="center" mb={2}>
-                <Flex gap={1}>
-                    <Text
-                        fontSize="xs"
-                        color={!filterLevel ? 'blue.400' : 'gray.500'}
-                        cursor="pointer"
+            <div className="mb-2 flex items-center justify-between">
+                <div className="flex gap-1">
+                    <span
+                        className={`cursor-pointer text-xs hover:text-blue-300 ${!filterLevel ? 'text-blue-400' : 'text-slate-500'}`}
                         onClick={() => setFilterLevel(null)}
-                        _hover={{ color: 'blue.300' }}
                     >
                         All
-                    </Text>
-                    <Text fontSize="xs" color="gray.600">|</Text>
-                    <Text
-                        fontSize="xs"
-                        color={filterLevel === 'ERROR' ? 'red.400' : 'gray.500'}
-                        cursor="pointer"
+                    </span>
+                    <span className="text-xs text-slate-600">|</span>
+                    <span
+                        className={`cursor-pointer text-xs hover:text-red-300 ${filterLevel === 'ERROR' ? 'text-red-400' : 'text-slate-500'}`}
                         onClick={() => setFilterLevel(filterLevel === 'ERROR' ? null : 'ERROR')}
-                        _hover={{ color: 'red.300' }}
                     >
                         Errors
-                    </Text>
-                    <Text fontSize="xs" color="gray.600">|</Text>
-                    <Text
-                        fontSize="xs"
-                        color={filterLevel === 'WARNING' ? 'yellow.400' : 'gray.500'}
-                        cursor="pointer"
+                    </span>
+                    <span className="text-xs text-slate-600">|</span>
+                    <span
+                        className={`cursor-pointer text-xs hover:text-yellow-300 ${filterLevel === 'WARNING' ? 'text-yellow-400' : 'text-slate-500'}`}
                         onClick={() => setFilterLevel(filterLevel === 'WARNING' ? null : 'WARNING')}
-                        _hover={{ color: 'yellow.300' }}
                     >
                         Warnings
-                    </Text>
-                </Flex>
-                <Flex align="center" gap={2}>
-                    <Text fontSize="xs" color="gray.500">
+                    </span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">
                         {filteredLogs.length} logs
-                    </Text>
-                    <Text
-                        fontSize="xs"
-                        color={autoScroll ? 'green.400' : 'gray.500'}
-                        cursor="pointer"
+                    </span>
+                    <span
+                        className={`cursor-pointer text-xs hover:underline ${autoScroll ? 'text-green-400' : 'text-slate-500'}`}
                         onClick={() => setAutoScroll(!autoScroll)}
-                        _hover={{ textDecoration: 'underline' }}
                     >
                         Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
-                    </Text>
-                </Flex>
-            </Flex>
+                    </span>
+                </div>
+            </div>
 
             {/* Log viewer */}
-            <Box
+            <div
                 ref={scrollRef}
                 onScroll={handleScroll}
-                bg="gray.900"
-                borderRadius="md"
-                p={2}
-                maxH={maxHeight}
-                overflowY="auto"
-                fontFamily="mono"
-                fontSize="xs"
-                css={{
-                    '&::-webkit-scrollbar': {
-                        width: '6px',
-                    },
-                    '&::-webkit-scrollbar-track': {
-                        background: '#1a1a2e',
-                    },
-                    '&::-webkit-scrollbar-thumb': {
-                        background: '#4a4a6a',
-                        borderRadius: '3px',
-                    },
-                }}
+                className="log-scrollbar overflow-y-auto bg-slate-900 p-2 font-mono text-xs"
+                style={{ maxHeight }}
             >
                 {filteredLogs.map((log, idx) => (
-                    <Flex key={idx} gap={2} mb={0.5} alignItems="flex-start">
-                        <Text color="gray.600" flexShrink={0}>
+                    <div key={idx} className="mb-0.5 flex items-start gap-2">
+                        <span className="shrink-0 text-slate-600">
                             {formatTimestamp(log.timestamp)}
-                        </Text>
-                        <Text
-                            color={getLevelColor(log.level)}
-                            fontWeight="medium"
-                            flexShrink={0}
-                            w="50px"
-                        >
+                        </span>
+                        <span className={`w-[50px] shrink-0 font-medium ${getLevelColor(log.level)}`}>
                             [{log.level.substring(0, 4)}]
-                        </Text>
-                        <Text color={getLevelColor(log.level)} wordBreak="break-word">
+                        </span>
+                        <span className={`break-words ${getLevelColor(log.level)}`}>
                             {log.message}
-                        </Text>
-                    </Flex>
+                        </span>
+                    </div>
                 ))}
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 };

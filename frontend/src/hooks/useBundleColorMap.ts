@@ -12,14 +12,15 @@ import { useMemo } from 'react';
 import { Transaction } from '../types';
 
 // Color palette for bundle membership — intentionally different from suggestion colors
-// Suggestion colors: teal.400, cyan.400, blue.400, purple.400, orange.400, pink.400
+// Suggestion colors: teal-400, cyan-400, blue-400, purple-400, orange-400, pink-400
+// (literal hex, consumed directly as CSS values by non-Chakra components).
 const BUNDLE_GROUP_COLORS = [
-    'purple.500',
-    'red.400',
-    'yellow.500',
-    'green.500',
-    'pink.500',
-    'orange.500',
+    '#a855f7', // purple-500
+    '#f87171', // red-400
+    '#eab308', // yellow-500
+    '#22c55e', // green-500
+    '#ec4899', // pink-500
+    '#f97316', // orange-500
 ];
 
 export interface UseBundleColorMapReturn {

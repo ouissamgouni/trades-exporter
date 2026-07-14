@@ -8,7 +8,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Badge, Box, Flex, Input, Slider, Text } from '@chakra-ui/react';
+import { Badge, BadgeColorScheme, Input } from '../ui/primitives';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { LuPackage } from 'react-icons/lu';
 import { SlidePanel } from './SlidePanel';
@@ -101,24 +101,17 @@ const BalanceRowItem: React.FC<{
     const canExpand = row.accounts.length > 0;
 
     return (
-        <Box>
-            <Box
-                display="grid"
-                gridTemplateColumns="minmax(120px, 1.2fr) 1fr 1fr 70px 50px"
-                gap={1}
-                px={2}
-                py={1}
-                borderBottom="1px solid"
-                borderColor="gray.100"
-                _hover={{ bg: 'gray.50' }}
-                cursor={canExpand ? 'pointer' : 'default'}
+        <div>
+            <div
+                className="grid grid-cols-[minmax(120px,1.2fr)_1fr_1fr_70px_50px] gap-1 border-b border-gray-100 px-2 py-1 hover:bg-gray-50"
+                style={{ cursor: canExpand ? 'pointer' : 'default' }}
                 onClick={() => canExpand && setExpanded(!expanded)}
             >
-                <Flex align="center" gap={1} minW={0}>
+                <div className="flex min-w-0 items-center gap-1">
                     {canExpand && (
-                        <Box color="gray.400" flexShrink={0}>
+                        <span className="shrink-0 text-gray-400">
                             {expanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                        </Box>
+                        </span>
                     )}
                     <AssetBadge
                         asset={assetMap.get(row.symbol)}
@@ -126,62 +119,54 @@ const BalanceRowItem: React.FC<{
                         size="xs"
                         showWarning={false}
                     />
-                </Flex>
-                <Text fontSize="xs" color="gray.600" textAlign="right" fontFamily="mono">
+                </div>
+                <div className="text-right font-mono text-xs text-gray-600">
                     {formatQty(row.pnlQty)}
-                </Text>
-                <Text fontSize="xs" color={row.covered ? 'gray.600' : 'gray.400'} textAlign="right" fontFamily="mono">
+                </div>
+                <div className={`text-right font-mono text-xs ${row.covered ? 'text-gray-600' : 'text-gray-400'}`}>
                     {row.covered ? formatQty(row.liveQty!) : '—'}
-                </Text>
-                <Text
-                    fontSize="xs"
-                    textAlign="right"
-                    fontFamily="mono"
-                    color={row.pct != null ? deltaColor(row.pct) : 'gray.400'}
-                >
+                </div>
+                <div className={`text-right font-mono text-xs ${row.pct != null ? deltaColor(row.pct) : 'text-gray-400'}`}>
                     {row.pct != null ? formatPct(row.pct) : '—'}
-                </Text>
-                <Flex justify="flex-end">
+                </div>
+                <div className="flex justify-end">
                     {!row.covered ? (
-                        <Badge size="xs" colorPalette="gray">N/A</Badge>
+                        <Badge colorScheme="gray">N/A</Badge>
                     ) : isMismatch ? (
-                        <Badge size="xs" colorPalette="orange">Δ</Badge>
+                        <Badge colorScheme="orange">Δ</Badge>
                     ) : (
-                        <Badge size="xs" colorPalette="green">✓</Badge>
+                        <Badge colorScheme="green">✓</Badge>
                     )}
-                </Flex>
-            </Box>
+                </div>
+            </div>
 
             {/* Per-account drill-down */}
             {expanded && row.accounts.length > 0 && (
-                <Box ml={5} mb={1} borderLeft="2px solid" borderColor="gray.100" pl={2}>
+                <div className="mb-1 ml-5 border-l-2 border-gray-100 pl-2">
                     {row.accounts.map((h, i) => (
-                        <Flex
+                        <div
                             key={`${h.accountName}-${h.connectorType}-${i}`}
-                            justify="space-between"
-                            align="center"
-                            py={0.5}
-                            px={1}
+                            className="flex items-center justify-between px-1 py-0.5"
                         >
-                            <Flex align="center" gap={1} flexWrap="wrap">
+                            <div className="flex flex-wrap items-center gap-1">
                                 <AccountBadge accountName={h.accountName} size="xs" />
-                                <Badge size="xs" variant="outline" colorPalette="blue" fontSize="2xs">
+                                <Badge colorScheme="blue" className="text-[10px]">
                                     {h.connectorType}
                                 </Badge>
                                 {h.chain && (
-                                    <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
+                                    <Badge colorScheme="gray" className="text-[10px]">
                                         {h.chain}
                                     </Badge>
                                 )}
-                            </Flex>
-                            <Text fontSize="xs" fontFamily="mono" color="gray.600">
+                            </div>
+                            <span className="font-mono text-xs text-gray-600">
                                 {formatQty(h.qty)}
-                            </Text>
-                        </Flex>
+                            </span>
+                        </div>
                     ))}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -194,79 +179,68 @@ const UnmappedRowItem: React.FC<{
     const canExpand = (asset.accounts?.length ?? 0) > 0;
 
     return (
-        <Box>
-            <Box
-                display="grid"
-                gridTemplateColumns="minmax(120px, 1.2fr) 1fr 1fr 70px 50px"
-                gap={1}
-                px={2}
-                py={1}
-                borderBottom="1px solid"
-                borderColor="purple.100"
-                bg="purple.50"
-                _hover={{ bg: 'purple.100' }}
-                cursor={canExpand ? 'pointer' : 'default'}
+        <div>
+            <div
+                className="grid grid-cols-[minmax(120px,1.2fr)_1fr_1fr_70px_50px] gap-1 border-b border-purple-100 bg-purple-50 px-2 py-1 hover:bg-purple-100"
+                style={{ cursor: canExpand ? 'pointer' : 'default' }}
                 onClick={() => canExpand && setExpanded(!expanded)}
             >
-                <Flex align="center" gap={1} minW={0}>
+                <div className="flex min-w-0 items-center gap-1">
                     {canExpand && (
-                        <Box color="purple.400" flexShrink={0}>
+                        <span className="shrink-0 text-purple-400">
                             {expanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                        </Box>
+                        </span>
                     )}
-                    <Badge size="xs" colorPalette="purple" variant="subtle">
-                        <Flex align="center" gap={0.5}>
+                    <Badge colorScheme="purple">
+                        <span className="flex items-center gap-0.5">
                             <LuPackage size={10} />
-                            <Text truncate>{asset.symbol}</Text>
-                        </Flex>
+                            <span className="truncate">{asset.symbol}</span>
+                        </span>
                     </Badge>
-                </Flex>
-                <Text fontSize="xs" color="gray.400" textAlign="right" fontFamily="mono">
+                </div>
+                <div className="text-right font-mono text-xs text-gray-400">
                     —
-                </Text>
-                <Text fontSize="xs" color="purple.600" textAlign="right" fontFamily="mono">
+                </div>
+                <div className="text-right font-mono text-xs text-purple-600">
                     {formatQty(asset.totalQty)}
-                </Text>
-                <Text fontSize="xs" color="gray.400" textAlign="right" fontFamily="mono">
+                </div>
+                <div className="text-right font-mono text-xs text-gray-400">
                     {asset.marketValue != null ? `$${asset.marketValue.toFixed(2)}` : '—'}
-                </Text>
-                <Flex justify="flex-end">
-                    <Badge size="xs" colorPalette="purple" variant="subtle">
+                </div>
+                <div className="flex justify-end">
+                    <Badge colorScheme="purple">
                         <LuPackage size={10} />
                     </Badge>
-                </Flex>
-            </Box>
+                </div>
+            </div>
 
             {/* Per-account drill-down for unmapped */}
             {expanded && asset.accounts && asset.accounts.length > 0 && (
-                <Box ml={5} mb={1} borderLeft="2px solid" borderColor="purple.100" pl={2} bg="purple.50">
+                <div className="mb-1 ml-5 border-l-2 border-purple-100 bg-purple-50 pl-2">
                     {asset.accounts.map((h, i) => (
-                        <Flex
+                        <div
                             key={`${h.accountName}-${h.connectorType}-${i}`}
-                            justify="space-between"
-                            align="center"
-                            py={0.5}
-                            px={1}
+                            className="flex items-center justify-between px-1 py-0.5"
                         >
-                            <Flex align="center" gap={1} flexWrap="wrap">
+                            <div className="flex flex-wrap items-center gap-1">
                                 <AccountBadge accountName={h.accountName} size="xs" />
-                                <Badge size="xs" variant="outline" colorPalette="blue" fontSize="2xs">
+                                <Badge colorScheme="blue" className="text-[10px]">
                                     {h.connectorType}
                                 </Badge>
                                 {h.chain && (
-                                    <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
+                                    <Badge colorScheme="gray" className="text-[10px]">
                                         {h.chain}
                                     </Badge>
                                 )}
-                            </Flex>
-                            <Text fontSize="xs" fontFamily="mono" color="purple.600">
+                            </div>
+                            <span className="font-mono text-xs text-purple-600">
                                 {formatQty(h.qty)}
-                            </Text>
-                        </Flex>
+                            </span>
+                        </div>
                     ))}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -365,81 +339,64 @@ export const BalanceSlidePanel: React.FC<BalanceSlidePanelProps> = ({
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Live Balance Comparison" width="600px">
             {/* Tolerance slider */}
-            <Box mb={3} p={3} bg="gray.50" borderRadius="md">
-                <Flex justify="space-between" align="center" mb={1}>
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.600">Tolerance threshold</Text>
-                    <Text fontSize="xs" color="gray.500" fontWeight="medium">{deltaThreshold}%</Text>
-                </Flex>
-                <Slider.Root
-                    size="sm"
+            <div className="mb-3 rounded-md bg-gray-50 p-3">
+                <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-600">Tolerance threshold</span>
+                    <span className="text-xs font-medium text-gray-500">{deltaThreshold}%</span>
+                </div>
+                <input
+                    type="range"
                     min={0}
                     max={50}
                     step={1}
-                    value={[deltaThreshold]}
-                    onValueChange={(d) => onDeltaThresholdChange(d.value[0])}
-                >
-                    <Slider.Control>
-                        <Slider.Track><Slider.Range /></Slider.Track>
-                        <Slider.Thumb index={0} />
-                    </Slider.Control>
-                </Slider.Root>
-            </Box>
+                    value={deltaThreshold}
+                    onChange={(e) => onDeltaThresholdChange(Number(e.target.value))}
+                    className="h-1 w-full accent-blue-500"
+                />
+            </div>
 
             {/* Status filter badges */}
-            <Flex gap={1} mb={2} flexWrap="wrap">
+            <div className="mb-2 flex flex-wrap gap-1">
                 {([
                     ['all', `All (${counts.all})`, 'gray'],
                     ['matched', `Matched (${counts.matched})`, 'green'],
                     ['mismatch', `Mismatch (${counts.mismatch})`, 'orange'],
                     ['uncovered', `No data (${counts.uncovered})`, 'gray'],
                     ...(counts.unmapped > 0 ? [['unmapped', `Unmapped (${counts.unmapped})`, 'purple']] : []),
-                ] as [StatusFilter, string, string][]).map(([key, label, color]) => (
+                ] as [StatusFilter, string, BadgeColorScheme][]).map(([key, label, color]) => (
                     <Badge
                         key={key}
-                        cursor="pointer"
-                        variant={filter === key ? 'solid' : 'outline'}
-                        colorPalette={filter === key ? color : 'gray'}
-                        size="xs"
-                        px={1.5}
+                        className={`cursor-pointer px-1.5 ${filter === key ? 'ring-2 ring-blue-400' : ''}`}
+                        colorScheme={filter === key ? color : 'gray'}
                         onClick={() => setFilter(key)}
                     >
                         {key === 'unmapped' && <LuPackage size={10} style={{ marginRight: 2 }} />}
                         {label}
                     </Badge>
                 ))}
-            </Flex>
+            </div>
 
             {/* Search */}
             <Input
                 placeholder="Search asset..."
-                size="sm"
-                mb={2}
+                className="mb-2"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
             />
 
             {/* Table header */}
-            <Box
-                display="grid"
-                gridTemplateColumns="minmax(120px, 1.2fr) 1fr 1fr 70px 50px"
-                gap={1}
-                px={2}
-                py={1}
-                bg="gray.100"
-                borderRadius="md"
-                mb={1}
-            >
-                <Text fontSize="2xs" fontWeight="bold" color="gray.500">Asset</Text>
-                <Text fontSize="2xs" fontWeight="bold" color="gray.500" textAlign="right">P&L Qty</Text>
-                <Text fontSize="2xs" fontWeight="bold" color="gray.500" textAlign="right">Live Qty</Text>
-                <Text fontSize="2xs" fontWeight="bold" color="gray.500" textAlign="right">Delta</Text>
-                <Text fontSize="2xs" fontWeight="bold" color="gray.500" textAlign="right">Status</Text>
-            </Box>
+            <div className="mb-1 grid grid-cols-[minmax(120px,1.2fr)_1fr_1fr_70px_50px] gap-1 rounded-md bg-gray-100 px-2 py-1">
+                <span className="text-[10px] font-bold text-gray-500">Asset</span>
+                <span className="text-right text-[10px] font-bold text-gray-500">P&L Qty</span>
+                <span className="text-right text-[10px] font-bold text-gray-500">Live Qty</span>
+                <span className="text-right text-[10px] font-bold text-gray-500">Delta</span>
+                <span className="text-right text-[10px] font-bold text-gray-500">Status</span>
+            </div>
 
             {/* Table rows */}
-            <Box maxH="calc(100vh - 340px)" overflowY="auto">
+            <div className="max-h-[calc(100vh-340px)] overflow-y-auto">
                 {filtered.length === 0 && filteredUnmapped.length === 0 ? (
-                    <Text fontSize="xs" color="gray.400" textAlign="center" py={4}>No assets match filter</Text>
+                    <div className="py-4 text-center text-xs text-gray-400">No assets match filter</div>
                 ) : (
                     <>
                         {filtered.map(row => (
@@ -453,21 +410,21 @@ export const BalanceSlidePanel: React.FC<BalanceSlidePanelProps> = ({
 
                         {/* Unmapped live assets section */}
                         {filteredUnmapped.length > 0 && filtered.length > 0 && (
-                            <Box px={2} py={1.5} bg="purple.50" borderBottom="1px solid" borderColor="purple.100">
-                                <Flex align="center" gap={1}>
-                                    <LuPackage size={12} color="var(--chakra-colors-purple-600)" />
-                                    <Text fontSize="2xs" fontWeight="bold" color="purple.600">
+                            <div className="border-b border-purple-100 bg-purple-50 px-2 py-1.5">
+                                <div className="flex items-center gap-1">
+                                    <LuPackage size={12} className="text-purple-600" />
+                                    <span className="text-[10px] font-bold text-purple-600">
                                         Unmapped — in live balance but no P&L record
-                                    </Text>
-                                </Flex>
-                            </Box>
+                                    </span>
+                                </div>
+                            </div>
                         )}
                         {filteredUnmapped.map(u => (
                             <UnmappedRowItem key={u.symbol} asset={u} />
                         ))}
                     </>
                 )}
-            </Box>
+            </div>
         </SlidePanel>
     );
 };

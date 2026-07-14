@@ -14,17 +14,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Heading,
-    SimpleGrid,
-    Spinner,
-    Table,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner } from '../ui/primitives';
 import { FiDownload, FiChevronsLeft, FiChevronLeft, FiChevronRight, FiChevronsRight } from 'react-icons/fi';
 import { LuRefreshCw, LuCircleAlert, LuCircleCheck, LuFilter, LuChevronDown, LuRotateCcw, LuEye, LuArrowLeft } from 'react-icons/lu';
 import { API_URL } from '../../types';
@@ -140,13 +130,9 @@ const formatCurrency = (value: number, currency: string) =>
     }).format(value);
 
 const GainBadge: React.FC<{ value: number; currency: string }> = ({ value, currency }) => (
-    <Text
-        fontWeight="semibold"
-        color={value >= 0 ? 'green.600' : 'red.600'}
-        fontSize="xs"
-    >
+    <span className={`text-xs font-semibold ${value >= 0 ? 'text-green-600' : 'text-red-600'}`}>
         {value >= 0 ? '+' : ''}{formatCurrency(value, currency)}
-    </Text>
+    </span>
 );
 
 type TaxCategory = 'crypto' | 'securities' | 'income';
@@ -235,49 +221,49 @@ export const FrenchTaxPanel: React.FC<FrenchTaxPanelProps> = ({
     // Initial loading state
     if (hasTaxResults === null) {
         return (
-            <Flex justify="center" align="center" py={8} gap={3}>
+            <div className="flex items-center justify-center gap-3 py-8">
                 <Spinner size="sm" />
-                <Text color="gray.500" fontSize="sm">Checking tax status…</Text>
-            </Flex>
+                <span className="text-sm text-slate-500">Checking tax status…</span>
+            </div>
         );
     }
 
     // No tax results yet
     if (!hasTaxResults && !isLoading) {
         return (
-            <Box py={8} textAlign="center">
-                <Text color="gray.500" fontSize="sm" mb={3}>
+            <div className="py-8 text-center">
+                <p className="mb-3 text-sm text-slate-500">
                     French tax has not been computed for this version yet.
-                </Text>
+                </p>
                 <Button
                     size="sm"
-                    colorPalette="blue"
+                    colorScheme="blue"
                     onClick={handleComputeTax}
                     loading={isComputing}
                 >
                     Compute French Tax
                 </Button>
                 {error && (
-                    <Text color="red.500" fontSize="sm" mt={2}>{error}</Text>
+                    <p className="mt-2 text-sm text-red-500">{error}</p>
                 )}
-            </Box>
+            </div>
         );
     }
 
     if (isLoading) {
         return (
-            <Flex justify="center" align="center" py={12} gap={3}>
+            <div className="flex items-center justify-center gap-3 py-12">
                 <Spinner size="md" />
-                <Text color="gray.500" fontSize="sm">Loading tax data…</Text>
-            </Flex>
+                <span className="text-sm text-slate-500">Loading tax data…</span>
+            </div>
         );
     }
 
     if (error) {
         return (
-            <Box py={8} textAlign="center">
-                <Text color="red.500" fontSize="sm">Failed to load tax data: {error}</Text>
-            </Box>
+            <div className="py-8 text-center">
+                <span className="text-sm text-red-500">Failed to load tax data: {error}</span>
+            </div>
         );
     }
 
@@ -287,12 +273,12 @@ export const FrenchTaxPanel: React.FC<FrenchTaxPanelProps> = ({
 
     if (!hasCrypto && !hasSecurities && !hasIncome) {
         return (
-            <Box py={8} textAlign="center">
-                <Text color="gray.400" fontSize="sm" mb={3}>No taxable disposals found for this version.</Text>
-                <Button size="xs" variant="ghost" onClick={handleComputeTax} loading={isComputing}>
+            <div className="py-8 text-center">
+                <p className="mb-3 text-sm text-slate-400">No taxable disposals found for this version.</p>
+                <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={handleComputeTax} loading={isComputing}>
                     Recompute
                 </Button>
-            </Box>
+            </div>
         );
     }
 
@@ -464,19 +450,12 @@ const TaxContent: React.FC<{
         };
 
         return (
-            <Box>
+            <div>
                 {/* ═══ Year Tab Bar — single wrapper (Approach B) ═══ */}
-                <Box
-                    border="1px solid"
-                    borderColor={`${wrapperPalette}.200`}
-                    borderRadius="lg"
-                    overflow="hidden"
-                    transition="border-color 0.15s"
-                    mb={0}
-                >
+                <div className="border border-gray-200 overflow-hidden transition-colors">
                     {/* Card row */}
-                    <Flex>
-                        {last3Years.map((year, idx) => {
+                    <div className="flex">
+                        {last3Years.map((year) => {
                             const isActive = view.type === 'year' && view.year === year;
                             const totals = yearCardTotals.get(year) ?? { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 };
                             return (
@@ -502,62 +481,54 @@ const TaxContent: React.FC<{
                             isLast
                             activePalette="blue"
                         />
-                    </Flex>
+                    </div>
 
                     {/* Older year breadcrumb */}
                     {isOlderYear && (
-                        <Flex
-                            align="center"
-                            gap={1}
-                            px={3}
-                            py={1.5}
-                            bg={`${wrapperPalette}.50/40`}
-                            borderBottom="1px solid"
-                            borderBottomColor={`${wrapperPalette}.100`}
-                            cursor="pointer"
+                        <div
+                            className="flex items-center gap-1 px-3 py-1.5 bg-gray-50/40 border-b border-gray-100 cursor-pointer transition-colors hover:bg-gray-50"
                             onClick={() => setView({ type: 'all' })}
-                            _hover={{ bg: `${wrapperPalette}.50` }}
-                            transition="all 0.15s"
                         >
                             <LuArrowLeft size={12} />
-                            <Text fontSize="xs" fontWeight="600" color={`${wrapperPalette}.700`}>
+                            <span className="text-xs font-semibold text-gray-700">
                                 Viewing {view.type === 'year' ? view.year : ''}
-                            </Text>
-                        </Flex>
+                            </span>
+                        </div>
                     )}
 
                     {/* Content area */}
-                    <Box bg={`${wrapperPalette}.100`} p={4} transition="background 0.15s">
+                    <div className="bg-gray-100 p-4 transition-colors">
 
                         {view.type === 'all' ? (
                             /* ── ALL view: combined annual summary, no category sub-cards ── */
                             <>
-                                <Flex justify="space-between" align="center" mb={3}>
+                                <div className="flex items-center justify-between mb-3">
                                     <Button
-                                        size="xs"
+                                        size="sm"
                                         variant="outline"
-                                        colorPalette="blue"
+                                        colorScheme="blue"
+                                        className="h-6 px-2 text-xs"
                                         onClick={onRecompute}
                                         loading={isComputing}
                                     >
                                         <LuRefreshCw size={12} />
-                                        <Text ml={1}>Recalc All</Text>
+                                        <span className="ml-1">Recalc All</span>
                                     </Button>
-                                    <Flex gap={2}>
+                                    <div className="flex gap-2">
                                         {hasCrypto && (
-                                            <Button size="xs" variant="outline" colorPalette="blue" onClick={() => handleExportAll('fr-crypto-tax')}>
+                                            <Button size="sm" variant="outline" colorScheme="blue" className="h-6 px-2 text-xs" onClick={() => handleExportAll('fr-crypto-tax')}>
                                                 <FiDownload size={12} />
-                                                <Text ml={1}>Export All Cerfa 2086</Text>
+                                                <span className="ml-1">Export All Cerfa 2086</span>
                                             </Button>
                                         )}
                                         {hasSecurities && (
-                                            <Button size="xs" variant="outline" colorPalette="purple" onClick={() => handleExportAll('fr-securities-tax')}>
+                                            <Button size="sm" variant="outline" className="h-6 px-2 text-xs border-purple-300 text-purple-700 hover:bg-purple-50" onClick={() => handleExportAll('fr-securities-tax')}>
                                                 <FiDownload size={12} />
-                                                <Text ml={1}>Export All Form 2074</Text>
+                                                <span className="ml-1">Export All Form 2074</span>
                                             </Button>
                                         )}
-                                    </Flex>
-                                </Flex>
+                                    </div>
+                                </div>
 
                                 {combinedSummaries.length > 0 && (
                                     <AnnualSummaryTable
@@ -573,7 +544,7 @@ const TaxContent: React.FC<{
                             /* ── Year view: Crypto / Securities sub-cards ── */
                             <>
                                 {/* Category sub-cards — Approach A */}
-                                <Flex gap={0} mb={0}>
+                                <div className="flex gap-0 mb-0">
                                     {hasCrypto && (
                                         <SummaryCard
                                             label="Crypto"
@@ -607,22 +578,17 @@ const TaxContent: React.FC<{
                                             onClick={() => setActiveCategory('income')}
                                         />
                                     )}
-                                </Flex>
+                                </div>
 
                                 {/* Category content area — border merges with active sub-card tab */}
                                 {(() => {
-                                    const palette = activeCategory === 'crypto' ? 'blue' : activeCategory === 'securities' ? 'purple' : 'teal';
-                                    const contentBg = activeCategory === 'crypto' ? 'blue.50/60' : activeCategory === 'securities' ? 'purple.50/60' : 'teal.50/60';
+                                    const contentClass = activeCategory === 'crypto'
+                                        ? 'bg-blue-50/60 border-blue-200'
+                                        : activeCategory === 'securities'
+                                            ? 'bg-purple-50/60 border-purple-200'
+                                            : 'bg-teal-50/60 border-teal-200';
                                     return (
-                                        <Box
-                                            bg={contentBg}
-                                            border="1px solid"
-                                            borderColor={`${palette}.200`}
-                                            borderTop="none"
-                                            borderRadius="0 0 lg lg"
-                                            p={4}
-                                            transition="all 0.15s"
-                                        >
+                                        <div className={`border border-t-0 p-4 transition-colors ${contentClass}`}>
                                             {activeCategory === 'income' ? (
                                                 /* ── Income content: PFU entries table ── */
                                                 <IncomeTaxContent
@@ -633,12 +599,17 @@ const TaxContent: React.FC<{
                                             ) : (
                                                 <>
                                                     {/* Export button */}
-                                                    <Flex justify="flex-end" mb={3}>
-                                                        <Button size="xs" variant="outline" colorPalette={palette} onClick={handleExport}>
+                                                    <div className="flex justify-end mb-3">
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className={`h-6 px-2 text-xs ${activeCategory === 'crypto' ? 'border-blue-300 text-blue-700 hover:bg-blue-50' : 'border-purple-300 text-purple-700 hover:bg-purple-50'}`}
+                                                            onClick={handleExport}
+                                                        >
                                                             <FiDownload size={12} />
-                                                            <Text ml={1}>Export {exportLabel}</Text>
+                                                            <span className="ml-1">Export {exportLabel}</span>
                                                         </Button>
-                                                    </Flex>
+                                                    </div>
 
                                                     {/* Annual summary table */}
                                                     {summaries.length > 0 && (
@@ -663,14 +634,14 @@ const TaxContent: React.FC<{
                                                     />
                                                 </>
                                             )}
-                                        </Box>
+                                        </div>
                                     );
                                 })()}
                             </>
                         )}
-                    </Box>
-                </Box>
-            </Box>
+                    </div>
+                </div>
+            </div>
         );
     };
 
@@ -762,53 +733,92 @@ function computeIncomeTotalsForYear(report: FrenchIncomeTaxReport | null, year: 
     );
 }
 
+// Tailwind JIT can't resolve `bg-${palette}-50`-style interpolation, so every
+// shade actually used by SummaryCard is pre-declared here as a literal class
+// string and looked up by the fixed 3-value `palette` prop at render time.
+const SUMMARY_PALETTE: Record<'blue' | 'purple' | 'teal', {
+    bgActive: string; bgInactive: string; borderActive: string; borderInactive: string;
+    borderBottomActive: string; borderBottomInactive: string; textActive: string;
+    hoverBorder: string; hoverBgActive: string; hoverBgInactive: string;
+}> = {
+    blue: {
+        bgActive: 'bg-blue-50', bgInactive: 'bg-blue-50/60',
+        borderActive: 'border-blue-200', borderInactive: 'border-blue-100',
+        borderBottomActive: 'border-b-blue-50', borderBottomInactive: 'border-b-blue-100',
+        textActive: 'text-blue-700',
+        hoverBorder: 'hover:border-blue-300', hoverBgActive: 'hover:bg-blue-50', hoverBgInactive: 'hover:bg-blue-100/50',
+    },
+    purple: {
+        bgActive: 'bg-purple-50', bgInactive: 'bg-purple-50/60',
+        borderActive: 'border-purple-200', borderInactive: 'border-purple-100',
+        borderBottomActive: 'border-b-purple-50', borderBottomInactive: 'border-b-purple-100',
+        textActive: 'text-purple-700',
+        hoverBorder: 'hover:border-purple-300', hoverBgActive: 'hover:bg-purple-50', hoverBgInactive: 'hover:bg-purple-100/50',
+    },
+    teal: {
+        bgActive: 'bg-teal-50', bgInactive: 'bg-teal-50/60',
+        borderActive: 'border-teal-200', borderInactive: 'border-teal-100',
+        borderBottomActive: 'border-b-teal-50', borderBottomInactive: 'border-b-teal-100',
+        textActive: 'text-teal-700',
+        hoverBorder: 'hover:border-teal-300', hoverBgActive: 'hover:bg-teal-50', hoverBgInactive: 'hover:bg-teal-100/50',
+    },
+};
+
 const SummaryCard: React.FC<{
     label: string;
     subtitle: string;
-    palette: string;
+    palette: 'blue' | 'purple' | 'teal';
     totals: CardTotals;
     baseCurrency: string;
     active: boolean;
     onClick: () => void;
-}> = ({ label, subtitle, palette, totals, baseCurrency, active, onClick }) => (
-    <Box
-        flex={1}
-        px={3}
-        py={2}
-        bg={active ? `${palette}.50` : `${palette}.50/60`}
-        border="1px solid"
-        borderColor={active ? `${palette}.200` : `${palette}.100`}
-        borderBottom="2px solid"
-        borderBottomColor={active ? `${palette}.50` : `${palette}.100`}
-        borderRadius={active ? 'lg lg 0 0' : 'lg'}
-        cursor="pointer"
-        onClick={onClick}
-        transition="all 0.15s"
-        position="relative"
-        zIndex={active ? 1 : 0}
-        mb={active ? '-1px' : '0'}
-        _hover={{ borderColor: `${palette}.300`, bg: active ? `${palette}.50` : `${palette}.100/50` }}
-    >
-        <Flex justify="space-between" align="center">
-            <Flex align="baseline" gap={2}>
-                <Text fontWeight="700" fontSize="sm" color={active ? `${palette}.700` : 'gray.700'}>
-                    {label}
-                </Text>
-                <Text fontSize="2xs" color="gray.400">{subtitle}</Text>
-            </Flex>
-            <Flex align="center" gap={4}>
-                <Text fontSize="2xs" color="gray.500">{totals.taxableDisposals} disposals</Text>
-                <Text fontWeight="600" fontSize="xs" color="green.600">+{formatCurrency(totals.totalGains, baseCurrency)}</Text>
-                <Text fontWeight="600" fontSize="xs" color="red.600">{totals.totalLosses > 0 ? `-${formatCurrency(totals.totalLosses, baseCurrency)}` : formatCurrency(0, baseCurrency)}</Text>
-                <Text fontWeight="bold" fontSize="sm" color={totals.totalTax > 0 ? 'red.600' : 'gray.500'}>
-                    Tax: {formatCurrency(totals.totalTax, baseCurrency)}
-                </Text>
-            </Flex>
-        </Flex>
-    </Box>
-);
+}> = ({ label, subtitle, palette, totals, baseCurrency, active, onClick }) => {
+    const p = SUMMARY_PALETTE[palette];
+    return (
+        <div
+            className={`relative flex-1 cursor-pointer border border-b-2 px-3 py-2 transition-colors ${p.hoverBorder} ${active
+                ? `z-10 -mb-px ${p.bgActive} ${p.borderActive} ${p.borderBottomActive} ${p.hoverBgActive}`
+                : `${p.bgInactive} ${p.borderInactive} ${p.borderBottomInactive} ${p.hoverBgInactive}`
+                }`}
+            onClick={onClick}
+        >
+            <div className="flex items-center justify-between">
+                <div className="flex items-baseline gap-2">
+                    <span className={`text-sm font-bold ${active ? p.textActive : 'text-gray-700'}`}>
+                        {label}
+                    </span>
+                    <span className="text-[10px] text-gray-400">{subtitle}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                    <span className="text-[10px] text-gray-500">{totals.taxableDisposals} disposals</span>
+                    <span className="text-xs font-semibold text-green-600">+{formatCurrency(totals.totalGains, baseCurrency)}</span>
+                    <span className="text-xs font-semibold text-red-600">{totals.totalLosses > 0 ? `-${formatCurrency(totals.totalLosses, baseCurrency)}` : formatCurrency(0, baseCurrency)}</span>
+                    <span className={`text-sm font-bold ${totals.totalTax > 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                        Tax: {formatCurrency(totals.totalTax, baseCurrency)}
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 // ─── Year Metric Card (tab header inside single wrapper) ────────────────────
+
+const YEAR_METRIC_PALETTE: Record<'gray' | 'blue', {
+    bgActive: string; bgInactive: string; borderRight: string;
+    borderBottomActive: string; borderBottomInactive: string; hoverBgInactive: string;
+}> = {
+    gray: {
+        bgActive: 'bg-gray-100', bgInactive: 'bg-gray-50/60', borderRight: 'border-gray-200',
+        borderBottomActive: 'border-b-gray-100', borderBottomInactive: 'border-b-gray-200',
+        hoverBgInactive: 'hover:bg-gray-100/50',
+    },
+    blue: {
+        bgActive: 'bg-blue-100', bgInactive: 'bg-blue-50/60', borderRight: 'border-blue-200',
+        borderBottomActive: 'border-b-blue-100', borderBottomInactive: 'border-b-blue-200',
+        hoverBgInactive: 'hover:bg-blue-100/50',
+    },
+};
 
 const YearMetricCard: React.FC<{
     label: string;
@@ -817,62 +827,51 @@ const YearMetricCard: React.FC<{
     baseCurrency: string;
     onClick: () => void;
     isLast?: boolean;
-    activePalette: string;
+    activePalette: 'gray' | 'blue';
     onRecompute?: () => void;
     isComputing?: boolean;
-}> = ({ label, totals, active, baseCurrency, onClick, isLast, activePalette, onRecompute, isComputing }) => (
-    <Box
-        flex={1}
-        p={3}
-        bg={active ? `${activePalette}.100` : `${activePalette}.50/60`}
-        borderRight={isLast ? 'none' : '1px solid'}
-        borderRightColor={`${activePalette}.200`}
-        borderBottom="2px solid"
-        borderBottomColor={active ? `${activePalette}.100` : `${activePalette}.200`}
-        cursor="pointer"
-        onClick={onClick}
-        transition="all 0.15s"
-        _hover={active ? {} : { bg: `${activePalette}.100/50` }}
-    >
-        <Flex justify="space-between" align="start" mb={1}>
-            <Badge
-                variant={active ? 'solid' : 'subtle'}
-                colorPalette={activePalette}
-                size="sm"
-                fontWeight="800"
-                fontSize="sm"
-            >
-                {label}
-            </Badge>
-            <Text fontWeight="bold" fontSize="lg" color="gray.700">
-                {formatCurrency(totals.totalTax, baseCurrency)}
-            </Text>
-        </Flex>
-        <Flex justify="space-between" align="end">
-            <Flex gap={3} align="center">
-                <Text fontSize="2xs" color="gray.500">{totals.taxableDisposals} disposals</Text>
-                <Text fontWeight="600" fontSize="xs" color="green.600">
-                    +{formatCurrency(totals.totalGains, baseCurrency)}
-                </Text>
-                <Text fontWeight="600" fontSize="xs" color="red.600">
-                    {totals.totalLosses > 0 ? `-${formatCurrency(totals.totalLosses, baseCurrency)}` : formatCurrency(0, baseCurrency)}
-                </Text>
-            </Flex>
-            {active && onRecompute && (
-                <Button
-                    size="2xs"
-                    variant="ghost"
-                    colorPalette="gray"
-                    onClick={(e) => { e.stopPropagation(); onRecompute(); }}
-                    loading={isComputing}
-                    title={`Recalculate ${label}`}
-                >
-                    <LuRefreshCw size={11} />
-                </Button>
-            )}
-        </Flex>
-    </Box>
-);
+}> = ({ label, totals, active, baseCurrency, onClick, isLast, activePalette, onRecompute, isComputing }) => {
+    const p = YEAR_METRIC_PALETTE[activePalette];
+    return (
+        <div
+            className={`flex-1 cursor-pointer border-b-2 p-3 transition-colors ${isLast ? '' : `border-r ${p.borderRight}`} ${active ? `${p.bgActive} ${p.borderBottomActive}` : `${p.bgInactive} ${p.borderBottomInactive} ${p.hoverBgInactive}`}`}
+            onClick={onClick}
+        >
+            <div className="mb-1 flex items-start justify-between">
+                <Badge colorScheme={activePalette} className={`text-sm font-extrabold ${active ? '' : 'opacity-70'}`}>
+                    {label}
+                </Badge>
+                <span className="text-lg font-bold text-gray-700">
+                    {formatCurrency(totals.totalTax, baseCurrency)}
+                </span>
+            </div>
+            <div className="flex items-end justify-between">
+                <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-gray-500">{totals.taxableDisposals} disposals</span>
+                    <span className="text-xs font-semibold text-green-600">
+                        +{formatCurrency(totals.totalGains, baseCurrency)}
+                    </span>
+                    <span className="text-xs font-semibold text-red-600">
+                        {totals.totalLosses > 0 ? `-${formatCurrency(totals.totalLosses, baseCurrency)}` : formatCurrency(0, baseCurrency)}
+                    </span>
+                </div>
+                {active && onRecompute && (
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        colorScheme="gray"
+                        className="h-5 px-1"
+                        onClick={(e) => { e.stopPropagation(); onRecompute(); }}
+                        loading={isComputing}
+                        title={`Recalculate ${label}`}
+                    >
+                        <LuRefreshCw size={11} />
+                    </Button>
+                )}
+            </div>
+        </div>
+    );
+};
 
 // ─── Annual Summary Table ───────────────────────────────────────────────────
 
@@ -883,67 +882,59 @@ const AnnualSummaryTable: React.FC<{
     baseCurrency: string;
     onViewYear?: (year: number) => void;
 }> = ({ summaries, selectedYear, onSelectYear, baseCurrency, onViewYear }) => (
-    <Box mb={5}>
-        <Heading size="xs" mb={2} color="gray.600">Annual Summary</Heading>
-        <Box overflowX="auto">
-            <Table.Root size="sm" variant="outline" striped>
-                <Table.Header>
-                    <Table.Row>
-                        <Table.ColumnHeader fontSize="xs">Year</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right" fontSize="xs">Gains</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right" fontSize="xs">Losses</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right" fontSize="xs">Net Taxable</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right" fontSize="xs">Tax</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right" fontSize="xs">Carryforward</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right" fontSize="xs">Taxable Disposals</Table.ColumnHeader>
-                        {onViewYear && <Table.ColumnHeader textAlign="center" fontSize="xs" width="40px"></Table.ColumnHeader>}
-                    </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                    {[...summaries].sort((a, b) => b.fiscal_year - a.fiscal_year).map(s => (
-                        <Table.Row
+    <div className="mb-5">
+        <div className="mb-2 text-xs font-semibold text-gray-600">Annual Summary</div>
+        <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="border-b border-gray-200">
+                        <th className="px-2 py-1 text-left">Year</th>
+                        <th className="px-2 py-1 text-right">Gains</th>
+                        <th className="px-2 py-1 text-right">Losses</th>
+                        <th className="px-2 py-1 text-right">Net Taxable</th>
+                        <th className="px-2 py-1 text-right">Tax</th>
+                        <th className="px-2 py-1 text-right">Carryforward</th>
+                        <th className="px-2 py-1 text-right">Taxable Disposals</th>
+                        {onViewYear && <th className="w-10 px-2 py-1 text-center" />}
+                    </tr>
+                </thead>
+                <tbody>
+                    {[...summaries].sort((a, b) => b.fiscal_year - a.fiscal_year).map((s, idx) => (
+                        <tr
                             key={s.fiscal_year}
-                            bg={selectedYear === s.fiscal_year ? 'blue.50' : undefined}
-                            cursor="pointer"
+                            className={`cursor-pointer border-b border-gray-100 ${selectedYear === s.fiscal_year ? 'bg-blue-50' : idx % 2 === 1 ? 'bg-gray-50/50' : ''}`}
                             onClick={() => onSelectYear(s.fiscal_year === selectedYear ? null : s.fiscal_year)}
                         >
-                            <Table.Cell fontWeight="semibold" fontSize="xs">{s.fiscal_year}</Table.Cell>
-                            <Table.Cell textAlign="right" color="green.600" fontSize="xs">{formatCurrency(s.total_gains, baseCurrency)}</Table.Cell>
-                            <Table.Cell textAlign="right" color="red.600" fontSize="xs">
+                            <td className="px-2 py-1 font-semibold">{s.fiscal_year}</td>
+                            <td className="px-2 py-1 text-right text-green-600">{formatCurrency(s.total_gains, baseCurrency)}</td>
+                            <td className="px-2 py-1 text-right text-red-600">
                                 {s.total_losses > 0 ? `-${formatCurrency(s.total_losses, baseCurrency)}` : '—'}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right" fontSize="xs"><GainBadge value={s.net_taxable} currency={baseCurrency} /></Table.Cell>
-                            <Table.Cell textAlign="right" fontWeight="semibold" color={s.tax_total > 0 ? 'red.600' : 'gray.500'} fontSize="xs">
+                            </td>
+                            <td className="px-2 py-1 text-right"><GainBadge value={s.net_taxable} currency={baseCurrency} /></td>
+                            <td className={`px-2 py-1 text-right font-semibold ${s.tax_total > 0 ? 'text-red-600' : 'text-gray-500'}`}>
                                 {formatCurrency(s.tax_total, baseCurrency)}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right" color="orange.600" fontSize="xs">
+                            </td>
+                            <td className="px-2 py-1 text-right text-orange-600">
                                 {s.loss_carried_forward < 0 ? formatCurrency(s.loss_carried_forward, baseCurrency) : '—'}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right" fontSize="xs">{s.transaction_count}</Table.Cell>
+                            </td>
+                            <td className="px-2 py-1 text-right">{s.transaction_count}</td>
                             {onViewYear && (
-                                <Table.Cell textAlign="center">
-                                    <Box
-                                        as="button"
-                                        display="inline-flex"
-                                        alignItems="center"
-                                        justifyContent="center"
-                                        w="22px" h="22px"
-                                        borderRadius="md"
-                                        color="blue.500"
-                                        _hover={{ bg: 'blue.50', color: 'blue.700' }}
-                                        transition="all 0.15s"
+                                <td className="px-2 py-1 text-center">
+                                    <button
+                                        type="button"
+                                        className="inline-flex h-[22px] w-[22px] items-center justify-center text-blue-500 transition-colors hover:bg-blue-50 hover:text-blue-700"
                                         onClick={(e: React.MouseEvent) => { e.stopPropagation(); onViewYear(s.fiscal_year); }}
                                     >
                                         <LuEye size={13} />
-                                    </Box>
-                                </Table.Cell>
+                                    </button>
+                                </td>
                             )}
-                        </Table.Row>
+                        </tr>
                     ))}
-                </Table.Body>
-            </Table.Root>
-        </Box>
-    </Box>
+                </tbody>
+            </table>
+        </div>
+    </div>
 );
 
 // ─── Disposal Table (server-paginated from /realized-pnl, with filters + sort) ──
@@ -1126,108 +1117,106 @@ const DisposalTable: React.FC<{
         const headingText = `Disposal Line Items ${selectedYear ? `— ${selectedYear}` : '— All Years'}`;
 
         const paginationBar = total > DISPOSAL_PAGE_SIZES[0] ? (
-            <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
-                <Flex align="center" gap={2}>
-                    <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                    <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+            <div className="flex w-full items-center justify-between py-2 px-3">
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-500">Rows:</span>
+                    <div className="inline-flex overflow-hidden border border-gray-200">
                         {DISPOSAL_PAGE_SIZES.map(size => (
-                            <Button key={size} size="2xs"
+                            <Button key={size} size="sm"
                                 variant={pageSize === size ? 'subtle' : 'ghost'}
-                                colorPalette={pageSize === size ? 'blue' : 'gray'}
-                                borderRadius="0"
+                                colorScheme={pageSize === size ? 'blue' : 'gray'}
                                 onClick={() => { setPageSize(size); setPage(1); }}
-                                px={2} fontSize="xs">
+                                className="h-6 px-2 text-xs">
                                 {size}
                             </Button>
                         ))}
-                    </Flex>
-                </Flex>
-                <Text fontSize="2xs" color="gray.500">
+                    </div>
+                </div>
+                <span className="text-[10px] text-gray-500">
                     {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
-                </Text>
-                <Flex align="center" gap={1}>
-                    <Button size="2xs" variant="ghost" onClick={() => setPage(1)} disabled={page <= 1} px={1}>
+                </span>
+                <div className="flex items-center gap-1">
+                    <Button size="sm" variant="ghost" className="h-6 px-1" onClick={() => setPage(1)} disabled={page <= 1}>
                         <FiChevronsLeft size={12} />
                     </Button>
-                    <Button size="2xs" variant="ghost" onClick={() => setPage(page - 1)} disabled={page <= 1} px={1}>
+                    <Button size="sm" variant="ghost" className="h-6 px-1" onClick={() => setPage(page - 1)} disabled={page <= 1}>
                         <FiChevronLeft size={14} />
                     </Button>
-                    <Text fontSize="xs" color="gray.600" mx={1}>{page} / {pageCount}</Text>
-                    <Button size="2xs" variant="ghost" onClick={() => setPage(page + 1)} disabled={page >= pageCount} px={1}>
+                    <span className="mx-1 text-xs text-gray-600">{page} / {pageCount}</span>
+                    <Button size="sm" variant="ghost" className="h-6 px-1" onClick={() => setPage(page + 1)} disabled={page >= pageCount}>
                         <FiChevronRight size={14} />
                     </Button>
-                    <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount)} disabled={page >= pageCount} px={1}>
+                    <Button size="sm" variant="ghost" className="h-6 px-1" onClick={() => setPage(pageCount)} disabled={page >= pageCount}>
                         <FiChevronsRight size={12} />
                     </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
         ) : null;
 
         return (
-            <Box>
-                <Flex justify="space-between" align="center" mb={2}>
-                    <Flex align="center" gap={2}>
-                        <Heading size="xs" color="gray.600">
+            <div>
+                <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <div className="text-xs font-semibold text-gray-600">
                             {headingText}
-                        </Heading>
-                        <Flex gap={1.5}>
+                        </div>
+                        <div className="flex gap-1.5">
                             <Button
-                                size="2xs"
+                                size="sm"
                                 variant={showTaxable ? 'subtle' : 'outline'}
-                                colorPalette={showTaxable ? 'red' : 'gray'}
+                                colorScheme={showTaxable ? 'red' : 'gray'}
                                 onClick={() => setShowTaxable(p => !p)}
-                                borderRadius="full"
-                                px={2.5}
+                                className="h-6 px-2.5 text-xs"
                             >
                                 Taxable ({taxableCount})
                             </Button>
                             <Button
-                                size="2xs"
+                                size="sm"
                                 variant={showNonTaxable ? 'subtle' : 'outline'}
-                                colorPalette={showNonTaxable ? 'green' : 'gray'}
+                                colorScheme={showNonTaxable ? 'green' : 'gray'}
                                 onClick={() => setShowNonTaxable(p => !p)}
-                                borderRadius="full"
-                                px={2.5}
+                                className="h-6 px-2.5 text-xs"
                             >
                                 Non-Taxable ({nonTaxableCount})
                             </Button>
-                        </Flex>
-                    </Flex>
-                    <Text fontSize="2xs" color="gray.400">
+                        </div>
+                    </div>
+                    <span className="text-[10px] text-gray-400">
                         {isRefreshing ? 'Refreshing…' : `${total} / ${totalEntries} entries`}
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
 
                 {/* ─── Collapsible Filter Section ─── */}
-                <Box mb={3}>
-                    <Box bg="gray.50" borderRadius="md" border="1px solid" borderColor={hasAnyFilter ? 'blue.300' : 'gray.200'} overflow="visible">
-                        <Flex align="center" justify="space-between" p={2.5}
-                            cursor="pointer" transition="background 0.15s" _hover={{ bg: 'gray.100' }}
-                            onClick={() => setFiltersExpanded(p => !p)} borderRadius="md">
-                            <Flex align="center" gap={1.5} flexWrap="wrap">
-                                <Box transition="transform 0.2s" transform={filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
+                <div className="mb-3">
+                    <div className={`overflow-visible border bg-gray-50 ${hasAnyFilter ? 'border-blue-300' : 'border-gray-200'}`}>
+                        <div
+                            className="flex flex-wrap items-center justify-between p-2.5 cursor-pointer transition-colors hover:bg-gray-100"
+                            onClick={() => setFiltersExpanded(p => !p)}
+                        >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                <div className={`transition-transform duration-200 ${filtersExpanded ? 'rotate-0' : '-rotate-90'}`}>
                                     <LuChevronDown size={14} />
-                                </Box>
+                                </div>
                                 <LuFilter size={12} />
-                                <Text fontWeight="semibold" fontSize="xs">Filters</Text>
+                                <span className="text-xs font-semibold">Filters</span>
                                 {activeChips.length > 0 && (
-                                    <Badge size="xs" colorPalette="blue">{activeChips.length} active</Badge>
+                                    <Badge colorScheme="blue">{activeChips.length} active</Badge>
                                 )}
                                 {activeChips.map(chip => <FilterChip key={chip.id} chip={chip} />)}
-                            </Flex>
-                            <Flex gap={1.5} onClick={e => e.stopPropagation()}>
+                            </div>
+                            <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
                                 {hasAnyFilter && (
-                                    <Button size="xs" variant="ghost" onClick={clearFilters} color="gray.500" _hover={{ color: 'gray.700' }}>
+                                    <Button size="sm" variant="ghost" className="h-6 px-1 text-gray-500 hover:text-gray-700" onClick={clearFilters}>
                                         <LuRotateCcw size={10} />
-                                        <Text ml={0.5} fontSize="2xs">Clear All</Text>
+                                        <span className="ml-0.5 text-[10px]">Clear All</span>
                                     </Button>
                                 )}
-                            </Flex>
-                        </Flex>
+                            </div>
+                        </div>
 
                         {filtersExpanded && (
-                            <Box p={3} pt={1} overflow="visible">
-                                <SimpleGrid columns={{ base: 2, md: 3, lg: 5 }} gap={2}>
+                            <div className="overflow-visible p-3 pt-1">
+                                <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-5">
                                     {filterOpts?.origin_type_options && filterOpts.origin_type_options.length > 0 && (
                                         <RFilterCard label="Origin" icon="📋" options={filterOpts.origin_type_options}
                                             selected={originFilter} onChange={setOriginFilter} color="blue" />
@@ -1254,27 +1243,27 @@ const DisposalTable: React.FC<{
                                             onToggle={() => { setAccountDropdownOpen(p => !p); setAssetDropdownOpen(false); }}
                                             onClose={() => setAccountDropdownOpen(false)} />
                                     )}
-                                </SimpleGrid>
-                            </Box>
+                                </div>
+                            </div>
                         )}
-                    </Box>
-                </Box>
+                    </div>
+                </div>
 
                 {isLoading ? (
-                    <Flex justify="center" py={8}>
+                    <div className="flex justify-center py-8">
                         <Spinner size="sm" />
-                        <Text ml={2} fontSize="xs" color="gray.500">Loading disposals…</Text>
-                    </Flex>
+                        <span className="ml-2 text-xs text-gray-500">Loading disposals…</span>
+                    </div>
                 ) : entries.length === 0 ? (
-                    <Box py={6} textAlign="center">
-                        <Text color="gray.400" fontSize="xs">
+                    <div className="py-6 text-center">
+                        <span className="text-xs text-gray-400">
                             {hasAnyFilter ? 'No entries match filters.' : 'No disposals found.'}
-                        </Text>
-                    </Box>
+                        </span>
+                    </div>
                 ) : (
-                    <Box>
+                    <div>
                         {paginationBar}
-                        <Box overflowX="auto">
+                        <div className="overflow-x-auto">
                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                     <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -1298,32 +1287,31 @@ const DisposalTable: React.FC<{
                                     {entries.map((e, idx) => (
                                         <tr key={e.pnl_id ?? idx} style={{ borderBottom: '1px solid #f1f3f5' }}>
                                             <td style={{ ...TD }}>
-                                                <Text fontSize="3xs" color="gray.400" fontFamily="mono">#{e.pnl_id}</Text>
+                                                <span className="font-mono text-[9px] text-gray-400">#{e.pnl_id}</span>
                                             </td>
                                             <td style={{ ...TD }}>
-                                                <Text fontSize="2xs" color="gray.600" whiteSpace="nowrap">
+                                                <span className="whitespace-nowrap text-[10px] text-gray-600">
                                                     {e.realized_at ? fmtDate(e.realized_at) : '-'}
-                                                </Text>
+                                                </span>
                                             </td>
                                             <td style={{ ...TD }}>
                                                 {onAssetClick ? (
-                                                    <Text fontSize="2xs" fontWeight="medium" color="purple.600"
-                                                        cursor="pointer"
-                                                        _hover={{ textDecoration: 'underline' }}
+                                                    <span
+                                                        className="block max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-medium text-purple-600 cursor-pointer hover:underline"
                                                         onClick={() => e.asset.id && onAssetClick(e.asset.id)}
-                                                        maxW="80px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                                                    >
                                                         {e.asset.label || e.asset.symbol}
-                                                    </Text>
+                                                    </span>
                                                 ) : (
-                                                    <Text fontSize="2xs" fontWeight="medium">{e.asset.label || e.asset.symbol}</Text>
+                                                    <span className="text-[10px] font-medium">{e.asset.label || e.asset.symbol}</span>
                                                 )}
                                             </td>
                                             <td style={{ ...TD }}>
-                                                <Flex align="center" gap={1}>
-                                                    <Text fontSize="2xs" color="gray.500" maxW="80px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                                                <div className="flex items-center gap-1">
+                                                    <span className="block max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-gray-500">
                                                         {e.account_name || '-'}
-                                                    </Text>
-                                                </Flex>
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td style={{ ...TD, textAlign: 'right' }}>
                                                 <ValueDisplay value={e.qty} />
@@ -1335,20 +1323,17 @@ const DisposalTable: React.FC<{
                                                 <ValueDisplay value={e.cost_basis_in_base} currency={baseCurrency} />
                                             </td>
                                             <td style={{ ...TD, textAlign: 'right' }}>
-                                                <Text color={e.pnl_in_base >= 0 ? 'green.600' : 'red.600'} fontWeight="medium" fontSize="2xs">
+                                                <span className={`text-[10px] font-medium ${e.pnl_in_base >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                     <ValueDisplay value={e.pnl_in_base} currency={baseCurrency} />
-                                                </Text>
+                                                </span>
                                             </td>
                                             <td style={{ ...TD, textAlign: 'center' }}>
                                                 <Tooltip content={e.taxable ? 'Taxable (computed)' : 'Non-Taxable (computed)'}>
-                                                    <Flex align="center" justify="center">
-                                                        <Box display="inline-flex" alignItems="center" justifyContent="center"
-                                                            w="18px" h="18px" borderRadius="full"
-                                                            bg={e.taxable ? 'red.100' : 'green.100'}
-                                                            color={e.taxable ? 'red.600' : 'green.600'}>
+                                                    <div className="flex items-center justify-center">
+                                                        <div className={`inline-flex h-[18px] w-[18px] items-center justify-center rounded-full ${e.taxable ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
                                                             {e.taxable ? <LuCircleAlert size={11} /> : <LuCircleCheck size={11} />}
-                                                        </Box>
-                                                    </Flex>
+                                                        </div>
+                                                    </div>
                                                 </Tooltip>
                                             </td>
                                             <td style={{ ...TD, textAlign: 'center' }}>
@@ -1357,59 +1342,55 @@ const DisposalTable: React.FC<{
                                                         ? `Override: ${(e.fr_tax_effective ?? e.taxable) ? 'Taxable' : 'Non-Taxable'} (click to reset)`
                                                         : `${(e.fr_tax_effective ?? e.taxable) ? 'Taxable' : 'Non-Taxable'} for FR tax (click to override)`
                                                 }>
-                                                    <Flex align="center" justify="center"
-                                                        cursor="pointer"
+                                                    <div
+                                                        className="flex cursor-pointer items-center justify-center"
                                                         onClick={() => handleTaxOverrideToggle(e)}
                                                     >
-                                                        <Box display="inline-flex" alignItems="center" justifyContent="center"
-                                                            w="18px" h="18px" borderRadius="full"
-                                                            bg={(e.fr_tax_effective ?? e.taxable) ? 'red.100' : 'green.100'}
-                                                            color={(e.fr_tax_effective ?? e.taxable) ? 'red.600' : 'green.600'}
-                                                            outline={(e.fr_tax_effective ?? e.taxable) !== e.taxable ? '2px dashed' : 'none'}
-                                                            outlineColor={(e.fr_tax_effective ?? e.taxable) !== e.taxable ? ((e.fr_tax_effective ?? e.taxable) ? 'red.400' : 'green.400') : undefined}
-                                                            outlineOffset="2px">
+                                                        <div
+                                                            className={`inline-flex h-[18px] w-[18px] items-center justify-center rounded-full ${(e.fr_tax_effective ?? e.taxable) ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'} ${(e.fr_tax_effective ?? e.taxable) !== e.taxable ? `outline outline-2 outline-dashed outline-offset-2 ${(e.fr_tax_effective ?? e.taxable) ? 'outline-red-400' : 'outline-green-400'}` : ''}`}
+                                                        >
                                                             {(e.fr_tax_effective ?? e.taxable) ? <LuCircleAlert size={11} /> : <LuCircleCheck size={11} />}
-                                                        </Box>
-                                                    </Flex>
+                                                        </div>
+                                                    </div>
                                                 </Tooltip>
                                             </td>
                                             <td style={{ ...TD, textAlign: 'center' }}>
-                                                <Badge size="xs" colorPalette={e.is_fee ? 'orange' : 'blue'} variant="subtle">
+                                                <Badge colorScheme={e.is_fee ? 'orange' : 'blue'}>
                                                     {e.is_fee ? 'Fee' : 'Disposal'}
                                                 </Badge>
                                             </td>
                                             <td style={{ ...TD, textAlign: 'right' }}>
-                                                <Text fontSize="2xs" color="gray.500">{e.holding_period_days ?? '-'}</Text>
+                                                <span className="text-[10px] text-gray-500">{e.holding_period_days ?? '-'}</span>
                                             </td>
                                             <td style={{ ...TD }}>
                                                 {e.transaction_id ? (
-                                                    <Text fontSize="2xs" color="blue.500" fontFamily="mono"
-                                                        cursor={onTransactionClick ? 'pointer' : undefined}
-                                                        _hover={onTransactionClick ? { textDecoration: 'underline' } : undefined}
-                                                        onClick={() => onTransactionClick?.(e.transaction_id!)}>
+                                                    <span
+                                                        className={`font-mono text-[10px] text-blue-500 ${onTransactionClick ? 'cursor-pointer hover:underline' : ''}`}
+                                                        onClick={() => onTransactionClick?.(e.transaction_id!)}
+                                                    >
                                                         #{e.transaction_id}
-                                                    </Text>
-                                                ) : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                    </span>
+                                                ) : <span className="text-[10px] text-gray-400">-</span>}
                                             </td>
                                             <td style={{ ...TD }}>
                                                 {e.unit_id ? (
-                                                    <Text fontSize="2xs" color="blue.500" fontFamily="mono"
-                                                        cursor={onUnitClick ? 'pointer' : undefined}
-                                                        _hover={onUnitClick ? { textDecoration: 'underline' } : undefined}
-                                                        onClick={() => onUnitClick?.(e.unit_id!)}>
+                                                    <span
+                                                        className={`font-mono text-[10px] text-blue-500 ${onUnitClick ? 'cursor-pointer hover:underline' : ''}`}
+                                                        onClick={() => onUnitClick?.(e.unit_id!)}
+                                                    >
                                                         #{e.unit_id}
-                                                    </Text>
-                                                ) : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                    </span>
+                                                ) : <span className="text-[10px] text-gray-400">-</span>}
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                        </Box>
+                        </div>
                         {paginationBar}
-                    </Box>
+                    </div>
                 )}
-            </Box>
+            </div>
         );
     };
 
@@ -1432,14 +1413,14 @@ const IncomeTaxContent: React.FC<{
         : incomeReport.entries;
 
     return (
-        <Box>
+        <div>
             {/* Annual summary */}
             {summaries.length > 0 && (
-                <Box mb={4}>
-                    <Text fontSize="xs" fontWeight="700" color="teal.700" mb={2}>
+                <div className="mb-4">
+                    <div className="mb-2 text-xs font-bold text-teal-700">
                         Annual Summary — Form 2042
-                    </Text>
-                    <Box overflowX="auto">
+                    </div>
+                    <div className="overflow-x-auto">
                         <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid #d5dce6' }}>
@@ -1472,17 +1453,17 @@ const IncomeTaxContent: React.FC<{
                                 ))}
                             </tbody>
                         </table>
-                    </Box>
-                </Box>
+                    </div>
+                </div>
             )}
 
             {/* Line item entries */}
             {entries.length > 0 && (
-                <Box>
-                    <Text fontSize="xs" fontWeight="700" color="teal.700" mb={2}>
+                <div>
+                    <div className="mb-2 text-xs font-bold text-teal-700">
                         Income Events ({entries.length})
-                    </Text>
-                    <Box overflowX="auto">
+                    </div>
+                    <div className="overflow-x-auto">
                         <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid #d5dce6' }}>
@@ -1499,7 +1480,7 @@ const IncomeTaxContent: React.FC<{
                                     <tr key={e.id} style={{ borderBottom: '1px solid #eef1f5' }}>
                                         <td style={{ padding: '4px 6px', fontWeight: 600 }}>{e.asset_symbol}</td>
                                         <td style={{ padding: '4px 6px' }}>
-                                            <Badge size="sm" colorPalette="teal" variant="subtle">{e.income_type}</Badge>
+                                            <Badge colorScheme="green">{e.income_type}</Badge>
                                         </td>
                                         <td style={{ padding: '4px 6px', textAlign: 'right' }}>
                                             {formatCurrency(e.gross_income, baseCurrency)}
@@ -1517,15 +1498,15 @@ const IncomeTaxContent: React.FC<{
                                 ))}
                             </tbody>
                         </table>
-                    </Box>
-                </Box>
+                    </div>
+                </div>
             )}
 
             {summaries.length === 0 && entries.length === 0 && (
-                <Text fontSize="xs" color="gray.400" textAlign="center" py={4}>
+                <div className="py-4 text-center text-xs text-gray-400">
                     No income tax entries for this period
-                </Text>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

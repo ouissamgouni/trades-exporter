@@ -1,8 +1,9 @@
-import { Box, Button, Dialog, Flex, Heading, Input, Portal, Text } from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import React, { useState } from 'react';
 import { API_URL, RawAccount } from '../types';
 import { AccountMappingPanel } from './AccountMappingPanel';
 import { toaster } from './ui/toaster';
+import { Button, Input } from './ui/primitives';
 
 export const RawAccountsEditor: React.FC = () => {
     const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -35,20 +36,20 @@ export const RawAccountsEditor: React.FC = () => {
     };
 
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="md" mb={1}>🔗 Raw Accounts Mapping</Heading>
-                    <Text color="gray.600" fontSize="sm">
+        <div>
+            <div className="mb-6 flex items-center justify-between border-b border-slate-200 pb-2">
+                <div>
+                    <h2 className="mb-1 text-base font-semibold">🔗 Raw Accounts Mapping</h2>
+                    <p className="text-sm text-slate-600">
                         Link source-specific account labels/addresses to normalized accounts.
-                    </Text>
-                </Box>
-                <Flex gap={2}>
-                    <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    <Button colorScheme="blue" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Mapping
                     </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             <AccountMappingPanel
                 mode="full"
@@ -57,46 +58,44 @@ export const RawAccountsEditor: React.FC = () => {
             />
 
             {/* Create Raw Account Dialog */}
-            <Dialog.Root open={showCreateDialog} onOpenChange={(e) => setShowCreateDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Add Raw Account Mapping</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Source</Text>
-                                        <Input
-                                            value={newRawAccount.source || ''}
-                                            onChange={(e) => setNewRawAccount({ ...newRawAccount, source: e.target.value })}
-                                            placeholder="e.g., binance_trx, solana_helius"
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Label</Text>
-                                        <Input
-                                            value={newRawAccount.label || ''}
-                                            onChange={(e) => setNewRawAccount({ ...newRawAccount, label: e.target.value })}
-                                            placeholder="e.g., spot, 0x1234..."
-                                        />
-                                    </Box>
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Dialog.ActionTrigger asChild>
-                                    <Button variant="outline">Cancel</Button>
-                                </Dialog.ActionTrigger>
-                                <Button colorPalette="blue" onClick={createRawAccount}>
-                                    Create
-                                </Button>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-        </Box>
+            <RadixDialog.Root open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-100 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold text-slate-900">
+                                Add Raw Account Mapping
+                            </RadixDialog.Title>
+                        </div>
+                        <div className="flex flex-col gap-4 px-5 py-4">
+                            <div>
+                                <p className="mb-1 font-medium">Source</p>
+                                <Input
+                                    value={newRawAccount.source || ''}
+                                    onChange={(e) => setNewRawAccount({ ...newRawAccount, source: e.target.value })}
+                                    placeholder="e.g., binance_trx, solana_helius"
+                                />
+                            </div>
+                            <div>
+                                <p className="mb-1 font-medium">Label</p>
+                                <Input
+                                    value={newRawAccount.label || ''}
+                                    onChange={(e) => setNewRawAccount({ ...newRawAccount, label: e.target.value })}
+                                    placeholder="e.g., spot, 0x1234..."
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-100 px-5 py-4">
+                            <RadixDialog.Close asChild>
+                                <Button variant="outline">Cancel</Button>
+                            </RadixDialog.Close>
+                            <Button colorScheme="blue" onClick={createRawAccount}>
+                                Create
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+        </div>
     );
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Button, Flex, Progress, Spinner, Text } from '@chakra-ui/react';
+import { Button, Progress, Spinner } from './ui/primitives';
 import { FiZap } from 'react-icons/fi';
 import { useBackfillAllPriceGaps } from '../hooks/usePriceGaps';
 import type { BackfillAllPriceGapsProgress } from '../hooks/usePriceGaps';
@@ -36,23 +36,23 @@ export const PriceGapBulkFix: React.FC<PriceGapBulkFixProps> = ({
     };
 
     return (
-        <Box minW={compact ? '220px' : '280px'} maxW={compact ? '100%' : '380px'}>
-            <Flex align="center" gap={2} justify={compact ? 'flex-start' : 'flex-end'}>
+        <div style={{ minWidth: compact ? '220px' : '280px', maxWidth: compact ? '100%' : '380px' }}>
+            <div className={`flex items-center gap-2 ${compact ? 'justify-start' : 'justify-end'}`}>
                 <Button
-                    size={compact ? 'xs' : 'sm'}
-                    colorPalette="blue"
+                    size={compact ? 'sm' : 'md'}
+                    colorScheme="blue"
                     onClick={handleRun}
                     disabled={isRunning}
                 >
                     {isRunning ? <Spinner size="xs" /> : <FiZap />}
-                    <Text as="span">{isRunning ? 'Fixing gaps' : 'Fix all gaps'}</Text>
+                    <span>{isRunning ? 'Fixing gaps' : 'Fix all gaps'}</span>
                 </Button>
-            </Flex>
+            </div>
 
             {hasProgress && (
-                <Box mt={2}>
-                    <Flex justify="space-between" align="center" mb={1} gap={2}>
-                        <Text fontSize="xs" color={progress.status === 'error' ? 'red.600' : 'gray.600'} truncate>
+                <div className="mt-2">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className={`truncate text-xs ${progress.status === 'error' ? 'text-red-600' : 'text-slate-600'}`}>
                             {progress.status === 'scanning'
                                 ? 'Scanning transaction assets...'
                                 : progress.status === 'running'
@@ -60,30 +60,26 @@ export const PriceGapBulkFix: React.FC<PriceGapBulkFixProps> = ({
                                     : progress.status === 'complete'
                                         ? 'Gap fix complete'
                                         : progress.error ?? 'Gap fix failed'}
-                        </Text>
-                        <Text fontSize="xs" color="gray.500" whiteSpace="nowrap">
+                        </span>
+                        <span className="whitespace-nowrap text-xs text-slate-500">
                             {progress.completedRanges}/{progress.totalRanges}
-                        </Text>
-                    </Flex>
-                    <Progress.Root
+                        </span>
+                    </div>
+                    <Progress
                         value={progressPercent}
                         max={100}
                         size="sm"
-                        colorPalette={progress.status === 'error' || progress.failedCount > 0 ? 'orange' : 'blue'}
-                    >
-                        <Progress.Track>
-                            <Progress.Range />
-                        </Progress.Track>
-                    </Progress.Root>
-                    <Flex mt={1} gap={3} fontSize="xs" color="gray.500" wrap="wrap">
-                        <Text>{progress.assetsWithGaps} asset{progress.assetsWithGaps !== 1 ? 's' : ''}</Text>
-                        <Text>{progress.totalMissingDays} missing day{progress.totalMissingDays !== 1 ? 's' : ''}</Text>
-                        <Text color="green.600">{progress.fetchedCount} fetched</Text>
-                        {progress.failedCount > 0 && <Text color="red.600">{progress.failedCount} failed</Text>}
-                    </Flex>
-                </Box>
+                        colorScheme={progress.status === 'error' || progress.failedCount > 0 ? 'orange' : 'blue'}
+                    />
+                    <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
+                        <span>{progress.assetsWithGaps} asset{progress.assetsWithGaps !== 1 ? 's' : ''}</span>
+                        <span>{progress.totalMissingDays} missing day{progress.totalMissingDays !== 1 ? 's' : ''}</span>
+                        <span className="text-green-600">{progress.fetchedCount} fetched</span>
+                        {progress.failedCount > 0 && <span className="text-red-600">{progress.failedCount} failed</span>}
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

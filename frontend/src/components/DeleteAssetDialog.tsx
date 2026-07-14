@@ -1,20 +1,10 @@
 "use client"
 
-import {
-    Badge,
-    Box,
-    Button,
-    Dialog,
-    Flex,
-    HStack,
-    Portal,
-    Spinner,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import React, { useEffect, useState } from 'react';
 import { FiAlertTriangle } from 'react-icons/fi';
 import { API_URL } from '../types';
+import { Badge, Button, Spinner } from './ui/primitives';
 
 interface AssetDeletePreview {
     asset_id: number;
@@ -124,132 +114,108 @@ export const DeleteAssetDialog: React.FC<DeleteAssetDialogProps> = ({
     };
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(); }}>
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content maxW="480px">
-                        <Dialog.Header>
-                            <Dialog.Title>Delete Asset</Dialog.Title>
-                        </Dialog.Header>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-200 p-4">
+                        <RadixDialog.Title className="text-base font-semibold">Delete Asset</RadixDialog.Title>
+                    </div>
 
-                        <Dialog.Body>
-                            {loading ? (
-                                <Flex justify="center" py={6}>
-                                    <Spinner size="lg" />
-                                </Flex>
-                            ) : error ? (
-                                <Text color="red.500">{error}</Text>
-                            ) : preview ? (
-                                <VStack align="stretch" gap={3}>
-                                    <Text>
-                                        Are you sure you want to delete{' '}
-                                        <Text as="span" fontWeight="bold">{assetSymbol}</Text>?
-                                    </Text>
+                    <div className="p-4">
+                        {loading ? (
+                            <div className="flex justify-center py-6">
+                                <Spinner size="lg" />
+                            </div>
+                        ) : error ? (
+                            <span className="text-red-500">{error}</span>
+                        ) : preview ? (
+                            <div className="flex flex-col items-stretch gap-3">
+                                <span>
+                                    Are you sure you want to delete{' '}
+                                    <span className="font-bold">{assetSymbol}</span>?
+                                </span>
 
-                                    {hasBlockers && (
-                                        <Box
-                                            borderWidth="1px"
-                                            borderColor="red.200"
-                                            bg="red.50"
-                                            borderRadius="md"
-                                            p={3}
-                                        >
-                                            <HStack gap={2} mb={2}>
-                                                <FiAlertTriangle color="var(--chakra-colors-red-500)" />
-                                                <Text fontWeight="semibold" fontSize="sm" color="red.700">
-                                                    The following data will be permanently deleted:
-                                                </Text>
-                                            </HStack>
-                                            <VStack align="stretch" gap={1} pl={1}>
-                                                {BLOCKER_LABELS.map(({ key, label, icon }) => {
-                                                    const count = preview[key] as number;
-                                                    if (count === 0) return null;
-                                                    return (
-                                                        <HStack key={key} justify="space-between" fontSize="sm">
-                                                            <Text color="gray.700">{icon} {label}</Text>
-                                                            <Badge
-                                                                colorPalette="red"
-                                                                variant="subtle"
-                                                                size="sm"
-                                                            >
-                                                                {count}
-                                                            </Badge>
-                                                        </HStack>
-                                                    );
-                                                })}
-                                            </VStack>
-                                        </Box>
-                                    )}
+                                {hasBlockers && (
+                                    <div className="border border-red-200 bg-red-50 p-3">
+                                        <div className="mb-2 flex items-center gap-2">
+                                            <span className="text-red-500"><FiAlertTriangle /></span>
+                                            <span className="text-sm font-semibold text-red-700">
+                                                The following data will be permanently deleted:
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-col items-stretch gap-1 pl-1">
+                                            {BLOCKER_LABELS.map(({ key, label, icon }) => {
+                                                const count = preview[key] as number;
+                                                if (count === 0) return null;
+                                                return (
+                                                    <div key={key} className="flex items-center justify-between text-sm">
+                                                        <span className="text-slate-700">{icon} {label}</span>
+                                                        <Badge colorScheme="red">
+                                                            {count}
+                                                        </Badge>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
 
-                                    {hasCascade && (
-                                        <Box
-                                            borderWidth="1px"
-                                            borderColor="orange.200"
-                                            bg="orange.50"
-                                            borderRadius="md"
-                                            p={3}
-                                        >
-                                            <Text fontWeight="semibold" fontSize="sm" color="orange.700" mb={2}>
-                                                Also removed (auto-cascade):
-                                            </Text>
-                                            <VStack align="stretch" gap={1} pl={1}>
-                                                {CASCADE_LABELS.map(({ key, label, icon }) => {
-                                                    const count = preview[key] as number;
-                                                    if (count === 0) return null;
-                                                    return (
-                                                        <HStack key={key} justify="space-between" fontSize="sm">
-                                                            <Text color="gray.700">{icon} {label}</Text>
-                                                            <Badge
-                                                                colorPalette="orange"
-                                                                variant="subtle"
-                                                                size="sm"
-                                                            >
-                                                                {count}
-                                                            </Badge>
-                                                        </HStack>
-                                                    );
-                                                })}
-                                            </VStack>
-                                        </Box>
-                                    )}
+                                {hasCascade && (
+                                    <div className="border border-orange-200 bg-orange-50 p-3">
+                                        <span className="mb-2 block text-sm font-semibold text-orange-700">
+                                            Also removed (auto-cascade):
+                                        </span>
+                                        <div className="flex flex-col items-stretch gap-1 pl-1">
+                                            {CASCADE_LABELS.map(({ key, label, icon }) => {
+                                                const count = preview[key] as number;
+                                                if (count === 0) return null;
+                                                return (
+                                                    <div key={key} className="flex items-center justify-between text-sm">
+                                                        <span className="text-slate-700">{icon} {label}</span>
+                                                        <Badge colorScheme="orange">
+                                                            {count}
+                                                        </Badge>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
 
-                                    {!hasAnyDependencies && (
-                                        <Text fontSize="sm" color="gray.600">
-                                            This asset has no dependent data.
-                                        </Text>
-                                    )}
+                                {!hasAnyDependencies && (
+                                    <span className="text-sm text-slate-600">
+                                        This asset has no dependent data.
+                                    </span>
+                                )}
 
-                                    <Text fontSize="xs" color="gray.500">
-                                        This action cannot be undone.
-                                    </Text>
-                                </VStack>
-                            ) : null}
-                        </Dialog.Body>
+                                <span className="text-xs text-slate-500">
+                                    This action cannot be undone.
+                                </span>
+                            </div>
+                        ) : null}
+                    </div>
 
-                        <Dialog.Footer>
-                            <Flex gap={3}>
-                                <Button
-                                    variant="outline"
-                                    onClick={onClose}
-                                    disabled={deleting}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    colorPalette="red"
-                                    onClick={handleDelete}
-                                    loading={deleting}
-                                    disabled={loading || !!error}
-                                >
-                                    {hasBlockers ? 'Force Delete' : 'Delete'}
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                    <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                        <Button
+                            variant="outline"
+                            onClick={onClose}
+                            disabled={deleting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            colorScheme="red"
+                            onClick={handleDelete}
+                            loading={deleting}
+                            disabled={loading || !!error}
+                        >
+                            {hasBlockers ? 'Force Delete' : 'Delete'}
+                        </Button>
+                    </div>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

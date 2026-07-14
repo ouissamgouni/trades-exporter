@@ -10,14 +10,15 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { API_URL } from '../types';
 
-// Color palette for duplicate groups — distinct from bundle suggestion colors
+// Color palette for duplicate groups — distinct from bundle suggestion colors (literal
+// hex, consumed directly as CSS values by non-Chakra components).
 const DUPLICATE_GROUP_COLORS = [
-    'red.400',
-    'orange.400',
-    'yellow.500',
-    'pink.400',
-    'red.300',
-    'orange.300',
+    '#f87171', // red-400
+    '#fb923c', // orange-400
+    '#eab308', // yellow-500
+    '#f472b6', // pink-400
+    '#fca5a5', // red-300
+    '#fdba74', // orange-300
 ];
 
 export interface DuplicateSuspicion {

@@ -22,7 +22,7 @@ Reference patterns: [backend/api/routes/events.py](backend/api/routes/events.py)
   - **Test**: a new branch in business logic, a new route's happy path + 1 error path, a bug fix (regression test).
   - **Skip**: trivial getters, pass-through wrappers, schema field renames already covered by Pydantic, framework behavior.
 - Prefer updating an existing test file over creating a new one.
-- After any **behavior** change, run the full backend suite before reporting done: `task test:backend` (or `.venv/bin/pytest -q` from `backend/`). Skip for pure docs/typo fixes.
+- After any **behavior** change, run the full backend suite before reporting done: `task test:unit:backend` (or `PYTHONPATH=.. ../.venv/bin/pytest -q` from `backend/`). Skip for pure docs/typo fixes.
 - If a test fails, fix the cause — don't weaken assertions or add `skip` to make it green.
 
 ## API contract

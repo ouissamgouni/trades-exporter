@@ -1,13 +1,4 @@
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    GridItem,
-    SimpleGrid,
-    Tabs,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Tabs, TabsList, TabsTrigger, TabsContent, type BadgeColorScheme } from './ui/primitives';
 import React, { useEffect, useRef, useState } from 'react';
 import { LuCalendar, LuCheck, LuChevronDown, LuFilter, LuRotateCcw, LuSearch, LuX } from 'react-icons/lu';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
@@ -209,6 +200,42 @@ const FILTER_DEFS: FilterDef[] = [
     { key: 'feeQuoteAssetIds', label: 'Fee Quote Asset', icon: '💱', type: 'multi', optionsKey: 'fee_quote_assets', color: 'orange', isDropdown: true },
 ];
 
+// Dynamic per-filter colorScheme lookup - literal Tailwind classes (Tailwind JIT cannot
+// resolve `${color}-100` style interpolation, so every color used by FILTER_DEFS/cards
+// must have a full literal entry here).
+interface FilterColorClasses {
+    border200: string;
+    bg100: string;
+    text700: string;
+    border300: string;
+    hoverBorder300: string;
+    hoverBg200: string;
+    hoverBorder400: string;
+    text500: string;
+    bg50: string;
+    hoverBg100: string;
+    border500: string;
+    bg500: string;
+    badge: BadgeColorScheme;
+}
+
+const FILTER_COLOR_CLASSES: Record<string, FilterColorClasses> = {
+    cyan: { border200: 'border-cyan-200', bg100: 'bg-cyan-100', text700: 'text-cyan-700', border300: 'border-cyan-300', hoverBorder300: 'hover:border-cyan-300', hoverBg200: 'hover:bg-cyan-200', hoverBorder400: 'hover:border-cyan-400', text500: 'text-cyan-500', bg50: 'bg-cyan-50', hoverBg100: 'hover:bg-cyan-100', border500: 'border-cyan-500', bg500: 'bg-cyan-500', badge: 'blue' },
+    teal: { border200: 'border-teal-200', bg100: 'bg-teal-100', text700: 'text-teal-700', border300: 'border-teal-300', hoverBorder300: 'hover:border-teal-300', hoverBg200: 'hover:bg-teal-200', hoverBorder400: 'hover:border-teal-400', text500: 'text-teal-500', bg50: 'bg-teal-50', hoverBg100: 'hover:bg-teal-100', border500: 'border-teal-500', bg500: 'bg-teal-500', badge: 'green' },
+    blue: { border200: 'border-blue-200', bg100: 'bg-blue-100', text700: 'text-blue-700', border300: 'border-blue-300', hoverBorder300: 'hover:border-blue-300', hoverBg200: 'hover:bg-blue-200', hoverBorder400: 'hover:border-blue-400', text500: 'text-blue-500', bg50: 'bg-blue-50', hoverBg100: 'hover:bg-blue-100', border500: 'border-blue-500', bg500: 'bg-blue-500', badge: 'blue' },
+    yellow: { border200: 'border-yellow-200', bg100: 'bg-yellow-100', text700: 'text-yellow-700', border300: 'border-yellow-300', hoverBorder300: 'hover:border-yellow-300', hoverBg200: 'hover:bg-yellow-200', hoverBorder400: 'hover:border-yellow-400', text500: 'text-yellow-500', bg50: 'bg-yellow-50', hoverBg100: 'hover:bg-yellow-100', border500: 'border-yellow-500', bg500: 'bg-yellow-500', badge: 'yellow' },
+    red: { border200: 'border-red-200', bg100: 'bg-red-100', text700: 'text-red-700', border300: 'border-red-300', hoverBorder300: 'hover:border-red-300', hoverBg200: 'hover:bg-red-200', hoverBorder400: 'hover:border-red-400', text500: 'text-red-500', bg50: 'bg-red-50', hoverBg100: 'hover:bg-red-100', border500: 'border-red-500', bg500: 'bg-red-500', badge: 'red' },
+    green: { border200: 'border-green-200', bg100: 'bg-green-100', text700: 'text-green-700', border300: 'border-green-300', hoverBorder300: 'hover:border-green-300', hoverBg200: 'hover:bg-green-200', hoverBorder400: 'hover:border-green-400', text500: 'text-green-500', bg50: 'bg-green-50', hoverBg100: 'hover:bg-green-100', border500: 'border-green-500', bg500: 'bg-green-500', badge: 'green' },
+    orange: { border200: 'border-orange-200', bg100: 'bg-orange-100', text700: 'text-orange-700', border300: 'border-orange-300', hoverBorder300: 'hover:border-orange-300', hoverBg200: 'hover:bg-orange-200', hoverBorder400: 'hover:border-orange-400', text500: 'text-orange-500', bg50: 'bg-orange-50', hoverBg100: 'hover:bg-orange-100', border500: 'border-orange-500', bg500: 'bg-orange-500', badge: 'orange' },
+    emerald: { border200: 'border-emerald-200', bg100: 'bg-emerald-100', text700: 'text-emerald-700', border300: 'border-emerald-300', hoverBorder300: 'hover:border-emerald-300', hoverBg200: 'hover:bg-emerald-200', hoverBorder400: 'hover:border-emerald-400', text500: 'text-emerald-500', bg50: 'bg-emerald-50', hoverBg100: 'hover:bg-emerald-100', border500: 'border-emerald-500', bg500: 'bg-emerald-500', badge: 'green' },
+    purple: { border200: 'border-purple-200', bg100: 'bg-purple-100', text700: 'text-purple-700', border300: 'border-purple-300', hoverBorder300: 'hover:border-purple-300', hoverBg200: 'hover:bg-purple-200', hoverBorder400: 'hover:border-purple-400', text500: 'text-purple-500', bg50: 'bg-purple-50', hoverBg100: 'hover:bg-purple-100', border500: 'border-purple-500', bg500: 'bg-purple-500', badge: 'purple' },
+    pink: { border200: 'border-pink-200', bg100: 'bg-pink-100', text700: 'text-pink-700', border300: 'border-pink-300', hoverBorder300: 'hover:border-pink-300', hoverBg200: 'hover:bg-pink-200', hoverBorder400: 'hover:border-pink-400', text500: 'text-pink-500', bg50: 'bg-pink-50', hoverBg100: 'hover:bg-pink-100', border500: 'border-pink-500', bg500: 'bg-pink-500', badge: 'red' },
+    indigo: { border200: 'border-indigo-200', bg100: 'bg-indigo-100', text700: 'text-indigo-700', border300: 'border-indigo-300', hoverBorder300: 'hover:border-indigo-300', hoverBg200: 'hover:bg-indigo-200', hoverBorder400: 'hover:border-indigo-400', text500: 'text-indigo-500', bg50: 'bg-indigo-50', hoverBg100: 'hover:bg-indigo-100', border500: 'border-indigo-500', bg500: 'bg-indigo-500', badge: 'purple' },
+    gray: { border200: 'border-slate-200', bg100: 'bg-slate-100', text700: 'text-slate-700', border300: 'border-slate-300', hoverBorder300: 'hover:border-slate-300', hoverBg200: 'hover:bg-slate-200', hoverBorder400: 'hover:border-slate-400', text500: 'text-slate-500', bg50: 'bg-slate-50', hoverBg100: 'hover:bg-slate-100', border500: 'border-slate-500', bg500: 'bg-slate-500', badge: 'gray' },
+};
+
+const getFilterColorClasses = (color: string): FilterColorClasses => FILTER_COLOR_CLASSES[color] ?? FILTER_COLOR_CLASSES.gray;
+
 // Filter Card Component - shows all options as toggleable chips (OPEN)
 interface FilterCardProps {
     label: string;
@@ -242,34 +269,28 @@ const FilterCard: React.FC<FilterCardProps> = ({
         ? options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
         : options;
     const needsScroll = displayOptions.length > 6;
+    const c = getFilterColorClasses(color);
 
     return (
-        <Box
-            bg="white"
-            border="1px solid"
-            borderColor={activeCount > 0 ? `${color}.200` : 'gray.200'}
-            borderRadius="md"
-            p={2}
-            minH="70px"
-        >
+        <div className={`min-h-[70px] border bg-white p-2 ${activeCount > 0 ? c.border200 : 'border-slate-200'}`}>
             {/* Card Header */}
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
-                    <Text fontSize="xs">{icon}</Text>
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs">{icon}</span>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">
                         {label}
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
                 {activeCount > 0 && (
-                    <Badge size="xs" colorPalette={color} borderRadius="full">
+                    <Badge colorScheme={c.badge} className="rounded-full">
                         {activeCount}
                     </Badge>
                 )}
-            </Flex>
+            </div>
 
             {/* Search box */}
             {searchable && (
-                <Flex align="center" gap={1} mb={1.5} px={1} py={1} bg="gray.50" borderRadius="sm">
+                <div className="mb-1.5 flex items-center gap-1 bg-slate-50 px-1 py-1">
                     <LuSearch size={10} color="#A0AEC0" />
                     <input
                         type="text"
@@ -281,61 +302,37 @@ const FilterCard: React.FC<FilterCardProps> = ({
                             fontSize: '10px', width: '100%', color: '#4A5568',
                         }}
                     />
-                </Flex>
+                </div>
             )}
 
             {/* Options as toggleable chips - with scroll if > 4 items */}
-            <Box
-                maxH={needsScroll ? '110px' : 'auto'}
-                overflowY={needsScroll ? 'auto' : 'visible'}
-                css={{
-                    '&::-webkit-scrollbar': { width: '4px' },
-                    '&::-webkit-scrollbar-thumb': { background: '#CBD5E0', borderRadius: '2px' },
-                }}
-            >
-                <Flex flexWrap="wrap" gap={1}>
+            <div className={needsScroll ? 'max-h-[110px] overflow-y-auto' : 'overflow-visible'}>
+                <div className="flex flex-wrap gap-1">
                     {displayOptions.map((option) => {
                         const isSelected = selected.includes(option.value);
                         return (
-                            <Box
+                            <button
                                 key={option.value}
-                                as="button"
-                                px={1.5}
-                                py={0.5}
-                                borderRadius="sm"
-                                fontSize="2xs"
-                                fontWeight="medium"
-                                cursor="pointer"
-                                transition="all 0.15s"
-                                bg={isSelected ? `${color}.100` : 'gray.50'}
-                                color={isSelected ? `${color}.700` : 'gray.600'}
-                                border="1px solid"
-                                borderColor={isSelected ? `${color}.300` : 'gray.200'}
-                                _hover={{
-                                    bg: isSelected ? `${color}.200` : 'gray.100',
-                                    borderColor: isSelected ? `${color}.400` : 'gray.300',
-                                }}
+                                type="button"
+                                className={`inline-flex cursor-pointer items-center gap-0.5 border px-1.5 py-0.5 text-[10px] font-medium transition-all ${isSelected ? `${c.bg100} ${c.text700} ${c.border300} ${c.hoverBg200} ${c.hoverBorder400}` : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-slate-100'}`}
                                 onClick={() => handleToggle(option.value)}
-                                display="inline-flex"
-                                alignItems="center"
-                                gap={0.5}
                             >
                                 {isSelected && <LuCheck size={8} />}
                                 {option.label}
                                 {option.count !== undefined && (
-                                    <Text as="span" fontSize="2xs" color={isSelected ? `${color}.500` : 'gray.400'}>
+                                    <span className={`text-[10px] ${isSelected ? c.text500 : 'text-slate-400'}`}>
                                         ({option.count})
-                                    </Text>
+                                    </span>
                                 )}
-                            </Box>
+                            </button>
                         );
                     })}
                     {displayOptions.length === 0 && (
-                        <Text fontSize="2xs" color="gray.400">No options</Text>
+                        <span className="text-[10px] text-slate-400">No options</span>
                     )}
-                </Flex>
-            </Box>
-        </Box>
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -346,39 +343,28 @@ interface FilterChipProps {
 }
 
 const FilterChip: React.FC<FilterChipProps> = ({ chip, onRemove }) => {
+    const c = getFilterColorClasses(chip.color);
     return (
         <Badge
-            size="sm"
-            colorPalette={chip.color}
-            display="inline-flex"
-            alignItems="center"
-            gap={1}
-            px={2}
-            py={0.5}
-            borderRadius="md"
-            cursor="pointer"
-            transition="all 0.15s"
-            _hover={{
-                transform: 'scale(0.95)',
-                opacity: 0.8,
-            }}
+            colorScheme={c.badge}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 transition-all hover:scale-95 hover:opacity-80"
             onClick={(e) => {
                 e.stopPropagation();
                 onRemove(chip);
             }}
         >
-            <Text fontSize="xs">{chip.label}</Text>
-            <Box
-                as="button"
-                display="flex"
-                alignItems="center"
+            <span className="text-xs">{chip.label}</span>
+            <button
+                type="button"
+                title="Remove filter"
+                className="flex items-center"
                 onClick={(e) => {
                     e.stopPropagation();
                     onRemove(chip);
                 }}
             >
                 <LuX size={12} />
-            </Box>
+            </button>
         </Badge>
     );
 };
@@ -439,74 +425,51 @@ const DateCard: React.FC<DateCardProps> = ({
     const activePreset = getActivePreset();
 
     return (
-        <Box
-            bg="white"
-            border="1px solid"
-            borderColor={hasValue ? 'purple.200' : 'gray.200'}
-            borderRadius="md"
-            p={2}
-            minH="70px"
-            overflow="hidden"
-        >
+        <div className="min-h-[70px] overflow-hidden border border-slate-200 bg-white p-2">
             {/* Card Header */}
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
                     <LuCalendar size={10} />
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">
                         Date Range
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
                 {hasValue && (
-                    <Box
-                        as="button"
+                    <button
+                        type="button"
+                        title="Clear date range"
                         onClick={onClear}
-                        color="gray.400"
-                        _hover={{ color: 'gray.600' }}
-                        cursor="pointer"
-                        p={0.5}
+                        className="cursor-pointer p-0.5 text-slate-400 hover:text-slate-600"
                     >
                         <LuX size={10} />
-                    </Box>
+                    </button>
                 )}
-            </Flex>
+            </div>
 
             {/* Quick Presets */}
-            <Flex gap={1} mb={1.5} flexWrap="wrap">
+            <div className="mb-1.5 flex flex-wrap gap-1">
                 {DATE_PRESETS.map((preset) => {
                     const isActive = activePreset === preset.label;
                     return (
-                        <Box
+                        <button
                             key={preset.label}
-                            as="button"
-                            px={1.5}
-                            py={0.5}
-                            borderRadius="sm"
-                            fontSize="2xs"
-                            fontWeight="medium"
-                            cursor="pointer"
-                            transition="all 0.15s"
-                            bg={isActive ? 'purple.100' : 'gray.50'}
-                            color={isActive ? 'purple.700' : 'gray.600'}
-                            border="1px solid"
-                            borderColor={isActive ? 'purple.300' : 'gray.200'}
-                            _hover={{
-                                bg: isActive ? 'purple.200' : 'gray.100',
-                                borderColor: isActive ? 'purple.400' : 'gray.300',
-                            }}
+                            type="button"
+                            className={`cursor-pointer border px-1.5 py-0.5 text-[10px] font-medium transition-all ${isActive ? 'border-purple-300 bg-purple-100 text-purple-700 hover:border-purple-400 hover:bg-purple-200' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-slate-100'}`}
                             onClick={() => applyPreset(preset.months)}
                         >
                             {preset.label}
-                        </Box>
+                        </button>
                     );
                 })}
-            </Flex>
+            </div>
 
             {/* Date inputs - Vertical */}
-            <Flex direction="column" gap={1}>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500" mb={0.5}>From</Text>
+            <div className="flex flex-col gap-1">
+                <div>
+                    <span className="mb-0.5 block text-[10px] text-slate-500">From</span>
                     <input
                         type="date"
+                        title="From date"
                         value={dateFrom ? dateFrom.split('T')[0] : ''}
                         onChange={e => onChangeFrom(e.target.value ? `${e.target.value}T00:00` : '')}
                         style={{
@@ -519,11 +482,12 @@ const DateCard: React.FC<DateCardProps> = ({
                             backgroundColor: 'white',
                         }}
                     />
-                </Box>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500" mb={0.5}>To</Text>
+                </div>
+                <div>
+                    <span className="mb-0.5 block text-[10px] text-slate-500">To</span>
                     <input
                         type="date"
+                        title="To date"
                         value={dateTo ? dateTo.split('T')[0] : ''}
                         onChange={e => onChangeTo(e.target.value ? `${e.target.value}T23:59` : '')}
                         style={{
@@ -536,9 +500,9 @@ const DateCard: React.FC<DateCardProps> = ({
                             backgroundColor: 'white',
                         }}
                     />
-                </Box>
-            </Flex>
-        </Box>
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -611,45 +575,32 @@ const DropdownCard: React.FC<DropdownCardProps> = ({
     };
 
     return (
-        <Box
-            ref={cardRef}
-            bg="white"
-            border="1px solid"
-            borderColor={activeCount > 0 ? `${color}.200` : 'gray.200'}
-            borderRadius="md"
-            p={2}
-            minH="70px"
-            position="relative"
-        >
+        <div ref={cardRef} className={`relative min-h-[70px] border bg-white p-2 ${activeCount > 0 ? getFilterColorClasses(color).border200 : 'border-slate-200'}`}>
             {/* Card Header */}
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
-                    <Text fontSize="xs">{icon}</Text>
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs">{icon}</span>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">
                         {label}
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
                 {activeCount > 0 && (
-                    <Badge size="xs" colorPalette={color} borderRadius="full">
+                    <Badge colorScheme={getFilterColorClasses(color).badge} className="rounded-full">
                         {activeCount}
                     </Badge>
                 )}
-            </Flex>
+            </div>
 
             {/* Dropdown trigger */}
             <Button
-                size="xs"
+                size="sm"
                 variant="outline"
-                width="100%"
-                justifyContent="space-between"
+                className={`w-full justify-between ${isOpen ? getFilterColorClasses(color).border300 : 'border-slate-200'} ${activeCount > 0 ? getFilterColorClasses(color).bg50 : 'bg-white'} ${getFilterColorClasses(color).hoverBorder300}`}
                 onClick={onToggle}
-                borderColor={isOpen ? `${color}.300` : 'gray.200'}
-                bg={activeCount > 0 ? `${color}.50` : 'white'}
-                _hover={{ borderColor: `${color}.300` }}
             >
-                <Text fontSize="2xs" color={activeCount > 0 ? `${color}.700` : 'gray.600'} truncate>
+                <span className={`truncate text-[10px] ${activeCount > 0 ? getFilterColorClasses(color).text700 : 'text-slate-600'}`}>
                     {getSelectedDisplay()}
-                </Text>
+                </span>
                 <LuChevronDown
                     size={10}
                     style={{
@@ -662,30 +613,10 @@ const DropdownCard: React.FC<DropdownCardProps> = ({
 
             {/* Dropdown panel */}
             {isOpen && (
-                <Box
-                    ref={popoverRef}
-                    position="absolute"
-                    top="100%"
-                    left={0}
-                    right={0}
-                    mt={1}
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
-                    boxShadow="lg"
-                    zIndex={1000}
-                    overflow="hidden"
-                >
+                <div ref={popoverRef} className="absolute left-0 right-0 top-full z-[1000] mt-1 overflow-hidden border border-slate-200 bg-white shadow-lg">
                     {/* Search */}
-                    <Box p={1.5} borderBottom="1px solid" borderColor="gray.100">
-                        <Flex
-                            align="center"
-                            bg="gray.50"
-                            borderRadius="sm"
-                            px={1.5}
-                            gap={1}
-                        >
+                    <div className="border-b border-slate-100 p-1.5">
+                        <div className="flex items-center gap-1 bg-slate-50 px-1.5">
                             <LuSearch size={10} color="#A0AEC0" />
                             <input
                                 type="text"
@@ -701,67 +632,51 @@ const DropdownCard: React.FC<DropdownCardProps> = ({
                                     outline: 'none',
                                 }}
                             />
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
 
                     {/* Quick actions */}
-                    <Flex p={1.5} gap={1} borderBottom="1px solid" borderColor="gray.100">
-                        <Button size="xs" variant="ghost" onClick={() => onChange(filteredOptions.map(o => o.value))}>
-                            <Text fontSize="2xs">All</Text>
+                    <div className="flex gap-1 border-b border-slate-100 p-1.5">
+                        <Button size="sm" variant="ghost" onClick={() => onChange(filteredOptions.map(o => o.value))}>
+                            <span className="text-[10px]">All</span>
                         </Button>
-                        <Button size="xs" variant="ghost" onClick={() => onChange([])}>
-                            <Text fontSize="2xs">None</Text>
+                        <Button size="sm" variant="ghost" onClick={() => onChange([])}>
+                            <span className="text-[10px]">None</span>
                         </Button>
-                    </Flex>
+                    </div>
 
                     {/* Options */}
-                    <Box maxH="160px" overflowY="auto" p={1}>
+                    <div className="max-h-[160px] overflow-y-auto p-1">
                         {filteredOptions.map((option) => {
                             const isSelected = selected.includes(option.value);
+                            const c = getFilterColorClasses(color);
                             return (
-                                <Box
+                                <div
                                     key={option.value}
-                                    px={1.5}
-                                    py={1}
-                                    cursor="pointer"
-                                    borderRadius="sm"
-                                    bg={isSelected ? `${color}.50` : undefined}
-                                    _hover={{ bg: isSelected ? `${color}.100` : 'gray.50' }}
+                                    className={`flex cursor-pointer items-center gap-1.5 px-1.5 py-1 ${isSelected ? c.bg50 : ''} ${isSelected ? c.hoverBg100 : 'hover:bg-slate-50'}`}
                                     onClick={() => handleToggle(option.value)}
-                                    display="flex"
-                                    alignItems="center"
-                                    gap={1.5}
                                 >
-                                    <Box
-                                        w="12px"
-                                        h="12px"
-                                        borderRadius="sm"
-                                        border="1px solid"
-                                        borderColor={isSelected ? `${color}.500` : 'gray.300'}
-                                        bg={isSelected ? `${color}.500` : 'white'}
-                                        display="flex"
-                                        alignItems="center"
-                                        justifyContent="center"
-                                        flexShrink={0}
+                                    <div
+                                        className={`flex h-3 w-3 shrink-0 items-center justify-center border ${isSelected ? `${c.border500} ${c.bg500}` : 'border-slate-300 bg-white'}`}
                                     >
                                         {isSelected && <LuCheck size={8} color="white" />}
-                                    </Box>
-                                    <Text fontSize="2xs" flex={1}>{option.label}</Text>
+                                    </div>
+                                    <span className="flex-1 text-[10px]">{option.label}</span>
                                     {option.count !== undefined && (
-                                        <Text fontSize="2xs" color="gray.400">({option.count})</Text>
+                                        <span className="text-[10px] text-slate-400">({option.count})</span>
                                     )}
-                                </Box>
+                                </div>
                             );
                         })}
                         {filteredOptions.length === 0 && (
-                            <Text fontSize="2xs" color="gray.400" p={1.5} textAlign="center">
+                            <p className="p-1.5 text-center text-[10px] text-slate-400">
                                 No results
-                            </Text>
+                            </p>
                         )}
-                    </Box>
-                </Box>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -830,45 +745,32 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
     };
 
     return (
-        <Box
-            ref={cardRef}
-            bg="white"
-            border="1px solid"
-            borderColor={activeCount > 0 ? 'pink.200' : 'gray.200'}
-            borderRadius="md"
-            p={2}
-            minH="70px"
-            position="relative"
-        >
+        <div ref={cardRef} className={`relative min-h-[70px] border bg-white p-2 ${activeCount > 0 ? 'border-pink-200' : 'border-slate-200'}`}>
             {/* Card Header */}
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
-                    <Text fontSize="xs">📁</Text>
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs">📁</span>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">
                         Category
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
                 {activeCount > 0 && (
-                    <Badge size="xs" colorPalette="pink" borderRadius="full">
+                    <Badge colorScheme="red" className="rounded-full">
                         {activeCount}
                     </Badge>
                 )}
-            </Flex>
+            </div>
 
             {/* Dropdown trigger */}
             <Button
-                size="xs"
+                size="sm"
                 variant="outline"
-                width="100%"
-                justifyContent="space-between"
+                className={`w-full justify-between hover:border-pink-300 ${isOpen ? 'border-pink-300' : 'border-slate-200'} ${activeCount > 0 ? 'bg-pink-50' : 'bg-white'}`}
                 onClick={onToggle}
-                borderColor={isOpen ? 'pink.300' : 'gray.200'}
-                bg={activeCount > 0 ? 'pink.50' : 'white'}
-                _hover={{ borderColor: 'pink.300' }}
             >
-                <Text fontSize="2xs" color={activeCount > 0 ? 'pink.700' : 'gray.600'} truncate>
+                <span className={`truncate text-[10px] ${activeCount > 0 ? 'text-pink-700' : 'text-slate-600'}`}>
                     {getSelectedDisplay()}
-                </Text>
+                </span>
                 <LuChevronDown
                     size={10}
                     style={{
@@ -881,83 +783,50 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
 
             {/* Dropdown panel with tabs */}
             {isOpen && categoriesByDimension.length > 0 && (
-                <Box
-                    ref={popoverRef}
-                    position="absolute"
-                    top="100%"
-                    left={0}
-                    right={0}
-                    mt={1}
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
-                    boxShadow="lg"
-                    zIndex={1000}
-                    overflow="hidden"
-                    minW="220px"
-                >
-                    <Tabs.Root
-                        value={activeTab}
-                        onValueChange={(e) => setActiveTab(e.value)}
-                        size="sm"
-                    >
-                        <Tabs.List px={1.5} pt={1.5}>
+                <div ref={popoverRef} className="absolute left-0 right-0 top-full z-[1000] mt-1 min-w-[220px] overflow-hidden border border-slate-200 bg-white shadow-lg">
+                    <Tabs value={activeTab} onValueChange={setActiveTab}>
+                        <TabsList className="px-1.5 pt-1.5">
                             {categoriesByDimension.map(dim => {
                                 const count = selected.filter(s =>
                                     dim.categories.some(c => c.value === s)
                                 ).length;
                                 return (
-                                    <Tabs.Trigger key={dim.id} value={dim.id.toString()}>
-                                        <Text fontSize="2xs">{dim.label}</Text>
+                                    <TabsTrigger key={dim.id} value={dim.id.toString()}>
+                                        <span className="text-[10px]">{dim.label}</span>
                                         {count > 0 && (
-                                            <Badge size="xs" colorPalette="pink" ml={1}>{count}</Badge>
+                                            <Badge colorScheme="red" className="ml-1">{count}</Badge>
                                         )}
-                                    </Tabs.Trigger>
+                                    </TabsTrigger>
                                 );
                             })}
-                        </Tabs.List>
+                        </TabsList>
 
                         {categoriesByDimension.map(dim => (
-                            <Tabs.Content key={dim.id} value={dim.id.toString()}>
-                                <Box maxH="160px" overflowY="auto" p={1.5}>
-                                    <Flex flexWrap="wrap" gap={1}>
+                            <TabsContent key={dim.id} value={dim.id.toString()}>
+                                <div className="max-h-[160px] overflow-y-auto p-1.5">
+                                    <div className="flex flex-wrap gap-1">
                                         {currentCategories.map((cat) => {
                                             const isSelected = selected.includes(cat.value);
                                             return (
-                                                <Box
+                                                <button
                                                     key={cat.value}
-                                                    as="button"
-                                                    px={1.5}
-                                                    py={0.5}
-                                                    borderRadius="sm"
-                                                    fontSize="2xs"
-                                                    cursor="pointer"
-                                                    bg={isSelected ? 'pink.100' : 'gray.50'}
-                                                    color={isSelected ? 'pink.700' : 'gray.600'}
-                                                    border="1px solid"
-                                                    borderColor={isSelected ? 'pink.300' : 'gray.200'}
-                                                    _hover={{
-                                                        bg: isSelected ? 'pink.200' : 'gray.100',
-                                                    }}
+                                                    type="button"
+                                                    className={`inline-flex cursor-pointer items-center gap-0.5 border px-1.5 py-0.5 text-[10px] ${isSelected ? 'border-pink-300 bg-pink-100 text-pink-700 hover:bg-pink-200' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
                                                     onClick={() => handleToggle(cat.value)}
-                                                    display="inline-flex"
-                                                    alignItems="center"
-                                                    gap={0.5}
                                                 >
                                                     {isSelected && <LuCheck size={8} />}
                                                     {cat.label}
-                                                </Box>
+                                                </button>
                                             );
                                         })}
-                                    </Flex>
-                                </Box>
-                            </Tabs.Content>
+                                    </div>
+                                </div>
+                            </TabsContent>
                         ))}
-                    </Tabs.Root>
-                </Box>
+                    </Tabs>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -1398,9 +1267,9 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
 
     if (loading) {
         return (
-            <Box p={3} textAlign="center">
-                <Text fontSize="xs" color="gray.500">Loading filters...</Text>
-            </Box>
+            <div className="p-3 text-center">
+                <span className="text-xs text-slate-500">Loading filters...</span>
+            </div>
         );
     }
 
@@ -1413,120 +1282,103 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     const hiddenChipCount = Math.max(0, filterChips.length - visibleChipCount);
 
     return (
-        <Box mb={3}>
-            <Box
-                bg="gray.50"
-                borderRadius="md"
-                border="1px solid"
-                borderColor={hasChanges ? 'blue.300' : 'gray.200'}
-                overflow="visible"
-            >
+        <div className="mb-3">
+            <div className={`overflow-visible border bg-slate-50 ${hasChanges ? 'border-blue-300' : 'border-slate-200'}`}>
                 {/* Clickable Header */}
-                <Flex
-                    align="center"
-                    justify="space-between"
-                    p={3}
-                    cursor="pointer"
-                    transition="background 0.15s"
-                    _hover={{ bg: 'gray.100' }}
+                <div
+                    className="flex cursor-pointer items-center justify-between p-3 transition-colors hover:bg-slate-100"
                     onClick={() => onExpandedChange?.(!expanded)}
-                    borderRadius="md"
                 >
-                    <Flex align="center" gap={1.5} flex={1} minW={0} flexWrap="wrap">
-                        <Box transition="transform 0.2s" transform={expanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                        <div className="transition-transform duration-200" style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
                             <LuChevronDown size={14} />
-                        </Box>
+                        </div>
                         <LuFilter size={12} />
-                        <Text fontWeight="semibold" fontSize="xs">Filters</Text>
+                        <span className="text-xs font-semibold">Filters</span>
                         {activeFilterCount > 0 && (
-                            <Badge size="xs" colorPalette="blue">{activeFilterCount} active</Badge>
+                            <Badge colorScheme="blue">{activeFilterCount} active</Badge>
                         )}
                         {/* Inline filter chips */}
                         {hasActiveFilters && !expanded && visibleChips.map(chip => (
-                            <Box key={chip.id} onClick={(e) => e.stopPropagation()}>
+                            <div key={chip.id} onClick={(e) => e.stopPropagation()}>
                                 <FilterChip chip={chip} onRemove={handleRemoveChip} />
-                            </Box>
+                            </div>
                         ))}
                         {hasActiveFilters && !expanded && hiddenChipCount > 0 && (
-                            <Badge size="sm" colorPalette="gray" variant="outline">
+                            <Badge colorScheme="gray" className="border border-slate-200">
                                 +{hiddenChipCount}
                             </Badge>
                         )}
-                    </Flex>
-                    <Flex gap={1.5} flexShrink={0} onClick={(e) => e.stopPropagation()}>
+                    </div>
+                    <div className="flex shrink-0 gap-1.5" onClick={(e) => e.stopPropagation()}>
                         {canReset && (
                             <Button
-                                size="xs"
+                                size="sm"
                                 variant="ghost"
                                 onClick={handleReset}
-                                color="gray.500"
-                                _hover={{ color: 'gray.700' }}
+                                className="text-slate-500 hover:text-slate-700"
                             >
                                 <LuRotateCcw size={10} />
-                                <Text ml={0.5} fontSize="2xs">Clear All</Text>
+                                <span className="ml-0.5 text-[10px]">Clear All</span>
                             </Button>
                         )}
                         {hasChanges && (
                             <Button
-                                size="xs"
-                                colorPalette="blue"
+                                size="sm"
+                                colorScheme="blue"
                                 onClick={handleApply}
                             >
                                 <LuCheck size={10} />
-                                <Text ml={0.5} fontSize="2xs">Apply</Text>
+                                <span className="ml-0.5 text-[10px]">Apply</span>
                             </Button>
                         )}
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
 
                 {/* Chip Summary Row — only when expanded */}
                 {hasActiveFilters && expanded && (
-                    <Box
-                        ref={chipContainerRef}
-                        px={3}
-                        pb={2}
-                        pt={0}
-                    >
-                        <Flex flexWrap="wrap" gap={1.5} align="center">
+                    <div ref={chipContainerRef} className="px-3 pb-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                             {visibleChips.map(chip => (
                                 <FilterChip key={chip.id} chip={chip} onRemove={handleRemoveChip} />
                             ))}
                             {hiddenChipCount > 0 && (
-                                <Badge size="sm" colorPalette="gray" variant="outline">
+                                <Badge colorScheme="gray" className="border border-slate-200">
                                     and {hiddenChipCount} more
                                 </Badge>
                             )}
-                        </Flex>
+                        </div>
 
                         {/* Filter Metadata - Show counts */}
                         {filterMetadata && (
-                            <Text fontSize="2xs" color="gray.500" mt={1}>
+                            <p className="mt-1 text-[10px] text-slate-500">
                                 Showing {filterMetadata.filtered_count} of {filterMetadata.total_count} transactions
-                            </Text>
+                            </p>
                         )}
 
                         {/* Validation Warnings */}
                         {filterMetadata?.validation_warnings && filterMetadata.validation_warnings.length > 0 && (
-                            <Box mt={2}>
+                            <div className="mt-2">
                                 {filterMetadata.validation_warnings.map((warning, idx) => (
-                                    <Flex key={idx} gap={1} align="center" fontSize="2xs" color={warning.severity === 'error' ? 'red.600' : 'orange.600'}>
-                                        <Text fontWeight="semibold">⚠️</Text>
-                                        <Text>
+                                    <div key={idx} className={`flex items-center gap-1 text-[10px] ${warning.severity === 'error' ? 'text-red-600' : 'text-orange-600'}`}>
+                                        <span className="font-semibold">⚠️</span>
+                                        <span>
                                             <strong>{warning.filter_name}:</strong> {warning.reason} ({warning.provided_value})
-                                        </Text>
-                                    </Flex>
+                                        </span>
+                                    </div>
                                 ))}
-                            </Box>
+                            </div>
                         )}
-                    </Box>
+                    </div>
                 )}
+
 
                 {/* Filter Cards */}
                 {expanded && (
-                    <Box p={3} pt={hasActiveFilters ? 1 : 2} overflow="visible">
+                    <div className={`overflow-visible p-3 ${hasActiveFilters ? 'pt-1' : 'pt-2'}`}>
 
                         {/* Card Grid - Maximum columns */}
-                        <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4, xl: 5 }} gap={2}>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                             {/* Date Range Card - First */}
                             <DateCard
                                 dateFrom={localFilters.dateFrom}
@@ -1556,9 +1408,9 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                 );
 
                                 return isWideCard ? (
-                                    <GridItem key={def.key} colSpan={{ base: 1, md: 2 }}>
+                                    <div key={def.key} className="col-span-1 md:col-span-2">
                                         {filterCard}
-                                    </GridItem>
+                                    </div>
                                 ) : (
                                     filterCard
                                 );
@@ -1714,28 +1566,21 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
 
                             {/* Transaction ID filter card */}
                             {!hiddenSet.has('transactionIds') && (
-                                <Box
-                                    bg="white"
-                                    border="1px solid"
-                                    borderColor={localFilters.transactionIds?.length ? 'gray.300' : 'gray.200'}
-                                    borderRadius="md"
-                                    p={2}
-                                    minH="70px"
-                                >
-                                    <Flex align="center" justify="space-between" mb={1.5}>
-                                        <Flex align="center" gap={1}>
-                                            <Text fontSize="xs">#️⃣</Text>
-                                            <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+                                <div className={`min-h-[70px] border bg-white p-2 ${localFilters.transactionIds?.length ? 'border-slate-300' : 'border-slate-200'}`}>
+                                    <div className="mb-1.5 flex items-center justify-between">
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs">#️⃣</span>
+                                            <span className="text-[10px] font-semibold uppercase text-slate-600">
                                                 Transaction IDs
-                                            </Text>
-                                        </Flex>
+                                            </span>
+                                        </div>
                                         {localFilters.transactionIds?.length ? (
-                                            <Badge size="xs" colorPalette="gray" borderRadius="full">
+                                            <Badge colorScheme="gray" className="rounded-full">
                                                 {localFilters.transactionIds.length}
                                             </Badge>
                                         ) : null}
-                                    </Flex>
-                                    <Flex align="center" gap={1} px={1} py={1} bg="gray.50" borderRadius="sm">
+                                    </div>
+                                    <div className="flex items-center gap-1 bg-slate-50 px-1 py-1">
                                         <LuSearch size={10} color="#A0AEC0" />
                                         <input
                                             type="text"
@@ -1760,93 +1605,69 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                             }}
                                         />
                                         {localFilters.transactionIds?.length ? (
-                                            <Box
-                                                as="button"
+                                            <button
+                                                type="button"
+                                                title="Clear transaction IDs"
                                                 onClick={() => updateLocalFilter('transactionIds', undefined)}
-                                                cursor="pointer"
-                                                color="gray.400"
-                                                _hover={{ color: 'gray.600' }}
+                                                className="cursor-pointer text-slate-400 hover:text-slate-600"
                                             >
                                                 <LuX size={10} />
-                                            </Box>
+                                            </button>
                                         ) : null}
-                                    </Flex>
-                                    <Text fontSize="2xs" color="gray.400" mt={1}>
+                                    </div>
+                                    <p className="mt-1 text-[10px] text-slate-400">
                                         Comma-separated IDs
-                                    </Text>
-                                </Box>
+                                    </p>
+                                </div>
                             )}
 
                             {/* Fees filter card (Has Fees + Include Fee) */}
                             {!hiddenSet.has('hasFees') && (
-                                <Box
-                                    bg="white"
-                                    border="1px solid"
-                                    borderColor={localFilters.hasFees !== undefined || localFilters.includeFee !== undefined ? 'orange.200' : 'gray.200'}
-                                    borderRadius="md"
-                                    p={2}
-                                    minH="70px"
-                                >
-                                    <Flex align="center" justify="space-between" mb={1.5}>
-                                        <Flex align="center" gap={1}>
-                                            <Text fontSize="xs">💸</Text>
-                                            <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+                                <div className={`min-h-[70px] border bg-white p-2 ${localFilters.hasFees !== undefined || localFilters.includeFee !== undefined ? 'border-orange-200' : 'border-slate-200'}`}>
+                                    <div className="mb-1.5 flex items-center justify-between">
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs">💸</span>
+                                            <span className="text-[10px] font-semibold uppercase text-slate-600">
                                                 Fees
-                                            </Text>
-                                        </Flex>
+                                            </span>
+                                        </div>
                                         {(localFilters.hasFees !== undefined || localFilters.includeFee !== undefined) && (
-                                            <Badge size="xs" colorPalette="orange">active</Badge>
+                                            <Badge colorScheme="orange">active</Badge>
                                         )}
-                                    </Flex>
-                                    <Flex flexWrap="wrap" gap={1.5}>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
                                         <Badge
-                                            size="sm"
-                                            variant={localFilters.hasFees ? 'solid' : 'outline'}
-                                            colorPalette={localFilters.hasFees ? 'orange' : 'gray'}
-                                            cursor="pointer"
-                                            userSelect="none"
+                                            colorScheme={localFilters.hasFees ? 'orange' : 'gray'}
+                                            className={`cursor-pointer select-none hover:opacity-80 ${localFilters.hasFees ? '' : 'border border-slate-200'}`}
                                             onClick={() => updateLocalFilter('hasFees', localFilters.hasFees ? undefined : true)}
-                                            _hover={{ opacity: 0.8 }}
                                         >
                                             Has Fees{filterOptions?.has_fee_count != null ? ` (${filterOptions.has_fee_count})` : ''}
                                         </Badge>
                                         <Badge
-                                            size="sm"
-                                            variant={localFilters.hasFees === false ? 'solid' : 'outline'}
-                                            colorPalette={localFilters.hasFees === false ? 'red' : 'gray'}
-                                            cursor="pointer"
-                                            userSelect="none"
+                                            colorScheme={localFilters.hasFees === false ? 'red' : 'gray'}
+                                            className={`cursor-pointer select-none hover:opacity-80 ${localFilters.hasFees === false ? '' : 'border border-slate-200'}`}
                                             onClick={() => updateLocalFilter('hasFees', localFilters.hasFees === false ? undefined : false)}
-                                            _hover={{ opacity: 0.8 }}
                                         >
                                             No Fees{filterOptions?.total_count != null && filterOptions?.has_fee_count != null ? ` (${filterOptions.total_count - filterOptions.has_fee_count})` : ''}
                                         </Badge>
                                         <Badge
-                                            size="sm"
-                                            variant={localFilters.includeFee === true ? 'solid' : 'outline'}
-                                            colorPalette={localFilters.includeFee === true ? 'green' : 'gray'}
-                                            cursor="pointer"
-                                            userSelect="none"
+                                            colorScheme={localFilters.includeFee === true ? 'green' : 'gray'}
+                                            className={`cursor-pointer select-none hover:opacity-80 ${localFilters.includeFee === true ? '' : 'border border-slate-200'}`}
                                             title="Fee included in P&L cost basis calculation"
                                             onClick={() => updateLocalFilter('includeFee', localFilters.includeFee === true ? undefined : true)}
-                                            _hover={{ opacity: 0.8 }}
                                         >
                                             Fee in Cost Basis{filterOptions?.include_fee_count != null ? ` (${filterOptions.include_fee_count})` : ''}
                                         </Badge>
                                         <Badge
-                                            size="sm"
-                                            variant={localFilters.includeFee === false ? 'solid' : 'outline'}
-                                            colorPalette={localFilters.includeFee === false ? 'red' : 'gray'}
-                                            cursor="pointer"
-                                            userSelect="none"
+                                            colorScheme={localFilters.includeFee === false ? 'red' : 'gray'}
+                                            className={`cursor-pointer select-none hover:opacity-80 ${localFilters.includeFee === false ? '' : 'border border-slate-200'}`}
                                             title="Fee excluded from P&L cost basis calculation"
                                             onClick={() => updateLocalFilter('includeFee', localFilters.includeFee === false ? undefined : false)}
-                                            _hover={{ opacity: 0.8 }}
                                         >
                                             Fee Not in Cost Basis{filterOptions?.total_count != null && filterOptions?.include_fee_count != null ? ` (${filterOptions.total_count - filterOptions.include_fee_count})` : ''}
                                         </Badge>
-                                    </Flex>
-                                </Box>
+                                    </div>
+                                </div>
                             )}
 
                             {/* Counterparty filter card (non-owned / unmapped) */}
@@ -1860,73 +1681,44 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
 
                             {/* Bundle filter card (Has Bundle toggle + Pattern chips) */}
                             {!hiddenSet.has('hasBundle') && (
-                                <Box
-                                    bg="white"
-                                    border="1px solid"
-                                    borderColor={localFilters.hasBundle !== undefined || (localFilters.bundlePatterns?.length ?? 0) > 0 ? 'teal.200' : 'gray.200'}
-                                    borderRadius="md"
-                                    p={2}
-                                    minH="70px"
-                                >
-                                    <Flex align="center" justify="space-between" mb={1.5}>
-                                        <Flex align="center" gap={1}>
-                                            <Text fontSize="xs">📦</Text>
-                                            <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+                                <div className={`min-h-[70px] border bg-white p-2 ${localFilters.hasBundle !== undefined || (localFilters.bundlePatterns?.length ?? 0) > 0 ? 'border-teal-200' : 'border-slate-200'}`}>
+                                    <div className="mb-1.5 flex items-center justify-between">
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs">📦</span>
+                                            <span className="text-[10px] font-semibold uppercase text-slate-600">
                                                 Bundle
-                                            </Text>
-                                        </Flex>
+                                            </span>
+                                        </div>
                                         {(localFilters.hasBundle !== undefined || (localFilters.bundlePatterns?.length ?? 0) > 0) && (
-                                            <Badge size="xs" colorPalette="teal">active</Badge>
+                                            <Badge colorScheme="green">active</Badge>
                                         )}
-                                    </Flex>
-                                    <Flex flexWrap="wrap" gap={1.5}>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
                                         <Badge
-                                            size="sm"
-                                            variant={localFilters.hasBundle === true ? 'solid' : 'outline'}
-                                            colorPalette={localFilters.hasBundle === true ? 'teal' : 'gray'}
-                                            cursor="pointer"
-                                            userSelect="none"
+                                            colorScheme={localFilters.hasBundle === true ? 'green' : 'gray'}
+                                            className={`cursor-pointer select-none hover:opacity-80 ${localFilters.hasBundle === true ? '' : 'border border-slate-200'}`}
                                             onClick={() => updateLocalFilter('hasBundle', localFilters.hasBundle === true ? undefined : true)}
-                                            _hover={{ opacity: 0.8 }}
                                         >
                                             Has Bundle{filterOptions?.has_bundle_count != null ? ` (${filterOptions.has_bundle_count})` : ''}
                                         </Badge>
                                         <Badge
-                                            size="sm"
-                                            variant={localFilters.hasBundle === false ? 'solid' : 'outline'}
-                                            colorPalette={localFilters.hasBundle === false ? 'red' : 'gray'}
-                                            cursor="pointer"
-                                            userSelect="none"
+                                            colorScheme={localFilters.hasBundle === false ? 'red' : 'gray'}
+                                            className={`cursor-pointer select-none hover:opacity-80 ${localFilters.hasBundle === false ? '' : 'border border-slate-200'}`}
                                             onClick={() => updateLocalFilter('hasBundle', localFilters.hasBundle === false ? undefined : false)}
-                                            _hover={{ opacity: 0.8 }}
                                         >
                                             No Bundle{filterOptions?.total_count != null && filterOptions?.has_bundle_count != null ? ` (${filterOptions.total_count - filterOptions.has_bundle_count})` : ''}
                                         </Badge>
-                                    </Flex>
+                                    </div>
                                     {/* Bundle Pattern chips */}
                                     {(filterOptions?.bundle_patterns?.length ?? 0) > 0 && (
-                                        <Flex flexWrap="wrap" gap={1} mt={2}>
+                                        <div className="mt-2 flex flex-wrap gap-1">
                                             {(filterOptions?.bundle_patterns || []).map((opt) => {
                                                 const isSelected = (localFilters.bundlePatterns || []).includes(opt.value);
                                                 return (
-                                                    <Box
+                                                    <button
                                                         key={opt.value}
-                                                        as="button"
-                                                        px={1.5}
-                                                        py={0.5}
-                                                        borderRadius="sm"
-                                                        fontSize="2xs"
-                                                        fontWeight="medium"
-                                                        cursor="pointer"
-                                                        transition="all 0.15s"
-                                                        bg={isSelected ? 'teal.100' : 'gray.50'}
-                                                        color={isSelected ? 'teal.700' : 'gray.600'}
-                                                        border="1px solid"
-                                                        borderColor={isSelected ? 'teal.300' : 'gray.200'}
-                                                        _hover={{
-                                                            bg: isSelected ? 'teal.200' : 'gray.100',
-                                                            borderColor: isSelected ? 'teal.400' : 'gray.300',
-                                                        }}
+                                                        type="button"
+                                                        className={`inline-flex cursor-pointer items-center gap-0.5 border px-1.5 py-0.5 text-[10px] font-medium transition-all ${isSelected ? 'border-teal-300 bg-teal-100 text-teal-700 hover:border-teal-400 hover:bg-teal-200' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-slate-100'}`}
                                                         onClick={() => {
                                                             const current = localFilters.bundlePatterns || [];
                                                             const next = isSelected
@@ -1934,32 +1726,29 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                                                 : [...current, opt.value];
                                                             updateLocalFilter('bundlePatterns', next);
                                                         }}
-                                                        display="inline-flex"
-                                                        alignItems="center"
-                                                        gap={0.5}
                                                     >
                                                         {isSelected && <LuCheck size={8} />}
                                                         {opt.label}
                                                         {opt.count !== undefined && (
-                                                            <Text as="span" fontSize="2xs" color={isSelected ? 'teal.500' : 'gray.400'}>
+                                                            <span className={`text-[10px] ${isSelected ? 'text-teal-500' : 'text-slate-400'}`}>
                                                                 ({opt.count})
-                                                            </Text>
+                                                            </span>
                                                         )}
-                                                    </Box>
+                                                    </button>
                                                 );
                                             })}
-                                        </Flex>
+                                        </div>
                                     )}
-                                </Box>
+                                </div>
                             )}
 
                             {/* Extra filter cards from parent */}
                             {extraFilterCards}
-                        </SimpleGrid>
-                    </Box>
+                        </div>
+                    </div>
                 )}
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 };
 

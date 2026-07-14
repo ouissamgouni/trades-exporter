@@ -14,7 +14,7 @@
  */
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Badge, Box, Flex, Heading, IconButton, Slider, Text } from '@chakra-ui/react';
+import { Badge, Button } from '../ui/primitives';
 import { ResponsiveTreeMap } from '@nivo/treemap';
 import { FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import type { TimelinePoint, TimelineBreakdownItem } from '../../hooks/useChartData';
@@ -108,6 +108,55 @@ interface TreeNode {
     fees?: number;
     fullLabel?: string;
 }
+
+/** Dual-thumb range slider (no Chakra Slider primitive available) — two overlapping
+ * native range inputs; each input's track has pointer-events disabled, but its thumb
+ * (a genuinely circular control, allowed rounded-full exception) keeps pointer-events so
+ * only the thumbs are draggable. */
+const THUMB_CLASSES =
+    'pointer-events-none absolute inset-x-0 top-1/2 h-1 w-full -translate-y-1/2 appearance-none bg-transparent ' +
+    '[&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 ' +
+    '[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 ' +
+    '[&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow ' +
+    '[&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 ' +
+    '[&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-blue-500 ' +
+    '[&::-moz-range-thumb]:shadow';
+
+const DualRangeSlider: React.FC<{
+    value: [number, number];
+    onChange: (value: [number, number]) => void;
+}> = ({ value, onChange }) => {
+    const [lo, hi] = value;
+    return (
+        <div className="relative h-4 w-full">
+            <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 bg-gray-200" />
+            <div
+                className="absolute top-1/2 h-1 -translate-y-1/2 bg-blue-500"
+                style={{ left: `${lo}%`, right: `${100 - hi}%` }}
+            />
+            <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={lo}
+                onChange={(e) => onChange([Math.min(Number(e.target.value), hi), hi])}
+                className={THUMB_CLASSES}
+                aria-label="Range minimum"
+            />
+            <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={hi}
+                onChange={(e) => onChange([lo, Math.max(Number(e.target.value), lo)])}
+                className={THUMB_CLASSES}
+                aria-label="Range maximum"
+            />
+        </div>
+    );
+};
 
 export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
     points,
@@ -533,141 +582,104 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
     if (!points.length && !isLoading) return null;
 
     return (
-        <Box
-            p={4}
-            bg="white"
-            borderRadius={isFullscreen ? 'none' : 'md'}
-            border={isFullscreen ? 'none' : '1px solid'}
-            borderColor="gray.200"
-            {...(isFullscreen ? {
-                position: 'fixed',
-                inset: 0,
-                zIndex: 1500,
-                overflow: 'auto',
-            } : {})}
+        <div
+            className={`bg-white p-4 ${isFullscreen ? 'fixed inset-0 z-[1500] overflow-auto' : 'border border-gray-200'}`}
         >
             {/* Controls row */}
-            <Flex justify="space-between" align="center" mb={2} wrap="wrap" gap={2}>
-                <Heading size="sm" color="gray.700">Portfolio Treemap</Heading>
-                <Flex gap={3} align="center" wrap="wrap">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-gray-700">Portfolio Treemap</h2>
+                <div className="flex flex-wrap items-center gap-3">
                     {/* Group by */}
-                    <Flex gap={1} align="center">
-                        <Text fontSize="xs" color="gray.500">Group:</Text>
+                    <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">Group:</span>
                         {(['flat', 'category', 'account', 'currency'] as const).map(g => (
                             <Badge
                                 key={g}
-                                cursor="pointer"
-                                variant={groupBy === g ? 'solid' : 'outline'}
-                                colorPalette={groupBy === g ? 'blue' : 'gray'}
+                                colorScheme={groupBy === g ? 'blue' : 'gray'}
                                 onClick={() => handleGroupByChange(g)}
-                                size="sm"
-                                px={2}
+                                className={`cursor-pointer px-2 ${groupBy === g ? 'ring-2 ring-blue-400' : ''}`}
                             >
                                 {g === 'flat' ? 'Flat' : g === 'category' ? 'Category' : g === 'account' ? 'Account' : 'Currency'}
                             </Badge>
                         ))}
-                    </Flex>
+                    </div>
                     {/* Dimension selector — shown when groupBy is 'category' */}
                     {groupBy === 'category' && dimensions.length > 1 && (
-                        <Flex gap={1} align="center">
-                            <Text fontSize="xs" color="gray.500">Dim:</Text>
+                        <div className="flex items-center gap-1">
+                            <span className="text-xs text-gray-500">Dim:</span>
                             {dimensions.map(dim => (
                                 <Badge
                                     key={dim.id}
-                                    cursor="pointer"
-                                    variant={selectedDimensionId === dim.id ? 'solid' : 'outline'}
-                                    colorPalette={selectedDimensionId === dim.id ? 'teal' : 'gray'}
+                                    colorScheme={selectedDimensionId === dim.id ? 'green' : 'gray'}
                                     onClick={() => { setSelectedDimensionId(dim.id); setDrilldown(null); }}
-                                    size="sm"
-                                    px={2}
+                                    className={`cursor-pointer px-2 ${selectedDimensionId === dim.id ? 'ring-2 ring-green-400' : ''}`}
                                 >
                                     {dim.label}
                                 </Badge>
                             ))}
-                        </Flex>
+                        </div>
                     )}
                     {/* Size by */}
-                    <Flex gap={1} align="center">
-                        <Text fontSize="xs" color="gray.500">Size:</Text>
+                    <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">Size:</span>
                         {(Object.keys(SIZE_BY_LABELS) as SizeBy[]).map(s => (
                             <Badge
                                 key={s}
-                                cursor="pointer"
-                                variant={sizeBy === s ? 'solid' : 'outline'}
-                                colorPalette={sizeBy === s ? 'purple' : 'gray'}
+                                colorScheme={sizeBy === s ? 'purple' : 'gray'}
                                 onClick={() => { setSizeBy(s); setDrilldown(null); }}
-                                size="sm"
-                                px={2}
+                                className={`cursor-pointer px-2 ${sizeBy === s ? 'ring-2 ring-purple-400' : ''}`}
                             >
                                 {SIZE_BY_LABELS[s]}
                             </Badge>
                         ))}
-                    </Flex>
+                    </div>
                     {/* Fullscreen toggle */}
-                    <IconButton
+                    <Button
                         aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                        size="xs"
                         variant="ghost"
+                        colorScheme="gray"
                         onClick={() => setIsFullscreen(f => !f)}
+                        className="h-7 w-7 p-0"
                     >
                         {isFullscreen ? <FiMinimize2 size={14} /> : <FiMaximize2 size={14} />}
-                    </IconButton>
-                </Flex>
-            </Flex>
+                    </Button>
+                </div>
+            </div>
 
             {/* Breadcrumb for drill-down */}
             {drilldown && (
-                <Flex align="center" gap={1} mb={2}>
-                    <Text
-                        fontSize="xs"
-                        color="blue.500"
-                        cursor="pointer"
-                        fontWeight="semibold"
-                        _hover={{ textDecoration: 'underline' }}
+                <div className="mb-2 flex items-center gap-1">
+                    <span
+                        className="cursor-pointer text-xs font-semibold text-blue-500 hover:underline"
                         onClick={() => { setDrilldown(null); onDrilldownChange?.({ groupBy, drilldown: null }); }}
                     >
                         Portfolio
-                    </Text>
-                    <Text fontSize="xs" color="gray.400">/</Text>
-                    <Text fontSize="xs" color="gray.700" fontWeight="semibold">{drilldown}</Text>
-                </Flex>
+                    </span>
+                    <span className="text-xs text-gray-400">/</span>
+                    <span className="text-xs font-semibold text-gray-700">{drilldown}</span>
+                </div>
             )}
 
             {/* Range filter slider */}
             {dataRange.max > dataRange.min && (
-                <Flex align="center" gap={3} mb={2} px={1}>
-                    <Text fontSize="2xs" color="gray.500" whiteSpace="nowrap">
+                <div className="mb-2 flex items-center gap-3 px-1">
+                    <span className="whitespace-nowrap text-[10px] text-gray-500">
                         Range: {formatCompact(dataRange.min + (rangeFilter[0] / 100) * (dataRange.max - dataRange.min), baseCurrency)}
                         {' — '}
                         {formatCompact(dataRange.min + (rangeFilter[1] / 100) * (dataRange.max - dataRange.min), baseCurrency)}
-                    </Text>
-                    <Box flex="1" maxW="300px">
-                        <Slider.Root
-                            size="sm"
-                            min={0}
-                            max={100}
-                            step={1}
-                            value={rangeFilter}
-                            onValueChange={(details) => setRangeFilter(details.value as [number, number])}
-                        >
-                            <Slider.Control>
-                                <Slider.Track>
-                                    <Slider.Range />
-                                </Slider.Track>
-                                <Slider.Thumb index={0} />
-                                <Slider.Thumb index={1} />
-                            </Slider.Control>
-                        </Slider.Root>
-                    </Box>
-                </Flex>
+                    </span>
+                    <div className="max-w-[300px] flex-1">
+                        <DualRangeSlider value={rangeFilter} onChange={setRangeFilter} />
+                    </div>
+                </div>
             )}
 
             {isLoading ? (
-                <Box h={isFullscreen ? 'calc(100vh - 140px)' : '500px'} display="flex" alignItems="center" justifyContent="center">
-                    <Text fontSize="sm" color="gray.400">Loading...</Text>
-                </Box>
+                <div className={`flex items-center justify-center ${isFullscreen ? 'h-[calc(100vh-140px)]' : 'h-[500px]'}`}>
+                    <span className="text-sm text-gray-400">Loading...</span>
+                </div>
             ) : (
-                <Box h={isFullscreen ? 'calc(100vh - 140px)' : '500px'} onMouseMove={handleChartMouseMove}>
+                <div className={isFullscreen ? 'h-[calc(100vh-140px)]' : 'h-[500px]'} onMouseMove={handleChartMouseMove}>
                     <ResponsiveTreeMap
                         data={treeData}
                         identity="id"
@@ -705,18 +717,18 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                             if (data?.children) {
                                 // Group node (has children) — show aggregate name
                                 content = (
-                                    <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="160px">
-                                        <Text fontSize="xs" fontWeight="bold" color="gray.700">{node.node?.id}</Text>
-                                        <Text fontSize="xs" color="gray.600">
+                                    <div className="min-w-[160px] border border-gray-200 bg-white p-2 shadow-md">
+                                        <div className="text-xs font-bold text-gray-700">{node.node?.id}</div>
+                                        <div className="text-xs text-gray-600">
                                             {sizeBy === 'efficiency'
                                                 ? `ROI: ${Number(value).toFixed(1)}% (${pct}% of total)`
                                                 : `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })} ${sym} (${pct}%)`
                                             }
-                                        </Text>
+                                        </div>
                                         {groupBy !== 'flat' && !drilldown && (
-                                            <Text fontSize="2xs" color="blue.500" mt={1}>Click to drill down</Text>
+                                            <div className="mt-1 text-[10px] text-blue-500">Click to drill down</div>
                                         )}
-                                    </Box>
+                                    </div>
                                 );
                             } else {
                                 // Leaf node: stacked horizontal bar for cost vs return
@@ -729,52 +741,52 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                                 // Strip @accountName suffix from display ID
                                 const displayId = (node.node?.id as string)?.replace(/@.+$/, '') ?? node.node?.id;
                                 content = (
-                                    <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="220px">
-                                        <Text fontSize="xs" fontWeight="bold" color="gray.700">
+                                    <div className="min-w-[220px] border border-gray-200 bg-white p-2 shadow-md">
+                                        <div className="text-xs font-bold text-gray-700">
                                             {data?.fullLabel || displayId}
-                                        </Text>
+                                        </div>
                                         {data?.fullLabel && data.fullLabel !== displayId && (
-                                            <Text fontSize="xs" color="gray.500">{displayId}</Text>
+                                            <div className="text-xs text-gray-500">{displayId}</div>
                                         )}
-                                        <Text fontSize="xs" color="gray.600" mt={1}>
+                                        <div className="mt-1 text-xs text-gray-600">
                                             {sizeBy === 'efficiency'
                                                 ? `ROI: ${Number(value).toFixed(1)}% (${pct}% of total)`
                                                 : `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })} ${sym} (${pct}%)`
                                             }
-                                        </Text>
+                                        </div>
                                         {data?.marketValue != null && (
-                                            <Box borderTop="1px solid" borderColor="gray.100" mt={1} pt={1}>
+                                            <div className="mt-1 border-t border-gray-100 pt-1">
                                                 {/* Cost & Return values */}
-                                                <Flex justify="space-between" mb={0.5}>
-                                                    <Text fontSize="2xs" color="gray.500">Cost: {formatCompact(cost, baseCurrency)}</Text>
-                                                    <Text fontSize="2xs" color={ret >= 0 ? 'green.600' : 'red.600'}>
+                                                <div className="mb-0.5 flex justify-between">
+                                                    <span className="text-[10px] text-gray-500">Cost: {formatCompact(cost, baseCurrency)}</span>
+                                                    <span className={`text-[10px] ${ret >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                         Return: {ret >= 0 ? '+' : ''}{formatCompact(ret, baseCurrency)}
-                                                    </Text>
-                                                </Flex>
+                                                    </span>
+                                                </div>
                                                 {/* Stacked horizontal bar */}
-                                                <Flex h="10px" borderRadius="sm" overflow="hidden" mb={1}>
-                                                    <Box bg="#A0AEC0" w={`${costPct}%`} h="100%" />
-                                                    <Box bg={ret >= 0 ? '#48BB78' : '#F56565'} w={`${retPct}%`} h="100%" />
-                                                </Flex>
-                                                <Flex justify="space-between">
-                                                    <Text fontSize="xs" color="gray.500">
+                                                <div className="mb-1 flex h-[10px] overflow-hidden">
+                                                    <div className="h-full bg-[#A0AEC0]" style={{ width: `${costPct}%` }} />
+                                                    <div className={`h-full ${ret >= 0 ? 'bg-[#48BB78]' : 'bg-[#F56565]'}`} style={{ width: `${retPct}%` }} />
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-xs text-gray-500">
                                                         MV: {formatCompact(data.marketValue, baseCurrency)}
-                                                    </Text>
-                                                    <Text fontSize="xs" fontWeight="bold" color={totalReturnPct >= 0 ? 'green.600' : 'red.600'}>
+                                                    </span>
+                                                    <span className={`text-xs font-bold ${totalReturnPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                         ROI: {totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(1)}%
-                                                    </Text>
-                                                </Flex>
+                                                    </span>
+                                                </div>
                                                 {(data.fees ?? 0) > 0 && (
-                                                    <Text fontSize="2xs" color="orange.500">
+                                                    <div className="text-[10px] text-orange-500">
                                                         Fees: {formatCompact(data.fees, baseCurrency)}
-                                                    </Text>
+                                                    </div>
                                                 )}
-                                            </Box>
+                                            </div>
                                         )}
                                         {parentGroup && (
-                                            <Text fontSize="2xs" color="blue.500" mt={1}>Click to drill into {parentGroup}</Text>
+                                            <div className="mt-1 text-[10px] text-blue-500">Click to drill into {parentGroup}</div>
                                         )}
-                                    </Box>
+                                    </div>
                                 );
                             }
 
@@ -796,24 +808,24 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                             labels: { text: { fontSize: 11, fontWeight: 600 } },
                         }}
                     />
-                </Box>
+                </div>
             )}
 
             {/* Performance color legend */}
-            <Flex justify="center" mt={2} gap={4}>
-                <Flex align="center" gap={1}>
-                    <Box w="12px" h="12px" borderRadius="sm" bg={performanceColor(-50)} />
-                    <Text fontSize="xs" color="gray.500">Loss</Text>
-                </Flex>
-                <Flex align="center" gap={1}>
-                    <Box w="12px" h="12px" borderRadius="sm" bg={performanceColor(0)} />
-                    <Text fontSize="xs" color="gray.500">Break-even</Text>
-                </Flex>
-                <Flex align="center" gap={1}>
-                    <Box w="12px" h="12px" borderRadius="sm" bg={performanceColor(50)} />
-                    <Text fontSize="xs" color="gray.500">Gain</Text>
-                </Flex>
-            </Flex>
-        </Box>
+            <div className="mt-2 flex justify-center gap-4">
+                <div className="flex items-center gap-1">
+                    <div className="h-3 w-3" style={{ backgroundColor: performanceColor(-50) }} />
+                    <span className="text-xs text-gray-500">Loss</span>
+                </div>
+                <div className="flex items-center gap-1">
+                    <div className="h-3 w-3" style={{ backgroundColor: performanceColor(0) }} />
+                    <span className="text-xs text-gray-500">Break-even</span>
+                </div>
+                <div className="flex items-center gap-1">
+                    <div className="h-3 w-3" style={{ backgroundColor: performanceColor(50) }} />
+                    <span className="text-xs text-gray-500">Gain</span>
+                </div>
+            </div>
+        </div>
     );
 };

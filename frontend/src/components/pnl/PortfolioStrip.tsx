@@ -5,7 +5,7 @@
  * Visible when drilled into category/account/asset as a context anchor.
  */
 import React from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { Badge, Text } from '../ui/primitives';
 import { FiTrendingUp, FiTrendingDown, FiDollarSign, FiAlertTriangle, FiActivity, FiRefreshCw } from 'react-icons/fi';
 import { LuReceipt } from 'react-icons/lu';
 import { MetricItem, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
@@ -32,7 +32,7 @@ const Sparkline: React.FC<{ points: TimelinePoint[]; width?: number; height?: nu
     const isPositive = values[values.length - 1] >= values[0];
     return (
         <svg width={width} height={height} style={{ display: 'block', flexShrink: 0, border: '1px solid #E2E8F0', borderRadius: 4 }}>
-            <polyline fill="none" stroke={isPositive ? '#38A169' : '#E53E3E'} strokeWidth={1.5} points={coords} />
+            <polyline fill="none" stroke={isPositive ? '#16a34a' : '#dc2626'} strokeWidth={1.5} points={coords} />
         </svg>
     );
 };
@@ -66,19 +66,8 @@ export const PortfolioStrip: React.FC<PortfolioStripProps> = ({
     const priceTotal = freshCount + staleCount + errorCount;
 
     return (
-        <Flex
-            align="center"
-            gap={2}
-            px={3}
-            py={1.5}
-            mb={2}
-            bg="gray.50"
-            borderRadius="lg"
-            border="1px solid"
-            borderColor="gray.200"
-            flexWrap="wrap"
-        >
-            <Badge colorPalette="gray" variant="subtle" size="xs">Portfolio</Badge>
+        <div className="mb-2 flex flex-wrap items-center gap-2 border border-gray-200 bg-gray-50 px-3 py-1.5">
+            <Badge colorScheme="gray" className="text-xs">Portfolio</Badge>
 
             <MetricItem
                 label="ROI"
@@ -112,26 +101,26 @@ export const PortfolioStrip: React.FC<PortfolioStripProps> = ({
             <Sparkline points={timelinePoints} />
 
             {/* Mini badges */}
-            <Flex gap={1.5} ml="auto" align="center" flexShrink={0}>
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
                 {priceTotal > 0 && (
-                    <Flex align="center" gap={1} px={1.5} py={0.5} bg={errorCount > 0 ? 'red.50' : staleCount > 0 ? 'orange.50' : 'green.50'} borderRadius="md" flexShrink={0}>
-                        <FiRefreshCw size={10} color={errorCount > 0 ? 'var(--chakra-colors-red-500)' : staleCount > 0 ? 'var(--chakra-colors-orange-500)' : 'var(--chakra-colors-green-500)'} />
-                        <Text fontSize="xs" fontWeight="semibold" color={errorCount > 0 ? 'red.600' : staleCount > 0 ? 'orange.600' : 'green.600'}>{freshCount}/{priceTotal}</Text>
-                    </Flex>
+                    <div className={`flex shrink-0 items-center gap-1 px-1.5 py-0.5 ${errorCount > 0 ? 'bg-red-50' : staleCount > 0 ? 'bg-orange-50' : 'bg-green-50'}`}>
+                        <FiRefreshCw size={10} color={errorCount > 0 ? '#dc2626' : staleCount > 0 ? '#f97316' : '#16a34a'} />
+                        <Text className={`text-xs font-semibold ${errorCount > 0 ? 'text-red-600' : staleCount > 0 ? 'text-orange-600' : 'text-green-600'}`}>{freshCount}/{priceTotal}</Text>
+                    </div>
                 )}
                 {pnlSummary && pnlSummary.warning_count > 0 && (
-                    <Flex align="center" gap={1} px={1.5} py={0.5} bg={pnlSummary.error_count > 0 ? 'red.50' : 'orange.50'} borderRadius="md" flexShrink={0}>
-                        <FiAlertTriangle size={10} color={pnlSummary.error_count > 0 ? 'var(--chakra-colors-red-500)' : 'var(--chakra-colors-orange-500)'} />
-                        <Text fontSize="xs" fontWeight="semibold" color={pnlSummary.error_count > 0 ? 'red.600' : 'orange.600'}>{pnlSummary.warning_count}</Text>
-                    </Flex>
+                    <div className={`flex shrink-0 items-center gap-1 px-1.5 py-0.5 ${pnlSummary.error_count > 0 ? 'bg-red-50' : 'bg-orange-50'}`}>
+                        <FiAlertTriangle size={10} color={pnlSummary.error_count > 0 ? '#dc2626' : '#f97316'} />
+                        <Text className={`text-xs font-semibold ${pnlSummary.error_count > 0 ? 'text-red-600' : 'text-orange-600'}`}>{pnlSummary.warning_count}</Text>
+                    </div>
                 )}
                 {balanceHealth && balanceHealth.mismatchCount > 0 && (
-                    <Flex align="center" gap={1} px={1.5} py={0.5} bg="orange.50" borderRadius="md" flexShrink={0}>
-                        <FiActivity size={10} color="var(--chakra-colors-orange-500)" />
-                        <Text fontSize="xs" fontWeight="semibold" color="orange.600">{balanceHealth.mismatchCount}</Text>
-                    </Flex>
+                    <div className="flex shrink-0 items-center gap-1 bg-orange-50 px-1.5 py-0.5">
+                        <FiActivity size={10} color="#f97316" />
+                        <Text className="text-xs font-semibold text-orange-600">{balanceHealth.mismatchCount}</Text>
+                    </div>
                 )}
-            </Flex>
-        </Flex>
+            </div>
+        </div>
     );
 };

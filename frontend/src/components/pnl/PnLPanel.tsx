@@ -7,7 +7,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Box, Button, Dialog, Flex, Heading, Spinner, Text } from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Badge, Button, Spinner } from '../ui/primitives';
 import { FiRefreshCw, FiClock, FiSliders } from 'react-icons/fi';
 import { LuReceipt } from 'react-icons/lu';
 import { toaster } from '../ui/toaster';
@@ -276,11 +277,11 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
     const statusBadgeError = status === PNL_STATUS.ERROR ? error : calcServiceError;
 
     return (
-        <Box p={2} pt={1}>
+        <div className="p-2 pt-1">
             {/* Header: Title + Status Badge + Action Buttons */}
-            <Flex justify="space-between" align="center" mb={1.5} flexWrap="wrap" gap={1}>
-                <Flex align="center" gap={3} flex={1} minW={0}>
-                    <Heading size="lg" flexShrink={0}>📊 P&L</Heading>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <h1 className="flex-shrink-0 text-lg font-semibold">📊 P&L</h1>
                     <PnLStatusBadge
                         status={statusBadgeStatus}
                         staleReasons={staleReasons}
@@ -289,110 +290,96 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                         errorMessage={statusBadgeError}
                         compactWhenCompleted
                     />
-                </Flex>
+                </div>
 
-                <Flex gap={1} align="center">
+                <div className="flex items-center gap-1">
                     <Button
-                        size="xs"
-                        colorPalette={isCalcStale ? 'orange' : 'blue'}
+                        size="sm"
+                        colorScheme={isCalcStale ? 'gray' : 'blue'}
                         variant={isCalcStale ? 'solid' : 'outline'}
                         onClick={handleTriggerRefresh}
                         disabled={isCalcServiceCalculating}
                         loading={isCalcServiceCalculating}
-                        fontSize="xs"
+                        className={`h-6 px-2 text-xs ${isCalcStale ? 'border-orange-500 bg-orange-500 text-white hover:bg-orange-600' : ''}`}
                     >
                         <FiRefreshCw size={12} />
-                        <Text ml={0.5}>{isCalcStale ? 'Refresh' : currentVersionId ? 'Recalc' : 'Calculate'}</Text>
+                        <span className="ml-0.5">{isCalcStale ? 'Refresh' : currentVersionId ? 'Recalc' : 'Calculate'}</span>
                     </Button>
                     <Button
-                        size="xs"
+                        size="sm"
                         variant="outline"
                         onClick={() => dispatch({ type: 'SET_SHOW_CUSTOM_CALC_DRAWER', value: true })}
-                        fontSize="xs"
+                        className="h-6 px-2 text-xs"
                     >
                         <FiSliders size={12} />
-                        <Text ml={0.5}>Custom</Text>
+                        <span className="ml-0.5">Custom</span>
                     </Button>
                     <Button
-                        size="xs"
+                        size="sm"
                         variant="outline"
                         onClick={handleOpenHistory}
-                        fontSize="xs"
+                        className="h-6 px-2 text-xs"
                     >
                         <FiClock size={12} />
-                        <Text ml={0.5}>History</Text>
+                        <span className="ml-0.5">History</span>
                     </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {status === PNL_STATUS.ERROR && error && (
-                <Box mb={2} borderWidth="1px" borderColor="red.200" bg="red.50" color="red.700" px={3} py={2}>
-                    <Text fontSize="sm" fontWeight="medium">Unable to load P&L data</Text>
-                    <Text fontSize="xs" mt={0.5}>{error}</Text>
-                </Box>
+                <div className="mb-2 border border-red-200 bg-red-50 px-3 py-2 text-red-700">
+                    <div className="text-sm font-medium">Unable to load P&L data</div>
+                    <div className="mt-0.5 text-xs">{error}</div>
+                </div>
             )}
 
             {/* Show loading state while auto-loading initial version */}
             {status === 'idle' && !hasAutoLoaded.current && (
-                <Flex justify="center" align="center" py={16} bg="gray.50" borderRadius="md" direction="column" gap={3}>
+                <div className="flex flex-col items-center justify-center gap-3 bg-gray-50 py-16">
                     <Spinner size="lg" />
-                    <Text color="gray.500">Loading P&L...</Text>
-                </Flex>
+                    <div className="text-gray-500">Loading P&L...</div>
+                </div>
             )}
 
             {/* Show empty state only if no versions exist at all */}
             {status === 'idle' && hasAutoLoaded.current && availableVersions.length === 0 && (
-                <Box textAlign="center" py={16} bg="gray.50" borderRadius="md">
-                    <Heading size="md" color="gray.500" mb={2}>
+                <div className="bg-gray-50 py-16 text-center">
+                    <h2 className="mb-2 text-lg font-semibold text-gray-500">
                         No P&L Calculation Yet
-                    </Heading>
-                    <Text color="gray.400" mb={4}>
+                    </h2>
+                    <div className="mb-4 text-gray-400">
                         Click "Refresh P&L" to calculate using your default settings, or "Custom Calculation" for advanced options.
-                    </Text>
+                    </div>
                     <Button
-                        colorPalette="blue"
+                        colorScheme="blue"
                         onClick={handleTriggerRefresh}
                     >
                         Calculate P&L
                     </Button>
-                </Box>
+                </div>
             )}
 
             {(status === 'preview' || status === 'persisted') && summary && (
                 <>
                     {/* ═══ Tab bar — Portfolio / Tax + Status Cards ═══ */}
-                    <Flex gap={0} borderBottom="1px solid" borderColor="gray.200" align="center">
+                    <div className="flex items-center gap-0 border-b border-gray-200">
                         {(['portfolio', 'tax'] as const).map(tab => {
                             const active = pnlActiveTab === tab;
                             const label = tab === 'portfolio' ? 'Portfolio' : 'Tax (FR)';
                             return (
-                                <Box
+                                <div
                                     key={tab}
-                                    px={4}
-                                    py={2}
-                                    cursor="pointer"
-                                    fontWeight={active ? '600' : '400'}
-                                    fontSize="sm"
-                                    color={active ? 'blue.600' : 'gray.500'}
-                                    borderBottom="2px solid"
-                                    borderColor={active ? 'blue.500' : 'transparent'}
-                                    mb="-1px"
-                                    _hover={{ color: active ? 'blue.600' : 'gray.700', bg: 'gray.50' }}
-                                    transition="all 0.15s"
+                                    className={`mb-[-1px] flex flex-shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-4 py-2 text-sm transition-colors hover:bg-gray-50 ${active ? 'border-blue-500 font-semibold text-blue-600' : 'border-transparent font-normal text-gray-500 hover:text-gray-700'}`}
                                     onClick={() => dispatch({ type: 'SET_PNL_ACTIVE_TAB', tab })}
-                                    display="flex"
-                                    alignItems="center"
-                                    gap={1.5}
-                                    flexShrink={0}
                                 >
                                     {tab === 'tax' && <LuReceipt size={13} />}
                                     {label}
-                                </Box>
+                                </div>
                             );
                         })}
 
                         {/* Status cards — right of tab strip */}
-                        <Flex gap={1.5} ml="auto" align="center" flexShrink={0} py={1} pr={1}>
+                        <div className="ml-auto flex flex-shrink-0 items-center gap-1.5 py-1 pr-1">
                             <RefreshPricesCard
                                 onRefreshPrices={handleRefreshPrices}
                                 isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
@@ -417,12 +404,12 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                                 onDeltaThresholdChange={(v: number) => dispatch({ type: 'SET_DELTA_THRESHOLD', threshold: v })}
                                 unmappedLiveAssets={unmappedLiveAssets}
                             />
-                        </Flex>
-                    </Flex>
+                        </div>
+                    </div>
 
                     {/* ═══ Portfolio tab — ContextView (breadcrumb + tree sections) ═══ */}
                     {pnlActiveTab === 'portfolio' && (
-                        <Box>
+                        <div>
                             <ContextView
                                 scope={scope}
                                 onAssetClick={(id) => handleAssetClick(id)}
@@ -436,11 +423,11 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                                 isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
                                 onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
                             />
-                        </Box>
+                        </div>
                     )}
 
                     {/* ═══ Tax tab — French Tax ═══ */}
-                    <Box display={pnlActiveTab === 'tax' ? 'block' : 'none'} mt={0}>
+                    <div className={pnlActiveTab === 'tax' ? 'mt-0 block' : 'mt-0 hidden'}>
                         {currentVersionId && (
                             <FrenchTaxPanel
                                 versionId={currentVersionId}
@@ -450,7 +437,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                                 onAssetClick={(id) => handleAssetClick(id)}
                             />
                         )}
-                    </Box>
+                    </div>
                 </>
             )}
 
@@ -519,55 +506,53 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
             />
 
             {/* Data Health Confirmation Dialog */}
-            <Dialog.Root
+            <RadixDialog.Root
                 open={showHealthConfirm}
-                onOpenChange={(e) => { if (!e.open) dispatch({ type: 'SET_SHOW_HEALTH_CONFIRM', value: false }); }}
+                onOpenChange={(open) => { if (!open) dispatch({ type: 'SET_SHOW_HEALTH_CONFIRM', value: false }); }}
             >
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content>
-                        <Dialog.Header>
-                            <Dialog.Title>Data Health Issues Detected</Dialog.Title>
-                        </Dialog.Header>
-                        <Dialog.Body>
-                            <Text>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-gray-200 px-5 py-3">
+                            <RadixDialog.Title className="text-sm font-semibold">Data Health Issues Detected</RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <div className="text-sm">
                                 Found <strong>{healthCheckIssueCount}</strong> data issue
                                 {healthCheckIssueCount !== 1 ? 's' : ''}
                                 (linkage, transfers, etc.). P&L calculation may be incomplete or inaccurate.
-                            </Text>
-                            <Text mt={3} fontSize="sm" color="gray.600">
+                            </div>
+                            <div className="mt-3 text-sm text-gray-600">
                                 What would you like to do?
-                            </Text>
-                        </Dialog.Body>
-                        <Dialog.Footer>
-                            <Flex gap={2} width="100%">
-                                <Button
-                                    variant="outline"
-                                    onClick={() => dispatch({ type: 'SET_SHOW_HEALTH_CONFIRM', value: false })}
-                                    flex={1}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    colorPalette="orange"
-                                    variant="outline"
-                                    onClick={handleContinueAnyway}
-                                    flex={1}
-                                >
-                                    Continue Anyway
-                                </Button>
-                                <Button
-                                    colorPalette="blue"
-                                    onClick={handleFixIssues}
-                                    flex={1}
-                                >
-                                    Fix Issues
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Dialog.Root>
+                            </div>
+                        </div>
+                        <div className="flex gap-2 border-t border-gray-200 px-5 py-3">
+                            <Button
+                                variant="outline"
+                                onClick={() => dispatch({ type: 'SET_SHOW_HEALTH_CONFIRM', value: false })}
+                                className="flex-1"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                colorScheme="gray"
+                                variant="outline"
+                                onClick={handleContinueAnyway}
+                                className="flex-1 border-orange-500 text-orange-600 hover:bg-orange-50"
+                            >
+                                Continue Anyway
+                            </Button>
+                            <Button
+                                colorScheme="blue"
+                                onClick={handleFixIssues}
+                                className="flex-1"
+                            >
+                                Fix Issues
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Custom Calculation Drawer */}
             <SlidePanel
@@ -611,90 +596,82 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                 title="P&L Calculation History"
                 width="600px"
             >
-                <Box>
+                <div>
                     {isLoadingVersions ? (
-                        <Flex justify="center" py={8}>
+                        <div className="flex justify-center py-8">
                             <Spinner size="lg" />
-                        </Flex>
+                        </div>
                     ) : availableVersions.length === 0 ? (
-                        <Text color="gray.500" textAlign="center" py={8}>
+                        <div className="py-8 text-center text-gray-500">
                             No calculation history yet
-                        </Text>
+                        </div>
                     ) : (
-                        <Box display="flex" flexDirection="column" gap={2}>
-                            {availableVersions.map((version) => (
-                                <Box
-                                    key={version.version_id}
-                                    p={3}
-                                    borderWidth={1}
-                                    borderRadius="md"
-                                    borderColor={currentVersionId === version.version_id ? 'blue.400' : 'gray.200'}
-                                    bg={currentVersionId === version.version_id ? 'blue.50' : 'white'}
-                                    cursor="pointer"
-                                    _hover={{ borderColor: 'blue.300', bg: currentVersionId === version.version_id ? 'blue.50' : 'gray.50' }}
-                                    onClick={() => {
-                                        dispatch({ type: 'SET_SHOW_HISTORY_PANEL', value: false });
-                                        handleLoadVersion(version.version_id);
-                                    }}
-                                >
-                                    <Flex justify="space-between" align="center">
-                                        <Flex gap={2} align="center">
-                                            <Badge
-                                                colorPalette={version.status === 'committed' ? 'green' : 'gray'}
-                                                size="sm"
-                                                variant="subtle"
-                                            >
-                                                {version.status}
-                                            </Badge>
-                                            {version.trigger && (
-                                                <Badge
-                                                    colorPalette={
-                                                        version.trigger === 'refresh' ? 'blue' :
-                                                            version.trigger === 'manual' ? 'purple' : 'gray'
-                                                    }
-                                                    size="sm"
-                                                    variant="outline"
-                                                >
-                                                    {version.trigger}
+                        <div className="flex flex-col gap-2">
+                            {availableVersions.map((version) => {
+                                const isSelected = currentVersionId === version.version_id;
+                                return (
+                                    <div
+                                        key={version.version_id}
+                                        className={`cursor-pointer border p-3 hover:border-blue-300 ${isSelected ? 'border-blue-400 bg-blue-50 hover:bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}
+                                        onClick={() => {
+                                            dispatch({ type: 'SET_SHOW_HISTORY_PANEL', value: false });
+                                            handleLoadVersion(version.version_id);
+                                        }}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <Badge colorScheme={version.status === 'committed' ? 'green' : 'gray'}>
+                                                    {version.status}
                                                 </Badge>
-                                            )}
-                                            <Text fontSize="sm" fontWeight="medium">
-                                                {version.lot_method} / {version.lot_mode}
-                                            </Text>
-                                        </Flex>
-                                        <Text fontSize="xs" color="gray.500">
-                                            {version.created_at
-                                                ? formatDateTimeLocale(version.created_at)
-                                                : 'Unknown date'}
-                                        </Text>
-                                    </Flex>
-                                    {version.description && (
-                                        <Text fontSize="xs" color="gray.600" mt={1}>{version.description}</Text>
-                                    )}
-                                    <Flex gap={3} mt={1} flexWrap="wrap">
-                                        <Text fontSize="xs" color="gray.400">
-                                            Base: {version.base_currency_symbol || '—'}
-                                        </Text>
-                                        <Text fontSize="xs" color="gray.400">
-                                            ID: {version.version_id}
-                                        </Text>
-                                    </Flex>
-                                    <Text fontSize="xs" color="gray.400" mt={1}>
-                                        Tolerance: {version.residual_tolerance_pct === 0 ? 'OFF' : `${version.residual_tolerance_pct}%`} ·{' '}
-                                        Neg. balances: {version.allow_negative_balances ? '✓' : '✗'} ·{' '}
-                                        Swaps taxable: {version.crypto_swap_taxable ? '✓' : '✗'} ·{' '}
-                                        Fees taxable: {version.fee_taxable ? '✓' : '✗'}
-                                        {version.use_price_fallback !== undefined && (
-                                            <> · Price fallback: {version.use_price_fallback ? `✓ (${version.price_staleness_window_days ?? 7}d)` : '✗'}</>
+                                                {version.trigger && (
+                                                    <Badge
+                                                        colorScheme={
+                                                            version.trigger === 'refresh' ? 'blue' :
+                                                                version.trigger === 'manual' ? 'purple' : 'gray'
+                                                        }
+                                                        className="border border-current bg-transparent"
+                                                    >
+                                                        {version.trigger}
+                                                    </Badge>
+                                                )}
+                                                <span className="text-sm font-medium">
+                                                    {version.lot_method} / {version.lot_mode}
+                                                </span>
+                                            </div>
+                                            <span className="text-xs text-gray-500">
+                                                {version.created_at
+                                                    ? formatDateTimeLocale(version.created_at)
+                                                    : 'Unknown date'}
+                                            </span>
+                                        </div>
+                                        {version.description && (
+                                            <div className="mt-1 text-xs text-gray-600">{version.description}</div>
                                         )}
-                                    </Text>
-                                </Box>
-                            ))}
-                        </Box>
+                                        <div className="mt-1 flex flex-wrap gap-3">
+                                            <span className="text-xs text-gray-400">
+                                                Base: {version.base_currency_symbol || '—'}
+                                            </span>
+                                            <span className="text-xs text-gray-400">
+                                                ID: {version.version_id}
+                                            </span>
+                                        </div>
+                                        <div className="mt-1 text-xs text-gray-400">
+                                            Tolerance: {version.residual_tolerance_pct === 0 ? 'OFF' : `${version.residual_tolerance_pct}%`} ·{' '}
+                                            Neg. balances: {version.allow_negative_balances ? '✓' : '✗'} ·{' '}
+                                            Swaps taxable: {version.crypto_swap_taxable ? '✓' : '✗'} ·{' '}
+                                            Fees taxable: {version.fee_taxable ? '✓' : '✗'}
+                                            {version.use_price_fallback !== undefined && (
+                                                <> · Price fallback: {version.use_price_fallback ? `✓ (${version.price_staleness_window_days ?? 7}d)` : '✗'}</>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     )}
-                </Box>
+                </div>
             </SlidePanel>
-        </Box>
+        </div>
     );
 };
 

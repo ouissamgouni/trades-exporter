@@ -12,18 +12,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Flex,
-    Grid,
-    Heading,
-    Spinner,
-    Tabs,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner, Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/primitives';
 import { FiArrowLeft, FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
 import { AssetPnLRow, CostLot, CalculationUnit, CostLotEventEntry, AccountBalanceBreakdown, mapProcessedUnitToCalculationUnit } from './types';
 import { UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
@@ -61,52 +50,54 @@ interface AssetDetailViewProps {
 }
 
 /** Metric Card for sidebar */
+type MetricColor = 'blue' | 'green' | 'red' | 'orange' | 'gray';
+
+const METRIC_TEXT: Record<MetricColor, string> = {
+    blue: 'text-blue-600',
+    green: 'text-green-600',
+    red: 'text-red-600',
+    orange: 'text-orange-600',
+    gray: 'text-gray-900',
+};
+const METRIC_BORDER: Record<MetricColor, string> = {
+    blue: 'border-blue-600',
+    green: 'border-green-600',
+    red: 'border-red-600',
+    orange: 'border-orange-600',
+    gray: 'border-gray-300',
+};
+
 const MetricCard: React.FC<{
     label: string;
     value: string;
     subValue?: string;
-    color?: string;
+    color?: MetricColor;
     icon?: React.ReactNode;
-}> = ({ label, value, subValue, color, icon }) => (
-    <Box
-        p={3}
-        bg="gray.50"
-        borderRadius="md"
-        borderLeft="3px solid"
-        borderLeftColor={color || 'gray.300'}
-    >
-        <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wide">
+}> = ({ label, value, subValue, color = 'gray', icon }) => (
+    <div className={`border-l-[3px] bg-gray-50 p-3 ${METRIC_BORDER[color]}`}>
+        <div className="text-xs uppercase tracking-wide text-gray-500">
             {label}
-        </Text>
-        <Flex align="center" gap={2}>
+        </div>
+        <div className="flex items-center gap-2">
             {icon}
-            <Text fontSize="lg" fontWeight="bold" color={color} fontFamily="mono">
+            <span className={`font-mono text-lg font-bold ${METRIC_TEXT[color]}`}>
                 {value}
-            </Text>
-        </Flex>
+            </span>
+        </div>
         {subValue && (
-            <Text fontSize="xs" color="gray.500">{subValue}</Text>
+            <div className="text-xs text-gray-500">{subValue}</div>
         )}
-    </Box>
+    </div>
 );
 
 /** Loading placeholder when data is being fetched */
 const LoadingPlaceholder: React.FC<{ label: string }> = ({ label }) => (
-    <Flex
-        direction="column"
-        align="center"
-        justify="center"
-        py={12}
-        px={4}
-        bg="gray.50"
-        borderRadius="md"
-        minH="200px"
-    >
-        <Spinner size="lg" color="blue.500" mb={4} />
-        <Text fontSize="lg" fontWeight="medium" color="gray.600">
+    <div className="flex min-h-[200px] flex-col items-center justify-center bg-gray-50 px-4 py-12">
+        <Spinner size="lg" className="mb-4 text-blue-500" />
+        <div className="text-lg font-medium text-gray-600">
             Loading {label}...
-        </Text>
-    </Flex>
+        </div>
+    </div>
 );
 
 /** Embedded transactions table filtered to a specific asset (any role: base, price quote, fee quote) */
@@ -295,43 +286,43 @@ function AssetDetailView({
             });
     }, [activeTab, eventsLoaded, eventsLoading, versionId, assetPnlRow.asset.id]);
 
-    const unrealizedColor = assetPnlRow.unrealized_pnl >= 0 ? 'green.600' : 'red.600';
-    const realizedColor = assetPnlRow.realized_pnl >= 0 ? 'green.600' : 'red.600';
+    const unrealizedColor: MetricColor = assetPnlRow.unrealized_pnl >= 0 ? 'green' : 'red';
+    const realizedColor: MetricColor = assetPnlRow.realized_pnl >= 0 ? 'green' : 'red';
     const unrealizedPct = `${assetPnlRow.unrealized_pnl_pct >= 0 ? '+' : ''}${(assetPnlRow.unrealized_pnl_pct * 100).toFixed(2)}%`;
 
     // Debug logging for render
     console.log('[AssetDetailView] Rendering - unitsLoading:', unitsLoading, 'units:', calculationUnits.length, 'activeTab:', activeTab);
 
     return (
-        <Box>
+        <div>
             {/* Header with back button */}
-            <Flex align="center" gap={3} mb={4}>
+            <div className="mb-4 flex items-center gap-3">
                 <Button variant="ghost" size="sm" onClick={onBack}>
                     <FiArrowLeft />
                 </Button>
-                <Heading size="lg">
-                    <Badge colorPalette="blue" fontSize="xl" mr={2}>
+                <h2 className="flex items-center text-lg font-semibold">
+                    <Badge colorScheme="blue" className="mr-2 text-xl">
                         {assetPnlRow.asset.symbol}
                     </Badge>
-                    <Text as="span" fontSize="md" color="gray.500" fontWeight="normal">
+                    <span className="text-base font-normal text-gray-500">
                         {assetPnlRow.asset.label}
-                    </Text>
-                </Heading>
-            </Flex>
+                    </span>
+                </h2>
+            </div>
 
             {/* Split-View Layout */}
-            <Grid templateColumns={{ base: '1fr', lg: '220px 1fr' }} gap={4}>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
                 {/* Left Sidebar - Asset Summary */}
-                <Box>
-                    <Card.Root position="sticky" top="80px">
-                        <Card.Body p={3}>
+                <div>
+                    <div className="sticky top-20 border border-gray-200 bg-white">
+                        <div className="p-3">
                             {/* ── Balances ── */}
-                            <Flex align="center" gap={2} mb={3}>
-                                <Text fontSize="sm" fontWeight="bold" color="gray.600">
+                            <div className="mb-3 flex items-center gap-2">
+                                <span className="text-sm font-bold text-gray-600">
                                     Balances
-                                </Text>
-                                {liveBalanceLoading && <Spinner size="xs" color="gray.400" />}
-                            </Flex>
+                                </span>
+                                {liveBalanceLoading && <Spinner size="xs" className="text-gray-400" />}
+                            </div>
 
                             {/* Total row: P&L qty vs Live qty + delta */}
                             {(() => {
@@ -345,41 +336,41 @@ function AssetDetailView({
                                     // Check if any account had errors (partial data)
                                     const hasErrors = liveAccountErrors && liveAccountErrors.size > 0;
                                     return (
-                                        <Box p={2} bg="blue.50" borderRadius="md" mb={2}>
-                                            <Flex justify="space-between" align="center" mb={1}>
-                                                <Flex align="center" gap={1}>
-                                                    <Text fontSize="xs" color="gray.500" fontWeight="medium">Total</Text>
+                                        <div className="mb-2 bg-blue-50 p-2">
+                                            <div className="mb-1 flex items-center justify-between">
+                                                <div className="flex items-center gap-1">
+                                                    <span className="text-xs font-medium text-gray-500">Total</span>
                                                     {hasErrors && (
                                                         <Tooltip content={`${liveAccountErrors!.size} account(s) had fetch errors — live total may be incomplete`} openDelay={200}>
-                                                            <Text fontSize="xs" color="orange.500" cursor="help">⚠</Text>
+                                                            <span className="cursor-help text-xs text-orange-500">⚠</span>
                                                         </Tooltip>
                                                     )}
-                                                </Flex>
+                                                </div>
                                                 <DeltaBar delta={deltaInfo} liveQty={effectiveLive} pnlQty={assetPnlRow.quantity} size="sm" />
-                                            </Flex>
-                                            <Flex justify="space-between" align="center">
-                                                <Text fontSize="sm" fontFamily="mono" fontWeight="bold">
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="font-mono text-sm font-bold">
                                                     <ValueDisplay value={assetPnlRow.quantity} options={{ maxDecimals: 4 }} />
-                                                </Text>
-                                            </Flex>
-                                        </Box>
+                                                </span>
+                                            </div>
+                                        </div>
                                     );
                                 }
 
                                 // Fallback: still loading or no live data infrastructure
                                 return (
-                                    <Box p={3} bg="gray.50" borderRadius="md" mb={2}>
-                                        <Text fontSize="xs" color="gray.500" mb={1}>Quantity</Text>
-                                        <Text fontSize="sm" fontFamily="mono" fontWeight="bold" color="blue.600">
+                                    <div className="mb-2 bg-gray-50 p-3">
+                                        <div className="mb-1 text-xs text-gray-500">Quantity</div>
+                                        <span className="font-mono text-sm font-bold text-blue-600">
                                             <ValueDisplay value={assetPnlRow.quantity} options={{ maxDecimals: 4 }} />
-                                        </Text>
-                                    </Box>
+                                        </span>
+                                    </div>
                                 );
                             })()}
 
                             {/* Per-account rows */}
                             {accountBreakdown && accountBreakdown.length > 0 ? (
-                                <Flex direction="column" gap={1} mb={2}>
+                                <div className="mb-2 flex flex-col gap-1">
                                     {[...accountBreakdown]
                                         .sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty))
                                         .map((acct) => {
@@ -397,14 +388,14 @@ function AssetDetailView({
                                                 deltaNode = (
                                                     <Tooltip
                                                         content={
-                                                            <Box fontSize="xs">
-                                                                <Text fontWeight="medium" mb={1}>Fetch error:</Text>
-                                                                {acctErrors.map((err, i) => <Text key={i}>{err}</Text>)}
-                                                            </Box>
+                                                            <div className="text-xs">
+                                                                <div className="mb-1 font-medium">Fetch error:</div>
+                                                                {acctErrors.map((err, i) => <div key={i}>{err}</div>)}
+                                                            </div>
                                                         }
                                                         openDelay={200}
                                                     >
-                                                        <Text fontSize="xs" color="red.500" cursor="help">⚠ err</Text>
+                                                        <span className="cursor-help text-xs text-red-500">⚠ err</span>
                                                     </Tooltip>
                                                 );
                                             } else if (acctLiveQty != null) {
@@ -414,60 +405,58 @@ function AssetDetailView({
                                             }
 
                                             return (
-                                                <Box key={acct.account_id} px={1.5} py={1} bg="gray.50" borderRadius="md">
-                                                    <Flex align="center" gap={1} mb={0.5}>
-                                                        <Box w="6px" h="6px" borderRadius="full" bg={acctColor} flexShrink={0} />
-                                                        <Text
-                                                            fontSize="2xs"
-                                                            fontWeight="medium"
-                                                            truncate
-                                                            maxW="120px"
+                                                <div key={acct.account_id} className="bg-gray-50 px-1.5 py-1">
+                                                    <div className="mb-0.5 flex items-center gap-1">
+                                                        <span
+                                                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                                                            style={{ backgroundColor: acctColor }}
+                                                        />
+                                                        <span
+                                                            className="max-w-[120px] cursor-pointer truncate text-[10px] font-medium hover:text-blue-600 hover:underline"
                                                             title={acct.account_name}
-                                                            cursor="pointer"
-                                                            _hover={{ textDecoration: 'underline', color: 'blue.600' }}
                                                             onClick={() => {
                                                                 setTxAccountFilter(acct.account_id);
                                                                 setActiveTab('transactions');
                                                             }}
                                                         >
                                                             {acct.account_name}
-                                                        </Text>
-                                                    </Flex>
-                                                    <Flex justify="space-between" align="center">
-                                                        <Text fontSize="xs" fontFamily="mono"><ValueDisplay value={acct.qty} options={{ maxDecimals: 4 }} /></Text>
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="font-mono text-xs"><ValueDisplay value={acct.qty} options={{ maxDecimals: 4 }} /></span>
                                                         {deltaNode}
-                                                    </Flex>
-                                                </Box>
+                                                    </div>
+                                                </div>
                                             );
                                         })}
-                                </Flex>
+                                </div>
                             ) : (
-                                <Text fontSize="xs" color="gray.400" textAlign="center" py={2}>
+                                <div className="py-2 text-center text-xs text-gray-400">
                                     {liveBalanceLoading ? 'Loading...' : 'No account breakdown available'}
-                                </Text>
+                                </div>
                             )}
 
                             {/* Divider between balance rows and monetary metrics */}
-                            <Box borderTop="1px solid" borderColor="gray.200" my={2} />
+                            <div className="my-2 border-t border-gray-200" />
 
-                            <Flex direction="column" gap={2}>
+                            <div className="flex flex-col gap-2">
                                 <MetricCard
                                     label="Market Value"
                                     value={formatQuantityWithCurrency(assetPnlRow.market_value, baseCurrency)}
                                     subValue={assetPnlRow.unit_value != null ? `@ ${formatQuantityWithCurrency(assetPnlRow.unit_value, baseCurrency)}/unit` : undefined}
-                                    color="blue.600"
+                                    color="blue"
                                 />
                                 <MetricCard
                                     label="Cost Basis"
                                     value={formatQuantityWithCurrency(assetPnlRow.cost_basis, baseCurrency)}
                                     subValue={assetPnlRow.unit_cost != null && assetPnlRow.unit_cost > 0 ? `@ ${formatQuantityWithCurrency(assetPnlRow.unit_cost, baseCurrency)}/unit` : undefined}
                                 />
-                            </Flex>
+                            </div>
 
-                            <Text fontSize="sm" fontWeight="bold" color="gray.600" mt={4} mb={3}>
+                            <div className="mb-3 mt-4 text-sm font-bold text-gray-600">
                                 P&L Summary
-                            </Text>
-                            <Flex direction="column" gap={2}>
+                            </div>
+                            <div className="flex flex-col gap-2">
                                 <MetricCard
                                     label="Unrealized P&L"
                                     value={formatQuantityWithCurrency(assetPnlRow.unrealized_pnl, baseCurrency)}
@@ -491,133 +480,131 @@ function AssetDetailView({
                                 <MetricCard
                                     label="Total Fees"
                                     value={formatQuantityWithCurrency(assetPnlRow.total_fees, baseCurrency)}
-                                    color="orange.600"
+                                    color="orange"
                                 />
-                            </Flex>
+                            </div>
 
-                            <Text fontSize="sm" fontWeight="bold" color="gray.600" mt={4} mb={3}>
+                            <div className="mb-3 mt-4 text-sm font-bold text-gray-600">
                                 Activity
-                            </Text>
-                            <Flex direction="column" gap={2}>
-                                <Box p={3} bg="gray.50" borderRadius="md">
-                                    <Flex justify="space-between" align="center">
-                                        <Text fontSize="xs" color="gray.500">Cost Lots</Text>
-                                        <Badge size="sm" colorPalette="blue">{assetPnlRow.lot_count}</Badge>
-                                    </Flex>
-                                </Box>
-                                <Box p={3} bg="gray.50" borderRadius="md">
-                                    <Flex justify="space-between" align="center">
-                                        <Text fontSize="xs" color="gray.500">Realized Events</Text>
-                                        <Badge size="sm" colorPalette="green">{assetPnlRow.realized_event_count}</Badge>
-                                    </Flex>
-                                </Box>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <div className="bg-gray-50 p-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs text-gray-500">Cost Lots</span>
+                                        <Badge colorScheme="blue">{assetPnlRow.lot_count}</Badge>
+                                    </div>
+                                </div>
+                                <div className="bg-gray-50 p-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs text-gray-500">Realized Events</span>
+                                        <Badge colorScheme="green">{assetPnlRow.realized_event_count}</Badge>
+                                    </div>
+                                </div>
                                 {assetPnlRow.warning_count > 0 && (
-                                    <Box p={3} bg="orange.50" borderRadius="md">
-                                        <Flex justify="space-between" align="center">
-                                            <Text fontSize="xs" color="orange.600">Warnings</Text>
-                                            <Badge size="sm" colorPalette="orange">{assetPnlRow.warning_count}</Badge>
-                                        </Flex>
-                                    </Box>
+                                    <div className="bg-orange-50 p-3">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs text-orange-600">Warnings</span>
+                                            <Badge colorScheme="orange">{assetPnlRow.warning_count}</Badge>
+                                        </div>
+                                    </div>
                                 )}
-                            </Flex>
-                        </Card.Body>
-                    </Card.Root>
-                </Box>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 {/* Right Main Area - Tabs */}
-                <Box minW={0} overflow="hidden">
-                    <Card.Root>
-                        <Card.Body p={0}>
-                            <Tabs.Root
-                                value={activeTab}
-                                onValueChange={(e) => setActiveTab(e.value as 'units' | 'events' | 'timeline' | 'transactions')}
-                            >
-                                <Tabs.List px={4} pt={2}>
-                                    <Tabs.Trigger value="units">
-                                        Calculation Units
-                                        {!unitsLoading && (
-                                            <Badge ml={2} size="sm" colorPalette="purple">
-                                                {calculationUnits.length}
-                                            </Badge>
-                                        )}
-                                    </Tabs.Trigger>
-                                    <Tabs.Trigger value="events">
-                                        Cost Lot Events
-                                        {eventsLoaded && (
-                                            <Badge ml={2} size="sm" colorPalette="blue">
-                                                {lotEvents.length}
-                                            </Badge>
-                                        )}
-                                    </Tabs.Trigger>
-                                    <Tabs.Trigger value="timeline">
-                                        Balance Timeline
-                                    </Tabs.Trigger>
-                                    <Tabs.Trigger value="transactions">
-                                        Transactions
-                                    </Tabs.Trigger>
-                                </Tabs.List>
-
-                                <Tabs.Content value="units" p={0}>
-                                    {unitsLoading ? (
-                                        <LoadingPlaceholder label="Calculation Units" />
-                                    ) : (
-                                        <UnitsTab
-                                            units={calculationUnits}
-                                            baseCurrency={baseCurrency}
-                                            costLots={costLots}
-                                            versionId={versionId}
-                                            onTransactionClick={onTransactionClick}
-                                        />
+                <div className="min-w-0 overflow-hidden">
+                    <div className="border border-gray-200 bg-white">
+                        <Tabs
+                            value={activeTab}
+                            onValueChange={(v) => setActiveTab(v as 'units' | 'events' | 'timeline' | 'transactions')}
+                        >
+                            <TabsList className="px-4 pt-2">
+                                <TabsTrigger value="units">
+                                    Calculation Units
+                                    {!unitsLoading && (
+                                        <Badge colorScheme="purple" className="ml-2">
+                                            {calculationUnits.length}
+                                        </Badge>
                                     )}
-                                </Tabs.Content>
+                                </TabsTrigger>
+                                <TabsTrigger value="events">
+                                    Cost Lot Events
+                                    {eventsLoaded && (
+                                        <Badge colorScheme="blue" className="ml-2">
+                                            {lotEvents.length}
+                                        </Badge>
+                                    )}
+                                </TabsTrigger>
+                                <TabsTrigger value="timeline">
+                                    Balance Timeline
+                                </TabsTrigger>
+                                <TabsTrigger value="transactions">
+                                    Transactions
+                                </TabsTrigger>
+                            </TabsList>
 
-                                <Tabs.Content value="events" p={0}>
-                                    <CostLotEventsTab
-                                        versionId={versionId}
+                            <TabsContent value="units">
+                                {unitsLoading ? (
+                                    <LoadingPlaceholder label="Calculation Units" />
+                                ) : (
+                                    <UnitsTab
+                                        units={calculationUnits}
                                         baseCurrency={baseCurrency}
-                                        onTransactionClick={onTransactionClick}
-                                        assetId={assetPnlRow.asset.id ?? undefined}
-                                    />
-                                </Tabs.Content>
-
-                                <Tabs.Content value="timeline" p={4}>
-                                    {!eventsLoaded ? (
-                                        <LoadingPlaceholder label="Balance Timeline" />
-                                    ) : (
-                                        <Box>
-                                            <Flex justify="flex-end" mb={4}>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    onClick={() => setTimelineViewMode(timelineViewMode === 'by-account' ? 'total' : 'by-account')}
-                                                >
-                                                    View: {timelineViewMode === 'by-account' ? 'By Account' : 'Total'}
-                                                </Button>
-                                            </Flex>
-                                            <BalanceTimelineChart
-                                                events={lotEvents}
-                                                baseCurrency={baseCurrency}
-                                                viewMode={timelineViewMode}
-                                                assetSymbol={assetPnlRow.asset.symbol || 'Unknown'}
-                                            />
-                                        </Box>
-                                    )}
-                                </Tabs.Content>
-
-                                <Tabs.Content value="transactions" p={0}>
-                                    <AssetTransactionsTab
+                                        costLots={costLots}
                                         versionId={versionId}
-                                        assetId={assetPnlRow.asset.id!}
-                                        accountId={txAccountFilter}
                                         onTransactionClick={onTransactionClick}
                                     />
-                                </Tabs.Content>
-                            </Tabs.Root>
-                        </Card.Body>
-                    </Card.Root>
-                </Box>
-            </Grid>
-        </Box>
+                                )}
+                            </TabsContent>
+
+                            <TabsContent value="events">
+                                <CostLotEventsTab
+                                    versionId={versionId}
+                                    baseCurrency={baseCurrency}
+                                    onTransactionClick={onTransactionClick}
+                                    assetId={assetPnlRow.asset.id ?? undefined}
+                                />
+                            </TabsContent>
+
+                            <TabsContent value="timeline" className="p-4">
+                                {!eventsLoaded ? (
+                                    <LoadingPlaceholder label="Balance Timeline" />
+                                ) : (
+                                    <div>
+                                        <div className="mb-4 flex justify-end">
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => setTimelineViewMode(timelineViewMode === 'by-account' ? 'total' : 'by-account')}
+                                            >
+                                                View: {timelineViewMode === 'by-account' ? 'By Account' : 'Total'}
+                                            </Button>
+                                        </div>
+                                        <BalanceTimelineChart
+                                            events={lotEvents}
+                                            baseCurrency={baseCurrency}
+                                            viewMode={timelineViewMode}
+                                            assetSymbol={assetPnlRow.asset.symbol || 'Unknown'}
+                                        />
+                                    </div>
+                                )}
+                            </TabsContent>
+
+                            <TabsContent value="transactions">
+                                <AssetTransactionsTab
+                                    versionId={versionId}
+                                    assetId={assetPnlRow.asset.id!}
+                                    accountId={txAccountFilter}
+                                    onTransactionClick={onTransactionClick}
+                                />
+                            </TabsContent>
+                        </Tabs>
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 }
 

@@ -1,22 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import {
     Badge,
-    Box,
+    type BadgeColorScheme,
     Button,
-    Flex,
     Heading,
-    IconButton,
-    NativeSelect,
     Spinner,
-    Switch,
-    Table,
     Text,
-} from '@chakra-ui/react';
+} from './ui/primitives';
 import { FiRefreshCw, FiTrash2, FiChevronDown, FiChevronRight } from 'react-icons/fi';
 
 import { ConnectorWithAccount, ConnectorTypeInfo, API_URL } from '../types';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
+
+const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toBadgeColor = (c: string): BadgeColorScheme =>
+    (VALID_BADGE_COLORS as string[]).includes(c) ? (c as BadgeColorScheme) : 'gray';
+
+interface ToggleSwitchProps {
+    checked: boolean;
+    onChange: () => void;
+}
+
+const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ checked, onChange }) => (
+    <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        className={`relative inline-flex h-4 w-7 items-center transition-colors ${checked ? 'bg-green-500' : 'bg-gray-300'}`}
+    >
+        <span
+            className={`inline-block h-3 w-3 transform bg-white transition-transform ${checked ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+        />
+    </button>
+);
 
 interface ConnectorTypeGroup {
     type: string;
@@ -171,15 +189,15 @@ const ConnectorsManager: React.FC = () => {
     const getStatusBadge = (status?: string) => {
         switch (status) {
             case 'success':
-                return <Badge colorPalette="green">Success</Badge>;
+                return <Badge colorScheme="green">Success</Badge>;
             case 'warning':
-                return <Badge colorPalette="orange">Warning</Badge>;
+                return <Badge colorScheme="orange">Warning</Badge>;
             case 'failed':
-                return <Badge colorPalette="red">Failed</Badge>;
+                return <Badge colorScheme="red">Failed</Badge>;
             case 'running':
-                return <Badge colorPalette="blue">Running</Badge>;
+                return <Badge colorScheme="blue">Running</Badge>;
             default:
-                return <Badge colorPalette="gray">Pending</Badge>;
+                return <Badge colorScheme="gray">Pending</Badge>;
         }
     };
 
@@ -194,7 +212,7 @@ const ConnectorsManager: React.FC = () => {
         };
 
         return (
-            <Badge colorPalette={colors[info.category] || 'gray'} size="sm">
+            <Badge colorScheme={toBadgeColor(colors[info.category] || 'gray')} className="text-[10px]">
                 {info.category.toUpperCase()}
             </Badge>
         );
@@ -208,14 +226,14 @@ const ConnectorsManager: React.FC = () => {
     const getAccountTypeBadge = (accountType: string) => {
         const colors: Record<string, string> = {
             cex: 'blue',
-            dex: 'cyan',
+            dex: 'blue',
             wallet: 'purple',
             broker: 'green',
-            bank: 'teal',
+            bank: 'green',
             investment: 'orange',
         };
         return (
-            <Badge colorPalette={colors[accountType] || 'gray'} size="sm">
+            <Badge colorScheme={toBadgeColor(colors[accountType] || 'gray')} className="text-[10px]">
                 {accountType.toUpperCase()}
             </Badge>
         );
@@ -226,31 +244,31 @@ const ConnectorsManager: React.FC = () => {
 
     if (loading && connectors.length === 0) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading connectors...</Text>
-            </Box>
+            <div className="bg-gray-50 py-10 text-center">
+                <Spinner size="lg" />
+                <Text className="mt-4 block">Loading connectors...</Text>
+            </div>
         );
     }
 
     if (error) {
         return (
-            <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                <Text color="red.600">Error: {error}</Text>
-            </Box>
+            <div className="border border-red-200 bg-red-50 py-10 text-center">
+                <Text className="text-red-600">Error: {error}</Text>
+            </div>
         );
     }
 
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="md" mb={1}>Connectors by Type</Heading>
-                    <Text color="gray.600" fontSize="sm">
+        <div>
+            <div className="mb-6 flex items-center justify-between border-b border-gray-200 pb-2">
+                <div>
+                    <Heading as="h2" className="mb-1 text-base">Connectors by Type</Heading>
+                    <Text className="text-sm text-gray-600">
                         View connectors grouped by type. Expand to see linked accounts and manage individual connectors.
                     </Text>
-                </Box>
-                <Flex gap={2}>
+                </div>
+                <div className="flex gap-2">
                     <Button onClick={expandAll} variant="outline" size="sm">
                         Expand All
                     </Button>
@@ -260,39 +278,37 @@ const ConnectorsManager: React.FC = () => {
                     <Button onClick={fetchConnectors} variant="outline" size="sm">
                         <FiRefreshCw /> Refresh
                     </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {/* Filters */}
-            <Flex gap={4} mb={6} align="center" flexWrap="wrap">
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Status:</Text>
-                    <NativeSelect.Root size="sm" width="auto">
-                        <NativeSelect.Field
-                            value={enabledFilter}
-                            onChange={e => setEnabledFilter(e.target.value)}
-                        >
-                            <option value="">All</option>
-                            <option value="true">Enabled Only</option>
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Flex>
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Category:</Text>
-                    <NativeSelect.Root size="sm" width="auto">
-                        <NativeSelect.Field
-                            value={categoryFilter}
-                            onChange={e => setCategoryFilter(e.target.value)}
-                        >
-                            <option value="">All Categories</option>
-                            {uniqueCategories.map(cat => (
-                                <option key={cat} value={cat}>
-                                    {cat.toUpperCase()}
-                                </option>
-                            ))}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Flex>
+            <div className="mb-6 flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                    <Text className="text-sm font-medium">Status:</Text>
+                    <select
+                        className="h-8 w-auto border border-gray-300 px-2 text-sm"
+                        value={enabledFilter}
+                        onChange={e => setEnabledFilter(e.target.value)}
+                    >
+                        <option value="">All</option>
+                        <option value="true">Enabled Only</option>
+                    </select>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Text className="text-sm font-medium">Category:</Text>
+                    <select
+                        className="h-8 w-auto border border-gray-300 px-2 text-sm"
+                        value={categoryFilter}
+                        onChange={e => setCategoryFilter(e.target.value)}
+                    >
+                        <option value="">All Categories</option>
+                        {uniqueCategories.map(cat => (
+                            <option key={cat} value={cat}>
+                                {cat.toUpperCase()}
+                            </option>
+                        ))}
+                    </select>
+                </div>
                 {(enabledFilter || categoryFilter) && (
                     <Button
                         size="sm"
@@ -305,161 +321,152 @@ const ConnectorsManager: React.FC = () => {
                         Clear Filters
                     </Button>
                 )}
-            </Flex>
+            </div>
 
             {/* Connectors Table - Grouped by Type */}
             {groupedConnectors.length === 0 ? (
-                <Box p={8} textAlign="center" borderWidth="1px" borderRadius="lg" bg="gray.50">
-                    <Text color="gray.600" mb={4}>No connectors found</Text>
-                    <Text fontSize="sm" color="gray.500">
+                <div className="border border-gray-200 bg-gray-50 p-8 text-center">
+                    <Text className="mb-4 block text-gray-600">No connectors found</Text>
+                    <Text className="block text-sm text-gray-500">
                         Create connectors from the Accounts tab by adding connectors to your accounts.
                     </Text>
-                </Box>
+                </div>
             ) : (
-                <Box borderWidth="1px" borderRadius="lg" overflow="hidden" bg="white">
-                    <Table.Root size="sm">
-                        <Table.Header>
-                            <Table.Row>
-                                <Table.ColumnHeader width="40px"></Table.ColumnHeader>
-                                <Table.ColumnHeader>Connector Type</Table.ColumnHeader>
-                                <Table.ColumnHeader>Category</Table.ColumnHeader>
-                                <Table.ColumnHeader>Linked Accounts</Table.ColumnHeader>
-                                <Table.ColumnHeader>Enabled</Table.ColumnHeader>
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
+                <div className="overflow-hidden border border-gray-200 bg-white">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th className="w-[40px] px-2 py-1 text-left"></th>
+                                <th className="px-2 py-1 text-left">Connector Type</th>
+                                <th className="px-2 py-1 text-left">Category</th>
+                                <th className="px-2 py-1 text-left">Linked Accounts</th>
+                                <th className="px-2 py-1 text-left">Enabled</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                             {groupedConnectors.map((group) => (
                                 <React.Fragment key={group.type}>
                                     {/* Connector Type Row */}
-                                    <Table.Row
+                                    <tr
                                         onClick={() => toggleExpanded(group.type)}
-                                        cursor="pointer"
-                                        _hover={{ bg: 'gray.50' }}
-                                        bg={expandedTypes.has(group.type) ? 'blue.50' : undefined}
+                                        className={`cursor-pointer hover:bg-gray-50 ${expandedTypes.has(group.type) ? 'bg-blue-50' : ''}`}
                                     >
-                                        <Table.Cell>
-                                            <IconButton
+                                        <td className="px-2 py-1">
+                                            <Button
                                                 aria-label="Expand"
-                                                size="xs"
                                                 variant="ghost"
+                                                className="h-6 w-6 p-0"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     toggleExpanded(group.type);
                                                 }}
                                             >
                                                 {expandedTypes.has(group.type) ? <FiChevronDown /> : <FiChevronRight />}
-                                            </IconButton>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Text fontWeight="semibold">{group.displayName}</Text>
-                                        </Table.Cell>
-                                        <Table.Cell>
+                                            </Button>
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            <Text className="font-semibold">{group.displayName}</Text>
+                                        </td>
+                                        <td className="px-2 py-1">
                                             {getCategoryBadge(group.type)}
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Flex gap={1} flexWrap="wrap">
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            <div className="flex flex-wrap gap-1">
                                                 {group.connectors.slice(0, 4).map(c => (
                                                     <Badge
                                                         key={c.id}
-                                                        colorPalette={c.enabled ? 'green' : 'gray'}
-                                                        size="sm"
-                                                        variant={c.enabled ? 'solid' : 'outline'}
+                                                        colorScheme={c.enabled ? 'green' : 'gray'}
+                                                        className="text-[10px]"
                                                     >
                                                         {c.account_name}
                                                     </Badge>
                                                 ))}
                                                 {group.connectors.length > 4 && (
-                                                    <Badge colorPalette="gray" size="sm">
+                                                    <Badge colorScheme="gray" className="text-[10px]">
                                                         +{group.connectors.length - 4} more
                                                     </Badge>
                                                 )}
-                                            </Flex>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Text fontSize="sm" color="gray.600">
+                                            </div>
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            <Text className="text-sm text-gray-600">
                                                 {group.enabledCount}/{group.totalCount}
                                             </Text>
-                                        </Table.Cell>
-                                    </Table.Row>
+                                        </td>
+                                    </tr>
 
                                     {/* Expanded Account Details */}
                                     {expandedTypes.has(group.type) && group.connectors.map(connector => (
-                                        <Table.Row key={connector.id} bg="gray.50">
-                                            <Table.Cell></Table.Cell>
-                                            <Table.Cell pl={8}>
-                                                <Flex direction="column" gap={0}>
-                                                    <Text fontWeight="medium" fontSize="sm">{connector.account_name}</Text>
+                                        <tr key={connector.id} className="bg-gray-50">
+                                            <td className="px-2 py-1"></td>
+                                            <td className="px-2 py-1 pl-8">
+                                                <div className="flex flex-col gap-0">
+                                                    <Text className="text-sm font-medium">{connector.account_name}</Text>
                                                     {getAccountTypeBadge(connector.account_type)}
-                                                </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Flex direction="column" gap={0}>
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-1">
+                                                <div className="flex flex-col gap-0">
                                                     {connector.config?.chain && (
-                                                        <Text fontSize="xs">Chain: {connector.config.chain}</Text>
+                                                        <Text className="text-xs">Chain: {connector.config.chain}</Text>
                                                     )}
                                                     {connector.config?.address && (
-                                                        <Text fontSize="xs" color="gray.500" maxW="120px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                                                        <Text className="block max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap text-xs text-gray-500">
                                                             {connector.config.address}
                                                         </Text>
                                                     )}
                                                     {connector.config?.start_date && (
-                                                        <Text fontSize="xs" color="gray.500">
+                                                        <Text className="text-xs text-gray-500">
                                                             Since: {connector.config.start_date}
                                                         </Text>
                                                     )}
-                                                </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Flex direction="column" gap={1}>
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-1">
+                                                <div className="flex flex-col gap-1">
                                                     {getStatusBadge(connector.last_sync_status)}
-                                                    <Text fontSize="xs" color="gray.500">
+                                                    <Text className="text-xs text-gray-500">
                                                         {connector.last_sync_at
                                                             ? new Date(connector.last_sync_at).toLocaleString()
                                                             : 'Never synced'}
                                                     </Text>
-                                                </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Flex gap={2} align="center">
-                                                    <Switch.Root
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-1">
+                                                <div className="flex items-center gap-2">
+                                                    <ToggleSwitch
                                                         checked={connector.enabled}
-                                                        onCheckedChange={() => handleToggle(connector)}
-                                                        colorPalette="green"
-                                                    >
-                                                        <Switch.HiddenInput />
-                                                        <Switch.Control>
-                                                            <Switch.Thumb />
-                                                        </Switch.Control>
-                                                    </Switch.Root>
-                                                    <IconButton
+                                                        onChange={() => handleToggle(connector)}
+                                                    />
+                                                    <Button
                                                         aria-label="Delete"
-                                                        size="xs"
                                                         variant="ghost"
-                                                        colorPalette="red"
+                                                        colorScheme="red"
+                                                        className="h-6 w-6 p-0"
                                                         onClick={() => handleDelete(connector)}
                                                     >
                                                         <FiTrash2 />
-                                                    </IconButton>
-                                                </Flex>
-                                            </Table.Cell>
-                                        </Table.Row>
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
                                     ))}
                                 </React.Fragment>
                             ))}
-                        </Table.Body>
-                    </Table.Root>
-                </Box>
+                        </tbody>
+                    </table>
+                </div>
             )}
 
             {/* Summary */}
-            <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                <Text fontSize="sm" color="gray.600">
+            <div className="mt-4 bg-white p-4 shadow-sm">
+                <Text className="text-sm text-gray-600">
                     <strong>{groupedConnectors.length}</strong> connector type(s) •{' '}
                     <strong>{connectors.length}</strong> total connector(s)
-                    {enabledFilter === 'true' && <Text as="span"> • Showing enabled only</Text>}
-                    {categoryFilter && <Text as="span"> • Category: <strong>{categoryFilter.toUpperCase()}</strong></Text>}
+                    {enabledFilter === 'true' && <span> • Showing enabled only</span>}
+                    {categoryFilter && <span> • Category: <strong>{categoryFilter.toUpperCase()}</strong></span>}
                 </Text>
-            </Box>
+            </div>
 
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog
@@ -471,7 +478,7 @@ const ConnectorsManager: React.FC = () => {
                 confirmLabel="Delete"
                 isDestructive
             />
-        </Box>
+        </div>
     );
 };
 

@@ -4,10 +4,10 @@
  * functionality as JobDetailDrawer.
  */
 
-import { Box, Flex, Heading, IconButton } from '@chakra-ui/react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LuX } from 'react-icons/lu';
 import { ConnectorRunDetailPanel } from './ConnectorRunDetailPanel';
+import { Button } from './ui/primitives';
 
 interface ConnectorRunDetailDrawerProps {
     runId: number;
@@ -69,73 +69,45 @@ export const ConnectorRunDetailDrawer: React.FC<ConnectorRunDetailDrawerProps> =
     return (
         <>
             {/* Backdrop */}
-            <Box
-                position="fixed"
-                inset={0}
-                bg="blackAlpha.400"
-                zIndex={1000}
+            <div
+                className="fixed inset-0 z-[1000] bg-black/40"
                 onClick={onClose}
             />
 
             {/* Drawer Panel */}
-            <Box
-                position="fixed"
-                top={0}
-                right={0}
-                bottom={0}
-                width={`${drawerWidth}px`}
-                maxW="95vw"
-                bg="white"
-                _dark={{ bg: 'gray.900' }}
-                boxShadow="xl"
-                zIndex={1001}
-                overflow="hidden"
-                display="flex"
-                flexDirection="column"
+            <div
+                className="fixed bottom-0 right-0 top-0 z-[1001] flex max-w-[95vw] flex-col overflow-hidden bg-white shadow-xl dark:bg-slate-900"
+                style={{ width: `${drawerWidth}px` }}
             >
                 {/* Resize Handle */}
-                <Box
-                    position="absolute"
-                    left={0}
-                    top={0}
-                    bottom={0}
-                    width="4px"
-                    cursor="col-resize"
-                    bg={isResizing ? 'blue.400' : 'transparent'}
-                    _hover={{ bg: 'blue.200' }}
-                    transition="background-color 0.2s"
+                <div
+                    className={`absolute inset-y-0 left-0 z-[1] w-1 cursor-col-resize transition-colors hover:bg-blue-200 ${isResizing ? 'bg-blue-400' : 'bg-transparent'}`}
                     onMouseDown={handleResizeStart}
-                    zIndex={1}
                 />
                 {/* Header */}
-                <Flex
-                    px={4}
-                    py={3}
-                    borderBottomWidth="1px"
-                    align="center"
-                    justify="space-between"
-                >
-                    <Heading size="md">
+                <div className="flex items-center justify-between border-b px-4 py-3">
+                    <span className="text-base font-semibold">
                         Connector Run Details
-                    </Heading>
-                    <IconButton
+                    </span>
+                    <Button
                         aria-label="Close"
                         variant="ghost"
+                        colorScheme="gray"
                         size="sm"
                         onClick={onClose}
                     >
                         <LuX />
-                    </IconButton>
-                </Flex>
+                    </Button>
+                </div>
 
                 {/* Body */}
-                <Box flex={1} overflow="auto" p={4}>
+                <div className="flex-1 overflow-auto p-4">
                     <ConnectorRunDetailPanel
                         runId={runId}
                         enablePolling={enablePolling}
                     />
-                </Box>
-            </Box>
+                </div>
+            </div>
         </>
     );
 };

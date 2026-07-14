@@ -8,16 +8,9 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Collapsible,
-    Flex,
-    Text,
-} from '@chakra-ui/react';
 import { FiFilter, FiX, FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { DimensionWithCategories, Category } from '../../types';
+import { Badge, Button } from '../ui/primitives';
 
 export interface CategoryFilterBarProps {
     /** Available dimensions with their categories (from /categories/tree) */
@@ -40,14 +33,14 @@ export interface CategoryFilterBarProps {
  * Get contrasting text color for a background color
  */
 const getContrastColor = (hexColor: string | null | undefined): string => {
-    if (!hexColor) return 'gray.700';
+    if (!hexColor) return '#334155'; // slate-700
     const hex = hexColor.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
     // Calculate relative luminance
     const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    return luminance > 0.5 ? 'gray.800' : 'white';
+    return luminance > 0.5 ? '#1e293b' : 'white'; // slate-800 or white
 };
 
 export const CategoryFilterBar: React.FC<CategoryFilterBarProps> = ({
@@ -89,12 +82,12 @@ export const CategoryFilterBar: React.FC<CategoryFilterBarProps> = ({
 
     if (isLoading) {
         return (
-            <Box py={2} px={3} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
-                <Flex align="center" gap={2}>
+            <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="flex items-center gap-2">
                     <FiFilter color="gray" />
-                    <Text fontSize="sm" color="gray.500">Loading categories...</Text>
-                </Flex>
-            </Box>
+                    <span className="text-sm text-slate-500">Loading categories...</span>
+                </div>
+            </div>
         );
     }
 
@@ -106,91 +99,75 @@ export const CategoryFilterBar: React.FC<CategoryFilterBarProps> = ({
     const [isExpanded, setIsExpanded] = useState(hasActiveFilter);
 
     return (
-        <Box
-            py={2}
-            px={3}
-            bg="gray.50"
-            borderRadius="md"
-            border="1px solid"
-            borderColor={hasActiveFilter ? 'blue.200' : 'gray.200'}
-            mb={4}
+        <div
+            className={`mb-4 border px-3 py-2 ${hasActiveFilter ? 'border-blue-200' : 'border-slate-200'} bg-slate-50`}
         >
             {/* Clickable header row */}
-            <Flex
-                justify="space-between"
-                align="center"
-                cursor="pointer"
+            <div
+                className="flex cursor-pointer items-center justify-between py-1"
                 onClick={() => setIsExpanded(!isExpanded)}
-                py={1}
             >
-                <Flex align="center" gap={2}>
+                <div className="flex items-center gap-2">
                     {isExpanded ? (
                         <FiChevronDown size={14} color={hasActiveFilter ? '#3182ce' : '#718096'} />
                     ) : (
                         <FiChevronRight size={14} color={hasActiveFilter ? '#3182ce' : '#718096'} />
                     )}
                     <FiFilter size={14} color={hasActiveFilter ? '#3182ce' : '#718096'} />
-                    <Text fontSize="sm" fontWeight="medium" color={hasActiveFilter ? 'blue.600' : 'gray.600'}>
+                    <span className={`text-sm font-medium ${hasActiveFilter ? 'text-blue-600' : 'text-slate-600'}`}>
                         Filter by Category
-                    </Text>
+                    </span>
                     {isFiltered && (
-                        <Badge colorPalette="blue" size="sm">
+                        <Badge colorScheme="blue">
                             {filteredAssetCount} of {totalAssetCount} assets
                         </Badge>
                     )}
-                </Flex>
+                </div>
                 {hasActiveFilter && (
                     <Button
-                        size="xs"
+                        size="sm"
                         variant="ghost"
-                        colorPalette="gray"
+                        colorScheme="gray"
                         onClick={(e) => {
                             e.stopPropagation();
                             handleClearFilters();
                         }}
                     >
                         <FiX />
-                        <Text ml={1}>Clear</Text>
+                        <span className="ml-1">Clear</span>
                     </Button>
                 )}
-            </Flex>
+            </div>
 
             {/* Collapsible content */}
-            <Collapsible.Root open={isExpanded}>
-                <Collapsible.Content>
-                    <Flex direction="column" gap={2} pt={2}>
-                        {relevantDimensions.map((dimension) => (
-                            <Flex key={dimension.id} align="center" gap={2} flexWrap="wrap">
-                                <Text
-                                    fontSize="xs"
-                                    color="gray.500"
-                                    fontWeight="medium"
-                                    minW="80px"
-                                >
-                                    {dimension.label}:
-                                </Text>
-                                <Flex gap={1} flexWrap="wrap">
-                                    {dimension.categories.map((category) => {
-                                        const isSelected = selectedCategoryIds.includes(category.id);
-                                        const hasAssets = !availableCategoryIds || availableCategoryIds.has(category.id);
+            {isExpanded && (
+                <div className="flex flex-col gap-2 pt-2">
+                    {relevantDimensions.map((dimension) => (
+                        <div key={dimension.id} className="flex flex-wrap items-center gap-2">
+                            <span className="min-w-[80px] text-xs font-medium text-slate-500">
+                                {dimension.label}:
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                                {dimension.categories.map((category) => {
+                                    const isSelected = selectedCategoryIds.includes(category.id);
+                                    const hasAssets = !availableCategoryIds || availableCategoryIds.has(category.id);
 
-                                        return (
-                                            <CategoryChip
-                                                key={category.id}
-                                                category={category}
-                                                isSelected={isSelected}
-                                                isDisabled={!hasAssets}
-                                                onClick={() => handleCategoryToggle(category.id)}
-                                            />
-                                        );
-                                    })}
-                                </Flex>
-                            </Flex>
-                        ))}
-                    </Flex>
-                </Collapsible.Content>
-            </Collapsible.Root>
-        </Box>
+                                    return (
+                                        <CategoryChip
+                                            key={category.id}
+                                            category={category}
+                                            isSelected={isSelected}
+                                            isDisabled={!hasAssets}
+                                            onClick={() => handleCategoryToggle(category.id)}
+                                        />
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
     );
 };
 
@@ -212,25 +189,23 @@ const CategoryChip: React.FC<CategoryChipProps> = ({
 
     return (
         <Button
-            size="xs"
+            size="sm"
             variant={isSelected ? 'solid' : 'outline'}
-            colorPalette={isSelected ? 'blue' : 'gray'}
+            colorScheme={isSelected ? 'blue' : 'gray'}
             onClick={onClick}
             disabled={isDisabled}
-            opacity={isDisabled ? 0.5 : 1}
-            bg={bgColor}
-            color={textColor}
-            borderColor={category.color || undefined}
-            _hover={{
-                bg: isSelected ? bgColor : 'gray.100',
-                opacity: isDisabled ? 0.5 : 0.9,
+            style={{
+                opacity: isDisabled ? 0.5 : 1,
+                backgroundColor: bgColor,
+                color: textColor,
+                borderColor: category.color || undefined,
             }}
         >
             {category.label}
             {category.asset_count !== undefined && (
-                <Text as="span" ml={1} opacity={0.7}>
+                <span className="ml-1 opacity-70">
                     ({category.asset_count})
-                </Text>
+                </span>
             )}
         </Button>
     );

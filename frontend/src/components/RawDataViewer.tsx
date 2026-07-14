@@ -1,15 +1,4 @@
-import {
-    Box,
-    Button,
-    Code,
-    Flex,
-    Heading,
-    HStack,
-    IconButton,
-    Spinner,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import { Button, Heading, Spinner } from './ui/primitives';
 import React, { useCallback, useEffect, useState } from 'react';
 import { LuChevronDown, LuChevronUp, LuCopy, LuExternalLink, LuX } from 'react-icons/lu';
 import { API_URL, LookupSourceIdsResponse, RawTransactionResponse } from '../types';
@@ -83,97 +72,73 @@ export const RawDataViewer: React.FC<RawDataViewerProps> = ({ rawId, onClose }) 
     };
 
     return (
-        <Box
-            p={4}
-            bg="gray.50"
-            _dark={{ bg: 'gray.800' }}
-            borderRadius="md"
-            borderWidth="1px"
-            mb={4}
-        >
-            <Flex justify="space-between" align="center" mb={3}>
-                <VStack align="start" gap={0}>
-                    <Heading size="sm">Raw Transaction Data</Heading>
+        <div className="mb-4 border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-3 flex items-center justify-between">
+                <div className="flex flex-col items-start gap-0">
+                    <Heading className="text-sm">Raw Transaction Data</Heading>
                     {data && (
-                        <Text fontSize="xs" color="gray.500">
+                        <span className="text-xs text-slate-500">
                             Source: {data.source} | ID: {data.source_transaction_id}
-                        </Text>
+                        </span>
                     )}
-                </VStack>
-                <HStack>
-                    <IconButton
+                </div>
+                <div className="flex items-center gap-2">
+                    <Button
                         aria-label="Copy JSON"
-                        size="xs"
+                        size="sm"
                         variant="ghost"
                         onClick={handleCopy}
                         disabled={!data}
                     >
                         <LuCopy />
-                    </IconButton>
-                    <IconButton
+                    </Button>
+                    <Button
                         aria-label="Close"
-                        size="xs"
+                        size="sm"
                         variant="ghost"
                         onClick={onClose}
                     >
                         <LuX />
-                    </IconButton>
-                </HStack>
-            </Flex>
+                    </Button>
+                </div>
+            </div>
 
             {copied && (
-                <Text fontSize="xs" color="green.600" mb={2}>
+                <span className="mb-2 block text-xs text-green-600">
                     Copied to clipboard!
-                </Text>
+                </span>
             )}
 
             {loading && (
-                <Flex justify="center" py={4}>
+                <div className="flex justify-center py-4">
                     <Spinner size="sm" />
-                </Flex>
+                </div>
             )}
 
             {error && (
-                <Box p={3} bg="red.50" borderRadius="md" _dark={{ bg: 'red.900' }}>
-                    <Text fontSize="sm" color="red.600">
+                <div className="border border-red-200 bg-red-50 p-3 dark:bg-red-900">
+                    <span className="block text-sm text-red-600">
                         {error}
-                    </Text>
-                    <Button size="xs" mt={2} onClick={() => fetchData(showFull)}>
+                    </span>
+                    <Button size="sm" className="mt-2" onClick={() => fetchData(showFull)}>
                         Retry
                     </Button>
-                </Box>
+                </div>
             )}
 
             {!loading && !error && data && (
                 <>
-                    <Box
-                        maxH="300px"
-                        overflowY="auto"
-                        bg="gray.900"
-                        color="gray.100"
-                        borderRadius="md"
-                        p={3}
-                        fontSize="xs"
-                        fontFamily="mono"
-                    >
-                        <Code
-                            as="pre"
-                            display="block"
-                            whiteSpace="pre-wrap"
-                            wordBreak="break-all"
-                            bg="transparent"
-                            color="inherit"
-                            fontSize="inherit"
-                        >
+                    <div className="max-h-[300px] overflow-y-auto bg-slate-900 p-3 font-mono text-xs text-slate-100">
+                        <pre className="whitespace-pre-wrap break-all bg-transparent text-inherit">
                             {formatJson(data.raw_data)}
-                        </Code>
-                    </Box>
+                        </pre>
+                    </div>
 
                     {data.truncated && !showFull && (
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="ghost"
-                            mt={2}
+                            className="mt-2"
                             onClick={handleShowFull}
                         >
                             Show full data <LuChevronDown />
@@ -182,22 +147,22 @@ export const RawDataViewer: React.FC<RawDataViewerProps> = ({ rawId, onClose }) 
 
                     {showFull && (
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="ghost"
-                            mt={2}
+                            className="mt-2"
                             onClick={() => fetchData(false)}
                         >
                             Show truncated <LuChevronUp />
                         </Button>
                     )}
 
-                    <HStack mt={3} fontSize="xs" color="gray.500">
-                        <Text>Ingested: {new Date(data.ingestion_time).toLocaleString()}</Text>
-                        {data.truncated && <Text>• Data truncated to 10KB</Text>}
-                    </HStack>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                        <span>Ingested: {new Date(data.ingestion_time).toLocaleString()}</span>
+                        {data.truncated && <span>• Data truncated to 10KB</span>}
+                    </div>
                 </>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -280,14 +245,14 @@ export const TransactionIdList: React.FC<TransactionIdListProps> = ({
 
     if (ids.length === 0) {
         return (
-            <Text color="gray.500" py={4}>
+            <div className="py-4 text-slate-500">
                 {emptyLabel}
-            </Text>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {selectedRawId && (
                 <RawDataViewer
                     rawId={selectedRawId}
@@ -296,54 +261,40 @@ export const TransactionIdList: React.FC<TransactionIdListProps> = ({
             )}
 
             {loadingMapping && (
-                <HStack fontSize="xs" color="gray.500" mb={2}>
+                <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
                     <Spinner size="xs" />
-                    <Text>Loading raw data links...</Text>
-                </HStack>
+                    <span>Loading raw data links...</span>
+                </div>
             )}
 
-            <Box maxH="300px" overflowY="auto">
-                <VStack align="stretch" gap={1}>
+            <div className="max-h-[300px] overflow-y-auto">
+                <div className="flex flex-col items-stretch gap-1">
                     {visibleIds.map((id, idx) => {
                         const rawId = rawIdMapping[id];
                         const isSelected = rawId === selectedRawId;
 
                         return (
-                            <Flex
+                            <div
                                 key={idx}
-                                align="center"
-                                gap={2}
-                                py={1}
-                                px={2}
-                                borderRadius="sm"
-                                cursor={rawId ? 'pointer' : 'default'}
-                                _hover={
-                                    rawId
-                                        ? { bg: 'gray.100', _dark: { bg: 'gray.700' } }
-                                        : undefined
-                                }
-                                bg={isSelected ? 'blue.50' : undefined}
-                                _dark={{
-                                    bg: isSelected ? 'blue.900' : undefined,
-                                }}
+                                className={`flex items-center gap-2 px-2 py-1 ${rawId ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-900' : ''}`}
                                 onClick={() => handleIdClick(id)}
                             >
-                                <Text fontSize="xs" fontFamily="mono" flex={1}>
+                                <span className="flex-1 font-mono text-xs">
                                     {id}
-                                </Text>
+                                </span>
                                 {rawId && (
                                     <LuExternalLink size={12} color="gray" />
                                 )}
-                            </Flex>
+                            </div>
                         );
                     })}
-                </VStack>
+                </div>
 
                 {hasMore && !showAll && (
                     <Button
-                        size="xs"
+                        size="sm"
                         variant="ghost"
-                        mt={2}
+                        className="mt-2"
                         onClick={() => setShowAll(true)}
                     >
                         Show {ids.length - maxVisible} more...
@@ -352,15 +303,15 @@ export const TransactionIdList: React.FC<TransactionIdListProps> = ({
 
                 {showAll && hasMore && (
                     <Button
-                        size="xs"
+                        size="sm"
                         variant="ghost"
-                        mt={2}
+                        className="mt-2"
                         onClick={() => setShowAll(false)}
                     >
                         Show less
                     </Button>
                 )}
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 };

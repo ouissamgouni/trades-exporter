@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Badge, Box, Button, Flex, Input, Spinner, Text } from '@chakra-ui/react';
+import { Badge, Button, Input, Spinner } from './ui/primitives';
 import { API_URL } from '../types';
 
 interface PriceGetterInfo {
@@ -103,66 +103,66 @@ export const PriceGetterTester: React.FC<PriceGetterTesterProps> = ({
 
     if (loading) {
         return (
-            <Flex align="center" gap={2} p={2}>
+            <div className="flex items-center gap-2 p-2">
                 <Spinner size="xs" />
-                <Text fontSize="xs" color="gray.500">Loading getters…</Text>
-            </Flex>
+                <span className="text-xs text-slate-500">Loading getters…</span>
+            </div>
         );
     }
 
     if (priceGetters.length === 0) return null;
 
     return (
-        <Box mt={3} p={2} bg="gray.50" borderRadius="md">
-            <Flex align="center" gap={2} mb={2}>
-                <Input
-                    size="xs"
+        <div className="mt-3 bg-slate-50 p-2">
+            <div className="mb-2 flex items-center gap-2">
+                <input
                     type="date"
                     value={testDate}
                     onChange={e => { setTestDate(e.target.value); setResults([]); }}
-                    width="130px"
-                    flexShrink={0}
+                    className="h-6 w-[130px] shrink-0 border border-slate-300 bg-white px-1 text-xs outline-none focus:border-blue-500"
                 />
                 <Button
-                    size="xs"
+                    size="sm"
                     variant="outline"
                     onClick={runTests}
                     loading={testing}
                     disabled={testing}
-                    flexShrink={0}
+                    className="shrink-0"
                 >
                     Test {priceGetters.length} getter{priceGetters.length > 1 ? 's' : ''}
                 </Button>
-            </Flex>
+            </div>
             {results.map((fp, i) => (
-                <Flex key={i} align="center" justify="space-between" py={1}
-                    borderTop={i > 0 ? '1px solid' : undefined} borderColor="gray.200">
-                    <Flex align="center" gap={2} minW={0} overflow="hidden">
-                        <Badge size="xs" variant="subtle" colorPalette={fp.price != null ? 'green' : 'red'} flexShrink={0}>
+                <div
+                    key={i}
+                    className={`flex items-center justify-between py-1 ${i > 0 ? 'border-t border-slate-200' : ''}`}
+                >
+                    <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+                        <Badge colorScheme={fp.price != null ? 'green' : 'red'} className="shrink-0">
                             {fp.getter}
                         </Badge>
                         {fp.price != null ? (
-                            <Text fontSize="xs" fontWeight="medium" truncate>
+                            <span className="truncate text-xs font-medium">
                                 {fp.price}
-                                {fp.quote_currency && <Text as="span" color="gray.400" ml={1}>{fp.quote_currency}</Text>}
-                            </Text>
+                                {fp.quote_currency && <span className="ml-1 text-slate-400">{fp.quote_currency}</span>}
+                            </span>
                         ) : (
-                            <Text fontSize="xs" color="red.500" truncate>{fp.error || 'No price'}</Text>
+                            <span className="truncate text-xs text-red-500">{fp.error || 'No price'}</span>
                         )}
-                    </Flex>
+                    </div>
                     {fp.price != null && onUsePrice && (
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="ghost"
-                            colorPalette="blue"
+                            colorScheme="blue"
                             onClick={() => onUsePrice(fp.price!)}
-                            flexShrink={0}
+                            className="shrink-0"
                         >
                             Use
                         </Button>
                     )}
-                </Flex>
+                </div>
             ))}
-        </Box>
+        </div>
     );
 };

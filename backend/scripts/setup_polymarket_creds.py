@@ -6,10 +6,10 @@ Uses py-clob-client (pip install py-clob-client) to derive L2 API credentials
 from a private key. The private key is only held in memory during derivation.
 
 Usage:
-    .venv/bin/python scripts/setup_polymarket_creds.py
+    ../.venv/bin/python scripts/setup_polymarket_creds.py
 
     # Alternative: pass private key via env var (useful if paste doesn't work)
-    POLYMARKET_PRIVATE_KEY=0x... .venv/bin/python scripts/setup_polymarket_creds.py
+    POLYMARKET_PRIVATE_KEY=0x... ../.venv/bin/python scripts/setup_polymarket_creds.py
 
 Output: api_key, api_secret, passphrase — store these in your env/config.
 The private key is NOT stored.
@@ -42,7 +42,7 @@ def main():
     if private_key:
         print("Using private key from POLYMARKET_PRIVATE_KEY env var.")
     elif len(sys.argv) > 1 and os.path.isfile(sys.argv[1]):
-        # Read from file: .venv/bin/python scripts/setup_polymarket_creds.py /tmp/pk.txt
+        # Read from file: ../.venv/bin/python scripts/setup_polymarket_creds.py /tmp/pk.txt
         key_file = sys.argv[1]
         with open(key_file, "r") as f:
             private_key = f.read().strip()
@@ -53,7 +53,7 @@ def main():
         print()
         print("If paste doesn't work, save the key to a temp file and pass it:")
         print("  echo '0xYOUR_KEY' > /tmp/pk.txt")
-        print("  .venv/bin/python scripts/setup_polymarket_creds.py /tmp/pk.txt")
+        print("  ../.venv/bin/python scripts/setup_polymarket_creds.py /tmp/pk.txt")
         print("  rm /tmp/pk.txt")
         print()
         private_key = getpass.getpass("Enter private key (0x...): ").strip()

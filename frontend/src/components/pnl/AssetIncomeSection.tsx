@@ -6,10 +6,10 @@
  */
 
 import React from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import { LuBanknote } from 'react-icons/lu';
 import { useIncomeEvents, type IncomeEventItem } from '../../hooks/useChartData';
 import { ValueDisplay } from '../ValueDisplay';
+import { Badge } from '../ui/primitives';
 
 interface AssetIncomeSectionProps {
     assetId: number;
@@ -29,7 +29,7 @@ export const AssetIncomeSection: React.FC<AssetIncomeSectionProps> = ({
     const { data, isLoading } = useIncomeEvents(versionId, { assetId, limit: 200 });
 
     if (isLoading) {
-        return <Text fontSize="xs" color="gray.400" p={2}>Loading income events...</Text>;
+        return <span className="p-2 text-xs text-slate-400">Loading income events...</span>;
     }
 
     const events = data?.items ?? [];
@@ -46,74 +46,74 @@ export const AssetIncomeSection: React.FC<AssetIncomeSectionProps> = ({
     }
 
     return (
-        <Box>
+        <div>
             {/* Summary */}
-            <Flex gap={4} mb={2} p={2} bg="teal.50" borderRadius="sm" wrap="wrap">
-                <Box>
-                    <Text fontSize="2xs" color="gray.500">Gross</Text>
-                    <Text fontSize="xs" fontWeight="bold" color="teal.700">
+            <div className="mb-2 flex flex-wrap gap-4 bg-teal-50 p-2">
+                <div>
+                    <span className="block text-[10px] text-slate-500">Gross</span>
+                    <span className="block text-xs font-bold text-teal-700">
                         <ValueDisplay value={totalGross} currency={baseCurrency} />
-                    </Text>
-                </Box>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500">Withholding</Text>
-                    <Text fontSize="xs" fontWeight="bold" color="red.500">
+                    </span>
+                </div>
+                <div>
+                    <span className="block text-[10px] text-slate-500">Withholding</span>
+                    <span className="block text-xs font-bold text-red-500">
                         <ValueDisplay value={-totalWht} currency={baseCurrency} />
-                    </Text>
-                </Box>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500">Net</Text>
-                    <Text fontSize="xs" fontWeight="bold" color="teal.700">
+                    </span>
+                </div>
+                <div>
+                    <span className="block text-[10px] text-slate-500">Net</span>
+                    <span className="block text-xs font-bold text-teal-700">
                         <ValueDisplay value={totalNet} currency={baseCurrency} />
-                    </Text>
-                </Box>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500">Events</Text>
-                    <Text fontSize="xs" fontWeight="bold" color="gray.600">{events.length}</Text>
-                </Box>
-            </Flex>
+                    </span>
+                </div>
+                <div>
+                    <span className="block text-[10px] text-slate-500">Events</span>
+                    <span className="block text-xs font-bold text-slate-600">{events.length}</span>
+                </div>
+            </div>
 
             {/* Table */}
-            <Box overflowX="auto">
-                <Box as="table" width="100%" fontSize="xs">
-                    <Box as="thead">
-                        <Box as="tr" bg="gray.50">
-                            <Box as="th" px={2} py={1} textAlign="left">Date</Box>
-                            <Box as="th" px={2} py={1} textAlign="left">Type</Box>
-                            <Box as="th" px={2} py={1} textAlign="left">Account</Box>
-                            <Box as="th" px={2} py={1} textAlign="right">Gross</Box>
-                            <Box as="th" px={2} py={1} textAlign="right">WHT</Box>
-                            <Box as="th" px={2} py={1} textAlign="right">Net</Box>
-                            <Box as="th" px={2} py={1} textAlign="left">Country</Box>
-                        </Box>
-                    </Box>
-                    <Box as="tbody">
+            <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                    <thead>
+                        <tr className="bg-slate-50">
+                            <th className="px-2 py-1 text-left">Date</th>
+                            <th className="px-2 py-1 text-left">Type</th>
+                            <th className="px-2 py-1 text-left">Account</th>
+                            <th className="px-2 py-1 text-right">Gross</th>
+                            <th className="px-2 py-1 text-right">WHT</th>
+                            <th className="px-2 py-1 text-right">Net</th>
+                            <th className="px-2 py-1 text-left">Country</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {events.map(e => (
-                            <Box as="tr" key={e.id} _hover={{ bg: 'gray.50' }} borderBottom="1px solid" borderColor="gray.100">
-                                <Box as="td" px={2} py={1} whiteSpace="nowrap">{fmtDate(e.income_at)}</Box>
-                                <Box as="td" px={2} py={1}>
-                                    <Badge size="xs" colorPalette="teal" variant="subtle">{e.income_type}</Badge>
-                                </Box>
-                                <Box as="td" px={2} py={1} color="gray.600">{e.account_name || '—'}</Box>
-                                <Box as="td" px={2} py={1} textAlign="right" color="teal.700">
+                            <tr key={e.id} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="whitespace-nowrap px-2 py-1">{fmtDate(e.income_at)}</td>
+                                <td className="px-2 py-1">
+                                    <Badge colorScheme="green">{e.income_type}</Badge>
+                                </td>
+                                <td className="px-2 py-1 text-slate-600">{e.account_name || '—'}</td>
+                                <td className="px-2 py-1 text-right text-teal-700">
                                     <ValueDisplay value={e.gross_amount_in_base} currency={baseCurrency} />
-                                </Box>
-                                <Box as="td" px={2} py={1} textAlign="right" color="red.500">
+                                </td>
+                                <td className="px-2 py-1 text-right text-red-500">
                                     {e.withholding_amount_in_base > 0 ? (
                                         <>-<ValueDisplay value={e.withholding_amount_in_base} currency={baseCurrency} /></>
                                     ) : '—'}
-                                </Box>
-                                <Box as="td" px={2} py={1} textAlign="right" fontWeight="semibold" color="teal.600">
+                                </td>
+                                <td className="px-2 py-1 text-right font-semibold text-teal-600">
                                     <ValueDisplay value={e.net_amount_in_base} currency={baseCurrency} />
-                                </Box>
-                                <Box as="td" px={2} py={1} color="gray.500" fontSize="2xs">
+                                </td>
+                                <td className="px-2 py-1 text-[10px] text-slate-500">
                                     {e.withholding_jurisdiction || '—'}
-                                </Box>
-                            </Box>
+                                </td>
+                            </tr>
                         ))}
-                    </Box>
-                </Box>
-            </Box>
-        </Box>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     );
 };

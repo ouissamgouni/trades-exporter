@@ -9,11 +9,11 @@
  */
 
 import React from 'react';
-import { Badge, Box, Button, Flex, Text } from '@chakra-ui/react';
 import { FiRefreshCw } from 'react-icons/fi';
 import { Account } from '../types';
 import { useEntityColors, ENTITY_COLOR_PALETTE, hexToRgba } from '../hooks/useEntityColors';
 import { Tooltip } from './ui/tooltip';
+import { Badge, Button } from './ui/primitives';
 
 interface EntityColorSettingsProps {
     /** Available accounts to configure */
@@ -29,21 +29,17 @@ const ColorSwatch: React.FC<{
     onClick: () => void;
     size?: number;
 }> = ({ color, active, onClick, size = 16 }) => (
-    <Box
-        as="button"
-        w={`${size}px`}
-        h={`${size}px`}
-        borderRadius="full"
-        bg={color}
-        border="2px solid"
-        borderColor={active ? 'white' : 'transparent'}
-        outline={active ? '2px solid' : 'none'}
-        outlineColor={active ? color : undefined}
-        cursor="pointer"
+    <button
+        type="button"
+        className="shrink-0 cursor-pointer rounded-full border-2 transition-transform hover:scale-125"
+        style={{
+            width: size,
+            height: size,
+            backgroundColor: color,
+            borderColor: active ? 'white' : 'transparent',
+            outline: active ? `2px solid ${color}` : 'none',
+        }}
         onClick={onClick}
-        _hover={{ transform: 'scale(1.2)' }}
-        transition="transform 0.1s"
-        flexShrink={0}
         title={color}
     />
 );
@@ -63,45 +59,41 @@ export const EntityColorSettings: React.FC<EntityColorSettingsProps> = ({
     } = useEntityColors();
 
     return (
-        <Box>
+        <div>
             {/* Header */}
-            <Flex justify="space-between" align="center" mb={3}>
-                <Text fontSize="sm" fontWeight="bold" color="gray.700">Badge Colors</Text>
+            <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-bold text-slate-700">Badge Colors</span>
                 <Tooltip content="Reset all colors to auto-assigned defaults">
                     <Button
-                        size="xs"
+                        size="sm"
                         variant="ghost"
                         onClick={resetAllColors}
-                        fontSize="9px"
+                        className="text-[9px]"
                     >
                         <FiRefreshCw size={10} />
                         Reset All
                     </Button>
                 </Tooltip>
-            </Flex>
+            </div>
 
             {/* Accounts */}
             {accounts.length > 0 && (
-                <Box mb={4}>
-                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2} textTransform="uppercase">
+                <div className="mb-4">
+                    <span className="mb-2 block text-xs font-bold uppercase text-slate-500">
                         Accounts
-                    </Text>
-                    <Flex direction="column" gap={1.5}>
+                    </span>
+                    <div className="flex flex-col gap-1.5">
                         {accounts.map(account => {
                             const currentColor = getAccountColor(account.id, account.name, account.color);
                             return (
-                                <Flex key={account.id} align="center" gap={2} py={0.5}>
+                                <div key={account.id} className="flex items-center gap-2 py-0.5">
                                     <Badge
-                                        size="xs"
-                                        bg={hexToRgba(currentColor, 0.18)}
-                                        color={currentColor}
-                                        variant="subtle"
-                                        fontSize="9px"
-                                        minW="80px"
+                                        className="min-w-[80px] text-[9px]"
+                                        style={{ backgroundColor: hexToRgba(currentColor, 0.18), color: currentColor }}
                                     >
                                         {account.name.length > 16 ? account.name.slice(0, 16) + '…' : account.name}
                                     </Badge>
-                                    <Flex gap={0.5} align="center" flexWrap="wrap">
+                                    <div className="flex flex-wrap items-center gap-0.5">
                                         {ENTITY_COLOR_PALETTE.map(hex => (
                                             <ColorSwatch
                                                 key={hex}
@@ -111,49 +103,41 @@ export const EntityColorSettings: React.FC<EntityColorSettingsProps> = ({
                                                 size={14}
                                             />
                                         ))}
-                                    </Flex>
+                                    </div>
                                     <Tooltip content="Reset to auto">
-                                        <Box
-                                            as="button"
-                                            fontSize="8px"
-                                            color="gray.400"
-                                            cursor="pointer"
+                                        <button
+                                            type="button"
+                                            className="ml-1 cursor-pointer text-[8px] text-slate-400 hover:text-slate-600"
                                             onClick={() => resetAccountColor(account.id)}
-                                            _hover={{ color: 'gray.600' }}
-                                            ml={1}
                                         >
                                             ✕
-                                        </Box>
+                                        </button>
                                     </Tooltip>
-                                </Flex>
+                                </div>
                             );
                         })}
-                    </Flex>
-                </Box>
+                    </div>
+                </div>
             )}
 
             {/* Connectors */}
             {connectorNames.length > 0 && (
-                <Box>
-                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={2} textTransform="uppercase">
+                <div>
+                    <span className="mb-2 block text-xs font-bold uppercase text-slate-500">
                         Connectors
-                    </Text>
-                    <Flex direction="column" gap={1.5}>
+                    </span>
+                    <div className="flex flex-col gap-1.5">
                         {connectorNames.map(name => {
                             const currentColor = getConnectorColor(name);
                             return (
-                                <Flex key={name} align="center" gap={2} py={0.5}>
+                                <div key={name} className="flex items-center gap-2 py-0.5">
                                     <Badge
-                                        size="xs"
-                                        bg={hexToRgba(currentColor, 0.18)}
-                                        color={currentColor}
-                                        variant="subtle"
-                                        fontSize="9px"
-                                        minW="80px"
+                                        className="min-w-[80px] text-[9px]"
+                                        style={{ backgroundColor: hexToRgba(currentColor, 0.18), color: currentColor }}
                                     >
                                         {name.length > 16 ? name.slice(0, 16) + '…' : name}
                                     </Badge>
-                                    <Flex gap={0.5} align="center" flexWrap="wrap">
+                                    <div className="flex flex-wrap items-center gap-0.5">
                                         {ENTITY_COLOR_PALETTE.map(hex => (
                                             <ColorSwatch
                                                 key={hex}
@@ -163,27 +147,23 @@ export const EntityColorSettings: React.FC<EntityColorSettingsProps> = ({
                                                 size={14}
                                             />
                                         ))}
-                                    </Flex>
+                                    </div>
                                     <Tooltip content="Reset to auto">
-                                        <Box
-                                            as="button"
-                                            fontSize="8px"
-                                            color="gray.400"
-                                            cursor="pointer"
+                                        <button
+                                            type="button"
+                                            className="ml-1 cursor-pointer text-[8px] text-slate-400 hover:text-slate-600"
                                             onClick={() => resetConnectorColor(name)}
-                                            _hover={{ color: 'gray.600' }}
-                                            ml={1}
                                         >
                                             ✕
-                                        </Box>
+                                        </button>
                                     </Tooltip>
-                                </Flex>
+                                </div>
                             );
                         })}
-                    </Flex>
-                </Box>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

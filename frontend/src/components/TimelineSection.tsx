@@ -1,17 +1,5 @@
 import React, { useState, useCallback, Suspense } from 'react';
-import {
-    Box,
-    Button,
-    Card,
-    Center,
-    Flex,
-    Heading,
-    HStack,
-    IconButton,
-    Spinner,
-    Text,
-    Badge,
-} from '@chakra-ui/react';
+import { Badge, Button, Heading, Spinner } from './ui/primitives';
 import { LuChevronLeft, LuChevronRight, LuCalendar, LuX, LuRefreshCw } from 'react-icons/lu';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_URL } from '../types';
@@ -34,9 +22,9 @@ interface TimelineStatsResponse {
 
 // Loading fallback for lazy-loaded table
 const TableLoadingFallback = () => (
-    <Center h="200px">
-        <Spinner size="lg" color="blue.500" />
-    </Center>
+    <div className="flex h-[200px] items-center justify-center">
+        <Spinner size="lg" className="text-blue-500" />
+    </div>
 );
 
 export const TimelineSection: React.FC = () => {
@@ -135,198 +123,188 @@ export const TimelineSection: React.FC = () => {
     const hasNoData = timelineData?.total_transactions === 0;
 
     return (
-        <Box>
+        <div>
             {/* Header with Year Navigation */}
-            <Card.Root mb={4}>
-                <Card.Body p={4}>
-                    <Flex justify="space-between" align="center" mb={4}>
-                        <Flex align="center" gap={3}>
-                            <LuCalendar size={24} />
-                            <Heading size="md">Transaction Timeline</Heading>
-                            <IconButton
-                                aria-label="Refresh timeline"
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleRefresh}
-                                disabled={isFetching}
-                            >
-                                <LuRefreshCw style={{ animation: isFetching ? 'spin 1s linear infinite' : 'none' }} />
-                            </IconButton>
-                        </Flex>
+            <div className="mb-4 border border-slate-200 bg-white p-4">
+                <div className="mb-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <LuCalendar size={24} />
+                        <Heading className="text-lg">Transaction Timeline</Heading>
+                        <Button
+                            aria-label="Refresh timeline"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleRefresh}
+                            disabled={isFetching}
+                        >
+                            <LuRefreshCw className={isFetching ? 'animate-spin' : ''} />
+                        </Button>
+                    </div>
 
-                        {/* Year Navigation */}
-                        <HStack gap={2}>
-                            <IconButton
-                                aria-label="Previous year"
-                                variant="outline"
-                                size="sm"
-                                onClick={handlePrevYear}
-                                disabled={!canGoPrev || isLoading}
-                            >
-                                <LuChevronLeft />
-                            </IconButton>
+                    {/* Year Navigation */}
+                    <div className="flex items-center gap-2">
+                        <Button
+                            aria-label="Previous year"
+                            variant="outline"
+                            size="sm"
+                            onClick={handlePrevYear}
+                            disabled={!canGoPrev || isLoading}
+                        >
+                            <LuChevronLeft />
+                        </Button>
 
-                            <Badge
-                                colorPalette="blue"
-                                size="lg"
-                                px={4}
-                                py={2}
-                                fontSize="md"
-                                fontWeight="bold"
-                            >
-                                {selectedYear}
-                            </Badge>
+                        <Badge
+                            colorScheme="blue"
+                            className="px-4 py-2 text-base font-bold"
+                        >
+                            {selectedYear}
+                        </Badge>
 
-                            <IconButton
-                                aria-label="Next year"
-                                variant="outline"
-                                size="sm"
-                                onClick={handleNextYear}
-                                disabled={!canGoNext || isLoading}
-                            >
-                                <LuChevronRight />
-                            </IconButton>
-                        </HStack>
+                        <Button
+                            aria-label="Next year"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleNextYear}
+                            disabled={!canGoNext || isLoading}
+                        >
+                            <LuChevronRight />
+                        </Button>
+                    </div>
 
-                        {/* Year Summary */}
-                        {timelineData && !hasNoData && (
-                            <Flex align="center" gap={2}>
-                                <Text fontSize="sm" color="gray.600">
-                                    {timelineData.total_transactions.toLocaleString()} transactions
-                                </Text>
-                                {timelineData.excluded_invalid_count > 0 && (
-                                    <Badge colorPalette="red" variant="subtle" size="sm">
-                                        {timelineData.excluded_invalid_count} invalid excluded
-                                    </Badge>
-                                )}
-                            </Flex>
-                        )}
-                    </Flex>
-
-                    {/* Calendar Heatmap */}
-                    {error && (
-                        <Center h="200px">
-                            <Text color="red.500">Failed to load timeline data</Text>
-                        </Center>
-                    )}
-                    {!error && hasNoData && (
-                        <Center h="200px" flexDirection="column" gap={2}>
-                            <LuCalendar size={48} color="#9CA3AF" />
-                            <Text fontSize="lg" fontWeight="medium" color="gray.600">
-                                No activity in {selectedYear}
-                            </Text>
-                            <Text fontSize="sm" color="gray.500">
-                                No transactions were recorded during this year.
-                            </Text>
-                            {timelineData && timelineData.min_year !== timelineData.max_year && (
-                                <Text fontSize="sm" color="blue.500" mt={2}>
-                                    Try navigating to {timelineData.max_year} for your most recent activity.
-                                </Text>
+                    {/* Year Summary */}
+                    {timelineData && !hasNoData && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-slate-600">
+                                {timelineData.total_transactions.toLocaleString()} transactions
+                            </span>
+                            {timelineData.excluded_invalid_count > 0 && (
+                                <Badge colorScheme="red">
+                                    {timelineData.excluded_invalid_count} invalid excluded
+                                </Badge>
                             )}
-                        </Center>
+                        </div>
                     )}
-                    {!error && !hasNoData && (
-                        <CalendarHeatmap
-                            year={selectedYear}
-                            data={timelineData?.daily_stats || []}
-                            selectedDate={selectedDate}
-                            onDateClick={handleDateClick}
-                            isLoading={isLoading}
-                        />
-                    )}
+                </div>
 
-                    {/* Legend */}
-                    {!hasNoData && !isLoading && (
-                        <Flex justify="center" mt={4} gap={4} align="center">
-                            <Text fontSize="xs" color="gray.500">Less</Text>
-                            <Flex gap={1}>
-                                <Box w={3} h={3} bg="#f3f4f6" borderRadius="sm" />
-                                <Box w={3} h={3} bg="#d1fae5" borderRadius="sm" />
-                                <Box w={3} h={3} bg="#6ee7b7" borderRadius="sm" />
-                                <Box w={3} h={3} bg="#34d399" borderRadius="sm" />
-                                <Box w={3} h={3} bg="#10b981" borderRadius="sm" />
-                                <Box w={3} h={3} bg="#059669" borderRadius="sm" />
-                            </Flex>
-                            <Text fontSize="xs" color="gray.500">More</Text>
-                        </Flex>
-                    )}
-                </Card.Body>
-            </Card.Root>
+                {/* Calendar Heatmap */}
+                {error && (
+                    <div className="flex h-[200px] items-center justify-center">
+                        <span className="text-red-500">Failed to load timeline data</span>
+                    </div>
+                )}
+                {!error && hasNoData && (
+                    <div className="flex h-[200px] flex-col items-center justify-center gap-2">
+                        <LuCalendar size={48} color="#9CA3AF" />
+                        <span className="text-lg font-medium text-slate-600">
+                            No activity in {selectedYear}
+                        </span>
+                        <span className="text-sm text-slate-500">
+                            No transactions were recorded during this year.
+                        </span>
+                        {timelineData && timelineData.min_year !== timelineData.max_year && (
+                            <span className="mt-2 block text-sm text-blue-500">
+                                Try navigating to {timelineData.max_year} for your most recent activity.
+                            </span>
+                        )}
+                    </div>
+                )}
+                {!error && !hasNoData && (
+                    <CalendarHeatmap
+                        year={selectedYear}
+                        data={timelineData?.daily_stats || []}
+                        selectedDate={selectedDate}
+                        onDateClick={handleDateClick}
+                        isLoading={isLoading}
+                    />
+                )}
+
+                {/* Legend */}
+                {!hasNoData && !isLoading && (
+                    <div className="mt-4 flex items-center justify-center gap-4">
+                        <span className="text-xs text-slate-500">Less</span>
+                        <div className="flex gap-1">
+                            <div className="h-3 w-3 rounded-sm bg-[#f3f4f6]" />
+                            <div className="h-3 w-3 rounded-sm bg-[#d1fae5]" />
+                            <div className="h-3 w-3 rounded-sm bg-[#6ee7b7]" />
+                            <div className="h-3 w-3 rounded-sm bg-[#34d399]" />
+                            <div className="h-3 w-3 rounded-sm bg-[#10b981]" />
+                            <div className="h-3 w-3 rounded-sm bg-[#059669]" />
+                        </div>
+                        <span className="text-xs text-slate-500">More</span>
+                    </div>
+                )}
+            </div>
 
             {/* Selected Date Transaction Table */}
             {selectedDate && (
-                <Card.Root>
-                    <Card.Body p={4}>
-                        {/* Selection Header */}
-                        <Flex justify="space-between" align="center" mb={4}>
-                            <Flex align="center" gap={3}>
-                                <Text fontSize="lg" fontWeight="bold">
-                                    📅 {formatSelectedDate(selectedDate)}
-                                </Text>
-                                {selectedStats && (
-                                    <HStack gap={2}>
-                                        <Badge colorPalette="blue">
-                                            {selectedStats.count} transaction{selectedStats.count === 1 ? '' : 's'}
+                <div className="border border-slate-200 bg-white p-4">
+                    {/* Selection Header */}
+                    <div className="mb-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <span className="text-lg font-bold">
+                                📅 {formatSelectedDate(selectedDate)}
+                            </span>
+                            {selectedStats && (
+                                <div className="flex items-center gap-2">
+                                    <Badge colorScheme="blue">
+                                        {selectedStats.count} transaction{selectedStats.count === 1 ? '' : 's'}
+                                    </Badge>
+                                    {selectedStats.inflow_count > 0 && (
+                                        <Badge colorScheme="green">
+                                            ↑ {selectedStats.inflow_count} inflow
                                         </Badge>
-                                        {selectedStats.inflow_count > 0 && (
-                                            <Badge colorPalette="green" variant="subtle">
-                                                ↑ {selectedStats.inflow_count} inflow
-                                            </Badge>
-                                        )}
-                                        {selectedStats.outflow_count > 0 && (
-                                            <Badge colorPalette="red" variant="subtle">
-                                                ↓ {selectedStats.outflow_count} outflow
-                                            </Badge>
-                                        )}
-                                    </HStack>
-                                )}
-                            </Flex>
+                                    )}
+                                    {selectedStats.outflow_count > 0 && (
+                                        <Badge colorScheme="red">
+                                            ↓ {selectedStats.outflow_count} outflow
+                                        </Badge>
+                                    )}
+                                </div>
+                            )}
+                        </div>
 
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleClearSelection}
-                            >
-                                <LuX />
-                                Clear Selection
-                            </Button>
-                        </Flex>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleClearSelection}
+                        >
+                            <LuX />
+                            Clear Selection
+                        </Button>
+                    </div>
 
-                        {/* Transactions Table */}
-                        <Suspense fallback={<TableLoadingFallback />}>
-                            <TransactionsTable
-                                tableId="timeline"
-                                key={selectedDate}
-                                title=""
-                                subtitle=""
-                                filters={{ ...defaultFilterState, ...getDateFilters() }}
-                                showFilters={false}
-                                showBundles={false}
-                                showSuggestions={false}
-                                compact={false}
-                                emptyMessage={`No transactions found on ${formatSelectedDate(selectedDate)}`}
-                            />
-                        </Suspense>
-                    </Card.Body>
-                </Card.Root>
+                    {/* Transactions Table */}
+                    <Suspense fallback={<TableLoadingFallback />}>
+                        <TransactionsTable
+                            tableId="timeline"
+                            key={selectedDate}
+                            title=""
+                            subtitle=""
+                            filters={{ ...defaultFilterState, ...getDateFilters() }}
+                            showFilters={false}
+                            showBundles={false}
+                            showSuggestions={false}
+                            compact={false}
+                            emptyMessage={`No transactions found on ${formatSelectedDate(selectedDate)}`}
+                        />
+                    </Suspense>
+                </div>
             )}
 
             {/* Hint when no date selected */}
             {!selectedDate && !hasNoData && !isLoading && timelineData && (
-                <Card.Root>
-                    <Card.Body p={6}>
-                        <Center flexDirection="column" gap={2} py={4}>
-                            <Text fontSize="md" color="gray.600" fontWeight="medium">
-                                Click on any day in the calendar to view transactions
-                            </Text>
-                            <Text fontSize="sm" color="gray.500">
-                                Darker cells indicate more activity. Hover over a day for details.
-                            </Text>
-                        </Center>
-                    </Card.Body>
-                </Card.Root>
+                <div className="border border-slate-200 bg-white p-6">
+                    <div className="flex flex-col items-center justify-center gap-2 py-4">
+                        <span className="text-base font-medium text-slate-600">
+                            Click on any day in the calendar to view transactions
+                        </span>
+                        <span className="text-sm text-slate-500">
+                            Darker cells indicate more activity. Hover over a day for details.
+                        </span>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

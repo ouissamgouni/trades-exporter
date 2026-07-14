@@ -12,14 +12,6 @@
  */
 
 import React from 'react';
-import {
-    Badge,
-    Box,
-    Card,
-    Flex,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
 import { FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
 import { AssetPnLRow, AccountBalanceBreakdown } from './types';
 import { Tooltip } from '../ui/tooltip';
@@ -28,6 +20,19 @@ import { DeltaBar } from './DeltaBar';
 import { computeDelta } from './deltaUtils';
 import { ValueDisplay } from '../ValueDisplay';
 import { formatQuantityWithCurrency } from '../../utils/numberUtils';
+import { Badge, Spinner } from '../ui/primitives';
+
+// ─── Color tones (Chakra token -> Tailwind class + hex for inline accents) ──
+
+interface ColorTone {
+    text: string;
+    hex: string;
+}
+
+const PNL_POSITIVE: ColorTone = { text: 'text-green-600', hex: '#16a34a' };
+const PNL_NEGATIVE: ColorTone = { text: 'text-red-600', hex: '#dc2626' };
+const BLUE_TONE: ColorTone = { text: 'text-blue-600', hex: '#2563eb' };
+const ORANGE_TONE: ColorTone = { text: 'text-orange-600', hex: '#ea580c' };
 
 // ─── MetricCard ─────────────────────────────────────────────────────────────
 
@@ -35,29 +40,23 @@ const MetricCard: React.FC<{
     label: string;
     value: string;
     subValue?: string;
-    color?: string;
+    color?: ColorTone;
     icon?: React.ReactNode;
 }> = ({ label, value, subValue, color, icon }) => (
-    <Box
-        p={3}
-        bg="gray.50"
-        borderRadius="md"
-        borderLeft="3px solid"
-        borderLeftColor={color || 'gray.300'}
-    >
-        <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wide">
+    <div className="bg-slate-50 p-3" style={{ borderLeft: `3px solid ${color?.hex || '#cbd5e1'}` }}>
+        <span className="block text-xs uppercase tracking-wide text-slate-500">
             {label}
-        </Text>
-        <Flex align="center" gap={2}>
+        </span>
+        <div className="flex items-center gap-2">
             {icon}
-            <Text fontSize="lg" fontWeight="bold" color={color} fontFamily="mono">
+            <span className={`font-mono text-lg font-bold ${color?.text || ''}`}>
                 {value}
-            </Text>
-        </Flex>
+            </span>
+        </div>
         {subValue && (
-            <Text fontSize="xs" color="gray.500">{subValue}</Text>
+            <span className="block text-xs text-slate-500">{subValue}</span>
         )}
-    </Box>
+    </div>
 );
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -97,20 +96,20 @@ export const AssetSidebar: React.FC<AssetSidebarProps> = ({
     liveAccountErrors,
     onAccountClick,
 }) => {
-    const unrealizedColor = assetPnlRow.unrealized_pnl >= 0 ? 'green.600' : 'red.600';
-    const realizedColor = assetPnlRow.realized_pnl >= 0 ? 'green.600' : 'red.600';
+    const unrealizedTone = assetPnlRow.unrealized_pnl >= 0 ? PNL_POSITIVE : PNL_NEGATIVE;
+    const realizedTone = assetPnlRow.realized_pnl >= 0 ? PNL_POSITIVE : PNL_NEGATIVE;
     const unrealizedPct = `${assetPnlRow.unrealized_pnl_pct >= 0 ? '+' : ''}${(assetPnlRow.unrealized_pnl_pct * 100).toFixed(2)}%`;
 
     return (
-        <Card.Root position="sticky" top="80px">
-            <Card.Body p={3}>
+        <div className="sticky top-[80px] border border-slate-200 bg-white">
+            <div className="p-3">
                 {/* ── Balances ── */}
-                <Flex align="center" gap={2} mb={3}>
-                    <Text fontSize="sm" fontWeight="bold" color="gray.600">
+                <div className="mb-3 flex items-center gap-2">
+                    <span className="text-sm font-bold text-slate-600">
                         Balances
-                    </Text>
-                    {liveBalanceLoading && <Spinner size="xs" color="gray.400" />}
-                </Flex>
+                    </span>
+                    {liveBalanceLoading && <Spinner size="xs" className="text-slate-400" />}
+                </div>
 
                 {/* Total row: P&L qty vs Live qty + delta */}
                 {(() => {
@@ -121,40 +120,40 @@ export const AssetSidebar: React.FC<AssetSidebarProps> = ({
                         const deltaInfo = computeDelta(assetPnlRow.quantity, effectiveLive);
                         const hasErrors = liveAccountErrors && liveAccountErrors.size > 0;
                         return (
-                            <Box p={2} bg="blue.50" borderRadius="md" mb={2}>
-                                <Flex justify="space-between" align="center" mb={1}>
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="xs" color="gray.500" fontWeight="medium">Total</Text>
+                            <div className="mb-2 bg-blue-50 p-2">
+                                <div className="mb-1 flex items-center justify-between">
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-xs font-medium text-slate-500">Total</span>
                                         {hasErrors && (
                                             <Tooltip content={`${liveAccountErrors!.size} account(s) had fetch errors — live total may be incomplete`} openDelay={200}>
-                                                <Text fontSize="xs" color="orange.500" cursor="help">⚠</Text>
+                                                <span className="cursor-help text-xs text-orange-500">⚠</span>
                                             </Tooltip>
                                         )}
-                                    </Flex>
+                                    </div>
                                     <DeltaBar delta={deltaInfo} liveQty={effectiveLive} pnlQty={assetPnlRow.quantity} size="sm" />
-                                </Flex>
-                                <Flex justify="space-between" align="center">
-                                    <Text fontSize="sm" fontFamily="mono" fontWeight="bold">
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="font-mono text-sm font-bold">
                                         <ValueDisplay value={assetPnlRow.quantity} options={{ maxDecimals: 4 }} />
-                                    </Text>
-                                </Flex>
-                            </Box>
+                                    </span>
+                                </div>
+                            </div>
                         );
                     }
 
                     return (
-                        <Box p={3} bg="gray.50" borderRadius="md" mb={2}>
-                            <Text fontSize="xs" color="gray.500" mb={1}>Quantity</Text>
-                            <Text fontSize="sm" fontFamily="mono" fontWeight="bold" color="blue.600">
+                        <div className="mb-2 bg-slate-50 p-3">
+                            <span className="mb-1 block text-xs text-slate-500">Quantity</span>
+                            <span className="block font-mono text-sm font-bold text-blue-600">
                                 <ValueDisplay value={assetPnlRow.quantity} options={{ maxDecimals: 4 }} />
-                            </Text>
-                        </Box>
+                            </span>
+                        </div>
                     );
                 })()}
 
                 {/* Per-account rows */}
                 {accountBreakdown && accountBreakdown.length > 0 ? (
-                    <Flex direction="column" gap={1} mb={2}>
+                    <div className="mb-2 flex flex-col gap-1">
                         {[...accountBreakdown]
                             .sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty))
                             .map((acct) => {
@@ -170,14 +169,14 @@ export const AssetSidebar: React.FC<AssetSidebarProps> = ({
                                     deltaNode = (
                                         <Tooltip
                                             content={
-                                                <Box fontSize="xs">
-                                                    <Text fontWeight="medium" mb={1}>Fetch error:</Text>
-                                                    {acctErrors.map((err, i) => <Text key={i}>{err}</Text>)}
-                                                </Box>
+                                                <div className="text-xs">
+                                                    <span className="mb-1 block font-medium">Fetch error:</span>
+                                                    {acctErrors.map((err, i) => <span key={i} className="block">{err}</span>)}
+                                                </div>
                                             }
                                             openDelay={200}
                                         >
-                                            <Text fontSize="xs" color="red.500" cursor="help">⚠ err</Text>
+                                            <span className="cursor-help text-xs text-red-500">⚠ err</span>
                                         </Tooltip>
                                     );
                                 } else if (acctLiveQty != null) {
@@ -187,62 +186,57 @@ export const AssetSidebar: React.FC<AssetSidebarProps> = ({
                                 }
 
                                 return (
-                                    <Box key={acct.account_id} px={1.5} py={1} bg="gray.50" borderRadius="md">
-                                        <Flex align="center" gap={1} mb={0.5}>
-                                            <Box w="6px" h="6px" borderRadius="full" bg={acctColor} flexShrink={0} />
-                                            <Text
-                                                fontSize="2xs"
-                                                fontWeight="medium"
-                                                truncate
-                                                maxW="120px"
+                                    <div key={acct.account_id} className="bg-slate-50 px-1.5 py-1">
+                                        <div className="mb-0.5 flex items-center gap-1">
+                                            <div className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: acctColor }} />
+                                            <span
+                                                className="max-w-[120px] cursor-pointer truncate text-[10px] font-medium hover:text-blue-600 hover:underline"
                                                 title={acct.account_name}
-                                                cursor="pointer"
-                                                _hover={{ textDecoration: 'underline', color: 'blue.600' }}
                                                 onClick={() => onAccountClick?.(acct.account_id)}
                                             >
                                                 {acct.account_name}
-                                            </Text>
-                                        </Flex>
-                                        <Flex justify="space-between" align="center">
-                                            <Text fontSize="xs" fontFamily="mono"><ValueDisplay value={acct.qty} options={{ maxDecimals: 4 }} /></Text>
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="font-mono text-xs"><ValueDisplay value={acct.qty} options={{ maxDecimals: 4 }} /></span>
                                             {deltaNode}
-                                        </Flex>
-                                    </Box>
+                                        </div>
+                                    </div>
                                 );
                             })}
-                    </Flex>
+                    </div>
                 ) : (
-                    <Text fontSize="xs" color="gray.400" textAlign="center" py={2}>
+                    <span className="block py-2 text-center text-xs text-slate-400">
                         {liveBalanceLoading ? 'Loading...' : 'No account breakdown available'}
-                    </Text>
+                    </span>
                 )}
 
                 {/* Divider */}
-                <Box borderTop="1px solid" borderColor="gray.200" my={2} />
+                <div className="my-2 border-t border-slate-200" />
 
-                <Flex direction="column" gap={2}>
+                <div className="flex flex-col gap-2">
                     <MetricCard
                         label="Market Value"
                         value={formatQuantityWithCurrency(assetPnlRow.market_value, baseCurrency)}
                         subValue={assetPnlRow.unit_value != null ? `@ ${formatQuantityWithCurrency(assetPnlRow.unit_value, baseCurrency)}/unit` : undefined}
-                        color="blue.600"
+                        color={BLUE_TONE}
                     />
                     <MetricCard
                         label="Cost Basis"
                         value={formatQuantityWithCurrency(assetPnlRow.cost_basis, baseCurrency)}
                         subValue={assetPnlRow.unit_cost != null && assetPnlRow.unit_cost > 0 ? `@ ${formatQuantityWithCurrency(assetPnlRow.unit_cost, baseCurrency)}/unit` : undefined}
                     />
-                </Flex>
+                </div>
 
-                <Text fontSize="sm" fontWeight="bold" color="gray.600" mt={4} mb={3}>
+                <span className="mb-3 mt-4 block text-sm font-bold text-slate-600">
                     P&L Summary
-                </Text>
-                <Flex direction="column" gap={2}>
+                </span>
+                <div className="flex flex-col gap-2">
                     <MetricCard
                         label="Unrealized P&L"
                         value={formatQuantityWithCurrency(assetPnlRow.unrealized_pnl, baseCurrency)}
                         subValue={unrealizedPct}
-                        color={unrealizedColor}
+                        color={unrealizedTone}
                         icon={assetPnlRow.unrealized_pnl >= 0 ?
                             <FiTrendingUp color="green" size={14} /> :
                             <FiTrendingDown color="red" size={14} />
@@ -251,7 +245,7 @@ export const AssetSidebar: React.FC<AssetSidebarProps> = ({
                     <MetricCard
                         label="Realized P&L"
                         value={formatQuantityWithCurrency(assetPnlRow.realized_pnl, baseCurrency)}
-                        color={realizedColor}
+                        color={realizedTone}
                         icon={assetPnlRow.realized_pnl >= 0 ?
                             <FiTrendingUp color="green" size={14} /> :
                             <FiTrendingDown color="red" size={14} />
@@ -260,36 +254,36 @@ export const AssetSidebar: React.FC<AssetSidebarProps> = ({
                     <MetricCard
                         label="Total Fees"
                         value={formatQuantityWithCurrency(assetPnlRow.total_fees, baseCurrency)}
-                        color="orange.600"
+                        color={ORANGE_TONE}
                     />
-                </Flex>
+                </div>
 
-                <Text fontSize="sm" fontWeight="bold" color="gray.600" mt={4} mb={3}>
+                <span className="mb-3 mt-4 block text-sm font-bold text-slate-600">
                     Activity
-                </Text>
-                <Flex direction="column" gap={2}>
-                    <Box p={3} bg="gray.50" borderRadius="md">
-                        <Flex justify="space-between" align="center">
-                            <Text fontSize="xs" color="gray.500">Cost Lots</Text>
-                            <Badge size="sm" colorPalette="blue">{assetPnlRow.lot_count}</Badge>
-                        </Flex>
-                    </Box>
-                    <Box p={3} bg="gray.50" borderRadius="md">
-                        <Flex justify="space-between" align="center">
-                            <Text fontSize="xs" color="gray.500">Realized Events</Text>
-                            <Badge size="sm" colorPalette="green">{assetPnlRow.realized_event_count}</Badge>
-                        </Flex>
-                    </Box>
+                </span>
+                <div className="flex flex-col gap-2">
+                    <div className="bg-slate-50 p-3">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">Cost Lots</span>
+                            <Badge colorScheme="blue">{assetPnlRow.lot_count}</Badge>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 p-3">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">Realized Events</span>
+                            <Badge colorScheme="green">{assetPnlRow.realized_event_count}</Badge>
+                        </div>
+                    </div>
                     {assetPnlRow.warning_count > 0 && (
-                        <Box p={3} bg="orange.50" borderRadius="md">
-                            <Flex justify="space-between" align="center">
-                                <Text fontSize="xs" color="orange.600">Warnings</Text>
-                                <Badge size="sm" colorPalette="orange">{assetPnlRow.warning_count}</Badge>
-                            </Flex>
-                        </Box>
+                        <div className="bg-orange-50 p-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs text-orange-600">Warnings</span>
+                                <Badge colorScheme="orange">{assetPnlRow.warning_count}</Badge>
+                            </div>
+                        </div>
                     )}
-                </Flex>
-            </Card.Body>
-        </Card.Root>
+                </div>
+            </div>
+        </div>
     );
 };

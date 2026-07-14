@@ -8,23 +8,25 @@
  */
 
 import React, { useState } from 'react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import {
     Badge,
-    Box,
+    type BadgeColorScheme,
     Button,
-    Dialog,
-    Flex,
     Input,
-    NativeSelect,
-    Portal,
     Tabs,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+    TabsList,
+    TabsTrigger,
+    TabsContent,
+} from './ui/primitives';
 import { API_URL, DimensionWithCategories } from '../types';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
 import { toaster } from './ui/toaster';
 import { useAssets } from '../hooks/useAssets';
+
+const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toBadgeColor = (c: string): BadgeColorScheme =>
+    (VALID_BADGE_COLORS as string[]).includes(c) ? (c as BadgeColorScheme) : 'gray';
 
 export interface AssetPrefill {
     symbol?: string;
@@ -65,6 +67,7 @@ const AssetFormDialog: React.FC<AssetFormDialogProps> = ({
     const [dimensionData, setDimensionData] = useState<DimensionWithCategories[]>([]);
     const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<number>>(new Set());
     const [isFetchingCategories, setIsFetchingCategories] = useState(false);
+    const [activeCategoryTab, setActiveCategoryTab] = useState<string>('');
 
     const fiatAssets = React.useMemo(
         () => allAssets.filter(a => a.price_type === 'fiat' && a.asset_id),
@@ -80,6 +83,7 @@ const AssetFormDialog: React.FC<AssetFormDialogProps> = ({
             if (response.ok) {
                 const data: DimensionWithCategories[] = await response.json();
                 setDimensionData(data);
+                setActiveCategoryTab(data[0]?.label || '');
             }
         } catch (err) {
             console.warn('Failed to fetch categories:', err);
@@ -193,244 +197,230 @@ const AssetFormDialog: React.FC<AssetFormDialogProps> = ({
     };
 
     return (
-        <Dialog.Root
+        <RadixDialog.Root
             open={isOpen}
-            onOpenChange={(e) => {
-                if (!e.open) onClose();
+            onOpenChange={(open) => {
+                if (!open) onClose();
             }}
         >
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content>
-                        <form onSubmit={handleSubmit}>
-                            <Dialog.Header>
-                                <Dialog.Title>Create New Asset</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    {error && (
-                                        <Text color="red.500" fontSize="sm">
-                                            {error}
-                                        </Text>
-                                    )}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            Symbol *
-                                        </Text>
-                                        <Input
-                                            placeholder="e.g., BTC, ETH, USDT"
-                                            value={formData.symbol}
-                                            onChange={(e) =>
-                                                setFormData({ ...formData, symbol: e.target.value.toUpperCase() })
-                                            }
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            Label
-                                        </Text>
-                                        <Input
-                                            placeholder="e.g., Bitcoin, Ethereum"
-                                            value={formData.label}
-                                            onChange={(e) =>
-                                                setFormData({ ...formData, label: e.target.value })
-                                            }
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            ISIN
-                                        </Text>
-                                        <Input
-                                            placeholder="e.g., US0378331005"
-                                            value={formData.isin}
-                                            onChange={(e) =>
-                                                setFormData({ ...formData, isin: e.target.value.toUpperCase() })
-                                            }
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            Type
-                                        </Text>
-                                        <ComboSelect
-                                            value={formData.price_type}
-                                            onChange={(val) =>
-                                                setFormData({ ...formData, price_type: val })
-                                            }
-                                            options={ASSET_TYPE_OPTIONS}
-                                            placeholder="Select or type..."
-                                            width="100%"
-                                            size="md"
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            Tags
-                                        </Text>
-                                        <Input
-                                            placeholder="e.g., defi, layer1, stablecoin (comma-separated)"
-                                            value={formData.tags
-                                                .map((t) => Object.keys(t)[0])
-                                                .filter(Boolean)
-                                                .join(', ')}
-                                            onChange={(e) => {
-                                                const tagStrings = e.target.value
-                                                    .split(',')
-                                                    .map((t) => t.trim())
-                                                    .filter((t) => t);
-                                                const tags = tagStrings.map((tag) => ({ [tag]: true }));
-                                                setFormData({ ...formData, tags });
-                                            }}
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            Denomination Currency
-                                        </Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={String(formData.denomination_currency_id ?? '')}
-                                                onChange={(e) =>
-                                                    setFormData({
-                                                        ...formData,
-                                                        denomination_currency_id: e.target.value ? parseInt(e.target.value) : null,
-                                                    })
-                                                }
-                                            >
-                                                <option value="">— Not set —</option>
-                                                {fiatAssets.map(a => (
-                                                    <option key={a.asset_id} value={String(a.asset_id)}>
-                                                        {a.symbol}{a.label ? ` (${a.label})` : ''}
-                                                    </option>
-                                                ))}
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            Status
-                                        </Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={String(formData.status)}
-                                                onChange={(e) =>
-                                                    setFormData({
-                                                        ...formData,
-                                                        status: parseInt(e.target.value),
-                                                    })
-                                                }
-                                            >
-                                                <option value="0">Active</option>
-                                                <option value="1">Inactive</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] max-h-[92vh] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto bg-white shadow-xl">
+                    <form onSubmit={handleSubmit}>
+                        <div className="border-b border-gray-200 px-4 py-3">
+                            <RadixDialog.Title className="text-base font-semibold">Create New Asset</RadixDialog.Title>
+                        </div>
+                        <div className="px-4 py-3">
+                            <div className="flex flex-col gap-4">
+                                {error && (
+                                    <span className="text-sm text-red-500">
+                                        {error}
+                                    </span>
+                                )}
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        Symbol *
+                                    </span>
+                                    <Input
+                                        placeholder="e.g., BTC, ETH, USDT"
+                                        value={formData.symbol}
+                                        onChange={(e) =>
+                                            setFormData({ ...formData, symbol: e.target.value.toUpperCase() })
+                                        }
+                                    />
+                                </div>
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        Label
+                                    </span>
+                                    <Input
+                                        placeholder="e.g., Bitcoin, Ethereum"
+                                        value={formData.label}
+                                        onChange={(e) =>
+                                            setFormData({ ...formData, label: e.target.value })
+                                        }
+                                    />
+                                </div>
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        ISIN
+                                    </span>
+                                    <Input
+                                        placeholder="e.g., US0378331005"
+                                        value={formData.isin}
+                                        onChange={(e) =>
+                                            setFormData({ ...formData, isin: e.target.value.toUpperCase() })
+                                        }
+                                    />
+                                </div>
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        Type
+                                    </span>
+                                    <ComboSelect
+                                        value={formData.price_type}
+                                        onChange={(val) =>
+                                            setFormData({ ...formData, price_type: val })
+                                        }
+                                        options={ASSET_TYPE_OPTIONS}
+                                        placeholder="Select or type..."
+                                        width="100%"
+                                        size="md"
+                                    />
+                                </div>
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        Tags
+                                    </span>
+                                    <Input
+                                        placeholder="e.g., defi, layer1, stablecoin (comma-separated)"
+                                        value={formData.tags
+                                            .map((t) => Object.keys(t)[0])
+                                            .filter(Boolean)
+                                            .join(', ')}
+                                        onChange={(e) => {
+                                            const tagStrings = e.target.value
+                                                .split(',')
+                                                .map((t) => t.trim())
+                                                .filter((t) => t);
+                                            const tags = tagStrings.map((tag) => ({ [tag]: true }));
+                                            setFormData({ ...formData, tags });
+                                        }}
+                                    />
+                                </div>
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        Denomination Currency
+                                    </span>
+                                    <select
+                                        className="h-9 w-full border border-gray-300 px-2 text-sm"
+                                        value={String(formData.denomination_currency_id ?? '')}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                denomination_currency_id: e.target.value ? parseInt(e.target.value) : null,
+                                            })
+                                        }
+                                    >
+                                        <option value="">— Not set —</option>
+                                        {fiatAssets.map(a => (
+                                            <option key={a.asset_id} value={String(a.asset_id)}>
+                                                {a.symbol}{a.label ? ` (${a.label})` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        Status
+                                    </span>
+                                    <select
+                                        className="h-9 w-full border border-gray-300 px-2 text-sm"
+                                        value={String(formData.status)}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                status: parseInt(e.target.value),
+                                            })
+                                        }
+                                    >
+                                        <option value="0">Active</option>
+                                        <option value="1">Inactive</option>
+                                    </select>
+                                </div>
 
-                                    {/* Category Selection */}
-                                    {dimensionData.length > 0 && (
-                                        <Box>
-                                            <Text fontWeight="medium" mb={1}>Categories</Text>
-                                            <Box borderWidth={1} borderColor="gray.200" borderRadius="md" p={2} maxH="300px" overflowY="auto">
-                                                <Tabs.Root defaultValue={dimensionData[0]?.label} size="sm">
-                                                    <Tabs.List>
-                                                        {dimensionData.map(dim => (
-                                                            <Tabs.Trigger key={dim.id} value={dim.label}>
-                                                                {dim.label}
-                                                            </Tabs.Trigger>
-                                                        ))}
-                                                    </Tabs.List>
+                                {/* Category Selection */}
+                                {dimensionData.length > 0 && (
+                                    <div>
+                                        <span className="mb-1 block font-medium">Categories</span>
+                                        <div className="max-h-[300px] overflow-y-auto border border-gray-200 p-2">
+                                            <Tabs value={activeCategoryTab} onValueChange={setActiveCategoryTab}>
+                                                <TabsList>
                                                     {dimensionData.map(dim => (
-                                                        <Tabs.Content key={dim.id} value={dim.label}>
-                                                            <VStack align="stretch" gap={1} mt={2}>
-                                                                {dim.categories.map(cat => (
-                                                                    <Flex
-                                                                        key={cat.id}
-                                                                        align="center"
-                                                                        gap={2}
-                                                                        p={1}
-                                                                        borderRadius="sm"
-                                                                        cursor="pointer"
-                                                                        _hover={{ bg: 'gray.50' }}
-                                                                        onClick={() => {
-                                                                            setSelectedCategoryIds(prev => {
-                                                                                const next = new Set(prev);
-                                                                                if (next.has(cat.id)) next.delete(cat.id);
-                                                                                else next.add(cat.id);
-                                                                                return next;
-                                                                            });
-                                                                        }}
-                                                                    >
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={selectedCategoryIds.has(cat.id)}
-                                                                            onChange={() => { }}
-                                                                            style={{ cursor: 'pointer' }}
-                                                                        />
-                                                                        <Badge
-                                                                            colorPalette={cat.color || 'gray'}
-                                                                            size="sm"
-                                                                            variant="subtle"
-                                                                        >
-                                                                            {cat.label}
-                                                                        </Badge>
-                                                                    </Flex>
-                                                                ))}
-                                                            </VStack>
-                                                        </Tabs.Content>
+                                                        <TabsTrigger key={dim.id} value={dim.label}>
+                                                            {dim.label}
+                                                        </TabsTrigger>
                                                     ))}
-                                                </Tabs.Root>
-                                                {selectedCategoryIds.size > 0 && (
-                                                    <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                        <Text fontSize="xs" color="gray.500" mb={1}>
-                                                            Selected ({selectedCategoryIds.size}):
-                                                        </Text>
-                                                        <Flex gap={1} flexWrap="wrap">
-                                                            {Array.from(selectedCategoryIds).map(catId => {
-                                                                const cat = dimensionData
-                                                                    .flatMap(d => d.categories)
-                                                                    .find(c => c.id === catId);
-                                                                if (!cat) return null;
-                                                                return (
+                                                </TabsList>
+                                                {dimensionData.map(dim => (
+                                                    <TabsContent key={dim.id} value={dim.label}>
+                                                        <div className="mt-2 flex flex-col gap-1">
+                                                            {dim.categories.map(cat => (
+                                                                <div
+                                                                    key={cat.id}
+                                                                    className="flex cursor-pointer items-center gap-2 p-1 hover:bg-gray-50"
+                                                                    onClick={() => {
+                                                                        setSelectedCategoryIds(prev => {
+                                                                            const next = new Set(prev);
+                                                                            if (next.has(cat.id)) next.delete(cat.id);
+                                                                            else next.add(cat.id);
+                                                                            return next;
+                                                                        });
+                                                                    }}
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={selectedCategoryIds.has(cat.id)}
+                                                                        onChange={() => { }}
+                                                                        style={{ cursor: 'pointer' }}
+                                                                    />
                                                                     <Badge
-                                                                        key={catId}
-                                                                        colorPalette={cat.color || 'gray'}
-                                                                        size="xs"
-                                                                        variant="solid"
+                                                                        colorScheme={toBadgeColor(cat.color || 'gray')}
                                                                     >
                                                                         {cat.label}
                                                                     </Badge>
-                                                                );
-                                                            })}
-                                                        </Flex>
-                                                    </Box>
-                                                )}
-                                            </Box>
-                                        </Box>
-                                    )}
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => onClose()}>
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        type="submit"
-                                        colorPalette="green"
-                                        loading={loading}
-                                        disabled={!formData.symbol.trim()}
-                                    >
-                                        Create
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </form>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </TabsContent>
+                                                ))}
+                                            </Tabs>
+                                            {selectedCategoryIds.size > 0 && (
+                                                <div className="mt-2 border-t border-gray-100 pt-2">
+                                                    <span className="mb-1 block text-xs text-gray-500">
+                                                        Selected ({selectedCategoryIds.size}):
+                                                    </span>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {Array.from(selectedCategoryIds).map(catId => {
+                                                            const cat = dimensionData
+                                                                .flatMap(d => d.categories)
+                                                                .find(c => c.id === catId);
+                                                            if (!cat) return null;
+                                                            return (
+                                                                <Badge
+                                                                    key={catId}
+                                                                    colorScheme={toBadgeColor(cat.color || 'gray')}
+                                                                    className="text-[10px]"
+                                                                >
+                                                                    {cat.label}
+                                                                </Badge>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
+                            <Button variant="outline" onClick={() => onClose()}>
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                colorScheme="green"
+                                loading={loading}
+                                disabled={!formData.symbol.trim()}
+                            >
+                                Create
+                            </Button>
+                        </div>
+                    </form>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

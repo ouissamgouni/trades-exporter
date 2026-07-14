@@ -9,13 +9,13 @@
  */
 
 import React, { useMemo } from 'react';
-import { Box, Heading, Text, Flex, Badge, Card } from '@chakra-ui/react';
 import { FiAlertTriangle } from 'react-icons/fi';
 import { AllocationTreemap } from './AllocationTreemap';
 import { AssetPnLTable } from './AssetPnLTable';
 import { usePnL } from './PnLContext';
 import type { AssetPnLRow } from './types';
 import type { DrillDownState } from './pnlState';
+import { Badge } from '../ui/primitives';
 
 interface PnLLevel1Props {
     drill: DrillDownState;
@@ -88,18 +88,18 @@ export const PnLLevel1: React.FC<PnLLevel1Props> = ({
     if (drill.metric === 'warnings') {
         const warningAssets = assets.filter(a => a.warning_count > 0);
         return (
-            <Box>
-                <Flex align="center" gap={2} mb={3}>
-                    <FiAlertTriangle color="var(--chakra-colors-orange-500)" />
-                    <Heading size="sm">Warnings ({state.warnings.length})</Heading>
-                </Flex>
-                <Flex gap={2} flexWrap="wrap" mb={4}>
+            <div>
+                <div className="mb-3 flex items-center gap-2">
+                    <span className="text-orange-500"><FiAlertTriangle /></span>
+                    <span className="text-sm font-semibold">Warnings ({state.warnings.length})</span>
+                </div>
+                <div className="mb-4 flex flex-wrap gap-2">
                     {Object.entries(state.warningTypeCounts).map(([type, count]) => (
-                        <Badge key={type} colorPalette="orange" variant="subtle" size="sm">
+                        <Badge key={type} colorScheme="orange">
                             {type}: {count}
                         </Badge>
                     ))}
-                </Flex>
+                </div>
                 <AssetPnLTable
                     assets={warningAssets}
                     baseCurrency={state.config.base_currency_symbol}
@@ -110,26 +110,26 @@ export const PnLLevel1: React.FC<PnLLevel1Props> = ({
                     accountBalances={accountBalances}
                     pnlVersionId={state.currentVersionId ?? undefined}
                 />
-            </Box>
+            </div>
         );
     }
 
     return (
-        <Box>
-            <Flex align="center" gap={2} mb={3}>
-                <Heading size="sm">{title}</Heading>
+        <div>
+            <div className="mb-3 flex items-center gap-2">
+                <span className="text-sm font-semibold">{title}</span>
                 {state.timeframeRange !== 'all' && (
-                    <Badge colorPalette="blue" variant="subtle" size="sm">
+                    <Badge colorScheme="blue">
                         {state.timeframeRange.toUpperCase()}
                     </Badge>
                 )}
-                <Text fontSize="xs" color="gray.500">
+                <span className="text-xs text-slate-500">
                     {filteredAssets.length} asset{filteredAssets.length !== 1 ? 's' : ''}
-                </Text>
-            </Flex>
+                </span>
+            </div>
 
             {/* Treemap */}
-            <Box mb={4}>
+            <div className="mb-4">
                 <AllocationTreemap
                     points={heroTimeline.data?.points || []}
                     assetCategoryMaps={assetCategoryMaps}
@@ -141,7 +141,7 @@ export const PnLLevel1: React.FC<PnLLevel1Props> = ({
                     accountBalances={accountBalances}
                     onAssetNavigate={onAssetNavigate}
                 />
-            </Box>
+            </div>
 
             {/* Asset cards / table */}
             <AssetPnLTable
@@ -159,6 +159,6 @@ export const PnLLevel1: React.FC<PnLLevel1Props> = ({
                 liveFetchedAccountIds={liveFetchedAccountIds}
                 pnlVersionId={state.currentVersionId ?? undefined}
             />
-        </Box>
+        </div>
     );
 };

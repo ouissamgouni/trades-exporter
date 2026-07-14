@@ -1,5 +1,5 @@
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import React from 'react';
+import { Badge } from './ui/primitives';
 
 interface CounterpartyFilterCardProps {
     nonOwned: boolean;
@@ -21,51 +21,36 @@ export const CounterpartyFilterCard: React.FC<CounterpartyFilterCardProps> = ({
     nonOwnedCount,
 }) => {
     return (
-        <Box
-            bg="white"
-            border="1px solid"
-            borderColor={nonOwned ? 'red.200' : 'gray.200'}
-            borderRadius="md"
-            p={2}
-            minH="70px"
-        >
+        <div className={`min-h-[70px] border bg-white p-2 ${nonOwned ? 'border-red-200' : 'border-slate-200'}`}>
             {/* Header */}
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.600">
-                        🔗 Counterparty
-                    </Text>
-                </Flex>
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs font-semibold text-slate-600">🔗 Counterparty</span>
+                </div>
                 {nonOwned && (
-                    <Badge size="xs" colorPalette="red">1 active</Badge>
+                    <Badge colorScheme="red">1 active</Badge>
                 )}
-            </Flex>
+            </div>
 
             {/* Toggle chip */}
-            <Flex flexWrap="wrap" gap={1.5}>
-                <Badge
-                    size="sm"
-                    variant={nonOwned ? 'solid' : 'outline'}
-                    colorPalette={nonOwned ? 'red' : 'gray'}
-                    cursor="pointer"
-                    userSelect="none"
+            <div className="flex flex-wrap gap-1.5">
+                <button
+                    type="button"
                     onClick={() => onToggle(!nonOwned)}
-                    _hover={{ opacity: 0.8 }}
+                    className={`inline-flex select-none items-center gap-1 border px-2 py-0.5 text-sm font-medium leading-tight transition-opacity hover:opacity-80 ${nonOwned ? 'border-red-500 bg-red-500 text-white' : 'border-slate-200 bg-white text-slate-600'}`}
                 >
                     🚫 Non-Owned
                     {nonOwnedCount !== undefined && nonOwnedCount > 0 && (
-                        <Text as="span" ml={1} fontSize="2xs" opacity={0.8}>
-                            ({nonOwnedCount})
-                        </Text>
+                        <span className="ml-1 text-[10px] opacity-80">({nonOwnedCount})</span>
                     )}
-                </Badge>
-            </Flex>
+                </button>
+            </div>
 
             {/* Helper text */}
-            <Text fontSize="2xs" color="gray.400" mt={1.5}>
+            <span className="mt-1.5 block text-[10px] text-slate-400">
                 Includes unmapped accounts
-            </Text>
-        </Box>
+            </span>
+        </div>
     );
 };
 

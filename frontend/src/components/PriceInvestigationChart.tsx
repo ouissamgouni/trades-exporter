@@ -14,14 +14,13 @@
  * - Nivo ResponsiveLine with slice tooltips
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-    Badge, Box, Button, Flex, Input, Popover, Portal, Spinner, Text,
-} from '@chakra-ui/react';
+import * as RadixPopover from '@radix-ui/react-popover';
 import { FiX, FiPlus } from 'react-icons/fi';
 import { ResponsiveLine } from '@nivo/line';
 import { usePriceHealth, usePriceTimeseries } from '../hooks/usePriceHealth';
 import { useBaseCurrency } from '../hooks/useBaseCurrency';
 import type { PriceHealthRow } from '../types';
+import { Badge, Button, Input, Spinner, Text } from './ui/primitives';
 
 // ---------------------------------------------------------------------------
 // Color palette (Tableau-10 inspired - same as AssetPerformanceComparison)
@@ -219,40 +218,32 @@ export const PriceInvestigationChart: React.FC = () => {
     // ----- Loading state -----
     if (healthLoading) {
         return (
-            <Box textAlign="center" py={10}>
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading asset list...</Text>
-            </Box>
+            <div className="py-10 text-center">
+                <Spinner size="lg" className="text-blue-500" />
+                <Text className="mt-4 block">Loading asset list...</Text>
+            </div>
         );
     }
 
     if (!healthData || healthData.items.length === 0) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Text color="gray.500">No price data available. Import some prices first.</Text>
-            </Box>
+            <div className="bg-gray-50 py-10 text-center">
+                <Text className="text-gray-500">No price data available. Import some prices first.</Text>
+            </div>
         );
     }
 
     const atMax = selectedIds.length >= MAX_ASSETS;
 
     return (
-        <Box>
+        <div>
             {/* ===== Badge bar: selected assets with color pickers + Add button ===== */}
-            <Flex wrap="wrap" gap={1.5} align="center" mb={3}>
+            <div className="mb-3 flex flex-wrap items-center gap-1.5">
                 {/* Add button + search dropdown */}
-                <Box position="relative">
+                <div className="relative">
                     <Badge
-                        variant={atMax ? 'subtle' : 'outline'}
-                        size="sm"
-                        px={2}
-                        py={1}
-                        borderRadius="full"
-                        cursor={atMax ? 'not-allowed' : 'pointer'}
-                        opacity={atMax ? 0.5 : 1}
-                        display="flex"
-                        alignItems="center"
-                        gap={1}
+                        colorScheme="gray"
+                        className={`flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 ${atMax ? 'cursor-not-allowed opacity-50' : ''}`}
                         onClick={() => {
                             if (!atMax) {
                                 setPickerOpen(prev => !prev);
@@ -260,30 +251,15 @@ export const PriceInvestigationChart: React.FC = () => {
                             }
                         }}
                     >
-                        <Box as={FiPlus} fontSize="10px" />
-                        <Text fontSize="xs">{atMax ? `Max ${MAX_ASSETS}` : 'Add'}</Text>
+                        <FiPlus size={10} />
+                        <Text className="text-xs">{atMax ? `Max ${MAX_ASSETS}` : 'Add'}</Text>
                     </Badge>
 
                     {pickerOpen && !atMax && (
-                        <Box
-                            position="absolute"
-                            top="100%"
-                            left={0}
-                            mt={1}
-                            zIndex={20}
-                            bg="white"
-                            border="1px solid"
-                            borderColor="gray.200"
-                            borderRadius="md"
-                            boxShadow="lg"
-                            w="240px"
-                            maxH="260px"
-                            overflow="hidden"
-                        >
-                            <Box p={2} borderBottom="1px solid" borderColor="gray.100">
+                        <div className="absolute left-0 top-full z-20 mt-1 w-[240px] max-h-[260px] overflow-hidden border border-gray-200 bg-white shadow-lg">
+                            <div className="border-b border-gray-100 p-2">
                                 <Input
                                     ref={pickerInputRef}
-                                    size="sm"
                                     placeholder="Search assets..."
                                     value={pickerSearch}
                                     onChange={e => setPickerSearch(e.target.value)}
@@ -293,49 +269,44 @@ export const PriceInvestigationChart: React.FC = () => {
                                             setPickerSearch('');
                                         }
                                     }}
+                                    className="h-8"
                                 />
-                            </Box>
-                            <Box maxH="200px" overflowY="auto">
+                            </div>
+                            <div className="max-h-[200px] overflow-y-auto">
                                 {filteredOptions.length === 0 ? (
-                                    <Text fontSize="xs" color="gray.400" p={3} textAlign="center">
+                                    <Text className="block p-3 text-center text-xs text-gray-400">
+
                                         {selectedIds.length === healthData.items.length
                                             ? 'All assets already selected'
                                             : 'No assets found'}
                                     </Text>
                                 ) : (
                                     filteredOptions.map(r => (
-                                        <Flex
+                                        <div
                                             key={r.asset_id}
-                                            px={3}
-                                            py={1.5}
-                                            align="center"
-                                            gap={2}
-                                            cursor="pointer"
-                                            _hover={{ bg: 'blue.50' }}
+                                            className="flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-blue-50"
                                             onClick={() => handleAdd(r.asset_id)}
                                         >
-                                            <Text fontSize="xs" fontWeight="medium" flex={1}>
+                                            <Text className="flex-1 text-xs font-medium">
                                                 {r.symbol}
                                             </Text>
                                             {r.label && r.label !== r.symbol && (
-                                                <Text fontSize="xs" color="gray.400" truncate maxW="100px">
+                                                <Text className="max-w-[100px] truncate text-xs text-gray-400">
                                                     {r.label}
                                                 </Text>
                                             )}
-                                        </Flex>
+                                        </div>
                                     ))
                                 )}
-                            </Box>
-                        </Box>
+                            </div>
+                        </div>
                     )}
-                </Box>
+                </div>
 
                 {/* Click-away layer for picker */}
                 {pickerOpen && (
-                    <Box
-                        position="fixed"
-                        inset={0}
-                        zIndex={19}
+                    <div
+                        className="fixed inset-0 z-[19]"
                         onClick={() => { setPickerOpen(false); setPickerSearch(''); }}
                     />
                 )}
@@ -351,187 +322,145 @@ export const PriceInvestigationChart: React.FC = () => {
                     const popKey = `asset-${id}`;
 
                     return (
-                        <Popover.Root
+                        <RadixPopover.Root
                             key={id}
                             open={colorPopoverKey === popKey}
-                            onOpenChange={(e) => setColorPopoverKey(e.open ? popKey : null)}
-                            positioning={{ placement: 'bottom' }}
-                            lazyMount
-                            unmountOnExit
+                            onOpenChange={(isOpen) => setColorPopoverKey(isOpen ? popKey : null)}
                         >
-                            <Popover.Trigger asChild>
+                            <RadixPopover.Trigger asChild>
                                 <Badge
-                                    variant="outline"
-                                    colorPalette="gray"
-                                    size="sm"
-                                    px={2}
-                                    cursor="pointer"
-                                    display="flex"
-                                    alignItems="center"
-                                    gap={1}
+                                    colorScheme="gray"
+                                    className="flex cursor-pointer items-center gap-1 px-2"
                                 >
-                                    <Box
-                                        w="8px"
-                                        h="8px"
-                                        borderRadius="full"
-                                        bg={currentColor}
-                                        flexShrink={0}
+                                    <span
+                                        className="h-2 w-2 shrink-0 rounded-full"
+                                        style={{ backgroundColor: currentColor }}
                                     />
-                                    <Text fontSize="xs">{label}</Text>
-                                    <Box
-                                        as="span"
-                                        ml={0.5}
-                                        color="gray.400"
-                                        _hover={{ color: 'red.500' }}
+                                    <Text className="text-xs">{label}</Text>
+                                    <span
+                                        className="ml-0.5 text-gray-400 hover:text-red-500"
                                         onClick={(e: React.MouseEvent) => {
                                             e.stopPropagation();
                                             handleRemove(id);
                                         }}
                                     >
                                         <FiX size={10} />
-                                    </Box>
+                                    </span>
                                 </Badge>
-                            </Popover.Trigger>
-                            <Portal>
-                                <Popover.Positioner>
-                                    <Popover.Content width="auto" p={2} shadow="md" bg="white" borderWidth={1} borderColor="gray.200">
-                                        <Flex gap={1} wrap="wrap" maxW="140px">
-                                            {COMPARISON_PALETTE.map(c => (
-                                                <Box
-                                                    key={c}
-                                                    w="16px"
-                                                    h="16px"
-                                                    borderRadius="full"
-                                                    bg={c}
-                                                    cursor="pointer"
-                                                    border="2px solid"
-                                                    borderColor={currentColor === c ? 'gray.700' : 'transparent'}
-                                                    onClick={() => {
-                                                        setColorOverrides(prev => ({ ...prev, [id]: c }));
-                                                        setColorPopoverKey(null);
-                                                    }}
-                                                    _hover={{ transform: 'scale(1.2)' }}
-                                                    transition="all 0.15s"
-                                                />
-                                            ))}
-                                        </Flex>
-                                    </Popover.Content>
-                                </Popover.Positioner>
-                            </Portal>
-                        </Popover.Root>
+                            </RadixPopover.Trigger>
+                            <RadixPopover.Portal>
+                                <RadixPopover.Content side="bottom" className="z-20 w-auto border border-gray-200 bg-white p-2 shadow-md">
+                                    <div className="flex max-w-[140px] flex-wrap gap-1">
+                                        {COMPARISON_PALETTE.map(c => (
+                                            <span
+                                                key={c}
+                                                className="h-4 w-4 cursor-pointer rounded-full border-2 transition-transform hover:scale-125"
+                                                style={{
+                                                    backgroundColor: c,
+                                                    borderColor: currentColor === c ? '#374151' : 'transparent',
+                                                }}
+                                                onClick={() => {
+                                                    setColorOverrides(prev => ({ ...prev, [id]: c }));
+                                                    setColorPopoverKey(null);
+                                                }}
+                                            />
+                                        ))}
+                                    </div>
+                                </RadixPopover.Content>
+                            </RadixPopover.Portal>
+                        </RadixPopover.Root>
                     );
                 })}
 
                 {/* Quick actions */}
                 {selectedIds.length > 0 && (
                     <Button
-                        size="2xs"
                         variant="ghost"
-                        color="gray.400"
+                        className="ml-1 h-6 px-2 text-xs text-gray-400"
                         onClick={() => setSelectedIds([])}
-                        ml={1}
                     >
                         Clear all
                     </Button>
                 )}
                 {selectedIds.length < healthData.items.length && (
                     <Button
-                        size="2xs"
                         variant="ghost"
-                        color="gray.400"
+                        className={`h-6 px-2 text-xs text-gray-400 ${selectedIds.length > 0 ? '' : 'ml-1'}`}
                         onClick={() => setSelectedIds(healthData.items.map(r => r.asset_id).slice(0, MAX_ASSETS))}
-                        ml={selectedIds.length > 0 ? 0 : 1}
                     >
                         Select all
                     </Button>
                 )}
-            </Flex>
+            </div>
 
             {/* ===== Controls: Zoom + Scale ===== */}
-            <Flex gap={2} mb={3} align="center" justify="space-between" flexWrap="wrap">
-                <Text fontSize="xs" color="gray.500">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <Text className="text-xs text-gray-500">
                     {selectedIds.length} of {healthData.items.length} assets
                     {tsLoading && ' \u00b7 Loading chart\u2026'}
                 </Text>
-                <Flex gap={2} align="center">
+                <div className="flex items-center gap-2">
                     {/* Zoom presets */}
-                    <Flex
-                        borderRadius="md"
-                        border="1px solid"
-                        borderColor="gray.200"
-                        overflow="hidden"
-                        display="inline-flex"
-                    >
+                    <div className="inline-flex overflow-hidden border border-gray-200">
                         {(Object.entries(ZOOM_PRESETS) as [ZoomPreset, { label: string }][]).map(
                             ([key, { label }]) => (
                                 <Button
                                     key={key}
-                                    size="2xs"
                                     variant={zoom === key ? 'solid' : 'ghost'}
-                                    colorPalette={zoom === key ? 'blue' : 'gray'}
-                                    borderRadius="0"
+                                    colorScheme={zoom === key ? 'blue' : 'gray'}
                                     onClick={() => setZoom(key)}
-                                    px={2}
-                                    fontSize="xs"
+                                    className="h-6 px-2 text-xs"
                                 >
                                     {label}
                                 </Button>
                             ),
                         )}
-                    </Flex>
+                    </div>
                     {/* Scale mode */}
-                    <Flex
-                        borderRadius="md"
-                        border="1px solid"
-                        borderColor="gray.200"
-                        overflow="hidden"
-                        display="inline-flex"
-                    >
+                    <div className="inline-flex overflow-hidden border border-gray-200">
                         {([
                             { value: 'auto', label: 'Auto' },
                             { value: 'full', label: 'Full' },
                         ] as const).map(opt => (
                             <Button
                                 key={opt.value}
-                                size="2xs"
                                 variant={scaleMode === opt.value ? 'solid' : 'ghost'}
-                                colorPalette={scaleMode === opt.value ? 'gray' : 'gray'}
-                                borderRadius="0"
+                                colorScheme="gray"
                                 onClick={() => setScaleMode(opt.value)}
-                                px={2}
-                                fontSize="xs"
+                                className="h-6 px-2 text-xs"
                             >
                                 {opt.label}
                             </Button>
                         ))}
-                    </Flex>
-                </Flex>
-            </Flex>
+                    </div>
+                </div>
+            </div>
 
             {/* ===== Chart area ===== */}
             {selectedIds.length === 0 ? (
-                <Box p={6} textAlign="center" bg="gray.50" borderRadius="md" border="1px dashed" borderColor="gray.300">
-                    <Text color="gray.400" fontSize="sm">
+                <div className="border border-dashed border-gray-300 bg-gray-50 p-6 text-center">
+                    <Text className="text-sm text-gray-400">
                         No assets selected. Click "+ Add" or "Select all" to begin.
                     </Text>
-                </Box>
+                </div>
             ) : tsLoading ? (
-                <Box h="400px" display="flex" alignItems="center" justifyContent="center" gap={2}>
-                    <Spinner size="sm" color="blue.500" />
-                    <Text fontSize="sm" color="gray.500">Loading price history\u2026</Text>
-                </Box>
+                <div className="flex h-[400px] items-center justify-center gap-2">
+                    <Spinner size="sm" className="text-blue-500" />
+                    <Text className="text-sm text-gray-500">Loading price history\u2026</Text>
+                </div>
             ) : tsError ? (
-                <Box p={4} bg="red.50" borderRadius="md" border="1px solid" borderColor="red.200">
-                    <Text fontSize="sm" color="red.600">Error: {tsError}</Text>
-                </Box>
+                <div className="border border-red-200 bg-red-50 p-4">
+                    <Text className="text-sm text-red-600">Error: {tsError}</Text>
+                </div>
             ) : chartData.length === 0 ? (
-                <Box p={6} textAlign="center" bg="gray.50" borderRadius="md">
-                    <Text color="gray.400" fontSize="sm">
+                <div className="bg-gray-50 p-6 text-center">
+                    <Text className="text-sm text-gray-400">
                         No price data available for the selected assets.
                     </Text>
-                </Box>
+                </div>
+
             ) : (
-                <Box h="400px" key={`chart-${zoom}-${selectedIds.join(',')}`}>
+                <div className="h-[400px]" key={`chart-${zoom}-${selectedIds.join(',')}`}>
                     <ResponsiveLine
                         data={chartData}
                         animate={false}
@@ -571,47 +500,32 @@ export const PriceInvestigationChart: React.FC = () => {
                                 (a, b) => (b.data.y as number) - (a.data.y as number),
                             );
                             return (
-                                <Box
-                                    bg="white"
-                                    p={2}
-                                    borderRadius="md"
-                                    boxShadow="md"
-                                    border="1px solid"
-                                    borderColor="gray.200"
-                                    minW="200px"
-                                    maxW="280px"
-                                >
-                                    <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={1}>
+                                <div className="min-w-[200px] max-w-[280px] border border-gray-200 bg-white p-2 shadow-md">
+                                    <Text className="mb-1 block text-xs font-bold text-gray-600">
                                         {sorted[0]?.data.xFormatted}
                                     </Text>
                                     {sorted.map(p => {
                                         const val = p.data.y as number;
                                         return (
-                                            <Flex key={p.id} justify="space-between" gap={3} py={0.5}>
-                                                <Flex align="center" gap={1} minW={0}>
-                                                    <Box
-                                                        w="8px"
-                                                        h="8px"
-                                                        borderRadius="full"
-                                                        bg={p.seriesColor}
-                                                        flexShrink={0}
+                                            <div key={p.id} className="flex items-center justify-between gap-3 py-0.5">
+                                                <div className="flex min-w-0 items-center gap-1">
+                                                    <span
+                                                        className="h-2 w-2 shrink-0 rounded-full"
+                                                        style={{ backgroundColor: p.seriesColor }}
                                                     />
-                                                    <Text fontSize="xs" truncate>
+                                                    <Text className="truncate text-xs">
                                                         {p.seriesId}
                                                     </Text>
-                                                </Flex>
+                                                </div>
                                                 <Text
-                                                    fontSize="xs"
-                                                    fontWeight="bold"
-                                                    color={val >= 0 ? 'green.600' : 'red.600'}
-                                                    flexShrink={0}
+                                                    className={`shrink-0 text-xs font-bold ${val >= 0 ? 'text-green-600' : 'text-red-600'}`}
                                                 >
                                                     {val >= 0 ? '+' : ''}{val.toFixed(1)}%
                                                 </Text>
-                                            </Flex>
+                                            </div>
                                         );
                                     })}
-                                </Box>
+                                </div>
                             );
                         }}
                         legends={[
@@ -632,8 +546,8 @@ export const PriceInvestigationChart: React.FC = () => {
                             tooltip: { container: { fontFamily: 'inherit', fontSize: 12 } },
                         }}
                     />
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

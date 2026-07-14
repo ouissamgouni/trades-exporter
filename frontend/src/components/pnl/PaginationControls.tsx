@@ -11,7 +11,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { Box, Button, Flex, NativeSelect, Text } from '@chakra-ui/react';
+import { Button } from '../ui/primitives';
 
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 export const DEFAULT_PAGE_SIZE = 50;
@@ -129,19 +129,19 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
     }
 
     return (
-        <Box mt={4} p={3} bg="gray.50" borderRadius="md">
-            <Flex justify="space-between" align="center" flexWrap="wrap" gap={3}>
+        <div className="mt-4 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
                 {/* Left: Item count info */}
-                <Text fontSize="sm" color="gray.600">
+                <span className="text-sm text-slate-600">
                     Showing {startItem}-{endItem} of <strong>{totalItems}</strong> items
-                </Text>
+                </span>
 
                 {/* Center: Page navigation */}
                 {totalPages > 1 && (
-                    <Flex align="center" gap={1}>
+                    <div className="flex items-center gap-1">
                         {/* First page */}
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={() => goToPage(1)}
                             disabled={currentPage === 1}
@@ -152,7 +152,7 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
 
                         {/* Previous page */}
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={() => goToPage(currentPage - 1)}
                             disabled={currentPage === 1}
@@ -165,9 +165,9 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
                         {getPageNumbers().map(pageNum => (
                             <Button
                                 key={pageNum}
-                                size="xs"
+                                size="sm"
                                 variant={currentPage === pageNum ? 'solid' : 'outline'}
-                                colorPalette={currentPage === pageNum ? 'blue' : undefined}
+                                colorScheme={currentPage === pageNum ? 'blue' : undefined}
                                 onClick={() => goToPage(pageNum)}
                                 aria-label={`Page ${pageNum}`}
                                 aria-current={currentPage === pageNum ? 'page' : undefined}
@@ -178,7 +178,7 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
 
                         {/* Next page */}
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={() => goToPage(currentPage + 1)}
                             disabled={currentPage === totalPages}
@@ -189,7 +189,7 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
 
                         {/* Last page */}
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={() => goToPage(totalPages)}
                             disabled={currentPage === totalPages}
@@ -197,26 +197,25 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
                         >
                             ⟫
                         </Button>
-                    </Flex>
+                    </div>
                 )}
 
                 {/* Right: Page size selector */}
-                <Flex align="center" gap={2}>
-                    <Text fontSize="sm" color="gray.600">Per page:</Text>
-                    <NativeSelect.Root size="sm" width="75px">
-                        <NativeSelect.Field
-                            value={pageSize}
-                            onChange={e => handlePageSizeChange(Number(e.target.value))}
-                            aria-label="Items per page"
-                        >
-                            {PAGE_SIZE_OPTIONS.map(size => (
-                                <option key={size} value={size}>{size}</option>
-                            ))}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Flex>
-            </Flex>
-        </Box>
+                <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">Per page:</span>
+                    <select
+                        className="h-8 w-[75px] border border-slate-300 bg-white px-1 text-sm"
+                        value={pageSize}
+                        onChange={e => handlePageSizeChange(Number(e.target.value))}
+                        aria-label="Items per page"
+                    >
+                        {PAGE_SIZE_OPTIONS.map(size => (
+                            <option key={size} value={size}>{size}</option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+        </div>
     );
 };
 

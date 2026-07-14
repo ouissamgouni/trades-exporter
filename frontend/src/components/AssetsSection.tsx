@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Tabs, Badge } from '@chakra-ui/react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
 import { AssetsEditor } from './AssetsEditor';
 import { RawAssetsEditor } from './RawAssetsEditor';
 import { CategoriesEditor } from './CategoriesEditor';
@@ -11,33 +11,33 @@ export const AssetsSection: React.FC = () => {
     const [activeTab, setActiveTab] = useState<string>('assets');
 
     return (
-        <Box>
-            <Tabs.Root value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
-                <Tabs.List mb={4}>
-                    <Tabs.Trigger value="assets">
+        <div>
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <TabsList className="mb-4">
+                    <TabsTrigger value="assets">
                         💰 Assets
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="raw-assets">
+                    </TabsTrigger>
+                    <TabsTrigger value="raw-assets">
                         🔗 Raw Mappings
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="categories">
+                    </TabsTrigger>
+                    <TabsTrigger value="categories">
                         🏷️ Categories
-                    </Tabs.Trigger>
-                </Tabs.List>
+                    </TabsTrigger>
+                </TabsList>
 
-                <Tabs.Content value="assets">
+                <TabsContent value="assets">
                     <AssetsEditor />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="raw-assets">
+                <TabsContent value="raw-assets">
                     <RawAssetsEditor />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="categories">
+                <TabsContent value="categories">
                     <CategoriesEditor />
-                </Tabs.Content>
-            </Tabs.Root>
-        </Box>
+                </TabsContent>
+            </Tabs>
+        </div>
     );
 };
 

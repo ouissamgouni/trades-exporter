@@ -6,10 +6,10 @@
  * Each chip's color dot matches its line in the comparison chart.
  */
 import React, { useMemo, useState, useRef } from 'react';
-import { Badge, Box, Flex, Input, Text } from '@chakra-ui/react';
 import { FiX, FiPlus } from 'react-icons/fi';
 import { CATEGORY_COLOR_PALETTE } from '../../constants/colors';
 import type { AssetPnLRow } from './types';
+import { Badge, Input } from '../ui/primitives';
 
 interface AssetComparisonPickerProps {
     /** All available assets for selection */
@@ -69,20 +69,11 @@ export const AssetComparisonPicker: React.FC<AssetComparisonPickerProps> = ({
     const atMax = selectedIds.length >= maxSelections;
 
     return (
-        <Flex wrap="wrap" gap={2} align="center" position="relative">
+        <div className="relative flex flex-wrap items-center gap-2">
             {/* Add button + popover */}
-            <Box position="relative">
+            <div className="relative">
                 <Badge
-                    variant={atMax ? 'subtle' : 'outline'}
-                    size="sm"
-                    px={2}
-                    py={1}
-                    borderRadius="full"
-                    cursor={atMax ? 'not-allowed' : 'pointer'}
-                    opacity={atMax ? 0.5 : 1}
-                    display="flex"
-                    alignItems="center"
-                    gap={1}
+                    className={`border border-slate-300 bg-white px-2 py-1 text-slate-700 ${atMax ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                     onClick={() => {
                         if (!atMax) {
                             setIsOpen(prev => !prev);
@@ -90,30 +81,15 @@ export const AssetComparisonPicker: React.FC<AssetComparisonPickerProps> = ({
                         }
                     }}
                 >
-                    <Box as={FiPlus} fontSize="10px" />
-                    <Text fontSize="xs">{atMax ? `Max ${maxSelections}` : 'Add'}</Text>
+                    <FiPlus size={10} />
+                    <span className="text-xs">{atMax ? `Max ${maxSelections}` : 'Add'}</span>
                 </Badge>
 
                 {isOpen && !atMax && (
-                    <Box
-                        position="absolute"
-                        top="100%"
-                        left={0}
-                        mt={1}
-                        zIndex={20}
-                        bg="white"
-                        border="1px solid"
-                        borderColor="gray.200"
-                        borderRadius="md"
-                        boxShadow="lg"
-                        w="240px"
-                        maxH="260px"
-                        overflow="hidden"
-                    >
-                        <Box p={2} borderBottom="1px solid" borderColor="gray.100">
+                    <div className="absolute left-0 top-full z-20 mt-1 w-60 max-h-[260px] overflow-hidden border border-slate-200 bg-white shadow-lg">
+                        <div className="border-b border-slate-100 p-2">
                             <Input
                                 ref={inputRef}
-                                size="sm"
                                 placeholder="Search assets..."
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
@@ -124,49 +100,42 @@ export const AssetComparisonPicker: React.FC<AssetComparisonPickerProps> = ({
                                     }
                                 }}
                             />
-                        </Box>
-                        <Box maxH="200px" overflowY="auto">
+                        </div>
+                        <div className="max-h-[200px] overflow-y-auto">
                             {filteredOptions.length === 0 ? (
-                                <Text fontSize="xs" color="gray.400" p={3} textAlign="center">
+                                <span className="block p-3 text-center text-xs text-slate-400">
                                     No assets found
-                                </Text>
+                                </span>
                             ) : (
                                 filteredOptions.map(a => (
-                                    <Flex
+                                    <div
                                         key={a.asset.id}
-                                        px={3}
-                                        py={1.5}
-                                        align="center"
-                                        gap={2}
-                                        cursor="pointer"
-                                        _hover={{ bg: 'blue.50' }}
+                                        className="flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-blue-50"
                                         onClick={() => handleAdd(a.asset.id!)}
                                     >
-                                        <Text fontSize="xs" fontWeight="medium" flex={1}>
+                                        <span className="flex-1 text-xs font-medium">
                                             {a.asset.symbol}
-                                        </Text>
+                                        </span>
                                         {a.asset.label && a.asset.label !== a.asset.symbol && (
-                                            <Text fontSize="xs" color="gray.400" truncate maxW="100px">
+                                            <span className="max-w-[100px] truncate text-xs text-slate-400">
                                                 {a.asset.label}
-                                            </Text>
+                                            </span>
                                         )}
-                                    </Flex>
+                                    </div>
                                 ))
                             )}
-                        </Box>
-                    </Box>
+                        </div>
+                    </div>
                 )}
-            </Box>
+            </div>
 
             {/* Click-away layer */}
             {isOpen && (
-                <Box
-                    position="fixed"
-                    inset={0}
-                    zIndex={19}
+                <div
+                    className="fixed inset-0 z-[19]"
                     onClick={() => { setIsOpen(false); setSearch(''); }}
                 />
             )}
-        </Flex>
+        </div>
     );
 };

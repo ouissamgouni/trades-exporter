@@ -1,24 +1,6 @@
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Checkbox,
-    Collapsible,
-    Dialog,
-    Flex,
-    Grid,
-    HStack,
-    IconButton,
-    Input,
-    Portal,
-    Spinner,
-    Stack,
-    Switch,
-    Text,
-    Tooltip,
-    VStack,
-} from '@chakra-ui/react';
+import { Badge, Button, Input, Spinner, type BadgeColorScheme } from './ui/primitives';
+import { Tooltip } from './ui/tooltip';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { LuRotateCcw, LuX, LuChevronRight, LuChevronDown, LuPlus, LuEye, LuTrash2, LuUpload } from 'react-icons/lu';
 import { FiPieChart } from 'react-icons/fi';
@@ -42,6 +24,15 @@ interface SyncConfigPanelProps {
     onConfigDataChange?: (connectors: EnabledConnector[], accounts: AccountSummary[]) => void;
     disabled?: boolean;
 }
+
+const SECTION_COLORS: Record<string, { bg: string; hoverBg: string }> = {
+    blue: { bg: 'bg-blue-50', hoverBg: 'hover:bg-blue-100' },
+    cyan: { bg: 'bg-cyan-50', hoverBg: 'hover:bg-cyan-100' },
+    purple: { bg: 'bg-purple-50', hoverBg: 'hover:bg-purple-100' },
+    green: { bg: 'bg-green-50', hoverBg: 'hover:bg-green-100' },
+    teal: { bg: 'bg-teal-50', hoverBg: 'hover:bg-teal-100' },
+    orange: { bg: 'bg-orange-50', hoverBg: 'hover:bg-orange-100' },
+};
 
 // Format datetime for input
 const formatForInput = (isoString: string | null | undefined): string => {
@@ -101,13 +92,12 @@ const CommaSeparatedInput: React.FC<{
     return (
         <Input
             type="text"
-            size="xs"
             value={localValue}
             onChange={(e) => setLocalValue(e.target.value)}
             onBlur={handleBlur}
             placeholder={placeholder}
-            flex={1}
             disabled={disabled}
+            className="h-7 flex-1 text-xs"
         />
     );
 };
@@ -174,173 +164,132 @@ const AccountCard: React.FC<{
         // If collapsed, show minimal horizontal card
         if (isCollapsed) {
             return (
-                <Card.Root
-                    variant="outline"
-                    size="sm"
-                    borderColor="gray.200"
-                    bg="gray.50"
-                    opacity={0.7}
-                    cursor="pointer"
+                <div
                     onClick={onToggleCollapse}
-                    _hover={{ opacity: 1, borderColor: "gray.300" }}
-                    transition="all 0.2s"
-                    width="140px"
-                    flexShrink={0}
+                    className="w-[140px] flex-shrink-0 cursor-pointer border border-slate-200 bg-slate-50 opacity-70 transition-all hover:border-slate-300 hover:opacity-100"
                 >
-                    <Card.Body py={2} px={3}>
-                        <VStack gap={1} align="center">
+                    <div className="px-3 py-2">
+                        <div className="flex flex-col items-center gap-1">
                             <LuChevronRight size={16} color="gray" />
-                            <Text fontSize="xs" color="gray.600" fontWeight="medium" textAlign="center" lineHeight="tight">
+                            <p className="text-center text-xs font-medium leading-tight text-slate-600">
                                 {account.name}
-                            </Text>
-                            <Badge size="xs" colorPalette="gray" variant="subtle">
+                            </p>
+                            <Badge colorScheme="gray">
                                 {connectors.length}
                             </Badge>
-                        </VStack>
-                    </Card.Body>
-                </Card.Root>
+                        </div>
+                    </div>
+                </div>
             );
         }
 
         return (
-            <Card.Root
-                variant="outline"
-                size="sm"
-                borderColor={hasOverride ? 'orange.300' : 'gray.200'}
-                bg={hasOverride ? 'orange.50' : 'white'}
-                opacity={accountDisabled && !allEnabled ? 0.8 : 1}
-                flex="1 1 280px"
-                minW="280px"
+            <div
+                className={`min-w-[280px] flex-[1_1_280px] border ${hasOverride ? 'border-orange-300 bg-orange-50' : 'border-slate-200 bg-white'} ${accountDisabled && !allEnabled ? 'opacity-80' : 'opacity-100'}`}
             >
-                <Card.Header pb={2} pt={3} px={3}>
-                    <Flex justify="space-between" align="center">
-                        <Flex align="center" gap={2}>
-                            <Box
-                                as="button"
+                <div className="px-3 pb-2 pt-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                aria-label="Toggle account details"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     onToggleCollapse();
                                 }}
-                                cursor="pointer"
-                                color="gray.400"
-                                _hover={{ color: "gray.600" }}
+                                className="text-slate-400 hover:text-slate-600"
                             >
                                 <LuChevronDown size={14} />
-                            </Box>
-                            <VStack align="flex-start" gap={0}>
-                                <Flex align="center" gap={2}>
-                                    <Text fontWeight="semibold" fontSize="sm" color="gray.700">
+                            </button>
+                            <div className="flex flex-col items-start gap-0">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-semibold text-slate-700">
                                         {account.name}
-                                    </Text>
-                                    <Badge
-                                        size="xs"
-                                        colorPalette={account.account_type === 'exchange' ? 'purple' : 'teal'}
-                                        variant="subtle"
-                                    >
+                                    </span>
+                                    <Badge colorScheme={account.account_type === 'exchange' ? 'purple' : 'green'}>
                                         {account.account_type}
                                     </Badge>
                                     {account.group && (
-                                        <Badge size="xs" colorPalette="cyan" variant="outline">
+                                        <Badge colorScheme="blue" className="border border-blue-300 bg-transparent text-blue-600">
                                             {account.group}
                                         </Badge>
                                     )}
-                                </Flex>
+                                </div>
                                 {account.address_or_identifier && (
-                                    <Text fontSize="xs" color="gray.500" fontFamily="mono">
+                                    <span className="font-mono text-xs text-slate-500">
                                         {formatAddress(account.address_or_identifier)}
-                                    </Text>
+                                    </span>
                                 )}
-                            </VStack>
-                        </Flex>
-                        <Flex align="center" gap={2}>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
                             {onRemove && (
-                                <Tooltip.Root positioning={{ placement: "top" }} openDelay={300}>
-                                    <Tooltip.Trigger asChild>
-                                        <IconButton
-                                            aria-label="Remove from sync config"
-                                            size="2xs"
-                                            variant="ghost"
-                                            colorPalette="red"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onRemove();
-                                            }}
-                                        >
-                                            <LuX size={13} />
-                                        </IconButton>
-                                    </Tooltip.Trigger>
-                                    <Tooltip.Positioner>
-                                        <Tooltip.Content>Remove from sync config</Tooltip.Content>
-                                    </Tooltip.Positioner>
-                                </Tooltip.Root>
-                            )}
-                            <Tooltip.Root positioning={{ placement: "top" }} openDelay={300}>
-                                <Tooltip.Trigger asChild>
-                                    <IconButton
-                                        aria-label="View balance"
-                                        size="2xs"
+                                <Tooltip content="Remove from sync config" openDelay={300}>
+                                    <Button
+                                        aria-label="Remove from sync config"
+                                        size="sm"
                                         variant="ghost"
-                                        colorPalette="green"
+                                        colorScheme="red"
+                                        className="h-6 w-6 p-0"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            onBalanceClick(account.id);
+                                            onRemove();
                                         }}
                                     >
-                                        <FiPieChart size={13} />
-                                    </IconButton>
-                                </Tooltip.Trigger>
-                                <Tooltip.Positioner>
-                                    <Tooltip.Content>View live balance</Tooltip.Content>
-                                </Tooltip.Positioner>
-                            </Tooltip.Root>
-                            <Text fontSize="xs" color="gray.500">
+                                        <LuX size={13} />
+                                    </Button>
+                                </Tooltip>
+                            )}
+                            <Tooltip content="View live balance" openDelay={300}>
+                                <Button
+                                    aria-label="View balance"
+                                    size="sm"
+                                    variant="ghost"
+                                    colorScheme="green"
+                                    className="h-6 w-6 p-0"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onBalanceClick(account.id);
+                                    }}
+                                >
+                                    <FiPieChart size={13} />
+                                </Button>
+                            </Tooltip>
+                            <span className="text-xs text-slate-500">
                                 {enabledCount}/{connectors.length}
-                            </Text>
-                            <Tooltip.Root
-                                positioning={{ placement: "top" }}
+                            </span>
+                            <Tooltip
+                                content={(() => {
+                                    if (allEnabled) {
+                                        return "Click to disable all connectors for this account";
+                                    }
+                                    if (enabledCount > 0) {
+                                        return `${enabledCount} of ${connectors.length} enabled - Click to enable all`;
+                                    }
+                                    return "Click to enable all connectors for this account";
+                                })()}
                                 openDelay={300}
                             >
-                                <Tooltip.Trigger asChild>
-                                    <Box display="inline-flex">
-                                        <Checkbox.Root
-                                            checked={(enabledCount > 0 && !allEnabled) ? 'indeterminate' : allEnabled}
-                                            disabled={disabled}
-                                            onCheckedChange={(details) => {
-                                                // Determine if we're in mixed state
-                                                const isMixed = enabledCount > 0 && !allEnabled;
-                                                // When in mixed state, always enable all
-                                                // When all enabled, disable all
-                                                // When none enabled, enable all
-                                                onAccountToggle(isMixed ? true : !!details.checked);
-                                            }}
-                                            size="sm"
-                                        >
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control>
-                                                <Checkbox.Indicator />
-                                            </Checkbox.Control>
-                                        </Checkbox.Root>
-                                    </Box>
-                                </Tooltip.Trigger>
-                                <Tooltip.Positioner>
-                                    <Tooltip.Content>
-                                        {(() => {
-                                            if (allEnabled) {
-                                                return "Click to disable all connectors for this account";
-                                            }
-                                            if (enabledCount > 0) {
-                                                return `${enabledCount} of ${connectors.length} enabled - Click to enable all`;
-                                            }
-                                            return "Click to enable all connectors for this account";
-                                        })()}
-                                    </Tooltip.Content>
-                                </Tooltip.Positioner>
-                            </Tooltip.Root>
-                        </Flex>
-                    </Flex>
-                </Card.Header>
-                <Card.Body pt={0} pb={3} px={3}>
-                    <Stack gap={2}>
+                                <span className="inline-flex">
+                                    <input
+                                        type="checkbox"
+                                        title="Toggle all connectors for this account"
+                                        checked={allEnabled}
+                                        ref={(el) => { if (el) el.indeterminate = enabledCount > 0 && !allEnabled; }}
+                                        disabled={disabled}
+                                        onChange={(e) => {
+                                            const isMixed = enabledCount > 0 && !allEnabled;
+                                            onAccountToggle(isMixed ? true : e.target.checked);
+                                        }}
+                                        className="h-4 w-4 cursor-pointer accent-blue-500"
+                                    />
+                                </span>
+                            </Tooltip>
+                        </div>
+                    </div>
+                </div>
+                <div className="px-3 pb-3 pt-0">
+                    <div className="flex flex-col gap-2">
                         {connectors.map((connector) => {
                             const override = overrides.get(connector.connector_id);
                             const isEnabled = getEffectiveEnabled(connector);
@@ -370,119 +319,110 @@ const AccountCard: React.FC<{
                             const hasAnyOverride = hasEnabledOverride || hasTestModeOverride || hasSinceOverride || hasSymbolsOverride || hasCurrenciesOverride;
 
                             return (
-                                <Box
+                                <div
                                     key={connector.connector_id}
-                                    py={2}
-                                    px={2}
-                                    borderRadius="md"
-                                    bg={hasAnyOverride ? 'orange.50' : 'transparent'}
-                                    borderWidth={hasAnyOverride ? '1px' : '0'}
-                                    borderColor="orange.200"
+                                    className={`px-2 py-2 ${hasAnyOverride ? 'border border-orange-200 bg-orange-50' : 'border-0'}`}
                                 >
                                     {/* Row 1: Checkbox, Name, Test toggle */}
-                                    <Flex justify="space-between" align="center">
-                                        <Checkbox.Root
-                                            checked={isEnabled}
-                                            disabled={disabled}
-                                            onCheckedChange={(details) =>
-                                                onConnectorEnabledChange(connector.connector_id, !!details.checked, defaultEnabled)
-                                            }
-                                            size="sm"
-                                        >
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control>
-                                                <Checkbox.Indicator />
-                                            </Checkbox.Control>
-                                            <Checkbox.Label>
-                                                <VStack align="flex-start" gap={0}>
-                                                    <Flex align="center" gap={1.5}>
-                                                        <Text
-                                                            fontSize="sm"
-                                                            color={isEnabled ? 'gray.700' : 'gray.400'}
-                                                            textDecoration={isEnabled ? undefined : 'line-through'}
-                                                        >
-                                                            {connector.display_name || connector.connector_type}
-                                                        </Text>
-                                                        {connector.is_file_connector && (
-                                                            <Badge colorPalette="blue" size="xs" variant="subtle">📁 File</Badge>
-                                                        )}
-                                                        {connector.is_file_connector && connector.config?.default_file_name && (
-                                                            <Badge colorPalette="teal" size="xs" variant="subtle">📌 default</Badge>
-                                                        )}
-                                                        {connector.chain_name && (
-                                                            <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                                {formatChainName(connector.chain_name)}
-                                                            </Badge>
-                                                        )}
-                                                    </Flex>
-                                                    {connector.wallet_address && (
-                                                        <Text fontSize="xs" color="gray.500" fontFamily="mono">
-                                                            {formatAddress(connector.wallet_address)}
-                                                        </Text>
-                                                    )}
-                                                </VStack>
-                                            </Checkbox.Label>
-                                        </Checkbox.Root>
-                                        <Flex align="center" gap={1.5}>
-                                            {hasTestModeOverride && (
-                                                <Badge colorPalette="purple" size="xs" variant="subtle">🧪</Badge>
-                                            )}
-                                            <Text fontSize="2xs" color="gray.400">Test</Text>
-                                            <Switch.Root
-                                                checked={isTestMode}
-                                                disabled={disabled || !isEnabled}
-                                                onCheckedChange={(details) =>
-                                                    onTestModeChange(connector.connector_id, details.checked, connector.test_mode)
+                                    <div className="flex items-center justify-between">
+                                        <label className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={isEnabled}
+                                                disabled={disabled}
+                                                onChange={(e) =>
+                                                    onConnectorEnabledChange(connector.connector_id, e.target.checked, defaultEnabled)
                                                 }
-                                                size="sm"
+                                                className="h-4 w-4 cursor-pointer accent-blue-500"
+                                            />
+                                            <div className="flex flex-col items-start gap-0">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className={`text-sm ${isEnabled ? 'text-slate-700' : 'text-slate-400 line-through'}`}>
+                                                        {connector.display_name || connector.connector_type}
+                                                    </span>
+                                                    {connector.is_file_connector && (
+                                                        <Badge colorScheme="blue">📁 File</Badge>
+                                                    )}
+                                                    {connector.is_file_connector && connector.config?.default_file_name && (
+                                                        <Badge colorScheme="green">📌 default</Badge>
+                                                    )}
+                                                    {connector.chain_name && (
+                                                        <Badge colorScheme="purple">
+                                                            {formatChainName(connector.chain_name)}
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                                {connector.wallet_address && (
+                                                    <span className="font-mono text-xs text-slate-500">
+                                                        {formatAddress(connector.wallet_address)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </label>
+                                        <div className="flex items-center gap-1.5">
+                                            {hasTestModeOverride && (
+                                                <Badge colorScheme="purple">🧪</Badge>
+                                            )}
+                                            <span className="text-[10px] text-slate-400">Test</span>
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={isTestMode}
+                                                aria-label="Toggle test mode"
+                                                disabled={disabled || !isEnabled}
+                                                onClick={() =>
+                                                    onTestModeChange(connector.connector_id, !isTestMode, connector.test_mode)
+                                                }
+                                                className={`relative inline-flex h-[14px] w-[26px] items-center transition-colors disabled:opacity-50 ${isTestMode ? 'bg-blue-500' : 'bg-slate-300'}`}
                                             >
-                                                <Switch.HiddenInput />
-                                                <Switch.Control>
-                                                    <Switch.Thumb />
-                                                </Switch.Control>
-                                            </Switch.Root>
-                                        </Flex>
-                                    </Flex>
+                                                <span
+                                                    className={`inline-block h-[10px] w-[10px] transform bg-white transition-transform ${isTestMode ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
+                                                />
+                                            </button>
+                                        </div>
+                                    </div>
 
                                     {/* Row 1b: Test fixture upload/display (when test mode is on) */}
                                     {isTestMode && isEnabled && (() => {
                                         const fixture = testFixtures.get(connector.connector_id);
                                         const isUploading = fixtureUploading === connector.connector_id;
                                         return (
-                                            <Flex align="center" gap={2} mt={2} pl={6}>
+                                            <div className="mt-2 flex items-center gap-2 pl-6">
                                                 {fixture ? (
                                                     <>
-                                                        <Badge colorPalette="orange" size="xs" variant="subtle">
+                                                        <Badge colorScheme="orange">
                                                             🧪 {fixture.itemCount} items
                                                         </Badge>
-                                                        <Text fontSize="2xs" color="orange.700" maxW="100px" truncate title={fixture.filename}>
+                                                        <span className="max-w-[100px] truncate text-[10px] text-orange-700" title={fixture.filename}>
                                                             {fixture.filename}
-                                                        </Text>
-                                                        <IconButton
+                                                        </span>
+                                                        <Button
                                                             aria-label="Preview fixture"
-                                                            size="xs"
+                                                            size="sm"
                                                             variant="ghost"
-                                                            colorPalette="blue"
+                                                            colorScheme="blue"
+                                                            className="h-6 w-6 p-0"
                                                             onClick={() => onPreviewFixture(connector.connector_id)}
                                                             title="Preview fixture content"
                                                         >
                                                             <LuEye size={12} />
-                                                        </IconButton>
-                                                        <IconButton
+                                                        </Button>
+                                                        <Button
                                                             aria-label="Remove fixture"
-                                                            size="xs"
+                                                            size="sm"
                                                             variant="ghost"
-                                                            colorPalette="red"
+                                                            colorScheme="red"
+                                                            className="h-6 w-6 p-0"
                                                             onClick={() => onTestFileRemove(connector.connector_id)}
                                                             disabled={isUploading}
                                                             title="Remove test fixture"
                                                         >
                                                             <LuTrash2 size={12} />
-                                                        </IconButton>
+                                                        </Button>
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <Text fontSize="2xs" color="orange.600">Fixture:</Text>
+                                                        <span className="text-[10px] text-orange-600">Fixture:</span>
                                                         {isUploading ? (
                                                             <Spinner size="xs" />
                                                         ) : (
@@ -499,39 +439,27 @@ const AccountCard: React.FC<{
                                                                     }}
                                                                 />
                                                                 <label htmlFor={`fixture-input-${connector.connector_id}`}>
-                                                                    <Flex
-                                                                        as="span"
-                                                                        align="center"
-                                                                        gap={1}
-                                                                        px={2}
-                                                                        py={1}
-                                                                        borderWidth="1px"
-                                                                        borderColor="orange.300"
-                                                                        borderRadius="md"
-                                                                        cursor="pointer"
-                                                                        fontSize="xs"
-                                                                        color="orange.600"
-                                                                        _hover={{ bg: 'orange.50' }}
+                                                                    <span
+                                                                        className="inline-flex cursor-pointer items-center gap-1 border border-orange-300 px-2 py-1 text-xs text-orange-600 hover:bg-orange-50"
                                                                     >
                                                                         <LuUpload size={10} />
                                                                         Upload JSON
-                                                                    </Flex>
+                                                                    </span>
                                                                 </label>
                                                             </>
                                                         )}
                                                     </>
                                                 )}
-                                            </Flex>
+                                            </div>
                                         );
                                     })()}
 
                                     {/* Row 2: Since datetime picker (only for incremental sync connectors when enabled) */}
                                     {supportsIncremental && isEnabled && !isTestMode && (
-                                        <Flex align="center" gap={2} mt={2} pl={6}>
-                                            <Text fontSize="xs" color="gray.500" minW="35px">Since:</Text>
+                                        <div className="mt-2 flex items-center gap-2 pl-6">
+                                            <span className="min-w-[35px] text-xs text-slate-500">Since:</span>
                                             <Input
                                                 type="datetime-local"
-                                                size="xs"
                                                 value={formatForInput(currentSince)}
                                                 onChange={(e) => {
                                                     const value = e.target.value
@@ -539,68 +467,69 @@ const AccountCard: React.FC<{
                                                         : null;
                                                     onSinceChange(connector.connector_id, value, defaultSince);
                                                 }}
-                                                flex={1}
-                                                maxW="180px"
                                                 disabled={disabled}
+                                                className="h-7 max-w-[180px] flex-1 text-xs"
                                             />
                                             {/* Reset to default button */}
-                                            <IconButton
+                                            <Button
                                                 aria-label="Reset to default"
-                                                size="xs"
+                                                size="sm"
                                                 variant="ghost"
+                                                className="h-6 w-6 p-0"
                                                 onClick={() => onSinceReset(connector.connector_id)}
                                                 title={`Reset to default: ${formatDateTime(defaultSince)}`}
                                                 disabled={disabled || !hasSinceOverride}
                                             >
                                                 <LuRotateCcw size={12} />
-                                            </IconButton>
+                                            </Button>
                                             {/* Clear for full sync button */}
-                                            <IconButton
+                                            <Button
                                                 aria-label="Clear for full sync"
-                                                size="xs"
+                                                size="sm"
                                                 variant="ghost"
-                                                colorPalette={isFullSync ? 'orange' : 'gray'}
+                                                colorScheme={isFullSync ? 'red' : 'gray'}
+                                                className="h-6 w-6 p-0"
                                                 onClick={() => onSinceClear(connector.connector_id)}
                                                 title="Clear for full sync"
                                                 disabled={disabled}
                                             >
                                                 <LuX size={12} />
-                                            </IconButton>
+                                            </Button>
                                             {/* Status badges */}
                                             {hasSinceOverride && !isFullSync && (
-                                                <Badge colorPalette="blue" size="xs" variant="subtle">modified</Badge>
+                                                <Badge colorScheme="blue">modified</Badge>
                                             )}
                                             {isFullSync && (
-                                                <Badge colorPalette="orange" size="xs" variant="subtle">⚠️ full sync</Badge>
+                                                <Badge colorScheme="orange">⚠️ full sync</Badge>
                                             )}
                                             {!hasSinceOverride && !isFullSync && (
-                                                <Badge colorPalette="gray" size="xs" variant="subtle">auto</Badge>
+                                                <Badge colorScheme="gray">auto</Badge>
                                             )}
-                                        </Flex>
+                                        </div>
                                     )}
 
                                     {/* Special Note for Binance Deposits/Withdrawals */}
                                     {isEnabled && !isTestMode && (connector.connector_type === 'binance-deposits' || connector.connector_type === 'binance-withdrawals') && (
-                                        <Flex gap={2} mt={1} pl={6} align="start">
-                                            <Text fontSize="2xs" color="orange.600" fontStyle="italic">
+                                        <div className="mt-1 flex items-start gap-2 pl-6">
+                                            <span className="text-[10px] italic text-orange-600">
                                                 Note: Default start date is 90 days ago. If start date is set, end date is start date + 90 days.
-                                            </Text>
-                                        </Flex>
+                                            </span>
+                                        </div>
                                     )}
 
                                     {/* Special Note for MEXC API Connectors (Transactions, Deposits, Withdrawals) */}
                                     {isEnabled && !isTestMode && !connector.is_file_connector && (connector.connector_type === 'mexc-transactions' || connector.connector_type === 'mexc-deposits' || connector.connector_type === 'mexc-withdrawals') && (
-                                        <Flex gap={2} mt={1} pl={6} align="start">
-                                            <Text fontSize="2xs" color="orange.600" fontStyle="italic">
+                                        <div className="mt-1 flex items-start gap-2 pl-6">
+                                            <span className="text-[10px] italic text-orange-600">
                                                 ⚠️ Note: MEXC API cannot retrieve data older than 90 days.
-                                            </Text>
-                                        </Flex>
+                                            </span>
+                                        </div>
                                     )}
 
                                     {/* Row 3: Symbols filter (for trade connectors) */}
                                     {supportsSymbols && isEnabled && !isTestMode && (
-                                        <Flex align="center" gap={2} mt={2} pl={6}>
-                                            <Text fontSize="xs" color="gray.500" minW="50px">Symbols:</Text>
+                                        <div className="mt-2 flex items-center gap-2 pl-6">
+                                            <span className="min-w-[50px] text-xs text-slate-500">Symbols:</span>
                                             <CommaSeparatedInput
                                                 value={currentSymbols}
                                                 onChange={(symbols) => onSymbolsChange(connector.connector_id, symbols)}
@@ -608,27 +537,28 @@ const AccountCard: React.FC<{
                                                 disabled={disabled}
                                             />
                                             {hasSymbolsOverride && (
-                                                <IconButton
+                                                <Button
                                                     aria-label="Clear symbols filter"
-                                                    size="xs"
+                                                    size="sm"
                                                     variant="ghost"
+                                                    className="h-6 w-6 p-0"
                                                     onClick={() => onSymbolsChange(connector.connector_id, null)}
                                                     title="Clear filter (use all symbols)"
                                                     disabled={disabled}
                                                 >
                                                     <LuX size={12} />
-                                                </IconButton>
+                                                </Button>
                                             )}
                                             {hasSymbolsOverride && (
-                                                <Badge colorPalette="blue" size="xs" variant="subtle">filtered</Badge>
+                                                <Badge colorScheme="blue">filtered</Badge>
                                             )}
-                                        </Flex>
+                                        </div>
                                     )}
 
                                     {/* Row 4: Currencies filter (for deposit/withdrawal connectors) */}
                                     {supportsCurrencies && isEnabled && !isTestMode && (
-                                        <Flex align="center" gap={2} mt={2} pl={6}>
-                                            <Text fontSize="xs" color="gray.500" minW="50px">Currencies:</Text>
+                                        <div className="mt-2 flex items-center gap-2 pl-6">
+                                            <span className="min-w-[50px] text-xs text-slate-500">Currencies:</span>
                                             <CommaSeparatedInput
                                                 value={currentCurrencies}
                                                 onChange={(currencies) => onCurrenciesChange(connector.connector_id, currencies)}
@@ -637,21 +567,22 @@ const AccountCard: React.FC<{
                                                 uppercase
                                             />
                                             {hasCurrenciesOverride && (
-                                                <IconButton
+                                                <Button
                                                     aria-label="Clear currencies filter"
-                                                    size="xs"
+                                                    size="sm"
                                                     variant="ghost"
+                                                    className="h-6 w-6 p-0"
                                                     onClick={() => onCurrenciesChange(connector.connector_id, null)}
                                                     title="Clear filter (use all currencies)"
                                                     disabled={disabled}
                                                 >
                                                     <LuX size={12} />
-                                                </IconButton>
+                                                </Button>
                                             )}
                                             {hasCurrenciesOverride && (
-                                                <Badge colorPalette="blue" size="xs" variant="subtle">filtered</Badge>
+                                                <Badge colorScheme="blue">filtered</Badge>
                                             )}
-                                        </Flex>
+                                        </div>
                                     )}
 
                                     {/* Row 5: File Upload (for file connectors) */}
@@ -667,38 +598,38 @@ const AccountCard: React.FC<{
 
                                     {/* Row 6: Job snippet - only show if enabled */}
                                     {isEnabled && (
-                                        <Box mt={2}>
+                                        <div className="mt-2">
                                             <ConnectorJobSnippet
                                                 connector={connector}
                                                 onClick={() => onJobSnippetClick(connector)}
                                             />
-                                        </Box>
+                                        </div>
                                     )}
 
                                     {/* Row 7: Last synced transaction - compact inline */}
                                     {isEnabled && connector.last_synced_transaction && (
-                                        <HStack mt={1} gap={1} fontSize="2xs" flexWrap="wrap">
-                                            <Text color="gray.500">Last:</Text>
-                                            <Badge size="xs" colorPalette="green" variant="subtle">
+                                        <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                                            <span className="text-slate-500">Last:</span>
+                                            <Badge colorScheme="green">
                                                 {new Date(connector.last_synced_transaction.datetime).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                                                 {' '}
                                                 {new Date(connector.last_synced_transaction.datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                             </Badge>
-                                            <Text color="gray.700" fontFamily="mono" truncate flex="1" minW={0}>
+                                            <span className="min-w-0 flex-1 truncate font-mono text-slate-700">
                                                 {connector.last_synced_transaction.type.toUpperCase()}
                                                 {' '}
                                                 {connector.last_synced_transaction.qty?.toFixed(4) || ''}
                                                 {' '}
                                                 {connector.last_synced_transaction.asset}
-                                            </Text>
-                                        </HStack>
+                                            </span>
+                                        </div>
                                     )}
-                                </Box>
+                                </div>
                             );
                         })}
-                    </Stack>
-                </Card.Body>
-            </Card.Root>
+                    </div>
+                </div>
+            </div>
         );
     };
 
@@ -1331,333 +1262,298 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
 
     if (loading) {
         return (
-            <Box p={4} textAlign="center">
+            <div className="p-4 text-center">
                 <Spinner size="sm" />
-                <Text fontSize="sm" color="gray.500" mt={2}>
+                <p className="mt-2 text-sm text-slate-500">
                     Loading connectors...
-                </Text>
-            </Box>
+                </p>
+            </div>
         );
     }
 
     if (error) {
         return (
-            <Box p={3} bg="red.50" borderRadius="md" borderWidth="1px" borderColor="red.200">
-                <Text color="red.600" fontSize="sm">
+            <div className="border border-red-200 bg-red-50 p-3">
+                <p className="text-sm text-red-600">
                     Failed to load connectors: {error}
-                </Text>
-                <Button size="xs" mt={2} onClick={fetchConnectors} colorPalette="red" variant="outline">
+                </p>
+                <Button size="sm" className="mt-2" onClick={fetchConnectors} colorScheme="red" variant="outline">
                     Retry
                 </Button>
-            </Box>
+            </div>
         );
     }
 
     if (allConnectors.length === 0) {
         return (
-            <Box p={3} bg="yellow.50" borderRadius="md" borderWidth="1px" borderColor="yellow.200">
-                <Text color="yellow.700" fontSize="sm">
+            <div className="border border-yellow-200 bg-yellow-50 p-3">
+                <p className="text-sm text-yellow-700">
                     No connectors found. Configure connectors in Settings → Accounts.
-                </Text>
-            </Box>
+                </p>
+            </div>
         );
     }
 
     return (
-        <Box
-            borderWidth="1px"
-            borderColor={hasOverrides ? 'orange.300' : 'gray.200'}
-            borderRadius="lg"
-            overflow="hidden"
-            bg="white"
-        >
+        <div className={`overflow-hidden border bg-white ${hasOverrides ? 'border-orange-300' : 'border-slate-200'}`}>
             {/* Header */}
-            <Box
-                p={3}
-                bg={hasOverrides ? 'orange.50' : 'gray.50'}
-                cursor="pointer"
+            <div
                 onClick={() => setExpanded(!expanded)}
-                _hover={{ bg: hasOverrides ? 'orange.100' : 'gray.100' }}
-                transition="background 0.15s"
+                className={`cursor-pointer p-3 transition-colors ${hasOverrides ? 'bg-orange-50 hover:bg-orange-100' : 'bg-slate-50 hover:bg-slate-100'}`}
             >
-                <Flex justify="space-between" align="center">
-                    <Flex align="center" gap={2}>
-                        <Text fontWeight="medium" color="gray.700">⚙️ Sync Configuration</Text>
-                        <Badge colorPalette="blue" size="sm" variant="subtle">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="font-medium text-slate-700">⚙️ Sync Configuration</span>
+                        <Badge colorScheme="blue">
                             {enabledCount}/{connectors.length} enabled
                         </Badge>
                         {hasOverrides && (
-                            <Badge colorPalette="orange" size="sm" variant="subtle">
+                            <Badge colorScheme="orange">
                                 modified
                             </Badge>
                         )}
-                    </Flex>
-                    <Text color="gray.400" fontSize="sm">{expanded ? '▼' : '▶'}</Text>
-                </Flex>
-                <Text fontSize="xs" color="gray.500" mt={1}>
+                    </div>
+                    <span className="text-sm text-slate-400">{expanded ? '▼' : '▶'}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
                     Configure which connectors to include and their test mode settings
-                </Text>
-            </Box>
+                </p>
+            </div>
 
             {/* Expanded content */}
-            <Collapsible.Root open={expanded}>
-                <Collapsible.Content>
-                    <Box p={3} borderTopWidth="1px" borderColor="gray.100" bg="white">
-                        {/* Action buttons */}
-                        <Flex justify="space-between" gap={1} mb={3}>
-                            <Flex gap={1}>
-                                <Button
-                                    size="xs"
-                                    colorPalette="blue"
-                                    variant="outline"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setPickerOpen(true);
-                                    }}
-                                    disabled={disabled}
-                                >
-                                    <LuPlus size={12} />
-                                    Add
-                                </Button>
-                                {configStore.hasSelection && (
-                                    <Button
-                                        size="xs"
-                                        variant="ghost"
-                                        colorPalette="red"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            configStore.clearAll();
-                                            resetOverrides();
-                                        }}
-                                        disabled={disabled}
-                                    >
-                                        Clear All
-                                    </Button>
-                                )}
-                            </Flex>
-                            <Flex gap={1}>
-                                {connectors.length > 0 && (
-                                    <>
-                                        <Button
-                                            size="xs"
-                                            variant="ghost"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                selectAll();
-                                            }}
-                                            disabled={disabled}
-                                        >
-                                            All
-                                        </Button>
-                                        <Button
-                                            size="xs"
-                                            variant="ghost"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                selectNone();
-                                            }}
-                                            disabled={disabled}
-                                        >
-                                            None
-                                        </Button>
-                                    </>
-                                )}
-                                {hasOverrides && (
-                                    <Button
-                                        size="xs"
-                                        variant="ghost"
-                                        colorPalette="orange"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            resetOverrides();
-                                        }}
-                                        disabled={disabled}
-                                    >
-                                        Reset
-                                    </Button>
-                                )}
-                                <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    colorPalette="blue"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        refreshConfiguration();
-                                    }}
-                                    disabled={disabled || loading}
-                                >
-                                    🔄 Refresh
-                                </Button>
-                                <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    colorPalette="green"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleGlobalBalanceClick();
-                                    }}
-                                >
-                                    <FiPieChart size={12} />
-                                    Balance
-                                </Button>
-                            </Flex>
-                        </Flex>
-
-                        {/* Empty state */}
-                        {connectors.length === 0 && (
-                            <Box
-                                py={8}
-                                textAlign="center"
-                                borderWidth="1px"
-                                borderColor="gray.200"
-                                borderStyle="dashed"
-                                borderRadius="md"
-                                bg="gray.50"
+            {expanded && (
+                <div className="border-t border-slate-100 bg-white p-3">
+                    {/* Action buttons */}
+                    <div className="mb-3 flex items-center justify-between gap-1">
+                        <div className="flex gap-1">
+                            <Button
+                                size="sm"
+                                colorScheme="blue"
+                                variant="outline"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPickerOpen(true);
+                                }}
+                                disabled={disabled}
                             >
-                                <Text color="gray.500" fontSize="sm" mb={3}>
-                                    No accounts configured for sync.
-                                </Text>
+                                <LuPlus size={12} />
+                                Add
+                            </Button>
+                            {configStore.hasSelection && (
                                 <Button
                                     size="sm"
-                                    colorPalette="blue"
-                                    onClick={() => setPickerOpen(true)}
+                                    variant="ghost"
+                                    colorScheme="red"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        configStore.clearAll();
+                                        resetOverrides();
+                                    }}
                                     disabled={disabled}
                                 >
-                                    <LuPlus size={14} />
-                                    Add Accounts & Connectors
+                                    Clear All
                                 </Button>
-                            </Box>
-                        )}
+                            )}
+                        </div>
+                        <div className="flex gap-1">
+                            {connectors.length > 0 && (
+                                <>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            selectAll();
+                                        }}
+                                        disabled={disabled}
+                                    >
+                                        All
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            selectNone();
+                                        }}
+                                        disabled={disabled}
+                                    >
+                                        None
+                                    </Button>
+                                </>
+                            )}
+                            {hasOverrides && (
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    colorScheme="gray"
+                                    className="border-orange-300 text-orange-700 hover:bg-orange-50"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        resetOverrides();
+                                    }}
+                                    disabled={disabled}
+                                >
+                                    Reset
+                                </Button>
+                            )}
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                colorScheme="blue"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    refreshConfiguration();
+                                }}
+                                disabled={disabled || loading}
+                            >
+                                🔄 Refresh
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                colorScheme="green"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleGlobalBalanceClick();
+                                }}
+                            >
+                                <FiPieChart size={12} />
+                                Balance
+                            </Button>
+                        </div>
+                    </div>
 
-                        {/* Account Type Sections */}
-                        {[{ type: 'cex', label: '🏦 CEX', colorScheme: 'blue' },
-                        { type: 'dex', label: '🔗 DEX', colorScheme: 'cyan' },
-                        { type: 'wallet', label: '💼 Wallets', colorScheme: 'purple' },
-                        { type: 'broker', label: '📊 Brokers', colorScheme: 'green' },
-                        { type: 'bank', label: '🏛️ Banks', colorScheme: 'teal' },
-                        { type: 'investment', label: '📈 Investments', colorScheme: 'orange' }]
-                            .filter(section => accountsByType.has(section.type))
-                            .map(section => {
-                                const allTypeAccounts = accountsByType.get(section.type)!;
-                                const sectionConnectors = allTypeAccounts.flatMap(a => connectorsByAccount.get(a.id) || []);
-                                const sectionEnabledCount = sectionConnectors.filter(c => getEffectiveEnabled(c)).length;
-                                const isCollapsed = collapsedSections[section.type] ?? false;
-                                const allEnabled = sectionConnectors.length > 0 && sectionConnectors.every(c => getEffectiveEnabled(c));
-                                const isMixed = sectionEnabledCount > 0 && !allEnabled;
+                    {/* Empty state */}
+                    {connectors.length === 0 && (
+                        <div className="border border-dashed border-slate-200 bg-slate-50 py-8 text-center">
+                            <p className="mb-3 text-sm text-slate-500">
+                                No accounts configured for sync.
+                            </p>
+                            <Button
+                                size="sm"
+                                colorScheme="blue"
+                                onClick={() => setPickerOpen(true)}
+                                disabled={disabled}
+                            >
+                                <LuPlus size={14} />
+                                Add Accounts & Connectors
+                            </Button>
+                        </div>
+                    )}
 
-                                const toggleSectionAll = (enabled: boolean) => {
-                                    allTypeAccounts.forEach(account => {
-                                        handleAccountToggle(account.id, enabled);
-                                    });
-                                };
+                    {/* Account Type Sections */}
+                    {[{ type: 'cex', label: '🏦 CEX', colorScheme: 'blue' },
+                    { type: 'dex', label: '🔗 DEX', colorScheme: 'cyan' },
+                    { type: 'wallet', label: '💼 Wallets', colorScheme: 'purple' },
+                    { type: 'broker', label: '📊 Brokers', colorScheme: 'green' },
+                    { type: 'bank', label: '🏛️ Banks', colorScheme: 'teal' },
+                    { type: 'investment', label: '📈 Investments', colorScheme: 'orange' }]
+                        .filter(section => accountsByType.has(section.type))
+                        .map(section => {
+                            const allTypeAccounts = accountsByType.get(section.type)!;
+                            const sectionConnectors = allTypeAccounts.flatMap(a => connectorsByAccount.get(a.id) || []);
+                            const sectionEnabledCount = sectionConnectors.filter(c => getEffectiveEnabled(c)).length;
+                            const isCollapsed = collapsedSections[section.type] ?? false;
+                            const allEnabled = sectionConnectors.length > 0 && sectionConnectors.every(c => getEffectiveEnabled(c));
+                            const isMixed = sectionEnabledCount > 0 && !allEnabled;
 
-                                return (
-                                    <Box key={section.type} mb={4}>
-                                        {/* Type Section Header */}
-                                        <Flex
-                                            align="center"
-                                            justify="space-between"
-                                            py={2}
-                                            px={2}
-                                            bg={`${section.colorScheme}.50`}
-                                            borderRadius="md"
-                                            mb={2}
-                                            cursor="pointer"
-                                            onClick={() => setCollapsedSections(prev => ({ ...prev, [section.type]: !isCollapsed }))}
-                                            _hover={{ bg: `${section.colorScheme}.100` }}
-                                        >
-                                            <Flex align="center" gap={2}>
-                                                <Text color="gray.400" fontSize="xs">{isCollapsed ? '▶' : '▼'}</Text>
-                                                <Text fontWeight="medium" fontSize="sm" color="gray.700">
-                                                    {section.label}
-                                                </Text>
-                                                <Badge colorPalette="gray" size="xs" variant="subtle">
-                                                    {allTypeAccounts.length} {allTypeAccounts.length === 1 ? 'account' : 'accounts'}
-                                                </Badge>
-                                                <Badge colorPalette="blue" size="xs" variant="subtle">
-                                                    {sectionEnabledCount}/{sectionConnectors.length}
-                                                </Badge>
-                                            </Flex>
-                                            <Flex align="center" gap={2} onClick={(e) => e.stopPropagation()}>
-                                                <Tooltip.Root positioning={{ placement: "top" }} openDelay={300}>
-                                                    <Tooltip.Trigger asChild>
-                                                        <Box display="inline-flex">
-                                                            <Checkbox.Root
-                                                                checked={isMixed ? 'indeterminate' : allEnabled}
-                                                                disabled={disabled}
-                                                                onCheckedChange={(details) => {
-                                                                    toggleSectionAll(isMixed ? true : !!details.checked);
-                                                                }}
-                                                                size="sm"
-                                                            >
-                                                                <Checkbox.HiddenInput />
-                                                                <Checkbox.Control>
-                                                                    <Checkbox.Indicator />
-                                                                </Checkbox.Control>
-                                                            </Checkbox.Root>
-                                                        </Box>
-                                                    </Tooltip.Trigger>
-                                                    <Tooltip.Positioner>
-                                                        <Tooltip.Content>
-                                                            {(() => {
-                                                                if (allEnabled) return `Click to disable all ${section.label} connectors`;
-                                                                if (sectionEnabledCount > 0) return `${sectionEnabledCount} of ${sectionConnectors.length} enabled - Click to enable all`;
-                                                                return `Click to enable all ${section.label} connectors`;
-                                                            })()}
-                                                        </Tooltip.Content>
-                                                    </Tooltip.Positioner>
-                                                </Tooltip.Root>
-                                            </Flex>
-                                        </Flex>
+                            const toggleSectionAll = (enabled: boolean) => {
+                                allTypeAccounts.forEach(account => {
+                                    handleAccountToggle(account.id, enabled);
+                                });
+                            };
 
-                                        {/* Account Cards Grid */}
-                                        <Collapsible.Root open={!isCollapsed}>
-                                            <Collapsible.Content>
-                                                <Grid templateColumns="repeat(auto-fill, minmax(340px, 1fr))" gap={3}>
-                                                    {allTypeAccounts.map((account) => {
-                                                        const accountConnectors = connectorsByAccount.get(account.id) || [];
-                                                        if (accountConnectors.length === 0) return null;
+                            return (
+                                <div key={section.type} className="mb-4">
+                                    {/* Type Section Header */}
+                                    <div
+                                        onClick={() => setCollapsedSections(prev => ({ ...prev, [section.type]: !isCollapsed }))}
+                                        className={`mb-2 flex cursor-pointer items-center justify-between px-2 py-2 ${SECTION_COLORS[section.colorScheme].bg} ${SECTION_COLORS[section.colorScheme].hoverBg}`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-slate-400">{isCollapsed ? '▶' : '▼'}</span>
+                                            <span className="text-sm font-medium text-slate-700">
+                                                {section.label}
+                                            </span>
+                                            <Badge colorScheme="gray">
+                                                {allTypeAccounts.length} {allTypeAccounts.length === 1 ? 'account' : 'accounts'}
+                                            </Badge>
+                                            <Badge colorScheme="blue">
+                                                {sectionEnabledCount}/{sectionConnectors.length}
+                                            </Badge>
+                                        </div>
+                                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                            <Tooltip
+                                                content={(() => {
+                                                    if (allEnabled) return `Click to disable all ${section.label} connectors`;
+                                                    if (sectionEnabledCount > 0) return `${sectionEnabledCount} of ${sectionConnectors.length} enabled - Click to enable all`;
+                                                    return `Click to enable all ${section.label} connectors`;
+                                                })()}
+                                                openDelay={300}
+                                            >
+                                                <span className="inline-flex">
+                                                    <input
+                                                        type="checkbox"
+                                                        title={`Toggle all ${section.label} connectors`}
+                                                        checked={allEnabled}
+                                                        ref={(el) => { if (el) el.indeterminate = isMixed; }}
+                                                        disabled={disabled}
+                                                        onChange={(e) => {
+                                                            toggleSectionAll(isMixed ? true : e.target.checked);
+                                                        }}
+                                                        className="h-4 w-4 cursor-pointer accent-blue-500"
+                                                    />
+                                                </span>
+                                            </Tooltip>
+                                        </div>
+                                    </div>
 
-                                                        return (
-                                                            <AccountCard
-                                                                key={account.id}
-                                                                account={account}
-                                                                connectors={accountConnectors}
-                                                                overrides={overrides}
-                                                                accountOverride={accountOverrides.get(account.id)}
-                                                                getEffectiveEnabled={getEffectiveEnabled}
-                                                                onAccountToggle={(enabled) => handleAccountToggle(account.id, enabled)}
-                                                                onConnectorEnabledChange={handleConnectorEnabledChange}
-                                                                onTestModeChange={handleTestModeChange}
-                                                                onTestFileUpload={handleTestFileUpload}
-                                                                onTestFileRemove={handleTestFileRemove}
-                                                                testFixtures={testFixtures}
-                                                                fixtureUploading={fixtureUploading}
-                                                                onPreviewFixture={handlePreviewFixture}
-                                                                onSinceChange={handleSinceChange}
-                                                                onSinceReset={handleSinceReset}
-                                                                onSinceClear={handleSinceClear}
-                                                                onSymbolsChange={handleSymbolsChange}
-                                                                onCurrenciesChange={handleCurrenciesChange}
-                                                                onFileUploadComplete={handleFileUploadComplete}
-                                                                onJobSnippetClick={handleJobSnippetClick}
-                                                                onBalanceClick={handleBalanceClick}
-                                                                onRemove={() => handleRemoveAccount(account.id)}
-                                                                isCollapsed={collapsedAccounts.get(account.id) ?? false}
-                                                                onToggleCollapse={() => toggleAccountCollapse(account.id)}
-                                                                disabled={disabled}
-                                                            />
-                                                        );
-                                                    })}
-                                                </Grid>
-                                            </Collapsible.Content>
-                                        </Collapsible.Root>
-                                    </Box>
-                                );
-                            })}
-                    </Box>
-                </Collapsible.Content>
-            </Collapsible.Root>
+                                    {/* Account Cards Grid */}
+                                    {!isCollapsed && (
+                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3">
+                                            {allTypeAccounts.map((account) => {
+                                                const accountConnectors = connectorsByAccount.get(account.id) || [];
+                                                if (accountConnectors.length === 0) return null;
+
+                                                return (
+                                                    <AccountCard
+                                                        key={account.id}
+                                                        account={account}
+                                                        connectors={accountConnectors}
+                                                        overrides={overrides}
+                                                        accountOverride={accountOverrides.get(account.id)}
+                                                        getEffectiveEnabled={getEffectiveEnabled}
+                                                        onAccountToggle={(enabled) => handleAccountToggle(account.id, enabled)}
+                                                        onConnectorEnabledChange={handleConnectorEnabledChange}
+                                                        onTestModeChange={handleTestModeChange}
+                                                        onTestFileUpload={handleTestFileUpload}
+                                                        onTestFileRemove={handleTestFileRemove}
+                                                        testFixtures={testFixtures}
+                                                        fixtureUploading={fixtureUploading}
+                                                        onPreviewFixture={handlePreviewFixture}
+                                                        onSinceChange={handleSinceChange}
+                                                        onSinceReset={handleSinceReset}
+                                                        onSinceClear={handleSinceClear}
+                                                        onSymbolsChange={handleSymbolsChange}
+                                                        onCurrenciesChange={handleCurrenciesChange}
+                                                        onFileUploadComplete={handleFileUploadComplete}
+                                                        onJobSnippetClick={handleJobSnippetClick}
+                                                        onBalanceClick={handleBalanceClick}
+                                                        onRemove={() => handleRemoveAccount(account.id)}
+                                                        isCollapsed={collapsedAccounts.get(account.id) ?? false}
+                                                        onToggleCollapse={() => toggleAccountCollapse(account.id)}
+                                                        disabled={disabled}
+                                                    />
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                </div>
+            )}
 
             {/* Job Detail Drawer */}
             {selectedJobConnector && (
@@ -1691,47 +1587,35 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
             />
 
             {/* Test Fixture Preview Dialog */}
-            <Dialog.Root open={previewConnectorId !== null} onOpenChange={(e) => { if (!e.open) { setPreviewConnectorId(null); setPreviewData(null); } }}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxW="600px" maxH="80vh">
-                            <Dialog.Header>
-                                <Dialog.Title fontSize="sm">🧪 Test Fixture Preview</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body overflowY="auto">
-                                {previewLoading ? (
-                                    <Flex justify="center" py={4}><Spinner size="sm" /></Flex>
-                                ) : previewData ? (
-                                    <Box>
-                                        <Text fontSize="xs" color="gray.500" mb={2}>{previewData.length} items</Text>
-                                        <Box
-                                            as="pre"
-                                            fontSize="xs"
-                                            bg="gray.50"
-                                            p={3}
-                                            borderRadius="md"
-                                            overflowX="auto"
-                                            maxH="60vh"
-                                            whiteSpace="pre-wrap"
-                                            wordBreak="break-all"
-                                        >
-                                            {JSON.stringify(previewData, null, 2)}
-                                        </Box>
-                                    </Box>
-                                ) : (
-                                    <Text fontSize="sm" color="gray.500">No data available</Text>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Button size="sm" variant="outline" onClick={() => { setPreviewConnectorId(null); setPreviewData(null); }}>
-                                    Close
-                                </Button>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-        </Box>
+            <RadixDialog.Root open={previewConnectorId !== null} onOpenChange={(open) => { if (!open) { setPreviewConnectorId(null); setPreviewData(null); } }}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[80vh] w-full max-w-[600px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-4 py-3">
+                            <RadixDialog.Title className="text-sm font-semibold">🧪 Test Fixture Preview</RadixDialog.Title>
+                        </div>
+                        <div className="max-h-[60vh] overflow-y-auto p-4">
+                            {previewLoading ? (
+                                <div className="flex justify-center py-4"><Spinner size="sm" /></div>
+                            ) : previewData ? (
+                                <div>
+                                    <p className="mb-2 text-xs text-slate-500">{previewData.length} items</p>
+                                    <pre className="max-h-[60vh] overflow-x-auto whitespace-pre-wrap break-all bg-slate-50 p-3 text-xs">
+                                        {JSON.stringify(previewData, null, 2)}
+                                    </pre>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-slate-500">No data available</p>
+                            )}
+                        </div>
+                        <div className="flex justify-end border-t border-slate-200 px-4 py-3">
+                            <Button size="sm" variant="outline" onClick={() => { setPreviewConnectorId(null); setPreviewData(null); }}>
+                                Close
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+        </div>
     );
 };

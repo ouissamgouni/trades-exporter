@@ -90,11 +90,11 @@ tasks:
 
   install:backend:
     desc: Install backend Python dependencies
-    dir: "{{.BACKEND_DIR}}"
+    dir: "{{.ROOT_DIR}}"
     cmds:
-      - .venv/bin/pip install -r requirements.txt
+      - .venv/bin/pip install -r backend/requirements.txt
     sources:
-      - requirements.txt
+      - backend/requirements.txt
 
   install:frontend:
     desc: Install frontend Node dependencies
@@ -129,14 +129,14 @@ tasks:
         printf "  %-34s  %6s  %-5s  %-5s  %-5s  %s\n" "──────────────────────────────────" "──────" "─────" "─────" "─────" "──────────"
 
         # Collect running scenario containers (Docker mode)
-        RUNNING_DOCKER=$(docker ps --filter "name=trades_db_qa" --format '{{`{{.Names}}`}}' 2>/dev/null || true)
+        RUNNING_DOCKER=$(docker ps --filter "name=trades_db_scenario-" --format '{{`{{.Names}}`}}' 2>/dev/null || true)
 
         # Track offsets for collision detection
         ALL_OFFSETS=""
 
         # ── Default scenario (always offset 0) ──
         STATUS="—"
-        if echo "$RUNNING_DOCKER" | grep -qx "trades_db_qa" 2>/dev/null; then
+        if echo "$RUNNING_DOCKER" | grep -qx "trades_db_scenario-default" 2>/dev/null; then
           STATUS="🟢 docker"
         elif lsof -iTCP:8002 -sTCP:LISTEN >/dev/null 2>&1; then
           STATUS="🟢 local"
@@ -158,7 +158,7 @@ tasks:
 
             # Check running status
             STATUS="—"
-            DB_CONTAINER="trades_db_qa-${NAME}"
+            DB_CONTAINER="trades_db_scenario-${NAME}"
             if echo "$RUNNING_DOCKER" | grep -qx "$DB_CONTAINER" 2>/dev/null; then
               STATUS="🟢 docker"
             elif lsof -iTCP:"$API" -sTCP:LISTEN >/dev/null 2>&1; then

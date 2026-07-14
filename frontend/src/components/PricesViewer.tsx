@@ -1,10 +1,6 @@
 
-import {
-    Badge, Box,
-    Button, Checkbox, Dialog, Flex,
-    Heading, Input, NativeSelect, Portal, Spinner,
-    Table, Text
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Button, Heading, Input, Spinner, Text } from './ui/primitives';
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_URL, Asset, PaginatedPriceSnapshotsResponse, PriceSnapshot } from '../types';
 import { useAssets } from '../hooks/useAssets';
@@ -247,41 +243,38 @@ export const PricesViewer: React.FC = () => {
     };
 
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="md" mb={1}>💰 Price Snapshots</Heading>
-                    <Text color="gray.600" fontSize="sm">
+        <div>
+            <div className="mb-6 flex items-center justify-between border-b border-gray-200 pb-2">
+                <div>
+                    <Heading as="h2" className="mb-1 text-base">💰 Price Snapshots</Heading>
+                    <Text className="text-sm text-gray-600">
                         {viewMode === 'health'
                             ? 'Monitor price data freshness and detect anomalies across all assets.'
                             : 'View and manage historical cryptocurrency price snapshots.'}
                     </Text>
-                </Box>
-                <Flex gap={2} align="center">
+                </div>
+                <div className="flex items-center gap-2">
                     <PriceGapBulkFix
                         quoteAssetId={baseCurrency.assetId ?? null}
                         onComplete={viewMode === 'table' ? fetchPrices : undefined}
                     />
                     {/* View mode toggle */}
-                    <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                    <div className="inline-flex overflow-hidden border border-gray-200">
                         {([{ value: 'health' as const, label: '🩺 Health' }, { value: 'table' as const, label: '📋 Table' }]).map(opt => (
                             <Button
                                 key={opt.value}
-                                size="sm"
                                 variant={viewMode === opt.value ? 'solid' : 'ghost'}
-                                colorPalette={viewMode === opt.value ? 'blue' : 'gray'}
-                                borderRadius="0"
+                                colorScheme={viewMode === opt.value ? 'blue' : 'gray'}
                                 onClick={() => setViewMode(opt.value)}
-                                px={3}
-                                fontSize="sm"
+                                className="px-3 text-sm"
                             >
                                 {opt.label}
                             </Button>
                         ))}
-                    </Flex>
+                    </div>
                     {viewMode === 'table' && (
                         <>
-                            <Button colorPalette="blue" onClick={handleAddPrice}>
+                            <Button colorScheme="blue" onClick={handleAddPrice}>
                                 ➕ Add Price
                             </Button>
                             <Button onClick={fetchPrices} variant="outline">
@@ -289,8 +282,8 @@ export const PricesViewer: React.FC = () => {
                             </Button>
                         </>
                     )}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {/* === HEALTH VIEW === */}
             {viewMode === 'health' && (
@@ -299,23 +292,23 @@ export const PricesViewer: React.FC = () => {
 
             {/* === TABLE VIEW === */}
             {viewMode === 'table' && loading && (
-                <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                    <Spinner size="xl" color="blue.500" />
-                    <Text mt={4}>Loading prices...</Text>
-                </Box>
+                <div className="bg-gray-50 py-10 text-center">
+                    <Spinner size="lg" className="text-blue-500" />
+                    <Text className="mt-4 block">Loading prices...</Text>
+                </div>
             )}
 
             {viewMode === 'table' && error && (
-                <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                    <Text color="red.600">Error: {error}</Text>
-                </Box>
+                <div className="border border-red-200 bg-red-50 py-10 text-center">
+                    <Text className="text-red-600">Error: {error}</Text>
+                </div>
             )}
 
             {viewMode === 'table' && !loading && !error && <>
                 {/* Asset detail header with Back + GapFixPanel */}
                 {assetIdFilter && (
-                    <Box mb={4}>
-                        <Flex align="center" gap={2} mb={3}>
+                    <div className="mb-4">
+                        <div className="mb-3 flex items-center gap-2">
                             <Button
                                 size="sm"
                                 variant="ghost"
@@ -323,21 +316,22 @@ export const PricesViewer: React.FC = () => {
                             >
                                 <FiArrowLeft /> Back to Health
                             </Button>
-                            <Heading as="h3" size="sm">
+                            <Heading as="h3" className="text-sm">
                                 {getAssetSymbol(assetIdFilter)} — Prices
                             </Heading>
-                        </Flex>
+                        </div>
                         <GapFixPanel
                             assetId={assetIdFilter}
                             symbol={getAssetSymbol(assetIdFilter)}
                             onOpenPriceSetter={() => { setCreateAssetId(assetIdFilter); setShowCreateDialog(true); }}
                         />
-                    </Box>
+                    </div>
                 )}
-                <Flex gap={4} mb={6} align="center" flexWrap="wrap">
-                    <Flex align="center" gap={2}>
-                        <Text fontWeight="medium" fontSize="sm">Asset:</Text>
-                        <Box width="180px">
+                <div className="mb-6 flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        <Text className="text-sm font-medium">Asset:</Text>
+                        <div className="w-[180px]">
+
                             <AssetSelector
                                 value={assetIdFilter}
                                 onChange={(id) => { setAssetIdFilter(id); pagination.firstPage(); }}
@@ -345,11 +339,11 @@ export const PricesViewer: React.FC = () => {
                                 placeholder="All Assets"
                                 size="sm"
                             />
-                        </Box>
-                    </Flex>
-                    <Flex align="center" gap={2}>
-                        <Text fontWeight="medium" fontSize="sm">Quote Asset:</Text>
-                        <Box width="180px">
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Text className="text-sm font-medium">Quote Asset:</Text>
+                        <div className="w-[180px]">
                             <AssetSelector
                                 value={quoteAssetIdFilter}
                                 onChange={(id) => { setQuoteAssetIdFilter(id); pagination.firstPage(); }}
@@ -357,96 +351,94 @@ export const PricesViewer: React.FC = () => {
                                 placeholder="All Quote Assets"
                                 size="sm"
                             />
-                        </Box>
-                    </Flex>
-                    <Flex align="center" gap={2}>
-                        <Text fontWeight="medium" fontSize="sm">Source:</Text>
-                        <NativeSelect.Root size="sm" width="150px">
-                            <NativeSelect.Field
-                                value={sourceFilter}
-                                onChange={e => { setSourceFilter(e.target.value); pagination.firstPage(); }}
-                            >
-                                <option value="">All Sources</option>
-                                {availableSources.map(source => (
-                                    <option key={source} value={source}>
-                                        {source}
-                                    </option>
-                                ))}
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-                    <Flex align="center" gap={2}>
-                        <Text fontWeight="medium" fontSize="sm">Snapshot Time:</Text>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Text className="text-sm font-medium">Source:</Text>
+                        <select
+                            aria-label="Source filter"
+                            className="h-8 w-[150px] border border-gray-300 px-2 text-sm"
+                            value={sourceFilter}
+                            onChange={e => { setSourceFilter(e.target.value); pagination.firstPage(); }}
+                        >
+                            <option value="">All Sources</option>
+                            {availableSources.map(source => (
+                                <option key={source} value={source}>
+                                    {source}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Text className="text-sm font-medium">Snapshot Time:</Text>
                         <Input
                             type="datetime-local"
-                            size="sm"
-                            width="180px"
+                            className="w-[180px]"
                             placeholder="From"
                             value={snapshotTimeFrom}
                             onChange={e => { setSnapshotTimeFrom(e.target.value); pagination.firstPage(); }}
                         />
-                        <Text fontSize="sm">to</Text>
+                        <Text className="text-sm">to</Text>
                         <Input
                             type="datetime-local"
-                            size="sm"
-                            width="180px"
+                            className="w-[180px]"
                             placeholder="To"
                             value={snapshotTimeTo}
                             onChange={e => { setSnapshotTimeTo(e.target.value); pagination.firstPage(); }}
                         />
-                    </Flex>
+                    </div>
                     {hasActiveFilters && (
                         <Button size="sm" variant="outline" onClick={clearFilters}>
                             Clear Filters
                         </Button>
                     )}
-                </Flex>
+                </div>
 
-                <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm">
-                    <Table.Root size="sm">
-                        <Table.Header>
-                            <Table.Row>
-                                <Table.ColumnHeader width="40px">
-                                    <Checkbox.Root
+                <div className="overflow-x-auto bg-white shadow-sm">
+                    <table className="w-full [&_td]:px-3 [&_td]:py-1.5 [&_th]:px-3 [&_th]:py-1.5 [&_th]:text-left">
+                        <thead>
+                            <tr>
+                                <th className="w-[40px]">
+                                    <input
+                                        type="checkbox"
+                                        aria-label="Select all price snapshots"
+                                        className="h-4 w-4 border border-slate-300"
                                         checked={prices.length > 0 && selectedIds.size === prices.length}
-                                        onCheckedChange={toggleSelectAll}
-                                    >
-                                        <Checkbox.HiddenInput />
-                                        <Checkbox.Control />
-                                    </Checkbox.Root>
-                                </Table.ColumnHeader>
-                                <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                                <Table.ColumnHeader>Quote Asset</Table.ColumnHeader>
-                                <Table.ColumnHeader>Snapshot Time</Table.ColumnHeader>
-                                <Table.ColumnHeader>Price</Table.ColumnHeader>
-                                <Table.ColumnHeader>Source</Table.ColumnHeader>
-                                <Table.ColumnHeader>Actions</Table.ColumnHeader>
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
+                                        onChange={toggleSelectAll}
+                                    />
+                                </th>
+                                <th>Asset</th>
+                                <th>Quote Asset</th>
+                                <th>Snapshot Time</th>
+                                <th>Price</th>
+                                <th>Source</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                             {prices.length === 0 ? (
-                                <Table.Row>
-                                    <Table.Cell colSpan={7}>
-                                        <Text textAlign="center" py={8} color="gray.500">
+                                <tr>
+                                    <td colSpan={7}>
+                                        <Text className="block py-8 text-center text-gray-500">
                                             No price snapshots found
                                         </Text>
-                                    </Table.Cell>
-                                </Table.Row>
+                                    </td>
+                                </tr>
                             ) : (
                                 prices.map((price, index) => {
                                     const key = price.snapshot_id ? getEditKey(price) : `price-${index}`;
                                     return (
-                                        <Table.Row key={key} bg={selectedIds.has(price.snapshot_id) ? 'blue.50' : undefined}>
-                                            <Table.Cell>
-                                                <Checkbox.Root
+                                        <tr key={key} className={selectedIds.has(price.snapshot_id) ? 'bg-blue-50' : undefined}>
+                                            <td>
+                                                <input
+                                                    type="checkbox"
+                                                    aria-label={`Select price snapshot ${price.snapshot_id}`}
+                                                    className="h-4 w-4 border border-slate-300"
                                                     checked={selectedIds.has(price.snapshot_id)}
-                                                    onCheckedChange={() => toggleSelection(price.snapshot_id)}
-                                                >
-                                                    <Checkbox.HiddenInput />
-                                                    <Checkbox.Control />
-                                                </Checkbox.Root>
-                                            </Table.Cell>
-                                            <Table.Cell>
+                                                    onChange={() => toggleSelection(price.snapshot_id)}
+                                                />
+                                            </td>
+                                            <td>
                                                 <AssetBadge
                                                     asset={{
                                                         id: price.asset_id,
@@ -456,8 +448,8 @@ export const PricesViewer: React.FC = () => {
                                                     colorPalette="blue"
                                                     size="xs"
                                                 />
-                                            </Table.Cell>
-                                            <Table.Cell>
+                                            </td>
+                                            <td>
                                                 <AssetBadge
                                                     asset={price.quote_asset_id ? {
                                                         id: price.quote_asset_id,
@@ -468,190 +460,173 @@ export const PricesViewer: React.FC = () => {
                                                     size="xs"
                                                     fallback="-"
                                                 />
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Text fontSize="xs">{formatSnapshotTime(price.snapshot_time)}</Text>
-                                            </Table.Cell>
-                                            <Table.Cell>
+                                            </td>
+                                            <td>
+                                                <Text className="text-xs">{formatSnapshotTime(price.snapshot_time)}</Text>
+                                            </td>
+                                            <td>
                                                 {editingKey === key ? (
                                                     <Input
-                                                        size="sm"
                                                         type="number"
                                                         step="any"
+                                                        className="text-sm"
                                                         value={editValues.price ?? ''}
                                                         onChange={e => setEditValues({ ...editValues, price: parseFloat(e.target.value) })}
                                                     />
                                                 ) : (
-                                                    <Text fontWeight="medium" fontSize="xs">{price.price != null ? price.price.toFixed(8) : '-'}</Text>
+                                                    <Text className="text-xs font-medium">{price.price != null ? price.price.toFixed(8) : '-'}</Text>
                                                 )}
-                                            </Table.Cell>
-                                            <Table.Cell>
+                                            </td>
+                                            <td>
                                                 {editingKey === key ? (
                                                     <Input
-                                                        size="sm"
+                                                        className="text-sm"
                                                         value={editValues.source || ''}
                                                         onChange={e => setEditValues({ ...editValues, source: e.target.value })}
                                                     />
                                                 ) : (
-                                                    <Text fontSize="xs">{price.source || '-'}</Text>
+                                                    <Text className="text-xs">{price.source || '-'}</Text>
                                                 )}
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Flex gap={1}>
+                                            </td>
+                                            <td>
+                                                <div className="flex gap-1">
                                                     {editingKey === key ? (
                                                         <>
-                                                            <Button size="xs" colorPalette="blue" onClick={() => savePrice(price)}>
+                                                            <Button size="sm" colorScheme="blue" className="text-xs" onClick={() => savePrice(price)}>
                                                                 💾
                                                             </Button>
-                                                            <Button size="xs" variant="outline" onClick={() => { setEditingKey(null); setEditValues({}); }}>
+                                                            <Button size="sm" variant="outline" className="text-xs" onClick={() => { setEditingKey(null); setEditValues({}); }}>
                                                                 ✗
                                                             </Button>
                                                         </>
                                                     ) : (
                                                         <>
-                                                            <Button size="xs" variant="outline" onClick={() => startEditing(price)}>
+                                                            <Button size="sm" variant="outline" className="text-xs" onClick={() => startEditing(price)}>
                                                                 ✏️
                                                             </Button>
-                                                            <Button size="xs" colorPalette="red" variant="outline" onClick={() => deletePrice(price)}>
+                                                            <Button size="sm" colorScheme="red" variant="outline" className="text-xs" onClick={() => deletePrice(price)}>
                                                                 🗑️
                                                             </Button>
                                                         </>
                                                     )}
-                                                </Flex>
-                                            </Table.Cell>
-                                        </Table.Row>
+                                                </div>
+                                            </td>
+                                        </tr>
                                     );
                                 })
                             )}
-                        </Table.Body>
-                    </Table.Root>
-                </Box>
+                        </tbody>
+                    </table>
+                </div>
 
-                <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                    <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
+                <div className="mt-4 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
                         {/* Left side: Info */}
-                        <Text fontSize="sm" color="gray.600">
+                        <Text className="text-sm text-gray-600">
                             Showing {totalItems === 0 ? 0 : offset + 1}-{Math.min(offset + pagination.pageSize, totalItems)} of <strong>{totalItems}</strong> records
                             {selectedIds.size > 0 && (
                                 <> | <strong>Selected:</strong> {selectedIds.size}</>
                             )}
                         </Text>
-                    </Flex>
+                    </div>
 
                     {/* Pagination controls */}
                     <TablePagination
                         pagination={pagination}
                         total={totalItems}
                     />
-                </Box>
+                </div>
 
                 {/* Bulk Action Bar */}
                 {selectedIds.size > 0 && (
-                    <Box
-                        position="fixed"
-                        bottom={4}
-                        left="50%"
-                        transform="translateX(-50%)"
-                        bg="gray.800"
-                        color="white"
-                        px={6}
-                        py={3}
-                        borderRadius="lg"
-                        boxShadow="lg"
-                        zIndex={10}
-                    >
-                        <Flex align="center" gap={4}>
-                            <Text fontWeight="medium">
+                    <div className="fixed bottom-4 left-1/2 z-10 -translate-x-1/2 bg-gray-800 px-6 py-3 text-white shadow-lg">
+                        <div className="flex items-center gap-4">
+                            <Text className="font-medium text-white">
                                 {selectedIds.size} selected
                             </Text>
                             <Button
                                 size="sm"
                                 variant="outline"
-                                colorPalette="whiteAlpha"
+                                colorScheme="gray"
+                                className="border-white/60 text-white hover:bg-white/10"
                                 onClick={clearSelection}
                             >
                                 Clear Selection
                             </Button>
                             <Button
                                 size="sm"
-                                colorPalette="red"
+                                colorScheme="red"
                                 onClick={() => setShowBulkDeleteDialog(true)}
                             >
                                 🗑️ Delete Selected
                             </Button>
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
                 )}
 
                 {/* Bulk Delete Confirmation Dialog */}
-                <Dialog.Root open={showBulkDeleteDialog} onOpenChange={(e) => setShowBulkDeleteDialog(e.open)}>
-                    <Portal>
-                        <Dialog.Backdrop />
-                        <Dialog.Positioner>
-                            <Dialog.Content>
-                                <Dialog.Header>
-                                    <Dialog.Title>Confirm Bulk Delete</Dialog.Title>
-                                </Dialog.Header>
-                                <Dialog.Body>
-                                    <Text>
-                                        Are you sure you want to delete <strong>{selectedIds.size}</strong> price record(s)?
-                                        This action cannot be undone.
-                                    </Text>
-                                </Dialog.Body>
-                                <Dialog.Footer>
-                                    <Flex gap={2}>
-                                        <Button
-                                            variant="outline"
-                                            onClick={() => setShowBulkDeleteDialog(false)}
-                                            disabled={bulkDeleteLoading}
-                                        >
-                                            Cancel
-                                        </Button>
-                                        <Button
-                                            colorPalette="red"
-                                            onClick={bulkDelete}
-                                            disabled={bulkDeleteLoading}
-                                        >
-                                            {bulkDeleteLoading ? <Spinner size="sm" /> : 'Delete'}
-                                        </Button>
-                                    </Flex>
-                                </Dialog.Footer>
-                            </Dialog.Content>
-                        </Dialog.Positioner>
-                    </Portal>
-                </Dialog.Root>
+                <RadixDialog.Root open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+                    <RadixDialog.Portal>
+                        <RadixDialog.Overlay className="fixed inset-0 z-[1000] bg-black/40" />
+                        <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[1000] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 bg-white shadow-xl">
+                            <div className="border-b border-gray-200 px-4 py-3">
+                                <RadixDialog.Title className="text-base font-semibold">Confirm Bulk Delete</RadixDialog.Title>
+                            </div>
+                            <div className="px-4 py-3">
+                                <Text>
+                                    Are you sure you want to delete <strong>{selectedIds.size}</strong> price record(s)?
+                                    This action cannot be undone.
+                                </Text>
+                            </div>
+                            <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setShowBulkDeleteDialog(false)}
+                                    disabled={bulkDeleteLoading}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    colorScheme="red"
+                                    onClick={bulkDelete}
+                                    disabled={bulkDeleteLoading}
+                                >
+                                    {bulkDeleteLoading ? <Spinner size="sm" /> : 'Delete'}
+                                </Button>
+                            </div>
+                        </RadixDialog.Content>
+                    </RadixDialog.Portal>
+                </RadixDialog.Root>
 
                 {/* Price Setter Dialog (replaces old inline create dialog) */}
                 {showCreateDialog && !createAssetId && (
-                    <Dialog.Root open={true} onOpenChange={(e) => !e.open && setShowCreateDialog(false)}>
-                        <Portal>
-                            <Dialog.Backdrop css={{ zIndex: 2000 }} />
-                            <Dialog.Positioner css={{ zIndex: 2000 }}>
-                                <Dialog.Content maxW="360px">
-                                    <Dialog.Header>
-                                        <Dialog.Title>Select Asset</Dialog.Title>
-                                    </Dialog.Header>
-                                    <Dialog.Body>
-                                        <Text fontSize="sm" mb={2} color="gray.600">Choose an asset to add prices for:</Text>
-                                        <AssetSelector
-                                            value={null}
-                                            onChange={(id) => {
-                                                if (id) setCreateAssetId(id);
-                                            }}
-                                            assets={assets}
-                                            placeholder="Select asset..."
-                                            size="md"
-                                        />
-                                    </Dialog.Body>
-                                    <Dialog.Footer>
-                                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
-                                            Cancel
-                                        </Button>
-                                    </Dialog.Footer>
-                                </Dialog.Content>
-                            </Dialog.Positioner>
-                        </Portal>
-                    </Dialog.Root>
+                    <RadixDialog.Root open={true} onOpenChange={(open: boolean) => !open && setShowCreateDialog(false)}>
+                        <RadixDialog.Portal>
+                            <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
+                            <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] w-full max-w-[360px] -translate-x-1/2 -translate-y-1/2 bg-white shadow-xl">
+                                <div className="border-b border-gray-200 px-4 py-3">
+                                    <RadixDialog.Title className="text-base font-semibold">Select Asset</RadixDialog.Title>
+                                </div>
+                                <div className="px-4 py-3">
+                                    <Text className="mb-2 text-sm text-gray-600">Choose an asset to add prices for:</Text>
+                                    <AssetSelector
+                                        value={null}
+                                        onChange={(id) => {
+                                            if (id) setCreateAssetId(id);
+                                        }}
+                                        assets={assets}
+                                        placeholder="Select asset..."
+                                        size="md"
+                                    />
+                                </div>
+                                <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
+                                    <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                                        Cancel
+                                    </Button>
+                                </div>
+                            </RadixDialog.Content>
+                        </RadixDialog.Portal>
+                    </RadixDialog.Root>
                 )}
 
                 {showCreateDialog && createAssetId && (
@@ -677,6 +652,6 @@ export const PricesViewer: React.FC = () => {
                 confirmLabel="Delete"
                 isDestructive
             />
-        </Box>
+        </div>
     );
 };

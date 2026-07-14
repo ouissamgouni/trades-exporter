@@ -1,0 +1,78 @@
+# Product Demo Scenario — Assets
+# =================================
+# Base currency (EUR) plus every asset referenced by transactions.yaml.
+# Symbols mirror real-world international tickers (reused as-is, per demo
+# convention) — quantities, dates and prices are entirely fake.
+
+assets:
+  # ── Fiat ──────────────────────────────────────────────────────
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: USD
+    label: US Dollar
+    price_type: fiat
+
+  # ── Crypto ────────────────────────────────────────────────────
+  - symbol: BTC
+    label: Bitcoin
+    price_type: crypto
+
+  - symbol: ETH
+    label: Ethereum
+    price_type: crypto
+
+  - symbol: SOL
+    label: Solana
+    price_type: crypto
+
+  - symbol: USDC
+    label: USD Coin
+    price_type: crypto
+
+  - symbol: XRP
+    label: XRP
+    price_type: crypto
+
+  - symbol: BNB
+    label: BNB
+    price_type: crypto
+
+  # ── Stocks & Funds ────────────────────────────────────────────
+  - symbol: AAPL
+    label: Apple Inc.
+    price_type: stock
+
+  - symbol: MSFT
+    label: Microsoft Corporation
+    price_type: stock
+
+  - symbol: GOOGL
+    label: Alphabet Inc.
+    price_type: stock
+
+  - symbol: ASML
+    label: ASML Holding N.V.
+    price_type: stock
+
+  - symbol: CW8
+    label: "Amundi MSCI World UCITS ETF"
+    price_type: stock
+
+  # ── Prediction Markets (Polymarket) ───────────────────────────
+  - symbol: "PM:bitcoin-200k-2025-Yes"
+    label: "Will BTC hit $200k in 2025? — Yes"
+    price_type: null
+
+  - symbol: "PM:fed-rate-cut-mar-2025-Yes"
+    label: "Fed cuts rates by March 2025 — Yes"
+    price_type: null
+
+  - symbol: "PM:senate-control-2026-Yes"
+    label: "Senate control after 2026 midterms — Yes"
+    price_type: null
+
+  - symbol: "PM:eth-etf-inflows-2026-Yes"
+    label: "ETH ETFs see net inflows in 2026 — Yes"
+    price_type: null

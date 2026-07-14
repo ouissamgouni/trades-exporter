@@ -17,20 +17,7 @@
  */
 
 import React, { useContext, useState, useMemo, useCallback, useEffect, Fragment } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Collapsible,
-    Flex,
-    Input,
-    SimpleGrid,
-    Slider,
-    Spinner,
-    Table,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Input, Spinner, type BadgeColorScheme } from '../ui/primitives';
 import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiFilter, FiX, FiList, FiCheck, FiDollarSign, FiTrendingUp, FiTrendingDown, FiColumns } from 'react-icons/fi';
 import { LuInfo, LuReceipt } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
@@ -58,9 +45,6 @@ const TOTAL_COLUMNS_BY_ACCOUNT = 7;
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
-
-/** Extra-small font style applied to all table cells */
-const XS: { fontSize: string } = { fontSize: 'xs' };
 
 type GroupBy = 'asset' | 'account';
 type DisplayMode = 'cards' | 'table';
@@ -198,29 +182,29 @@ const renderCost = (
     return (
         <Tooltip
             content={
-                <Box p={1} fontSize="xs">
-                    <Flex justify="space-between" gap={3}>
-                        <Text color="gray.400">Unit cost</Text>
-                        <Text fontWeight="medium">
+                <div className="p-1 text-xs">
+                    <div className="flex justify-between gap-3">
+                        <span className="text-gray-400">Unit cost</span>
+                        <span className="font-medium">
                             {unitCost != null
                                 ? <ValueDisplay value={unitCost} currency={baseCurrency} />
                                 : '—'}
-                        </Text>
-                    </Flex>
-                </Box>
+                        </span>
+                    </div>
+                </div>
             }
             openDelay={200}
         >
-            <Box cursor="help">
-                <Text {...XS}>
+            <div className="cursor-help">
+                <span className="text-xs">
                     <ValueDisplay value={costBasis} currency={baseCurrency} />
-                </Text>
+                </span>
                 {showInvested && (
-                    <Text fontSize="2xs" color="gray.400" lineHeight="1">
+                    <div className="text-[10px] leading-none text-gray-400">
                         invested <ValueDisplay value={totalInvested} currency={baseCurrency} />
-                    </Text>
+                    </div>
                 )}
-            </Box>
+            </div>
         </Tooltip>
     );
 };
@@ -235,52 +219,52 @@ const renderValue = (
     const hasError = !!row.price_error;
     const isLoadingPrice = !!row.price_loading;
 
-    if (isLoadingPrice) return <Spinner size="xs" color="gray.400" />;
+    if (isLoadingPrice) return <Spinner size="xs" className="text-gray-400" />;
 
     return (
         <Tooltip
             content={
-                <Box p={2} fontSize="xs">
-                    <Flex justify="space-between" gap={4} mb={1}>
-                        <Text color="gray.400">Unit price</Text>
-                        <Text fontWeight="medium">
+                <div className="p-2 text-xs">
+                    <div className="mb-1 flex justify-between gap-4">
+                        <span className="text-gray-400">Unit price</span>
+                        <span className="font-medium">
                             {hasPrice
                                 ? <ValueDisplay value={row.unit_value!} currency={baseCurrency} />
                                 : '—'}
-                        </Text>
-                    </Flex>
-                    <Flex justify="space-between" gap={4} mb={1}>
-                        <Text color="gray.400">Source</Text>
-                        <Text fontWeight="medium">{row.price_source || 'N/A'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" gap={4} mb={1}>
-                        <Text color="gray.400">Updated</Text>
-                        <Text fontWeight="medium">{formatDateTimeLocale(row.price_fetched_at)}</Text>
-                    </Flex>
+                        </span>
+                    </div>
+                    <div className="mb-1 flex justify-between gap-4">
+                        <span className="text-gray-400">Source</span>
+                        <span className="font-medium">{row.price_source || 'N/A'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between gap-4">
+                        <span className="text-gray-400">Updated</span>
+                        <span className="font-medium">{formatDateTimeLocale(row.price_fetched_at)}</span>
+                    </div>
                     {hasError && (
-                        <Flex justify="space-between" gap={4}>
-                            <Text color="red.400">Error</Text>
-                            <Text color="red.300" maxW="200px" wordBreak="break-word">{row.price_error}</Text>
-                        </Flex>
+                        <div className="flex justify-between gap-4">
+                            <span className="text-red-400">Error</span>
+                            <span className="max-w-[200px] break-words text-red-300">{row.price_error}</span>
+                        </div>
                     )}
                     {stale && (
-                        <Text color="orange.400" mt={1}>⚠ Price is stale (over 1 hour old)</Text>
+                        <div className="mt-1 text-orange-400">⚠ Price is stale (over 1 hour old)</div>
                     )}
-                </Box>
+                </div>
             }
             openDelay={200}
             closeDelay={100}
         >
-            <Flex align="center" gap={1} cursor="help">
-                <Text {...XS} color={stale ? 'orange.500' : undefined} textDecoration={hasPrice ? 'underline dotted' : undefined}>
+            <div className="flex cursor-help items-center gap-1">
+                <span className={`text-xs ${stale ? 'text-orange-500' : ''} ${hasPrice ? 'underline decoration-dotted' : ''}`}>
                     {hasPrice
                         ? <ValueDisplay value={row.market_value} currency={baseCurrency} />
                         : '—'}
-                </Text>
+                </span>
                 {(stale || hasError) && (
                     <FiAlertCircle size={10} color={hasError ? '#E53E3E' : '#DD6B20'} />
                 )}
-            </Flex>
+            </div>
         </Tooltip>
     );
 };
@@ -404,7 +388,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
 
     // Build active filter chips for display when collapsed
     const activeFilterChips = useMemo(() => {
-        const chips: { id: string; label: string; color: string; onRemove: () => void }[] = [];
+        const chips: { id: string; label: string; color: BadgeColorScheme; onRemove: () => void }[] = [];
         if (search) {
             chips.push({ id: 'search', label: `"${search}"`, color: 'purple', onRemove: () => setSearch('') });
         }
@@ -412,10 +396,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
             chips.push({ id: 'minValue', label: `Min $${minMarketValue}`, color: 'gray', onRemove: () => setMinMarketValue(0) });
         }
         if (pnlStatus !== 'all') {
-            chips.push({ id: 'pnlStatus', label: pnlStatus === 'with_pnl' ? 'With P&L' : 'No P&L', color: 'teal', onRemove: () => setPnlStatus('all') });
+            chips.push({ id: 'pnlStatus', label: pnlStatus === 'with_pnl' ? 'With P&L' : 'No P&L', color: 'green', onRemove: () => setPnlStatus('all') });
         }
         if (balanceStatus !== 'all') {
-            chips.push({ id: 'balanceStatus', label: balanceStatus === 'mapped' ? 'Has balance' : 'No balance', color: 'cyan', onRemove: () => setBalanceStatus('all') });
+            chips.push({ id: 'balanceStatus', label: balanceStatus === 'mapped' ? 'Has balance' : 'No balance', color: 'yellow', onRemove: () => setBalanceStatus('all') });
         }
         for (const accId of selectedAccountIds) {
             const acc = accounts.find(a => a.id === accId);
@@ -769,18 +753,17 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     };
 
     const SortHeader: React.FC<{ field: SortField; children: React.ReactNode }> = ({ field, children }) => (
-        <Table.ColumnHeader
-            cursor="pointer"
+        <th
+            className="cursor-pointer hover:bg-gray-50"
             onClick={() => handleSort(field)}
-            _hover={{ bg: 'gray.50' }}
         >
-            <Flex align="center" gap={1}>
+            <div className="flex items-center gap-1">
                 {children}
                 {sortField === field && (
-                    <Text fontSize="xs">{sortDir === 'asc' ? '↑' : '↓'}</Text>
+                    <span className="text-xs">{sortDir === 'asc' ? '↑' : '↓'}</span>
                 )}
-            </Flex>
-        </Table.ColumnHeader>
+            </div>
+        </th>
     );
 
     /** Segmented control helper for filter options */
@@ -789,28 +772,19 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         options: { value: string; label: string }[];
         onChange: (value: string) => void;
     }> = ({ value, options, onChange }) => (
-        <Flex
-            borderRadius="md"
-            border="1px solid"
-            borderColor="gray.200"
-            overflow="hidden"
-            display="inline-flex"
-        >
+        <div className="inline-flex overflow-hidden border border-gray-200">
             {options.map((opt) => (
                 <Button
                     key={opt.value}
-                    size="2xs"
                     variant={value === opt.value ? 'subtle' : 'ghost'}
-                    colorPalette={value === opt.value ? 'blue' : 'gray'}
-                    borderRadius="0"
+                    colorScheme={value === opt.value ? 'blue' : 'gray'}
                     onClick={() => onChange(opt.value)}
-                    px={2}
-                    fontSize="xs"
+                    className="h-6 px-2 text-xs"
                 >
                     {opt.label}
                 </Button>
             ))}
-        </Flex>
+        </div>
     );
 
     // ── Pagination bar (reusable for top + bottom) ──
@@ -823,92 +797,96 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         const pSafePage = Math.min(pPage, pPageCount - 1);
         if (pTotalRows <= PAGE_SIZE_OPTIONS[0]) return null;
         return (
-            <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
-                <Flex align="center" gap={2}>
-                    <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                    <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+            <div className="flex w-full items-center justify-between px-3 py-2">
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-500">Rows:</span>
+                    <div className="inline-flex overflow-hidden border border-gray-200">
                         {PAGE_SIZE_OPTIONS.map((size) => (
                             <Button
                                 key={size}
-                                size="2xs"
                                 variant={pPageSize === size ? 'subtle' : 'ghost'}
-                                colorPalette={pPageSize === size ? 'blue' : 'gray'}
-                                borderRadius="0"
+                                colorScheme={pPageSize === size ? 'blue' : 'gray'}
                                 onClick={() => { setPPageSize(size); setPPage(0); }}
-                                px={2}
-                                fontSize="xs"
+                                className="h-6 px-2 text-xs"
                             >
                                 {size}
                             </Button>
                         ))}
-                    </Flex>
-                </Flex>
-                <Text fontSize="2xs" color="gray.500">
+                    </div>
+                </div>
+                <span className="text-[10px] text-gray-500">
                     {pSafePage * pPageSize + 1}–{Math.min((pSafePage + 1) * pPageSize, pTotalRows)} of {pTotalRows}
-                </Text>
-                <Flex align="center" gap={1}>
-                    <Button size="2xs" variant="ghost" onClick={() => setPPage(0)} disabled={pSafePage === 0} px={1}>
+                </span>
+                <div className="flex items-center gap-1">
+                    <Button variant="ghost" onClick={() => setPPage(0)} disabled={pSafePage === 0} className="h-6 px-1">
                         <FiChevronsLeft size={12} />
                     </Button>
-                    <Button size="2xs" variant="ghost" onClick={() => setPPage((p: number) => Math.max(0, p - 1))} disabled={pSafePage === 0} px={1}>
+                    <Button variant="ghost" onClick={() => setPPage((p: number) => Math.max(0, p - 1))} disabled={pSafePage === 0} className="h-6 px-1">
                         <FiChevronLeft size={14} />
                     </Button>
-                    <Text fontSize="xs" color="gray.600" mx={1}>
+                    <span className="mx-1 text-xs text-gray-600">
                         {pSafePage + 1} / {pPageCount}
-                    </Text>
-                    <Button size="2xs" variant="ghost" onClick={() => setPPage((p: number) => Math.min(pPageCount - 1, p + 1))} disabled={pSafePage >= pPageCount - 1} px={1}>
+                    </span>
+                    <Button variant="ghost" onClick={() => setPPage((p: number) => Math.min(pPageCount - 1, p + 1))} disabled={pSafePage >= pPageCount - 1} className="h-6 px-1">
                         <FiChevronRight size={14} />
                     </Button>
-                    <Button size="2xs" variant="ghost" onClick={() => setPPage(pPageCount - 1)} disabled={pSafePage >= pPageCount - 1} px={1}>
+                    <Button variant="ghost" onClick={() => setPPage(pPageCount - 1)} disabled={pSafePage >= pPageCount - 1} className="h-6 px-1">
                         <FiChevronsRight size={12} />
                     </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
         );
     };
 
     const paginationBar = renderPaginationBar(safePage, setPage, pageSize, setPageSize, totalRows);
 
     // ── Helper: render a grid of asset cards from an array ──
-    const renderAssetCardGrid = (rows: AssetPnLRow[], columns?: Record<string, number>) => (
-        <SimpleGrid columns={columns ?? { base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
-            {rows.map((assetpnlrow) => {
-                const assetId = assetpnlrow.asset.id;
-                const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
-                const liveQty = liveBalances?.get(sym);
-                const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
-                const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
-                    ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
-                    : [];
-                const isUnmapped = !!assetpnlrow.is_unmapped;
-                const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
-                return (
-                    <AssetPnLCard
-                        key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}
-                        row={assetpnlrow}
-                        baseCurrency={baseCurrency}
-                        onAssetClick={onAssetClick}
-                        onAccountClick={onAccountClick}
-                        isExpanded={assetId != null && expandedAssetIds.has(assetId)}
-                        onToggleExpand={toggleExpanded}
-                        accountBalances={assetId != null ? accountBalances?.get(assetId) : undefined}
-                        accounts={accounts}
-                        liveQty={liveQty}
-                        deltaInfo={deltaInfo}
-                        liveBalanceLoading={liveBalanceLoading}
-                        liveAccountBalanceMap={liveAccountBalances?.get(sym)}
-                        liveAccountErrors={liveAccountErrors}
-                        assetErrorAccounts={assetErrorAccounts}
-                        hasLiveErrors={!!hasLiveErrors}
-                        unrealizedPnlRange={unrealizedPnlRange}
-                        periodDelta={assetId != null ? periodDeltaMap?.get(assetId) : undefined}
-                        periodLabel={periodLabel}
-                        pnlVersionId={pnlVersionId}
-                    />
-                );
-            })}
-        </SimpleGrid>
-    );
+    const renderAssetCardGrid = (rows: AssetPnLRow[], columns?: Record<string, number>) => {
+        const isSplitGrid = columns?.md === 1 && columns?.lg === 2 && columns?.xl === 3;
+        const gridClassName = isSplitGrid
+            ? 'grid grid-cols-1 gap-3 sm:grid-cols-1 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'
+            : 'grid grid-cols-1 gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-5';
+
+        return (
+            <div className={gridClassName}>
+                {rows.map((assetpnlrow) => {
+                    const assetId = assetpnlrow.asset.id;
+                    const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
+                    const liveQty = liveBalances?.get(sym);
+                    const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
+                    const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
+                        ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
+                        : [];
+                    const isUnmapped = !!assetpnlrow.is_unmapped;
+                    const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
+                    return (
+                        <AssetPnLCard
+                            key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}
+                            row={assetpnlrow}
+                            baseCurrency={baseCurrency}
+                            onAssetClick={onAssetClick}
+                            onAccountClick={onAccountClick}
+                            isExpanded={assetId != null && expandedAssetIds.has(assetId)}
+                            onToggleExpand={toggleExpanded}
+                            accountBalances={assetId != null ? accountBalances?.get(assetId) : undefined}
+                            accounts={accounts}
+                            liveQty={liveQty}
+                            deltaInfo={deltaInfo}
+                            liveBalanceLoading={liveBalanceLoading}
+                            liveAccountBalanceMap={liveAccountBalances?.get(sym)}
+                            liveAccountErrors={liveAccountErrors}
+                            assetErrorAccounts={assetErrorAccounts}
+                            hasLiveErrors={!!hasLiveErrors}
+                            unrealizedPnlRange={unrealizedPnlRange}
+                            periodDelta={assetId != null ? periodDeltaMap?.get(assetId) : undefined}
+                            periodLabel={periodLabel}
+                            pnlVersionId={pnlVersionId}
+                        />
+                    );
+                })}
+            </div>
+        );
+    };
 
     // ── Helper: render asset table rows from an array ──
     const renderAssetTableRows = (rows: AssetPnLRow[]) => (
@@ -927,43 +905,46 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
                     : [];
                 const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
+                const rowClassName = [
+                    'transition-colors',
+                    isNoPnl ? 'cursor-default hover:bg-gray-100' : 'cursor-pointer hover:bg-blue-50',
+                    isExpanded ? 'bg-blue-50' : isNoPnl ? 'bg-gray-50' : '',
+                    isUnmapped ? 'opacity-60' : '',
+                ].join(' ');
                 return (
                     <Fragment key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}>
-                        <Table.Row
-                            cursor={isNoPnl ? 'default' : 'pointer'}
-                            _hover={{ bg: isNoPnl ? 'gray.100' : 'blue.50' }}
-                            onClick={isNoPnl ? undefined : () => onAssetClick(assetpnlrow.asset.id)}
-                            bg={isExpanded ? 'blue.50' : isNoPnl ? 'gray.50' : undefined}
-                            css={{ '& td': { py: '2px', px: '4px' } }}
-                            opacity={isUnmapped ? 0.6 : undefined}
-                        >
-                            <Table.Cell>
-                                <Flex align="center" gap={1}>
+                        <tr className={rowClassName} onClick={isNoPnl ? undefined : () => onAssetClick(assetpnlrow.asset.id)}>
+                            <td className="px-1 py-0.5">
+                                <div className="flex items-center gap-1">
                                     {isExpandable ? (
-                                        <Box as="button" onClick={(e: React.MouseEvent) => assetId != null && toggleExpanded(assetId, e)} p={0.5} borderRadius="sm" _hover={{ bg: 'gray.200' }}>
+                                        <button
+                                            type="button"
+                                            onClick={(e: React.MouseEvent) => assetId != null && toggleExpanded(assetId, e)}
+                                            className="p-0.5 hover:bg-gray-200"
+                                        >
                                             {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                                        </Box>
-                                    ) : <Box w="18px" />}
+                                        </button>
+                                    ) : <span className="inline-block w-[18px]" />}
                                     <Tooltip content={assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : (assetpnlrow.asset.symbol || '')} openDelay={300}>
-                                        <Badge size="xs" colorPalette={isUnmapped ? 'gray' : 'blue'} variant={isUnmapped ? 'outline' : 'solid'} fontWeight="bold" maxW="120px" truncate>
+                                        <Badge colorScheme={isUnmapped ? 'gray' : 'blue'} className="max-w-[120px] truncate font-bold">
                                             {assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : assetpnlrow.asset.symbol}
                                         </Badge>
                                     </Tooltip>
-                                </Flex>
-                            </Table.Cell>
-                            <Table.Cell>{isNoPnl ? <Text {...XS} color="gray.400">—</Text> : <Text {...XS}><ValueDisplay value={assetpnlrow.quantity} /></Text>}</Table.Cell>
-                            <Table.Cell>{renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency, assetpnlrow.total_invested)}</Table.Cell>
-                            <Table.Cell>{renderValue(assetpnlrow, baseCurrency)}</Table.Cell>
-                            <Table.Cell>
-                                {isNoPnl ? <Text {...XS} color="gray.400">N/A</Text>
-                                    : assetpnlrow.unit_value == null ? <Text {...XS} color="gray.400">—</Text>
-                                        : <Text {...XS} fontWeight="medium" color={assetpnlrow.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}><ValueDisplay value={assetpnlrow.unrealized_pnl} currency={baseCurrency} /></Text>}
-                            </Table.Cell>
-                            <Table.Cell>
-                                {isNoPnl ? <Text {...XS} color="gray.400">N/A</Text>
-                                    : <Text {...XS} fontWeight="medium" color={assetpnlrow.realized_pnl >= 0 ? 'green.600' : 'red.600'}><ValueDisplay value={assetpnlrow.realized_pnl} currency={baseCurrency} /></Text>}
-                            </Table.Cell>
-                        </Table.Row>
+                                </div>
+                            </td>
+                            <td className="px-1 py-0.5">{isNoPnl ? <span className="text-xs text-gray-400">—</span> : <span className="text-xs"><ValueDisplay value={assetpnlrow.quantity} /></span>}</td>
+                            <td className="px-1 py-0.5">{renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency, assetpnlrow.total_invested)}</td>
+                            <td className="px-1 py-0.5">{renderValue(assetpnlrow, baseCurrency)}</td>
+                            <td className="px-1 py-0.5">
+                                {isNoPnl ? <span className="text-xs text-gray-400">N/A</span>
+                                    : assetpnlrow.unit_value == null ? <span className="text-xs text-gray-400">—</span>
+                                        : <span className={`text-xs font-medium ${assetpnlrow.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}><ValueDisplay value={assetpnlrow.unrealized_pnl} currency={baseCurrency} /></span>}
+                            </td>
+                            <td className="px-1 py-0.5">
+                                {isNoPnl ? <span className="text-xs text-gray-400">N/A</span>
+                                    : <span className={`text-xs font-medium ${assetpnlrow.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}><ValueDisplay value={assetpnlrow.realized_pnl} currency={baseCurrency} /></span>}
+                            </td>
+                        </tr>
                     </Fragment>
                 );
             })}
@@ -977,127 +958,104 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     // (contentHidden path removed — unified into main return below)
 
     return (
-        <Card.Root>
-            <Card.Header pb={2}>
+        <div className="border border-gray-200 bg-white">
+            <div className="pb-2">
                 {/* Top row: Search + filters header */}
-                <Flex align="center" mb={2} gap={3}>
+                <div className="mb-2 flex items-center gap-3">
                     {!hideFilters && (
-                        <Box position="relative" maxW="220px" w="100%" flexShrink={0}>
+                        <div className="relative w-full max-w-[220px] shrink-0">
                             <Input
                                 placeholder="Search asset..."
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
-                                size="xs"
-                                pl={7}
+                                className="h-7 pl-7 text-xs"
                             />
-                            <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
+                            <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2">
                                 <FiSearch size={12} color="gray" />
-                            </Box>
-                        </Box>
+                            </div>
+                        </div>
                     )}
-                </Flex>
+                </div>
 
                 {/* Filter section — collapsible (hidden when parent manages filters) */}
                 {!hideFilters && (
-                    <Collapsible.Root open={filtersExpanded}>
-                        <Box border="1px solid" borderColor={filtersExpanded ? 'blue.200' : 'gray.200'} borderRadius="md" px={2} py={1} transition="border-color 0.15s">
-                            {/* Filter header row */}
-                            <Flex
-                                align="center"
-                                justify="space-between"
-                                cursor="pointer"
-                                py={1}
-                                onClick={() => setFiltersExpanded(prev => !prev)}
-                                _hover={{ bg: 'gray.50' }}
-                                borderRadius="sm"
-                                userSelect="none"
-                            >
-                                <Flex align="center" gap={2}>
-                                    {filtersExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                                    <FiFilter size={12} color="gray" />
-                                    <Text fontSize="xs" fontWeight="medium" color="gray.600">
-                                        Filters
-                                        {filtered.length < totalAssetCount && (
-                                            <Text as="span" color="gray.400" fontWeight="normal">
-                                                {' '}— showing {filtered.length} of {totalAssetCount}
-                                            </Text>
-                                        )}
-                                    </Text>
-                                    {activeFilterCount > 0 && (
-                                        <Badge size="xs" colorPalette="blue" variant="solid">{activeFilterCount}</Badge>
+                    <div className={`border px-2 py-1 transition-colors ${filtersExpanded ? 'border-blue-200' : 'border-gray-200'}`}>
+                        {/* Filter header row */}
+                        <div
+                            className="flex cursor-pointer select-none items-center justify-between py-1 hover:bg-gray-50"
+                            onClick={() => setFiltersExpanded(prev => !prev)}
+                        >
+                            <div className="flex items-center gap-2">
+                                {filtersExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                                <FiFilter size={12} color="gray" />
+                                <span className="text-xs font-medium text-gray-600">
+                                    Filters
+                                    {filtered.length < totalAssetCount && (
+                                        <span className="font-normal text-gray-400">
+                                            {' '}— showing {filtered.length} of {totalAssetCount}
+                                        </span>
                                     )}
-                                    {/* Active filter chips — inline in header */}
-                                    {!filtersExpanded && activeFilterChips.length > 0 && (
-                                        <Flex gap={1} ml={1} flexWrap="wrap" onClick={(e) => e.stopPropagation()}>
-                                            {activeFilterChips.map(chip => (
-                                                <Badge
-                                                    key={chip.id}
-                                                    size="xs"
-                                                    colorPalette={chip.color}
-                                                    display="inline-flex"
-                                                    alignItems="center"
-                                                    gap={0.5}
-                                                    px={1.5}
-                                                    borderRadius="md"
-                                                    cursor="pointer"
-                                                    transition="all 0.15s"
-                                                    _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
-                                                    onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
-                                                >
-                                                    <Text fontSize="2xs">{chip.label}</Text>
-                                                    <Box as="span" display="flex" alignItems="center">
-                                                        <FiX size={8} />
-                                                    </Box>
-                                                </Badge>
-                                            ))}
-                                        </Flex>
-                                    )}
-                                </Flex>
+                                </span>
                                 {activeFilterCount > 0 && (
-                                    <Button
-                                        size="2xs"
-                                        variant="ghost"
-                                        colorPalette="gray"
-                                        onClick={(e) => { e.stopPropagation(); clearAllFilters(); }}
-                                        gap={1}
-                                    >
-                                        <FiX size={10} />
-                                        Clear all
-                                    </Button>
+                                    <Badge colorScheme="blue">{activeFilterCount}</Badge>
                                 )}
-                            </Flex>
+                                {/* Active filter chips — inline in header */}
+                                {!filtersExpanded && activeFilterChips.length > 0 && (
+                                    <div className="ml-1 flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+                                        {activeFilterChips.map(chip => (
+                                            <Badge
+                                                key={chip.id}
+                                                colorScheme={chip.color}
+                                                className="cursor-pointer gap-0.5 px-1.5 text-[10px] transition hover:opacity-80"
+                                                onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
+                                            >
+                                                <span className="text-[10px]">{chip.label}</span>
+                                                <span className="flex items-center">
+                                                    <FiX size={8} />
+                                                </span>
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            {activeFilterCount > 0 && (
+                                <Button
+                                    variant="ghost"
+                                    colorScheme="gray"
+                                    onClick={(e) => { e.stopPropagation(); clearAllFilters(); }}
+                                    className="h-6 gap-1 px-2 text-xs font-normal"
+                                >
+                                    <FiX size={10} />
+                                    Clear all
+                                </Button>
+                            )}
+                        </div>
 
-                            <Collapsible.Content>
-                                <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={3} mt={2} pb={1}>
+                        {filtersExpanded && (
+                            <>
+                                <div className="mt-2 grid grid-cols-1 gap-3 pb-1 md:grid-cols-2 lg:grid-cols-3">
                                     {/* Min value */}
-                                    <Box>
-                                        <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>Min value</Text>
-                                        <Flex align="center" gap={2}>
-                                            <Slider.Root
-                                                size="sm"
+                                    <div>
+                                        <div className="mb-1 text-[10px] font-medium text-gray-500">Min value</div>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="range"
                                                 min={0}
                                                 max={100}
                                                 step={1}
-                                                value={[minMarketValue]}
-                                                onValueChange={(details) => setMinMarketValue(details.value[0])}
-                                                width="100%"
-                                            >
-                                                <Slider.Control>
-                                                    <Slider.Track>
-                                                        <Slider.Range />
-                                                    </Slider.Track>
-                                                    <Slider.Thumbs />
-                                                </Slider.Control>
-                                            </Slider.Root>
-                                            <Text fontSize="xs" color="gray.600" whiteSpace="nowrap" minW="28px" textAlign="right">
+                                                value={minMarketValue}
+                                                onChange={(e) => setMinMarketValue(Number(e.target.value))}
+                                                className="h-1 w-full accent-blue-500"
+                                            />
+                                            <span className="min-w-[28px] whitespace-nowrap text-right text-xs text-gray-600">
                                                 ${minMarketValue}
-                                            </Text>
-                                        </Flex>
-                                    </Box>
+                                            </span>
+                                        </div>
+                                    </div>
 
                                     {/* P&L status */}
-                                    <Box>
-                                        <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>P&L status</Text>
+                                    <div>
+                                        <div className="mb-1 text-[10px] font-medium text-gray-500">P&L status</div>
                                         <SegmentedControl
                                             value={pnlStatus}
                                             options={[
@@ -1107,11 +1065,11 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                             ]}
                                             onChange={(v) => setPnlStatus(v as PnlStatusFilter)}
                                         />
-                                    </Box>
+                                    </div>
 
                                     {/* Balance status */}
-                                    <Box>
-                                        <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>Live balance</Text>
+                                    <div>
+                                        <div className="mb-1 text-[10px] font-medium text-gray-500">Live balance</div>
                                         <SegmentedControl
                                             value={balanceStatus}
                                             options={[
@@ -1121,71 +1079,70 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                             ]}
                                             onChange={(v) => setBalanceStatus(v as BalanceStatusFilter)}
                                         />
-                                    </Box>
-                                </SimpleGrid>
+                                    </div>
+                                </div>
 
                                 {/* Account / Category filter cards */}
                                 {(availableAccounts.length > 0 || relevantDimensions.length > 0) && (
-                                    <SimpleGrid columns={{ base: 1, md: 2, lg: Math.min(1 + relevantDimensions.length, 3) }} gap={3} mt={3}>
+                                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                                         {/* Accounts card */}
                                         {availableAccounts.length > 0 && (() => {
                                             const filteredAccounts = accountFilterSearch
                                                 ? availableAccounts.filter(a => a.name.toLowerCase().includes(accountFilterSearch.toLowerCase()))
                                                 : availableAccounts;
                                             return (
-                                                <Card.Root size="sm" variant="outline" borderColor={selectedAccountIds.length > 0 ? 'blue.200' : 'gray.200'} bg={selectedAccountIds.length > 0 ? 'blue.50' : 'white'}>
-                                                    <Card.Body p={2}>
-                                                        <Flex align="center" gap={2} mb={1}>
-                                                            <Text fontSize="2xs" fontWeight="semibold" color={selectedAccountIds.length > 0 ? 'blue.700' : 'gray.700'}>
-                                                                Accounts
-                                                            </Text>
-                                                            <Badge size="xs" colorPalette={selectedAccountIds.length > 0 ? 'blue' : 'gray'} ml="auto">
-                                                                {selectedAccountIds.length || 'All'}/{availableAccounts.length}
-                                                            </Badge>
-                                                        </Flex>
-                                                        <Box position="relative" mb={1}>
-                                                            <Input
-                                                                placeholder="Search accounts..."
-                                                                value={accountFilterSearch}
-                                                                onChange={(e) => setAccountFilterSearch(e.target.value)}
-                                                                size="xs"
-                                                                pl={7}
-                                                            />
-                                                            <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
-                                                                <FiSearch size={10} color="gray" />
-                                                            </Box>
-                                                        </Box>
-                                                        <Box maxH="100px" overflowY="auto">
-                                                            <Flex gap={1} flexWrap="wrap">
-                                                                {filteredAccounts.map((account) => {
-                                                                    const isSelected = selectedAccountIds.includes(account.id);
-                                                                    const color = getAccountColor(account.id);
-                                                                    return (
-                                                                        <Button
-                                                                            key={account.id}
-                                                                            size="2xs"
-                                                                            variant={isSelected ? 'solid' : 'outline'}
-                                                                            onClick={() => setSelectedAccountIds(
-                                                                                selectedAccountIds.includes(account.id)
-                                                                                    ? selectedAccountIds.filter(id => id !== account.id)
-                                                                                    : [...selectedAccountIds, account.id]
-                                                                            )}
-                                                                            bg={isSelected ? color : 'white'}
-                                                                            color={isSelected ? 'white' : 'gray.700'}
-                                                                            borderColor={color}
-                                                                            _hover={{ bg: isSelected ? color : `${color}15`, opacity: 0.9 }}
-                                                                            gap={1}
-                                                                            fontSize="xs"
-                                                                        >
-                                                                            <Box w="6px" h="6px" borderRadius="full" bg={isSelected ? 'currentColor' : color} opacity={isSelected ? 0.7 : 1} />
-                                                                            {account.name}
-                                                                        </Button>
-                                                                    );
-                                                                })}
-                                                            </Flex>
-                                                        </Box>
-                                                    </Card.Body>
-                                                </Card.Root>
+                                                <div className={`border-2 p-2 ${selectedAccountIds.length > 0 ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'}`}>
+                                                    <div className="mb-1 flex items-center gap-2">
+                                                        <span className={`text-[10px] font-semibold ${selectedAccountIds.length > 0 ? 'text-blue-700' : 'text-gray-700'}`}>
+                                                            Accounts
+                                                        </span>
+                                                        <Badge colorScheme={selectedAccountIds.length > 0 ? 'blue' : 'gray'} className="ml-auto">
+                                                            {selectedAccountIds.length || 'All'}/{availableAccounts.length}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="relative mb-1">
+                                                        <Input
+                                                            placeholder="Search accounts..."
+                                                            value={accountFilterSearch}
+                                                            onChange={(e) => setAccountFilterSearch(e.target.value)}
+                                                            className="h-7 pl-7 text-xs"
+                                                        />
+                                                        <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2">
+                                                            <FiSearch size={10} color="gray" />
+                                                        </div>
+                                                    </div>
+                                                    <div className="max-h-[100px] overflow-y-auto">
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {filteredAccounts.map((account) => {
+                                                                const isSelected = selectedAccountIds.includes(account.id);
+                                                                const color = getAccountColor(account.id);
+                                                                return (
+                                                                    <Button
+                                                                        key={account.id}
+                                                                        variant={isSelected ? 'solid' : 'outline'}
+                                                                        onClick={() => setSelectedAccountIds(
+                                                                            selectedAccountIds.includes(account.id)
+                                                                                ? selectedAccountIds.filter(id => id !== account.id)
+                                                                                : [...selectedAccountIds, account.id]
+                                                                        )}
+                                                                        className="h-6 gap-1 px-2 text-xs hover:opacity-90"
+                                                                        style={{
+                                                                            backgroundColor: isSelected ? color : '#ffffff',
+                                                                            color: isSelected ? '#ffffff' : '#374151',
+                                                                            borderColor: color,
+                                                                        }}
+                                                                    >
+                                                                        <span
+                                                                            className="inline-block h-[6px] w-[6px] rounded-full"
+                                                                            style={{ backgroundColor: isSelected ? 'currentColor' : color, opacity: isSelected ? 0.7 : 1 }}
+                                                                        />
+                                                                        {account.name}
+                                                                    </Button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             );
                                         })()}
 
@@ -1198,65 +1155,62 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                 ? dimension.categories.filter(c => c.label.toLowerCase().includes(catFilterSearch.toLowerCase()))
                                                 : dimension.categories;
                                             return (
-                                                <Card.Root key={dimension.id} size="sm" variant="outline" borderColor={selectedInDim > 0 ? 'blue.200' : 'gray.200'} bg={selectedInDim > 0 ? 'blue.50' : 'white'}>
-                                                    <Card.Body p={2}>
-                                                        <Flex align="center" gap={2} mb={1}>
-                                                            <Text fontSize="2xs" fontWeight="semibold" color={selectedInDim > 0 ? 'blue.700' : 'gray.700'}>
-                                                                {dimension.label}
-                                                            </Text>
-                                                            <Badge size="xs" colorPalette={selectedInDim > 0 ? 'blue' : 'gray'} ml="auto">
-                                                                {selectedInDim || 'All'}/{dimension.categories.length}
-                                                            </Badge>
-                                                        </Flex>
-                                                        <Box position="relative" mb={1}>
-                                                            <Input
-                                                                placeholder={`Search ${dimension.label.toLowerCase()}...`}
-                                                                value={catFilterSearch}
-                                                                onChange={(e) => setCatFilterSearch(e.target.value)}
-                                                                size="xs"
-                                                                pl={7}
-                                                            />
-                                                            <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
-                                                                <FiSearch size={10} color="gray" />
-                                                            </Box>
-                                                        </Box>
-                                                        <Box maxH="100px" overflowY="auto">
-                                                            <Flex gap={1} flexWrap="wrap">
-                                                                {filteredCats.map((category) => {
-                                                                    const isSelected = selectedCategoryIds.includes(category.id);
-                                                                    return (
-                                                                        <Button
-                                                                            key={category.id}
-                                                                            size="2xs"
-                                                                            variant={isSelected ? 'solid' : 'outline'}
-                                                                            colorPalette={isSelected ? 'blue' : 'gray'}
-                                                                            onClick={() => setSelectedCategoryIds(
-                                                                                selectedCategoryIds.includes(category.id)
-                                                                                    ? selectedCategoryIds.filter(id => id !== category.id)
-                                                                                    : [...selectedCategoryIds, category.id]
-                                                                            )}
-                                                                            borderColor={category.color || undefined}
-                                                                            bg={isSelected && category.color ? category.color : undefined}
-                                                                            color={isSelected && category.color ? 'white' : undefined}
-                                                                            _hover={{ bg: isSelected ? undefined : 'gray.100', opacity: 0.9 }}
-                                                                            fontSize="xs"
-                                                                        >
-                                                                            {category.label}
-                                                                        </Button>
-                                                                    );
-                                                                })}
-                                                            </Flex>
-                                                        </Box>
-                                                    </Card.Body>
-                                                </Card.Root>
+                                                <div key={dimension.id} className={`border-2 p-2 ${selectedInDim > 0 ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'}`}>
+                                                    <div className="mb-1 flex items-center gap-2">
+                                                        <span className={`text-[10px] font-semibold ${selectedInDim > 0 ? 'text-blue-700' : 'text-gray-700'}`}>
+                                                            {dimension.label}
+                                                        </span>
+                                                        <Badge colorScheme={selectedInDim > 0 ? 'blue' : 'gray'} className="ml-auto">
+                                                            {selectedInDim || 'All'}/{dimension.categories.length}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="relative mb-1">
+                                                        <Input
+                                                            placeholder={`Search ${dimension.label.toLowerCase()}...`}
+                                                            value={catFilterSearch}
+                                                            onChange={(e) => setCatFilterSearch(e.target.value)}
+                                                            className="h-7 pl-7 text-xs"
+                                                        />
+                                                        <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2">
+                                                            <FiSearch size={10} color="gray" />
+                                                        </div>
+                                                    </div>
+                                                    <div className="max-h-[100px] overflow-y-auto">
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {filteredCats.map((category) => {
+                                                                const isSelected = selectedCategoryIds.includes(category.id);
+                                                                return (
+                                                                    <Button
+                                                                        key={category.id}
+                                                                        variant={isSelected ? 'solid' : 'outline'}
+                                                                        colorScheme={isSelected ? 'blue' : 'gray'}
+                                                                        onClick={() => setSelectedCategoryIds(
+                                                                            selectedCategoryIds.includes(category.id)
+                                                                                ? selectedCategoryIds.filter(id => id !== category.id)
+                                                                                : [...selectedCategoryIds, category.id]
+                                                                        )}
+                                                                        className="h-6 px-2 text-xs hover:opacity-90"
+                                                                        style={{
+                                                                            borderColor: category.color || undefined,
+                                                                            backgroundColor: isSelected && category.color ? category.color : undefined,
+                                                                            color: isSelected && category.color ? '#ffffff' : undefined,
+                                                                        }}
+                                                                    >
+                                                                        {category.label}
+                                                                    </Button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             );
                                         })}
-                                    </SimpleGrid>
+                                    </div>
                                 )}
 
-                            </Collapsible.Content>
-                        </Box>
-                    </Collapsible.Root>
+                            </>
+                        )}
+                    </div>
                 )}
 
                 {/* Portfolio totals summary bar (only when list view) */}
@@ -1267,7 +1221,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     const roi = totals.totalCost > 0 ? (totalReturn / totals.totalCost) * 100 : 0;
                     const colorFn = (v: number) => (v >= 0 ? 'green.600' : 'red.600');
                     return filtered.length > 0 && totals.totalCost > 0 && (
-                        <Box mt={2}>
+                        <div className="mt-2">
                             <HeroMetricsBar
                                 totalReturn={totalReturn}
                                 roi={roi}
@@ -1286,122 +1240,93 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 <MetricItem label="Fees" value={fmtCurrency(totals.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />
                             </HeroMetricsBar>
                             {showDustNote && (
-                                <Text fontSize="2xs" color="gray.400" mt={1} textAlign="right">
+                                <div className="mt-1 text-right text-[10px] text-gray-400">
                                     {dustHiddenCount} small-value asset{dustHiddenCount !== 1 ? 's' : ''} hidden by dust filter
-                                </Text>
+                                </div>
                             )}
-                        </Box>
+                        </div>
                     );
                 })()}
 
                 {/* List / Treemap toggle — injected by parent, after PnL bar */}
                 {renderAfterFilters && (
-                    <Box mt={2}>{renderAfterFilters}</Box>
+                    <div className="mt-2">{renderAfterFilters}</div>
                 )}
-            </Card.Header>
+            </div>
 
             {/* ── List content — highlighted border to separate from shared filters/PnL bar above ── */}
             {!contentHidden && (
-                <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
+                <div className="mx-3 mb-3 mt-1 overflow-hidden border-2 border-blue-100">
                     {/* View controls: display mode, group-by, sort */}
-                    <Flex align="center" gap={3} px={3} py={2} bg="gray.50" borderBottom="1px solid" borderColor="gray.100" flexWrap="wrap">
+                    <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 bg-gray-50 px-3 py-2">
                         {/* Display mode toggle — Cards vs Table */}
-                        <Flex align="center" gap={1}>
-                            <Text fontSize="2xs" fontWeight="medium" color="gray.500">View</Text>
-                            <Flex
-                                borderRadius="md"
-                                border="1px solid"
-                                borderColor="gray.200"
-                                overflow="hidden"
-                            >
+                        <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-medium text-gray-500">View</span>
+                            <div className="overflow-hidden border border-gray-200">
                                 <Button
-                                    size="2xs"
                                     variant={displayMode === 'cards' ? 'subtle' : 'ghost'}
-                                    colorPalette={displayMode === 'cards' ? 'blue' : 'gray'}
-                                    borderRadius="0"
+                                    colorScheme={displayMode === 'cards' ? 'blue' : 'gray'}
                                     onClick={() => setDisplayMode('cards')}
-                                    px={2}
+                                    className="h-6 px-2"
                                     title="Card view"
                                 >
                                     <FiGrid size={12} />
                                 </Button>
                                 <Button
-                                    size="2xs"
                                     variant={displayMode === 'table' ? 'subtle' : 'ghost'}
-                                    colorPalette={displayMode === 'table' ? 'blue' : 'gray'}
-                                    borderRadius="0"
+                                    colorScheme={displayMode === 'table' ? 'blue' : 'gray'}
                                     onClick={() => setDisplayMode('table')}
-                                    px={2}
+                                    className="h-6 px-2"
                                     title="Table view"
                                 >
                                     <FiList size={12} />
                                 </Button>
-                            </Flex>
-                        </Flex>
+                            </div>
+                        </div>
 
                         {/* Split view toggle (only for by-asset) */}
                         {groupBy === 'asset' && (
-                            <Flex align="center" gap={1}>
+                            <div className="flex items-center gap-1">
                                 <Button
-                                    size="2xs"
                                     variant={splitView ? 'subtle' : 'ghost'}
-                                    colorPalette={splitView ? 'blue' : 'gray'}
-                                    borderRadius="md"
+                                    colorScheme={splitView ? 'blue' : 'gray'}
                                     onClick={() => setSplitView(v => !v)}
-                                    px={2}
                                     title="Split view: top vs bottom performers"
-                                    gap={1}
+                                    className="h-6 gap-1 px-2 text-xs"
                                 >
                                     <FiColumns size={12} />
-                                    <Text fontSize="xs">Split</Text>
+                                    <span>Split</span>
                                 </Button>
-                            </Flex>
+                            </div>
                         )}
 
                         {/* Group by toggle */}
-                        <Flex align="center" gap={1}>
-                            <Text fontSize="2xs" fontWeight="medium" color="gray.500">Group</Text>
-                            <Flex
-                                borderRadius="md"
-                                border="1px solid"
-                                borderColor="gray.200"
-                                overflow="hidden"
-                            >
+                        <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-medium text-gray-500">Group</span>
+                            <div className="overflow-hidden border border-gray-200">
                                 <Button
-                                    size="2xs"
                                     variant={groupBy === 'asset' ? 'subtle' : 'ghost'}
-                                    colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
-                                    borderRadius="0"
+                                    colorScheme={groupBy === 'asset' ? 'blue' : 'gray'}
                                     onClick={() => handleGroupByChange('asset')}
-                                    px={2}
-                                    fontSize="xs"
+                                    className="h-6 px-2 text-xs"
                                 >
                                     By Asset
                                 </Button>
                                 <Button
-                                    size="2xs"
                                     variant={groupBy === 'account' ? 'subtle' : 'ghost'}
-                                    colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
-                                    borderRadius="0"
+                                    colorScheme={groupBy === 'account' ? 'blue' : 'gray'}
                                     onClick={() => handleGroupByChange('account')}
-                                    px={2}
-                                    fontSize="xs"
+                                    className="h-6 px-2 text-xs"
                                 >
                                     By Account
                                 </Button>
-                            </Flex>
-                        </Flex>
+                            </div>
+                        </div>
 
                         {/* Sort-by */}
-                        <Flex align="center" gap={1}>
-                            <Text fontSize="2xs" fontWeight="medium" color="gray.500">Sort</Text>
-                            <Flex
-                                borderRadius="md"
-                                border="1px solid"
-                                borderColor="gray.200"
-                                overflow="hidden"
-                                display="inline-flex"
-                            >
+                        <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-medium text-gray-500">Sort</span>
+                            <div className="inline-flex overflow-hidden border border-gray-200">
                                 {[
                                     { value: 'total_return', label: 'Return' },
                                     { value: 'market_value', label: 'Value' },
@@ -1412,53 +1337,48 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 ].map((opt) => (
                                     <Button
                                         key={opt.value}
-                                        size="2xs"
                                         variant={sortField === opt.value ? 'subtle' : 'ghost'}
-                                        colorPalette={sortField === opt.value ? 'blue' : 'gray'}
-                                        borderRadius="0"
+                                        colorScheme={sortField === opt.value ? 'blue' : 'gray'}
                                         onClick={() => handleSort(opt.value as SortField)}
-                                        px={2}
-                                        fontSize="xs"
+                                        className="h-6 px-2 text-xs"
                                     >
                                         {opt.label}
                                         {sortField === opt.value && (
-                                            <Text as="span" ml={0.5}>{sortDir === 'asc' ? '↑' : '↓'}</Text>
+                                            <span className="ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span>
                                         )}
                                     </Button>
                                 ))}
-                            </Flex>
-                        </Flex>
-                    </Flex>
+                            </div>
+                        </div>
+                    </div>
 
                     {/* Top pagination */}
                     {/* Top pagination (hidden in split mode — each half has its own) */}
                     {!splitView && paginationBar && (
-                        <Box borderBottom="1px solid" borderColor="gray.100">
+                        <div className="border-b border-gray-100">
                             {paginationBar}
-                        </Box>
+                        </div>
                     )}
                     {/* ── Card mode ── */}
                     {displayMode === 'cards' ? (
-                        <Box p={3}>
+                        <div className="p-3">
                             {loading ? (
-                                <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-5">
                                     {Array.from({ length: 8 }).map((_, i) => (
-                                        <Card.Root key={i} size="sm">
-                                            <Card.Body py={6}>
-                                                <Text textAlign="center" color="gray.400" fontSize="xs">Loading...</Text>
-                                            </Card.Body>
-                                        </Card.Root>
+                                        <div key={i} className="border border-gray-200 bg-white py-6">
+                                            <div className="text-center text-xs text-gray-400">Loading...</div>
+                                        </div>
                                     ))}
-                                </SimpleGrid>
+                                </div>
                             ) : groupBy === 'account' ? (
                                 byAccountRows.length === 0 ? (
-                                    <Text textAlign="center" py={8} color="gray.500">
+                                    <div className="py-8 text-center text-gray-500">
                                         {accountBalances && accountBalances.size > 0
                                             ? 'No rows match your criteria'
                                             : 'Loading account breakdown...'}
-                                    </Text>
+                                    </div>
                                 ) : (
-                                    <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-5">
                                         {paginatedByAccount.map((row) => (
                                             <AccountPnLCard
                                                 key={row.account_id}
@@ -1472,181 +1392,175 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                 liveBalanceLoading={liveBalanceLoading}
                                             />
                                         ))}
-                                    </SimpleGrid>
+                                    </div>
                                 )
                             ) : splitView ? (
                                 /* ── Split card view: desc (left) vs asc (right) ── */
                                 filtered.length === 0 ? (
-                                    <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
+                                    <div className="py-8 text-center text-gray-500">No assets match your criteria</div>
                                 ) : (
-                                    <Flex direction={{ base: 'column', md: 'row' }} gap={3}>
+                                    <div className="flex flex-col gap-3 md:flex-row">
                                         {/* Left: sorted desc */}
-                                        <Box flex="1" minW="0" borderRight={{ base: 'none', md: '1px solid' }} borderBottom={{ base: '1px solid', md: 'none' }} borderColor="gray.200" pr={{ base: 0, md: 3 }} pb={{ base: 3, md: 0 }}>
-                                            <Flex align="center" gap={2} mb={2}>
-                                                <Text fontSize="sm" fontWeight="semibold" color="green.700">↓ {splitMetricLabel}</Text>
-                                                <Badge size="xs" colorPalette="gray" variant="subtle">{topHalf.length}</Badge>
-                                            </Flex>
+                                        <div className="min-w-0 flex-1 border-b border-gray-200 pb-3 md:border-b-0 md:border-r md:pb-0 md:pr-3">
+                                            <div className="mb-2 flex items-center gap-2">
+                                                <span className="text-sm font-semibold text-green-700">↓ {splitMetricLabel}</span>
+                                                <Badge colorScheme="gray">{topHalf.length}</Badge>
+                                            </div>
                                             {renderAssetCardGrid(paginatedTopPerformers, { base: 1, sm: 1, md: 1, lg: 2, xl: 3 })}
                                             {renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length) && (
-                                                <Box mt={2}>{renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length)}</Box>
+                                                <div className="mt-2">{renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length)}</div>
                                             )}
-                                        </Box>
+                                        </div>
                                         {/* Right: sorted asc */}
-                                        <Box flex="1" minW="0" pl={{ base: 0, md: 3 }}>
-                                            <Flex align="center" gap={2} mb={2}>
-                                                <Text fontSize="sm" fontWeight="semibold" color="red.700">↑ {splitMetricLabel}</Text>
-                                                <Badge size="xs" colorPalette="gray" variant="subtle">{bottomHalf.length}</Badge>
-                                            </Flex>
+                                        <div className="min-w-0 flex-1 md:pl-3">
+                                            <div className="mb-2 flex items-center gap-2">
+                                                <span className="text-sm font-semibold text-red-700">↑ {splitMetricLabel}</span>
+                                                <Badge colorScheme="gray">{bottomHalf.length}</Badge>
+                                            </div>
                                             {renderAssetCardGrid(paginatedBottomPerformers, { base: 1, sm: 1, md: 1, lg: 2, xl: 3 })}
                                             {renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length) && (
-                                                <Box mt={2}>{renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length)}</Box>
+                                                <div className="mt-2">{renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length)}</div>
                                             )}
-                                        </Box>
-                                    </Flex>
+                                        </div>
+                                    </div>
                                 )
                             ) : (
                                 filtered.length === 0 ? (
-                                    <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
+                                    <div className="py-8 text-center text-gray-500">No assets match your criteria</div>
                                 ) : renderAssetCardGrid(paginatedFiltered)
                             )}
-                        </Box>
+                        </div>
                     ) : splitView && groupBy === 'asset' ? (
                         /* ── Split table mode ── */
                         filtered.length === 0 ? (
-                            <Box p={3}>
-                                <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
-                            </Box>
+                            <div className="p-3">
+                                <div className="py-8 text-center text-gray-500">No assets match your criteria</div>
+                            </div>
                         ) : (
-                            <Flex direction={{ base: 'column', md: 'row' }} gap={0}>
+                            <div className="flex flex-col gap-0 md:flex-row">
                                 {/* Left: sorted desc */}
-                                <Box flex="1" minW="0" borderRight={{ base: 'none', md: '1px solid' }} borderBottom={{ base: '1px solid', md: 'none' }} borderColor="gray.200">
-                                    <Flex align="center" gap={2} px={3} py={2} bg="green.50" borderBottom="1px solid" borderColor="gray.100">
-                                        <Text fontSize="sm" fontWeight="semibold" color="green.700">↓ {splitMetricLabel}</Text>
-                                        <Badge size="xs" colorPalette="gray" variant="subtle">{topHalf.length}</Badge>
-                                    </Flex>
-                                    <Box overflowX="auto">
-                                        <Table.Root size="sm">
-                                            <Table.Header>
-                                                <Table.Row>
-                                                    <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Qty</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Cost</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Value</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Unrealized</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Realized</Table.ColumnHeader>
-                                                </Table.Row>
-                                            </Table.Header>
-                                            <Table.Body>
+                                <div className="min-w-0 flex-1 border-b border-gray-200 md:border-b-0 md:border-r">
+                                    <div className="flex items-center gap-2 border-b border-gray-100 bg-green-50 px-3 py-2">
+                                        <span className="text-sm font-semibold text-green-700">↓ {splitMetricLabel}</span>
+                                        <Badge colorScheme="gray">{topHalf.length}</Badge>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Asset</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Qty</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Cost</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Value</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Unrealized</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Realized</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
                                                 {renderAssetTableRows(paginatedTopPerformers)}
-                                            </Table.Body>
-                                        </Table.Root>
-                                    </Box>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                     {renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length) && (
-                                        <Box borderTop="1px solid" borderColor="gray.100">
+                                        <div className="border-t border-gray-100">
                                             {renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length)}
-                                        </Box>
+                                        </div>
                                     )}
-                                </Box>
+                                </div>
                                 {/* Right: sorted asc */}
-                                <Box flex="1" minW="0">
-                                    <Flex align="center" gap={2} px={3} py={2} bg="red.50" borderBottom="1px solid" borderColor="gray.100">
-                                        <Text fontSize="sm" fontWeight="semibold" color="red.700">↑ {splitMetricLabel}</Text>
-                                        <Badge size="xs" colorPalette="gray" variant="subtle">{bottomHalf.length}</Badge>
-                                    </Flex>
-                                    <Box overflowX="auto">
-                                        <Table.Root size="sm">
-                                            <Table.Header>
-                                                <Table.Row>
-                                                    <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Qty</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Cost</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Value</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Unrealized</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Realized</Table.ColumnHeader>
-                                                </Table.Row>
-                                            </Table.Header>
-                                            <Table.Body>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 border-b border-gray-100 bg-red-50 px-3 py-2">
+                                        <span className="text-sm font-semibold text-red-700">↑ {splitMetricLabel}</span>
+                                        <Badge colorScheme="gray">{bottomHalf.length}</Badge>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Asset</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Qty</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Cost</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Value</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Unrealized</th>
+                                                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Realized</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
                                                 {renderAssetTableRows(paginatedBottomPerformers)}
-                                            </Table.Body>
-                                        </Table.Root>
-                                    </Box>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                     {renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length) && (
-                                        <Box borderTop="1px solid" borderColor="gray.100">
+                                        <div className="border-t border-gray-100">
                                             {renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length)}
-                                        </Box>
+                                        </div>
                                     )}
-                                </Box>
-                            </Flex>
+                                </div>
+                            </div>
                         )
                     ) : (
                         /* ── Table mode (original) ── */
-                        <Box overflowX="auto">
-                            <Table.Root size="sm">
-                                <Table.Header>
-                                    <Table.Row>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr>
                                         {groupBy === 'account' ? (
                                             <>
-                                                <Table.ColumnHeader>Account</Table.ColumnHeader>
-                                                <Table.ColumnHeader>Assets</Table.ColumnHeader>
-                                                <Table.ColumnHeader>Cost</Table.ColumnHeader>
-                                                <Table.ColumnHeader>Value</Table.ColumnHeader>
-                                                <Table.ColumnHeader>Unrealized</Table.ColumnHeader>
-                                                <Table.ColumnHeader textAlign="center">Info</Table.ColumnHeader>
-                                                <Table.ColumnHeader></Table.ColumnHeader>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Account</th>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Assets</th>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Cost</th>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Value</th>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Unrealized</th>
+                                                <th className="px-2 py-2 text-center text-xs font-medium text-gray-600">Info</th>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600"></th>
                                             </>
                                         ) : (
                                             <>
                                                 <SortHeader field="asset_symbol">Asset</SortHeader>
                                                 <SortHeader field="quantity">Qty</SortHeader>
-                                                <Table.ColumnHeader>
-                                                    <Flex align="center" gap={1}>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">
+                                                    <div className="flex items-center gap-1">
                                                         Δ
-                                                        {liveBalanceLoading && <Spinner size="xs" color="gray.400" />}
-                                                    </Flex>
-                                                </Table.ColumnHeader>
+                                                        {liveBalanceLoading && <Spinner size="xs" className="text-gray-400" />}
+                                                    </div>
+                                                </th>
                                                 <SortHeader field="cost_basis">Cost</SortHeader>
                                                 <SortHeader field="market_value">Value</SortHeader>
                                                 <SortHeader field="unrealized_pnl">Unrealized</SortHeader>
                                                 <SortHeader field="realized_pnl">Realized</SortHeader>
-                                                <Table.ColumnHeader>Fees</Table.ColumnHeader>
-                                                <Table.ColumnHeader textAlign="center">Info</Table.ColumnHeader>
-                                                <Table.ColumnHeader></Table.ColumnHeader>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600">Fees</th>
+                                                <th className="px-2 py-2 text-center text-xs font-medium text-gray-600">Info</th>
+                                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600"></th>
                                             </>
                                         )}
-                                    </Table.Row>
-                                </Table.Header>
-                                <Table.Body>
+                                    </tr>
+                                </thead>
+                                <tbody>
                                     {(() => {
                                         const colSpan = groupBy === 'account' ? TOTAL_COLUMNS_BY_ACCOUNT : TOTAL_COLUMNS_BY_ASSET;
                                         if (loading) {
                                             return (
-                                                <Table.Row>
-                                                    <Table.Cell colSpan={colSpan}>
-                                                        <Text textAlign="center" py={8} color="gray.500">Loading...</Text>
-                                                    </Table.Cell>
-                                                </Table.Row>
+                                                <tr>
+                                                    <td colSpan={colSpan} className="py-8 text-center text-gray-500">Loading...</td>
+                                                </tr>
                                             );
                                         }
                                         if (groupBy === 'account' && byAccountRows.length === 0) {
                                             return (
-                                                <Table.Row>
-                                                    <Table.Cell colSpan={colSpan}>
-                                                        <Text textAlign="center" py={8} color="gray.500">
-                                                            {accountBalances && accountBalances.size > 0
-                                                                ? 'No rows match your criteria'
-                                                                : 'Loading account breakdown...'}
-                                                        </Text>
-                                                    </Table.Cell>
-                                                </Table.Row>
+                                                <tr>
+                                                    <td colSpan={colSpan} className="py-8 text-center text-gray-500">
+                                                        {accountBalances && accountBalances.size > 0
+                                                            ? 'No rows match your criteria'
+                                                            : 'Loading account breakdown...'}
+                                                    </td>
+                                                </tr>
                                             );
                                         }
                                         if (groupBy === 'asset' && filtered.length === 0) {
                                             return (
-                                                <Table.Row>
-                                                    <Table.Cell colSpan={colSpan}>
-                                                        <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
-                                                    </Table.Cell>
-                                                </Table.Row>
+                                                <tr>
+                                                    <td colSpan={colSpan} className="py-8 text-center text-gray-500">No assets match your criteria</td>
+                                                </tr>
                                             );
                                         }
 
@@ -1661,127 +1575,116 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
 
                                                 return (
                                                     <Fragment key={account_id}>
-                                                        <Table.Row
-                                                            _hover={{ bg: 'blue.50' }}
-                                                            css={{ '& td': { py: '2px', px: '4px' } }}
-                                                            bg={isAcctExpanded ? 'blue.50' : undefined}
-                                                            cursor="pointer"
+                                                        <tr
+                                                            className={`cursor-pointer [&>td]:px-1 [&>td]:py-0.5 hover:bg-blue-50 ${isAcctExpanded ? 'bg-blue-50' : ''}`}
                                                             onClick={(e) => toggleAccountExpanded(account_id, e)}
                                                         >
                                                             {/* Account */}
-                                                            <Table.Cell>
-                                                                <Flex align="center" gap={1}>
-                                                                    <Box
-                                                                        as="button"
-                                                                        p={0.5}
-                                                                        borderRadius="sm"
-                                                                        _hover={{ bg: 'gray.200' }}
+                                                            <td>
+                                                                <div className="flex items-center gap-1">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="p-0.5 hover:bg-gray-200"
                                                                         onClick={(e: React.MouseEvent) => toggleAccountExpanded(account_id, e)}
                                                                     >
                                                                         {isAcctExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                                                                    </Box>
-                                                                    <Box w="8px" h="8px" borderRadius="full" bg={accountColor} flexShrink={0} />
-                                                                    <Text {...XS} fontWeight="medium" truncate maxW="140px" title={account_name}>
+                                                                    </button>
+                                                                    <span className="inline-block h-[8px] w-[8px] shrink-0 rounded-full" style={{ backgroundColor: accountColor }} />
+                                                                    <span className="max-w-[140px] truncate text-xs font-medium" title={account_name}>
                                                                         {account_name}
-                                                                    </Text>
-                                                                </Flex>
-                                                            </Table.Cell>
+                                                                    </span>
+                                                                </div>
+                                                            </td>
                                                             {/* Assets count */}
-                                                            <Table.Cell>
-                                                                <Badge size="xs" variant="subtle">{asset_count}</Badge>
-                                                            </Table.Cell>
+                                                            <td>
+                                                                <Badge>{asset_count}</Badge>
+                                                            </td>
                                                             {/* Cost */}
-                                                            <Table.Cell>
-                                                                <Text {...XS}><ValueDisplay value={total_cost_basis} currency={baseCurrency} /></Text>
-                                                            </Table.Cell>
+                                                            <td>
+                                                                <span className="text-xs"><ValueDisplay value={total_cost_basis} currency={baseCurrency} /></span>
+                                                            </td>
                                                             {/* Value */}
-                                                            <Table.Cell>
-                                                                <Text {...XS} fontWeight="medium">
+                                                            <td>
+                                                                <span className="text-xs font-medium">
                                                                     <ValueDisplay value={total_market_value} currency={baseCurrency} />
-                                                                </Text>
-                                                            </Table.Cell>
+                                                                </span>
+                                                            </td>
                                                             {/* Unrealized P&L */}
-                                                            <Table.Cell>
-                                                                <Flex direction="column">
-                                                                    <Text {...XS} color={total_unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                            <td>
+                                                                <div className="flex flex-col">
+                                                                    <span className={`text-xs ${total_unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                                         <ValueDisplay value={total_unrealized_pnl} currency={baseCurrency} />
-                                                                    </Text>
-                                                                    <Text fontSize="2xs" color="gray.500">{formatPct(unrealizedPct)}</Text>
-                                                                </Flex>
-                                                            </Table.Cell>
+                                                                    </span>
+                                                                    <span className="text-[10px] text-gray-500">{formatPct(unrealizedPct)}</span>
+                                                                </div>
+                                                            </td>
                                                             {/* Info */}
-                                                            <Table.Cell textAlign="center">
-                                                                <Badge size="xs" variant="subtle">{total_lot_count} lots</Badge>
-                                                            </Table.Cell>
+                                                            <td className="text-center">
+                                                                <Badge>{total_lot_count} lots</Badge>
+                                                            </td>
                                                             {/* Chevron */}
-                                                            <Table.Cell></Table.Cell>
-                                                        </Table.Row>
+                                                            <td></td>
+                                                        </tr>
 
                                                         {/* Expanded asset detail rows */}
                                                         {isAcctExpanded && details.map((d) => {
                                                             const dUnrealizedPct = d.cost_basis > 0 ? d.unrealized_pnl / d.cost_basis : 0;
                                                             return (
-                                                                <Table.Row
+                                                                <tr
                                                                     key={`${account_id}-${d.asset_symbol}`}
-                                                                    bg="gray.50"
-                                                                    _hover={{ bg: 'gray.100' }}
-                                                                    css={{ '& td': { py: '1px', px: '4px' } }}
-                                                                    cursor="pointer"
+                                                                    className="cursor-pointer bg-gray-50 [&>td]:px-1 [&>td]:py-px hover:bg-gray-100"
                                                                     onClick={() => onAssetClick(d.asset_id)}
                                                                 >
                                                                     {/* Asset (indented) */}
-                                                                    <Table.Cell pl={10}>
-                                                                        <Flex align="center" gap={1}>
-                                                                            <Badge size="xs" colorPalette="blue" fontWeight="bold" maxW="80px" truncate>
+                                                                    <td className="pl-10">
+                                                                        <div className="flex items-center gap-1">
+                                                                            <Badge colorScheme="blue" className="max-w-[80px] truncate font-bold">
                                                                                 {d.asset_symbol}
                                                                             </Badge>
                                                                             {d.asset_id != null && assetPanelCtx && (
-                                                                                <Box
-                                                                                    as="button"
+                                                                                <button
+                                                                                    type="button"
                                                                                     onClick={(e: React.MouseEvent) => { e.stopPropagation(); assetPanelCtx.openAssetPanel(d.asset_id!, { pnlVersionId }); }}
-                                                                                    p={0.5}
-                                                                                    borderRadius="sm"
-                                                                                    color="gray.400"
-                                                                                    _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                                                                                    className="p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
                                                                                     title="Asset details"
                                                                                 >
                                                                                     <LuInfo size={10} />
-                                                                                </Box>
+                                                                                </button>
                                                                             )}
-                                                                        </Flex>
-                                                                    </Table.Cell>
+                                                                        </div>
+                                                                    </td>
                                                                     {/* Qty */}
-                                                                    <Table.Cell>
-                                                                        <Text {...XS} color="gray.600"><ValueDisplay value={d.qty} /></Text>
-                                                                    </Table.Cell>
+                                                                    <td>
+                                                                        <span className="text-xs text-gray-600"><ValueDisplay value={d.qty} /></span>
+                                                                    </td>
                                                                     {/* Cost */}
-                                                                    <Table.Cell>
+                                                                    <td>
                                                                         {renderCost(d.cost_basis, d.unit_cost, baseCurrency)}
-                                                                    </Table.Cell>
+                                                                    </td>
                                                                     {/* Value */}
-                                                                    <Table.Cell>
-                                                                        <Text {...XS} color="gray.600">
+                                                                    <td>
+                                                                        <span className="text-xs text-gray-600">
                                                                             <ValueDisplay value={d.market_value} currency={baseCurrency} />
-                                                                        </Text>
-                                                                    </Table.Cell>
+                                                                        </span>
+                                                                    </td>
                                                                     {/* Unrealized */}
-                                                                    <Table.Cell>
-                                                                        <Flex direction="column">
-                                                                            <Text {...XS} color={d.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                    <td>
+                                                                        <div className="flex flex-col">
+                                                                            <span className={`text-xs ${d.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                                                 <ValueDisplay value={d.unrealized_pnl} currency={baseCurrency} />
-                                                                            </Text>
-                                                                            <Text fontSize="2xs" color="gray.500">{formatPct(dUnrealizedPct)}</Text>
-                                                                        </Flex>
-                                                                    </Table.Cell>
+                                                                            </span>
+                                                                            <span className="text-[10px] text-gray-500">{formatPct(dUnrealizedPct)}</span>
+                                                                        </div>
+                                                                    </td>
                                                                     {/* Info */}
-                                                                    <Table.Cell textAlign="center">
-                                                                        <Badge size="xs" variant="subtle">{d.lot_count} lots</Badge>
-                                                                    </Table.Cell>
+                                                                    <td className="text-center">
+                                                                        <Badge>{d.lot_count} lots</Badge>
+                                                                    </td>
                                                                     {/* Chevron */}
-                                                                    <Table.Cell>
+                                                                    <td>
                                                                         <FiChevronRight size={12} color="gray" />
-                                                                    </Table.Cell>
-                                                                </Table.Row>
+                                                                    </td>
+                                                                </tr>
                                                             );
                                                         })}
                                                     </Fragment>
@@ -1811,187 +1714,179 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                         : [];
                                                     const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
 
+                                                    const assetRowClassName = [
+                                                        '[&>td]:px-1 [&>td]:py-0.5',
+                                                        isNoPnl ? 'cursor-default hover:bg-gray-100' : 'cursor-pointer hover:bg-blue-50',
+                                                        isExpanded ? 'bg-blue-50' : isNoPnl ? 'bg-gray-50' : '',
+                                                        isUnmapped ? 'opacity-60' : '',
+                                                    ].join(' ');
+
                                                     return (
                                                         <Fragment key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}>
-                                                            <Table.Row
-                                                                cursor={isNoPnl ? 'default' : 'pointer'}
-                                                                _hover={{ bg: isNoPnl ? 'gray.100' : 'blue.50' }}
+                                                            <tr
+                                                                className={assetRowClassName}
                                                                 onClick={isNoPnl ? undefined : () => onAssetClick(assetpnlrow.asset.id)}
-                                                                bg={isExpanded ? 'blue.50' : isNoPnl ? 'gray.50' : undefined}
-                                                                css={{ '& td': { py: '2px', px: '4px' } }}
-                                                                opacity={isUnmapped ? 0.6 : undefined}
                                                             >
                                                                 {/* Asset */}
-                                                                <Table.Cell>
-                                                                    <Flex align="center" gap={1}>
+                                                                <td>
+                                                                    <div className="flex items-center gap-1">
                                                                         {isExpandable ? (
-                                                                            <Box
-                                                                                as="button"
+                                                                            <button
+                                                                                type="button"
                                                                                 onClick={(e: React.MouseEvent) => assetId != null && toggleExpanded(assetId, e)}
-                                                                                p={0.5}
-                                                                                borderRadius="sm"
-                                                                                _hover={{ bg: 'gray.200' }}
+                                                                                className="p-0.5 hover:bg-gray-200"
                                                                             >
                                                                                 {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                                                                            </Box>
+                                                                            </button>
                                                                         ) : (
-                                                                            <Box w="18px" />
+                                                                            <span className="inline-block w-[18px]" />
                                                                         )}
                                                                         <Tooltip content={assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : (assetpnlrow.asset.symbol || '')} openDelay={300}>
                                                                             <Badge
-                                                                                size="xs"
-                                                                                colorPalette={isUnmapped ? 'gray' : 'blue'}
-                                                                                variant={isUnmapped ? 'outline' : 'solid'}
-                                                                                fontWeight="bold"
-                                                                                maxW="120px"
-                                                                                truncate
+                                                                                colorScheme={isUnmapped ? 'gray' : 'blue'}
+                                                                                className="max-w-[120px] truncate font-bold"
                                                                             >
                                                                                 {assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : assetpnlrow.asset.symbol}
                                                                             </Badge>
                                                                         </Tooltip>
                                                                         {assetpnlrow.asset.id != null && assetPanelCtx && (
-                                                                            <Box
-                                                                                as="button"
+                                                                            <button
+                                                                                type="button"
                                                                                 onClick={(e: React.MouseEvent) => { e.stopPropagation(); assetPanelCtx.openAssetPanel(assetpnlrow.asset.id!, { pnlVersionId }); }}
-                                                                                p={0.5}
-                                                                                borderRadius="sm"
-                                                                                color="gray.400"
-                                                                                _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                                                                                className="p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
                                                                                 title="Asset details"
                                                                             >
                                                                                 <LuInfo size={12} />
-                                                                            </Box>
+                                                                            </button>
                                                                         )}
                                                                         {isUnmapped && (
                                                                             <Tooltip content="This asset is not mapped in the database" openDelay={200}>
-                                                                                <Text color="orange.500" fontSize="xs" cursor="help">⚠</Text>
+                                                                                <span className="cursor-help text-xs text-orange-500">⚠</span>
                                                                             </Tooltip>
                                                                         )}
-                                                                    </Flex>
-                                                                </Table.Cell>
+                                                                    </div>
+                                                                </td>
                                                                 {/* Qty */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {isNoPnl
-                                                                        ? <Text {...XS} color="gray.400">—</Text>
-                                                                        : <Text {...XS}><ValueDisplay value={assetpnlrow.quantity} /></Text>
+                                                                        ? <span className="text-xs text-gray-400">—</span>
+                                                                        : <span className="text-xs"><ValueDisplay value={assetpnlrow.quantity} /></span>
                                                                     }
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Δ (combined) */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {liveBalanceLoading
-                                                                        ? <Spinner size="xs" color="gray.400" />
+                                                                        ? <Spinner size="xs" className="text-gray-400" />
                                                                         : (
-                                                                            <Flex align="center" gap={0.5}>
+                                                                            <div className="flex items-center gap-0.5">
                                                                                 <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={assetpnlrow.quantity} size="xs" />
                                                                                 {hasLiveErrors && (
                                                                                     <Tooltip
                                                                                         content={
-                                                                                            <Box fontSize="xs">
-                                                                                                <Text fontWeight="medium" mb={1}>Some accounts had fetch errors — balance may be incomplete</Text>
+                                                                                            <div className="text-xs">
+                                                                                                <div className="mb-1 font-medium">Some accounts had fetch errors — balance may be incomplete</div>
                                                                                                 {assetErrorAccounts.map(accId => {
                                                                                                     const errs = liveAccountErrors!.get(accId) ?? [];
                                                                                                     const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
                                                                                                     return errs.map((err, i) => (
-                                                                                                        <Text key={`${accId}-${i}`} color="red.300">{accName}: {err}</Text>
+                                                                                                        <div key={`${accId}-${i}`} className="text-red-300">{accName}: {err}</div>
                                                                                                     ));
                                                                                                 })}
-                                                                                            </Box>
+                                                                                            </div>
                                                                                         }
                                                                                         openDelay={200}
                                                                                     >
-                                                                                        <Text fontSize="xs" color="orange.500" cursor="help" flexShrink={0}>⚠</Text>
+                                                                                        <span className="shrink-0 cursor-help text-xs text-orange-500">⚠</span>
                                                                                     </Tooltip>
                                                                                 )}
-                                                                            </Flex>
+                                                                            </div>
                                                                         )
                                                                     }
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Cost (combined) */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {isNoPnl
-                                                                        ? <Text {...XS} color="gray.400">N/A</Text>
+                                                                        ? <span className="text-xs text-gray-400">N/A</span>
                                                                         : renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency)
                                                                     }
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Value (combined) */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {renderValue(assetpnlrow, baseCurrency)}
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Unrealized P&L */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {isNoPnl ? (
-                                                                        <Text {...XS} color="gray.400">N/A</Text>
+                                                                        <span className="text-xs text-gray-400">N/A</span>
                                                                     ) : assetpnlrow.unit_value == null ? (
-                                                                        <Flex align="center" gap={1}>
-                                                                            <Text {...XS} color="gray.400">—</Text>
+                                                                        <div className="flex items-center gap-1">
+                                                                            <span className="text-xs text-gray-400">—</span>
                                                                             {assetpnlrow.price_error && <FiAlertCircle size={10} color="#E53E3E" />}
-                                                                        </Flex>
+                                                                        </div>
                                                                     ) : (
-                                                                        <Flex direction="column">
-                                                                            <Text {...XS} fontWeight="medium" color={assetpnlrow.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                        <div className="flex flex-col">
+                                                                            <span className={`text-xs font-medium ${assetpnlrow.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                                                 <ValueDisplay value={assetpnlrow.unrealized_pnl} currency={baseCurrency} />
-                                                                            </Text>
-                                                                            <Text fontSize="2xs" color="gray.500">{formatPct(assetpnlrow.unrealized_pnl_pct)}</Text>
-                                                                        </Flex>
+                                                                            </span>
+                                                                            <span className="text-[10px] text-gray-500">{formatPct(assetpnlrow.unrealized_pnl_pct)}</span>
+                                                                        </div>
                                                                     )}
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Realized P&L */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {isNoPnl ? (
-                                                                        <Text {...XS} color="gray.400">N/A</Text>
+                                                                        <span className="text-xs text-gray-400">N/A</span>
                                                                     ) : (
-                                                                        <Text {...XS} fontWeight="medium" color={assetpnlrow.realized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                        <span className={`text-xs font-medium ${assetpnlrow.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                                             <ValueDisplay value={assetpnlrow.realized_pnl} currency={baseCurrency} />
-                                                                        </Text>
+                                                                        </span>
                                                                     )}
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Fees */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {isNoPnl ? (
-                                                                        <Text {...XS} color="gray.400">N/A</Text>
+                                                                        <span className="text-xs text-gray-400">N/A</span>
                                                                     ) : (
-                                                                        <Text {...XS} color="gray.600">
+                                                                        <span className="text-xs text-gray-600">
                                                                             <ValueDisplay value={assetpnlrow.total_fees} currency={baseCurrency} />
-                                                                        </Text>
+                                                                        </span>
                                                                     )}
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Info */}
-                                                                <Table.Cell textAlign="center">
+                                                                <td className="text-center">
                                                                     {isNoPnl ? (
                                                                         isUnmapped
-                                                                            ? <Badge size="xs" colorPalette="orange" variant="subtle">Unmapped</Badge>
-                                                                            : <Badge size="xs" colorPalette="yellow" variant="subtle">No P&L</Badge>
+                                                                            ? <Badge colorScheme="orange">Unmapped</Badge>
+                                                                            : <Badge colorScheme="yellow">No P&L</Badge>
                                                                     ) : (
-                                                                        <Flex gap={0.5} justify="center" align="center">
+                                                                        <div className="flex items-center justify-center gap-0.5">
                                                                             {assetAccountBalances && assetAccountBalances.length > 1 && (
-                                                                                <Flex gap={0.5} mr={0.5}>
+                                                                                <div className="mr-0.5 flex gap-0.5">
                                                                                     {assetAccountBalances.slice(0, 3).map((bal) => (
-                                                                                        <Box
+                                                                                        <span
                                                                                             key={bal.account_id}
-                                                                                            w="6px"
-                                                                                            h="6px"
-                                                                                            borderRadius="full"
-                                                                                            bg={getAccountColor(bal.account_id)}
+                                                                                            className="inline-block h-[6px] w-[6px] rounded-full"
+                                                                                            style={{ backgroundColor: getAccountColor(bal.account_id) }}
                                                                                             title={bal.account_name}
                                                                                         />
                                                                                     ))}
                                                                                     {assetAccountBalances.length > 3 && (
-                                                                                        <Text fontSize="2xs" color="gray.500">+{assetAccountBalances.length - 3}</Text>
+                                                                                        <span className="text-[10px] text-gray-500">+{assetAccountBalances.length - 3}</span>
                                                                                     )}
-                                                                                </Flex>
+                                                                                </div>
                                                                             )}
-                                                                            <Badge size="xs" variant="subtle">{assetpnlrow.lot_count} lots</Badge>
+                                                                            <Badge>{assetpnlrow.lot_count} lots</Badge>
                                                                             {assetpnlrow.warning_count > 0 && (
-                                                                                <Badge size="xs" colorPalette="orange">{assetpnlrow.warning_count} ⚠</Badge>
+                                                                                <Badge colorScheme="orange">{assetpnlrow.warning_count} ⚠</Badge>
                                                                             )}
-                                                                        </Flex>
+                                                                        </div>
                                                                     )}
-                                                                </Table.Cell>
+                                                                </td>
                                                                 {/* Chevron */}
-                                                                <Table.Cell>
+                                                                <td>
                                                                     {!isNoPnl && <FiChevronRight size={12} color="gray" />}
-                                                                </Table.Cell>
-                                                            </Table.Row>
+                                                                </td>
+                                                            </tr>
 
                                                             {/* Expanded account breakdown rows */}
                                                             {isExpanded && assetAccountBalances && assetAccountBalances.map((balance) => {
@@ -2009,21 +1904,16 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                 const acctHasError = acctErrors && acctErrors.length > 0 && acctLiveQty == null;
 
                                                                 return (
-                                                                    <Table.Row
+                                                                    <tr
                                                                         key={`${assetpnlrow.asset.id}-${balance.account_id}`}
-                                                                        bg="gray.50"
-                                                                        _hover={{ bg: 'gray.100' }}
-                                                                        css={{ '& td': { py: '1px', px: '4px' }, '& td:first-of-type': { borderLeft: '2px solid', borderLeftColor: accountColor, pl: '28px' } }}
+                                                                        className="bg-gray-50 [&>td]:px-1 [&>td]:py-px hover:bg-gray-100"
                                                                     >
                                                                         {/* Account name (indented, border starts right of parent asset name) */}
-                                                                        <Table.Cell>
-                                                                            <Flex align="center" gap={1}>
-                                                                                <Box w="8px" h="8px" borderRadius="full" bg={accountColor} flexShrink={0} />
-                                                                                <Text
-                                                                                    {...XS}
-                                                                                    color="gray.700"
-                                                                                    cursor={onAccountClick ? 'pointer' : undefined}
-                                                                                    _hover={onAccountClick ? { textDecoration: 'underline', color: 'blue.600' } : undefined}
+                                                                        <td className="pl-7" style={{ borderLeft: `2px solid ${accountColor}` }}>
+                                                                            <div className="flex items-center gap-1">
+                                                                                <span className="inline-block h-[8px] w-[8px] shrink-0 rounded-full" style={{ backgroundColor: accountColor }} />
+                                                                                <span
+                                                                                    className={`text-xs text-gray-700 ${onAccountClick ? 'cursor-pointer hover:text-blue-600 hover:underline' : ''}`}
                                                                                     onClick={(e) => {
                                                                                         if (onAccountClick && assetId != null) {
                                                                                             e.stopPropagation();
@@ -2032,67 +1922,67 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                                     }}
                                                                                 >
                                                                                     {balance.account_name}
-                                                                                </Text>
-                                                                            </Flex>
-                                                                        </Table.Cell>
+                                                                                </span>
+                                                                            </div>
+                                                                        </td>
                                                                         {/* Qty */}
-                                                                        <Table.Cell>
-                                                                            <Text {...XS} color="gray.600"><ValueDisplay value={balance.qty} /></Text>
-                                                                        </Table.Cell>
+                                                                        <td>
+                                                                            <span className="text-xs text-gray-600"><ValueDisplay value={balance.qty} /></span>
+                                                                        </td>
                                                                         {/* Δ (combined) */}
-                                                                        <Table.Cell>
+                                                                        <td>
                                                                             {acctHasError ? (
                                                                                 <Tooltip
                                                                                     content={
-                                                                                        <Box fontSize="xs">
-                                                                                            <Text fontWeight="medium" mb={1}>Fetch error:</Text>
-                                                                                            {acctErrors!.map((err, i) => <Text key={i} color="red.300">{err}</Text>)}
-                                                                                        </Box>
+                                                                                        <div className="text-xs">
+                                                                                            <div className="mb-1 font-medium">Fetch error:</div>
+                                                                                            {acctErrors!.map((err, i) => <div key={i} className="text-red-300">{err}</div>)}
+                                                                                        </div>
                                                                                     }
                                                                                     openDelay={200}
                                                                                 >
-                                                                                    <Text fontSize="xs" color="red.500" cursor="help">⚠ err</Text>
+                                                                                    <span className="cursor-help text-xs text-red-500">⚠ err</span>
                                                                                 </Tooltip>
                                                                             ) : (
                                                                                 <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={balance.qty} size="xs" />
                                                                             )}
-                                                                        </Table.Cell>
+                                                                        </td>
                                                                         {/* Cost (combined) */}
-                                                                        <Table.Cell>
+                                                                        <td>
                                                                             {renderCost(balance.cost_basis_in_base, balance.avg_unit_cost_in_base, baseCurrency)}
-                                                                        </Table.Cell>
+                                                                        </td>
                                                                         {/* Value (combined) */}
-                                                                        <Table.Cell>
-                                                                            <Text {...XS} color="gray.600">
+                                                                        <td>
+                                                                            <span className="text-xs text-gray-600">
                                                                                 {unitPrice != null
                                                                                     ? <ValueDisplay value={marketValue} currency={baseCurrency} />
                                                                                     : '—'}
-                                                                            </Text>
-                                                                        </Table.Cell>
+                                                                            </span>
+                                                                        </td>
                                                                         {/* Unrealized */}
-                                                                        <Table.Cell>
+                                                                        <td>
                                                                             {unitPrice != null ? (
-                                                                                <Flex direction="column">
-                                                                                    <Text {...XS} color={unrealizedPnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                                <div className="flex flex-col">
+                                                                                    <span className={`text-xs ${unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                                                         <ValueDisplay value={unrealizedPnl} currency={baseCurrency} />
-                                                                                    </Text>
-                                                                                    <Text fontSize="2xs" color="gray.500">{formatPct(unrealizedPnlPct)}</Text>
-                                                                                </Flex>
+                                                                                    </span>
+                                                                                    <span className="text-[10px] text-gray-500">{formatPct(unrealizedPnlPct)}</span>
+                                                                                </div>
                                                                             ) : (
-                                                                                <Text {...XS} color="gray.500">—</Text>
+                                                                                <span className="text-xs text-gray-500">—</span>
                                                                             )}
-                                                                        </Table.Cell>
+                                                                        </td>
                                                                         {/* Realized */}
-                                                                        <Table.Cell><Text {...XS} color="gray.500">—</Text></Table.Cell>
+                                                                        <td><span className="text-xs text-gray-500">—</span></td>
                                                                         {/* Fees */}
-                                                                        <Table.Cell><Text {...XS} color="gray.500">—</Text></Table.Cell>
+                                                                        <td><span className="text-xs text-gray-500">—</span></td>
                                                                         {/* Info */}
-                                                                        <Table.Cell textAlign="center">
-                                                                            <Badge size="xs" variant="subtle">{balance.lot_count} lots</Badge>
-                                                                        </Table.Cell>
+                                                                        <td className="text-center">
+                                                                            <Badge>{balance.lot_count} lots</Badge>
+                                                                        </td>
                                                                         {/* Chevron */}
-                                                                        <Table.Cell></Table.Cell>
-                                                                    </Table.Row>
+                                                                        <td></td>
+                                                                    </tr>
                                                                 );
                                                             })}
                                                         </Fragment>
@@ -2101,20 +1991,20 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                             </>
                                         );
                                     })()}
-                                </Table.Body>
-                            </Table.Root>
-                        </Box>
+                                </tbody>
+                            </table>
+                        </div>
                     )}
 
                     {/* Bottom pagination (hidden in split mode) */}
                     {!splitView && paginationBar && (
-                        <Box borderTop="1px solid" borderColor="gray.100">
+                        <div className="border-t border-gray-100">
                             {paginationBar}
-                        </Box>
+                        </div>
                     )}
-                </Box>
+                </div>
             )}
-        </Card.Root>
+        </div>
     );
 };
 

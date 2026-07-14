@@ -10,7 +10,7 @@
  *   4. PnL Audit (InvestigationView with pre-applied filters, foldable, default open for single-asset)
  */
 import React, { useMemo, useState, useContext } from 'react';
-import { Badge, Box, Collapsible, Flex, Text } from '@chakra-ui/react';
+import { Badge } from '../ui/primitives';
 import { FiChevronDown, FiChevronRight, FiDollarSign, FiTrendingUp, FiTrendingDown, FiAlertTriangle } from 'react-icons/fi';
 import { LuReceipt, LuInfo } from 'react-icons/lu';
 import { usePnL } from './PnLContext';
@@ -75,35 +75,27 @@ export const SectionToggle: React.FC<{
     const open = controlledOpen ?? internalOpen;
     const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v); };
     return (
-        <Collapsible.Root open={open} onOpenChange={(d) => setOpen(d.open)}>
-            <Collapsible.Trigger asChild>
-                <Flex
-                    align="center"
-                    gap={1.5}
-                    py={1.5}
-                    px={2}
-                    cursor="pointer"
-                    _hover={{ bg: 'gray.50' }}
-                    borderRadius="md"
-                    userSelect="none"
-                >
-                    {open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                    <Text fontSize="sm" fontWeight="semibold" color="gray.700">{label}</Text>
-                    {badge && <Badge size="xs" variant="subtle" colorPalette="gray">{badge}</Badge>}
-                    {summary && <Box ml={1} flex="1" minW={0}>{summary}</Box>}
-                    {headerRight && (
-                        <Box ml="auto" onClick={(e) => e.stopPropagation()}>
-                            {headerRight}
-                        </Box>
-                    )}
-                </Flex>
-            </Collapsible.Trigger>
-            <Collapsible.Content>
-                <Box pt={1} pb={2}>
+        <div>
+            <div
+                className="flex cursor-pointer select-none items-center gap-1.5 px-2 py-1.5 hover:bg-gray-50"
+                onClick={() => setOpen(!open)}
+            >
+                {open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                <span className="text-sm font-semibold text-gray-700">{label}</span>
+                {badge && <Badge colorScheme="gray">{badge}</Badge>}
+                {summary && <div className="ml-1 min-w-0 flex-1">{summary}</div>}
+                {headerRight && (
+                    <div className="ml-auto" onClick={(e) => e.stopPropagation()}>
+                        {headerRight}
+                    </div>
+                )}
+            </div>
+            {open && (
+                <div className="pb-2 pt-1">
                     {children}
-                </Box>
-            </Collapsible.Content>
-        </Collapsible.Root>
+                </div>
+            )}
+        </div>
     );
 };
 
@@ -397,29 +389,26 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
     }, [scopedWarnings]);
 
     return (
-        <Box>
+        <div>
             {/* ── 1. Summary metrics + inline chart ── */}
-            <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mb={2}>
+            <div className="mb-2 border border-gray-200 bg-white">
                 <SectionToggle
                     label="Overview"
                     defaultOpen
                     headerRight={isSingleAsset && drill.assetId != null && assetPanelCtx ? (
-                        <Box
-                            as="button"
+                        <button
+                            type="button"
                             onClick={() => assetPanelCtx.openAssetPanel(drill.assetId!, { pnlVersionId: currentVersionId ?? undefined })}
-                            p={0.5}
-                            borderRadius="sm"
-                            color="gray.400"
-                            _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                            className="p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
                             title="Asset details"
                         >
                             <LuInfo size={12} />
-                        </Box>
+                        </button>
                     ) : undefined}
                 >
-                    <Box px={2.5}>
-                        <Flex gap={3} align="flex-start" flexWrap={{ base: 'wrap', lg: 'nowrap' }}>
-                            <Box flex="1" minW={0}>
+                    <div className="px-2.5">
+                        <div className="flex flex-wrap items-start gap-3 lg:flex-nowrap">
+                            <div className="min-w-0 flex-1">
                                 <HeroMetricsBar
                                     totalReturn={scopedMetrics.totalReturn}
                                     roi={scopedMetrics.roi}
@@ -452,7 +441,7 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
 
                                 {/* ── Balance-by-account + warnings (single-asset only) ── */}
                                 {isSingleAsset && accountBreakdowns.length > 0 && (
-                                    <Flex gap={2} mt={2} flexWrap="wrap" align="stretch">
+                                    <div className="mt-2 flex flex-wrap items-stretch gap-2">
                                         {accountBreakdowns.map(b => {
                                             const assetSymbol = isSingleAsset
                                                 ? scopedAssets[0]?.asset?.symbol
@@ -463,85 +452,67 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                                             const delta = computeDelta(b.qty, liveQty);
                                             const urPnl = b.unrealized_pnl ?? 0;
                                             return (
-                                                <Box
+                                                <div
                                                     key={b.account_id}
-                                                    bg="gray.50"
-                                                    borderLeft="3px solid"
-                                                    borderLeftColor="blue.300"
-                                                    borderRadius="sm"
-                                                    px={2.5}
-                                                    py={1.5}
-                                                    minW="140px"
-                                                    flex="1"
+                                                    className="min-w-[140px] flex-1 border-l-[3px] border-l-blue-300 bg-gray-50 px-2.5 py-1.5"
                                                 >
                                                     <AccountBadge accountId={b.account_id} accountName={b.account_name} size="xs" />
-                                                    <Flex align="center" gap={1} mt={1.5}>
-                                                        <Text fontSize="xs" fontWeight="semibold" color="gray.700">
+                                                    <div className="mt-1.5 flex items-center gap-1">
+                                                        <span className="text-xs font-semibold text-gray-700">
                                                             {formatQuantity(b.qty)}
-                                                        </Text>
+                                                        </span>
                                                         {isSingleAsset && <DeltaBar delta={delta} liveQty={liveQty} pnlQty={b.qty} size="xs" />}
-                                                    </Flex>
+                                                    </div>
                                                     {b.market_value != null && (
-                                                        <Text fontSize="xs" color="gray.600" mt={0.5}>
+                                                        <div className="mt-0.5 text-xs text-gray-600">
                                                             {fmtCurrency(b.market_value, baseCurrency)}
-                                                        </Text>
+                                                        </div>
                                                     )}
-                                                    <Text fontSize="xs" color={urPnl >= 0 ? 'green.600' : 'red.600'} mt={0.5}>
+                                                    <div className={`mt-0.5 text-xs ${urPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                         {fmtCurrencySigned(urPnl, baseCurrency)}
                                                         {b.unrealized_pnl_pct != null && (
-                                                            <Text as="span" color="gray.500" ml={1}>
+                                                            <span className="ml-1 text-gray-500">
                                                                 ({b.unrealized_pnl_pct >= 0 ? '+' : ''}{b.unrealized_pnl_pct.toFixed(1)}%)
-                                                            </Text>
+                                                            </span>
                                                         )}
-                                                    </Text>
-                                                </Box>
+                                                    </div>
+                                                </div>
                                             );
                                         })}
 
-                                    </Flex>
+                                    </div>
                                 )}
 
                                 {/* Warnings summary (all scopes) */}
                                 {warningCounts.total > 0 && (
-                                    <Flex mt={2}>
+                                    <div className="mt-2 flex">
                                         <Tooltip content={scopedWarnings.slice(0, 10).map(w => w.message).join('\n')}>
-                                            <Flex
-                                                bg="orange.50"
-                                                borderLeft="3px solid"
-                                                borderLeftColor="orange.400"
-                                                borderRadius="sm"
-                                                px={2.5}
-                                                py={1.5}
-                                                minW="120px"
-                                                maxW="280px"
-                                                direction="column"
-                                                gap={1}
-                                            >
-                                                <Flex align="center" gap={1}>
-                                                    <FiAlertTriangle size={12} color="var(--chakra-colors-orange-500)" />
-                                                    <Text fontSize="xs" fontWeight="semibold" color="orange.700">
+                                            <div className="flex min-w-[120px] max-w-[280px] flex-col gap-1 border-l-[3px] border-l-orange-400 bg-orange-50 px-2.5 py-1.5">
+                                                <div className="flex items-center gap-1">
+                                                    <FiAlertTriangle size={12} className="text-orange-500" />
+                                                    <span className="text-xs font-semibold text-orange-700">
                                                         Warnings
-                                                    </Text>
-                                                </Flex>
-                                                <Flex gap={2} flexWrap="wrap">
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
                                                     {warningCounts.errors > 0 && (
-                                                        <Badge size="xs" colorPalette="red">{warningCounts.errors} error{warningCounts.errors !== 1 ? 's' : ''}</Badge>
+                                                        <Badge colorScheme="red">{warningCounts.errors} error{warningCounts.errors !== 1 ? 's' : ''}</Badge>
                                                     )}
                                                     {warningCounts.warnings > 0 && (
-                                                        <Badge size="xs" colorPalette="orange">{warningCounts.warnings} warn</Badge>
+                                                        <Badge colorScheme="orange">{warningCounts.warnings} warn</Badge>
                                                     )}
                                                     {warningCounts.infos > 0 && (
-                                                        <Badge size="xs" colorPalette="blue">{warningCounts.infos} info</Badge>
+                                                        <Badge colorScheme="blue">{warningCounts.infos} info</Badge>
                                                     )}
-                                                </Flex>
-                                            </Flex>
+                                                </div>
+                                            </div>
                                         </Tooltip>
-                                    </Flex>
+                                    </div>
                                 )}
-                            </Box>
+                            </div>
 
                             {/* Inline chart (compact) */}
-                            <Box w={{ base: '100%', lg: '38%' }} flexShrink={0}>
+                            <div className="w-full flex-shrink-0 lg:w-[38%]">
                                 <PeriodChartPanel
                                     points={effectiveTimeline.data?.points || []}
                                     baseCurrency={baseCurrency}
@@ -551,15 +522,15 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                                     assets={scopedAssets}
                                     contextLabel={drill.assetSymbol ?? drill.entityLabel ?? undefined}
                                 />
-                            </Box>
-                        </Flex>
-                    </Box>
+                            </div>
+                        </div>
+                    </div>
                 </SectionToggle>
-            </Box>
+            </div>
 
             {/* ── 2. Assets (multi-asset scope only) ── */}
             {isMultiAsset && (
-                <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mb={3}>
+                <div className="mb-3 border border-gray-200 bg-white">
                     <SectionToggle label="Assets" defaultOpen open={assetsOpen} onOpenChange={() => onToggleAssets?.()} badge={`${scopedAssets.length}`}>
                         <AssetPnLTable
                             assets={scopedAssets}
@@ -576,7 +547,7 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                             pnlVersionId={currentVersionId ?? undefined}
                         />
                         {assetsView === 'treemap' && (
-                            <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
+                            <div className="mx-3 mb-3 mt-1 overflow-hidden border-2 border-blue-100">
                                 <AllocationTreemap
                                     points={heroTimeline.data?.points || []}
                                     assetCategoryMaps={assetCategoryMaps}
@@ -588,24 +559,24 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                                     accountBalances={accountBalances}
                                     onAssetNavigate={onAssetNavigate}
                                 />
-                            </Box>
+                            </div>
                         )}
                         {assetsView === 'pie' && (
-                            <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
+                            <div className="mx-3 mb-3 mt-1 overflow-hidden border-2 border-blue-100">
                                 <MarketValuePieChart
                                     assets={scopedAssets}
                                     dimensions={dimensions}
                                     baseCurrency={baseCurrency}
                                 />
-                            </Box>
+                            </div>
                         )}
                     </SectionToggle>
-                </Box>
+                </div>
             )}
 
             {/* ── 3. PnL Audit ── */}
             {currentVersionId && (
-                <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
+                <div className="border border-gray-200 bg-white">
                     <SectionToggle label="PnL Audit" defaultOpen={false} open={auditOpen} onOpenChange={() => onToggleAudit?.()}>
                         <InvestigationView
                             versionId={currentVersionId}
@@ -621,8 +592,8 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                             }))}
                         />
                     </SectionToggle>
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

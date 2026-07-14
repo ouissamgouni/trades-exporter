@@ -7,7 +7,6 @@
  */
 
 import React from 'react';
-import { Box } from '@chakra-ui/react';
 import { InvestigationView } from './InvestigationView';
 import { usePnL } from './PnLContext';
 import type { DrillDownState } from './pnlState';
@@ -41,7 +40,7 @@ export const PnLLevel2: React.FC<PnLLevel2Props> = ({
         .map(a => ({ id: a.asset.id ?? 0, symbol: a.asset.symbol ?? '', label: a.asset.label ?? undefined }));
 
     return (
-        <Box>
+        <div>
             <InvestigationView
                 versionId={currentVersionId}
                 baseCurrency={config.base_currency_symbol}
@@ -52,6 +51,6 @@ export const PnLLevel2: React.FC<PnLLevel2Props> = ({
                 assets={scopedAssets.length > 0 ? scopedAssets : assets.map(a => ({ id: a.asset.id ?? 0, symbol: a.asset.symbol ?? '', label: a.asset.label ?? undefined }))}
                 assetBalanceMap={assetBalanceMap}
             />
-        </Box>
+        </div>
     );
 };

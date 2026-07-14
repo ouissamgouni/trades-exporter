@@ -8,7 +8,7 @@
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Box, Button, Text, Flex, Badge, Heading, Spinner, IconButton } from '@chakra-ui/react';
+import { Badge, Button, Heading, Spinner } from './ui/primitives';
 import { FiClipboard, FiCheckSquare, FiSquare, FiChevronLeft, FiX } from 'react-icons/fi';
 import { API_URL, AppInfo } from '../types';
 
@@ -26,7 +26,7 @@ interface QaPinContext {
 const QaPinCtx = createContext<QaPinContext>({
     pinnedWidth: 0,
     isOpen: false,
-    setIsOpen: () => {},
+    setIsOpen: () => { },
     appInfo: null,
     doneCount: 0,
     totalSteps: 0,
@@ -168,27 +168,16 @@ const QaTestPlanPanelInner: React.FC<PanelInnerProps> = ({ onPinnedWidthChange, 
     const panelContent = (
         <>
             {/* Header */}
-            <Flex
-                justify="space-between"
-                align="center"
-                px={3}
-                py={2}
-                borderBottom="1px solid"
-                borderColor="gray.200"
-                bg="gray.50"
-                position="sticky"
-                top={0}
-                zIndex={1}
-            >
-                <Flex align="center" gap={2}>
+            <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="flex items-center gap-2">
                     <FiClipboard size={16} />
-                    <Heading size="sm">{activeScenario ? `QA: ${activeScenario}` : 'QA Test Plans'}</Heading>
-                </Flex>
-                <Flex gap={1}>
-                    <IconButton
+                    <Heading className="text-sm">{activeScenario ? `QA: ${activeScenario}` : 'QA Test Plans'}</Heading>
+                </div>
+                <div className="flex gap-1">
+                    <Button
                         aria-label={pinned ? 'Unpin panel' : 'Pin panel'}
                         variant="ghost"
-                        size="xs"
+                        size="sm"
                         onClick={togglePin}
                         title={pinned ? 'Unpin (overlay mode)' : 'Pin (side-by-side)'}
                     >
@@ -208,52 +197,47 @@ const QaTestPlanPanelInner: React.FC<PanelInnerProps> = ({ onPinnedWidthChange, 
                                 </>
                             )}
                         </svg>
-                    </IconButton>
-                    <IconButton aria-label="Close" variant="ghost" size="xs" onClick={handleClose}>
+                    </Button>
+                    <Button aria-label="Close" variant="ghost" size="sm" onClick={handleClose}>
                         <FiX size={16} />
-                    </IconButton>
-                </Flex>
-            </Flex>
+                    </Button>
+                </div>
+            </div>
 
             {/* Body */}
-            <Box p={3} overflowY="auto" flex={1}>
+            <div className="flex-1 overflow-y-auto p-3">
                 {/* Scenario picker */}
                 {(!activeScenario || (hasMultiple && !testPlan)) && (
-                    <Box mb={4}>
-                        <Text fontSize="xs" color="gray.500" mb={2}>Select a scenario:</Text>
-                        <Flex direction="column" gap={2}>
+                    <div className="mb-4">
+                        <span className="mb-2 block text-xs text-slate-500">Select a scenario:</span>
+                        <div className="flex flex-col gap-2">
                             {scenarios.map(s => {
                                 const sDone = checkedSteps[s]?.size ?? 0;
                                 return (
-                                    <Box
+                                    <div
                                         key={s}
-                                        p={3}
-                                        border="1px solid"
-                                        borderColor="gray.200"
-                                        borderRadius="md"
-                                        cursor="pointer"
-                                        _hover={{ bg: 'purple.50', borderColor: 'purple.300' }}
+                                        className="cursor-pointer border border-slate-200 p-3 hover:border-purple-300 hover:bg-purple-50"
                                         onClick={() => setActiveScenario(s)}
                                     >
-                                        <Flex justify="space-between" align="center">
-                                            <Text fontSize="sm" fontWeight="bold">{s}</Text>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm font-bold">{s}</span>
                                             {sDone > 0 && (
-                                                <Badge colorPalette="green" fontSize="xs">{sDone} done</Badge>
+                                                <Badge colorScheme="green" className="text-xs">{sDone} done</Badge>
                                             )}
-                                        </Flex>
-                                    </Box>
+                                        </div>
+                                    </div>
                                 );
                             })}
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
                 )}
 
                 {/* Back button when viewing a scenario in multi mode */}
                 {hasMultiple && activeScenario && testPlan && (
                     <Button
                         variant="ghost"
-                        size="xs"
-                        mb={3}
+                        size="sm"
+                        className="mb-3"
                         onClick={() => { setActiveScenario(null); setTestPlan(null); }}
                     >
                         <FiChevronLeft /> All scenarios
@@ -261,18 +245,17 @@ const QaTestPlanPanelInner: React.FC<PanelInnerProps> = ({ onPinnedWidthChange, 
                 )}
 
                 {loading && (
-                    <Flex justify="center" py={8}><Spinner size="lg" /></Flex>
+                    <div className="flex justify-center py-8"><Spinner size="lg" /></div>
                 )}
 
                 {testPlan && (
-                    <Box>
-                        <Heading size="xs" mb={1}>{testPlan.name}</Heading>
-                        <Text fontSize="xs" color="gray.500" mb={4}>{testPlan.description}</Text>
+                    <div>
+                        <Heading className="mb-1 text-xs">{testPlan.name}</Heading>
+                        <span className="mb-4 block text-xs text-slate-500">{testPlan.description}</span>
 
                         <Badge
-                            colorPalette={doneCount === totalSteps ? 'green' : 'purple'}
-                            fontSize="xs"
-                            mb={3}
+                            colorScheme={doneCount === totalSteps ? 'green' : 'purple'}
+                            className="mb-3 text-xs"
                         >
                             {doneCount} / {totalSteps} completed
                         </Badge>
@@ -280,47 +263,38 @@ const QaTestPlanPanelInner: React.FC<PanelInnerProps> = ({ onPinnedWidthChange, 
                         {testPlan.steps.map((step) => {
                             const isDone = doneSet.has(step.id);
                             return (
-                                <Box
+                                <div
                                     key={step.id}
-                                    mb={2}
-                                    p={2}
-                                    borderRadius="md"
-                                    border="1px solid"
-                                    borderColor={isDone ? 'green.200' : 'gray.200'}
-                                    bg={isDone ? 'green.50' : 'white'}
-                                    opacity={isDone ? 0.7 : 1}
-                                    cursor="pointer"
+                                    className={`mb-2 cursor-pointer border p-2 transition-all hover:border-purple-300 ${isDone ? 'border-green-200 bg-green-50 opacity-70' : 'border-slate-200 bg-white'}`}
                                     onClick={() => toggleStep(step.id)}
-                                    _hover={{ borderColor: 'purple.300' }}
-                                    transition="all 0.15s"
                                 >
-                                    <Flex align="flex-start" gap={2}>
-                                        <Box mt="2px" color={isDone ? 'green.500' : 'gray.400'} flexShrink={0}>
+                                    <div className="flex items-start gap-2">
+                                        <div className={`mt-[2px] shrink-0 ${isDone ? 'text-green-500' : 'text-slate-400'}`}>
                                             {isDone ? <FiCheckSquare size={14} /> : <FiSquare size={14} />}
-                                        </Box>
-                                        <Box flex={1}>
-                                            <Text fontSize="xs" fontWeight="bold" mb={0.5}>
+                                        </div>
+                                        <div className="flex-1">
+                                            <span className="mb-0.5 block text-xs font-bold">
                                                 {step.id}. {step.title}
-                                            </Text>
-                                            <Text fontSize="xs" color="gray.600" mb={1}>
+                                            </span>
+                                            <span className="mb-1 block text-xs text-slate-600">
                                                 {step.description}
-                                            </Text>
-                                            <Box bg="blue.50" px={2} py={1} borderRadius="sm" mb={1}>
-                                                <Text fontSize="xs" color="blue.700">
+                                            </span>
+                                            <div className="mb-1 bg-blue-50 px-2 py-1">
+                                                <span className="text-xs text-blue-700">
                                                     <strong>Expected:</strong> {step.expected}
-                                                </Text>
-                                            </Box>
-                                            <Text fontSize="xs" color="gray.500" fontStyle="italic">
+                                                </span>
+                                            </div>
+                                            <span className="block text-xs italic text-slate-500">
                                                 ✓ {step.verification}
-                                            </Text>
-                                        </Box>
-                                    </Flex>
-                                </Box>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
                             );
                         })}
-                    </Box>
+                    </div>
                 )}
-            </Box>
+            </div>
         </>
     );
 
@@ -329,51 +303,25 @@ const QaTestPlanPanelInner: React.FC<PanelInnerProps> = ({ onPinnedWidthChange, 
             {/* Overlay mode (unpinned): backdrop + fixed panel */}
             {isOpen && !pinned && (
                 <>
-                    <Box
-                        position="fixed"
-                        inset={0}
-                        bg="blackAlpha.400"
-                        zIndex={199}
+                    <div
+                        className="fixed inset-0 z-[199] bg-black/40"
                         onClick={handleClose}
                     />
-                    <Box
-                        position="fixed"
-                        right={0}
-                        top={0}
-                        bottom={0}
-                        width={`${QA_PANEL_WIDTH}px`}
-                        maxW="90vw"
-                        bg="white"
-                        boxShadow="xl"
-                        zIndex={200}
-                        display="flex"
-                        flexDirection="column"
-                        borderLeft="1px solid"
-                        borderColor="gray.200"
+                    <div
+                        className="fixed bottom-0 right-0 top-0 z-[200] flex w-[380px] max-w-[90vw] flex-col border-l border-slate-200 bg-white shadow-xl"
                     >
                         {panelContent}
-                    </Box>
+                    </div>
                 </>
             )}
 
             {/* Pinned mode: fixed panel, no backdrop, app shrinks via margin */}
             {isOpen && pinned && (
-                <Box
-                    position="fixed"
-                    right={0}
-                    top={0}
-                    bottom={0}
-                    width={`${QA_PANEL_WIDTH}px`}
-                    bg="white"
-                    boxShadow="-2px 0 8px rgba(0,0,0,0.08)"
-                    zIndex={10}
-                    display="flex"
-                    flexDirection="column"
-                    borderLeft="1px solid"
-                    borderColor="gray.200"
+                <div
+                    className="fixed bottom-0 right-0 top-0 z-10 flex w-[380px] flex-col border-l border-slate-200 bg-white shadow-[-2px_0_8px_rgba(0,0,0,0.08)]"
                 >
                     {panelContent}
-                </Box>
+                </div>
             )}
         </>
     );

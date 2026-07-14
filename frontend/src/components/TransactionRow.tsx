@@ -22,7 +22,7 @@
  */
 
 import React, { useState } from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { Badge, type BadgeColorScheme } from './ui/primitives';
 import { FiChevronRight, FiChevronDown } from 'react-icons/fi';
 import { AssetBadge } from './AssetBadge';
 import { TransactionTooltip } from './TransactionTooltip';
@@ -72,7 +72,7 @@ const formatDateShort = (dateStr: string | undefined): string => {
     }
 };
 
-const getTypeColor = (type: string | undefined): string => {
+const getTypeColor = (type: string | undefined): BadgeColorScheme => {
     if (!type) return 'gray';
     const t = type.toLowerCase();
     if (t.includes('buy') || t.includes('deposit') || t.includes('receive')) return 'green';
@@ -80,15 +80,15 @@ const getTypeColor = (type: string | undefined): string => {
     if (t.includes('swap') || t.includes('trade') || t.includes('exchange')) return 'blue';
     if (t.includes('transfer')) return 'purple';
     if (t.includes('fee') || t.includes('commission')) return 'orange';
-    if (t.includes('reward') || t.includes('staking') || t.includes('airdrop')) return 'teal';
+    if (t.includes('reward') || t.includes('staking') || t.includes('airdrop')) return 'green';
     return 'gray';
 };
 
 const getTotalColor = (direction: string | undefined): string => {
-    if (!direction) return 'gray.600';
-    if (direction === 'inflow') return 'red.600';
-    if (direction === 'outflow') return 'green.600';
-    return 'gray.600';
+    if (!direction) return 'text-slate-600';
+    if (direction === 'inflow') return 'text-red-600';
+    if (direction === 'outflow') return 'text-green-600';
+    return 'text-slate-600';
 };
 
 /**
@@ -122,30 +122,30 @@ interface LegDetailItemProps {
 
 const LegDetailItem: React.FC<LegDetailItemProps> = ({ leg }) => {
     const config = {
-        outflow: { arrow: '↑', color: 'red.500' },
-        inflow: { arrow: '↓', color: 'green.500' },
-        fee: { arrow: '💸', color: 'orange.500' },
-    }[leg.leg_type] || { arrow: '?', color: 'gray.500' };
+        outflow: { arrow: '↑', color: 'text-red-500' },
+        inflow: { arrow: '↓', color: 'text-green-500' },
+        fee: { arrow: '💸', color: 'text-orange-500' },
+    }[leg.leg_type] || { arrow: '?', color: 'text-slate-500' };
 
     const assetSymbol = leg.asset?.symbol || '?';
 
     return (
-        <Flex align="center" gap={1}>
-            <Text fontSize="xs" color={config.color} fontWeight="bold">
+        <div className="flex items-center gap-1">
+            <span className={`text-xs font-bold ${config.color}`}>
                 {config.arrow}
-            </Text>
-            <Text fontSize="xs" color={config.color}>
+            </span>
+            <span className={`text-xs ${config.color}`}>
                 {formatQuantity(leg.qty)}
-            </Text>
+            </span>
             {leg.asset?.id ? (
                 <AssetBadge
                     asset={{ id: leg.asset.id, symbol: assetSymbol }}
                     size="xs"
                 />
             ) : (
-                <Text fontSize="xs" color={config.color}>{assetSymbol}</Text>
+                <span className={`text-xs ${config.color}`}>{assetSymbol}</span>
             )}
-        </Flex>
+        </div>
     );
 };
 
@@ -197,14 +197,9 @@ export const TransactionRow: React.FC<{
 
 
         return (
-            <Box>
+            <div>
                 {/* Transaction Header Row */}
-                <Flex
-                    align="center"
-                    gap={1}
-                    py={0.5}
-                    borderRadius="sm"
-                >
+                <div className="flex items-center gap-1 py-0.5">
 
 
                     {/* TX Badge - Gray */}
@@ -214,36 +209,30 @@ export const TransactionRow: React.FC<{
                         onTransactionClick={onTransactionClick}
                     >
                         <Badge
-                            size="xs"
-                            colorPalette="gray"
-                            variant="subtle"
-                            cursor="pointer"
+                            colorScheme="gray"
+                            className="cursor-pointer hover:bg-slate-200"
                             onClick={handleTxClick}
-                            _hover={{ bg: 'gray.200' }}
                         >
                             TX#{id}
                         </Badge>
                     </TransactionTooltip>
 
-                    {/* DateTime Badge - Cyan (highlighted) */}
-                    <Badge size="xs" colorPalette="cyan" variant="subtle">
+                    {/* DateTime Badge - Blue (highlighted) */}
+                    <Badge colorScheme="blue">
                         {formatDateShort(date_time)}
                     </Badge>
 
                     {/* Account:Source Badge - Purple */}
                     {sourceLabel && (
-                        <Badge size="xs" colorPalette="purple" variant="subtle" maxW="120px" truncate title={sourceLabel}>
+                        <Badge colorScheme="purple" className="max-w-[120px] truncate" title={sourceLabel}>
                             {sourceLabel}
                         </Badge>
                     )}
 
                     {/* Type Badge - Semantic color */}
                     <Badge
-                        size="xs"
-                        colorPalette={getTypeColor(typeLabel)}
-                        variant="subtle"
-                        maxW="100px"
-                        truncate
+                        colorScheme={getTypeColor(typeLabel)}
+                        className="max-w-[100px] truncate"
                         title={typeLabel}
                     >
                         {typeLabel}
@@ -251,21 +240,21 @@ export const TransactionRow: React.FC<{
 
                     {/* Primary Asset + Qty → Total */}
                     {asset && (
-                        <Flex align="center" gap={1}>
+                        <div className="flex items-center gap-1">
                             <AssetBadge
                                 asset={{ id: asset.id, symbol: asset.symbol, label: asset.label }}
                                 sourceSymbol={asset.symbol}
                                 size="xs"
                             />
-                            <Text fontSize="2xs" color="gray.600">
+                            <span className="text-[10px] text-slate-600">
                                 {formatQuantity(quantity)}
-                            </Text>
+                            </span>
                             {total != null && total > 0 && (
                                 <>
-                                    <Text fontSize="2xs" color="gray.400">→</Text>
-                                    <Text fontSize="2xs" color={getTotalColor(direction)} fontWeight="medium">
+                                    <span className="text-[10px] text-slate-400">→</span>
+                                    <span className={`text-[10px] font-medium ${getTotalColor(direction)}`}>
                                         {formatTotal(total)}
-                                    </Text>
+                                    </span>
                                     {price_quote_asset && (
                                         <AssetBadge
                                             asset={{ id: price_quote_asset.id, symbol: price_quote_asset.symbol, label: price_quote_asset.label }}
@@ -275,17 +264,17 @@ export const TransactionRow: React.FC<{
                                     )}
                                 </>
                             )}
-                        </Flex>
+                        </div>
                     )}
 
                     {/* Fee - Orange */}
                     {hasFee && (
-                        <Flex align="center" gap={1}>
-                            <Text fontSize="2xs" color="gray.400">|</Text>
-                            <Text fontSize="2xs" color="orange.500" fontWeight="bold">💸</Text>
-                            <Text fontSize="2xs" color="orange.600">
+                        <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-slate-400">|</span>
+                            <span className="text-[10px] font-bold text-orange-500">💸</span>
+                            <span className="text-[10px] text-orange-600">
                                 {formatFee(fee)}
-                            </Text>
+                            </span>
                             {fee_quote_asset && (
                                 <AssetBadge
                                     asset={{ id: fee_quote_asset.id, symbol: fee_quote_asset.symbol, label: fee_quote_asset.label }}
@@ -293,12 +282,12 @@ export const TransactionRow: React.FC<{
                                     size="xs"
                                 />
                             )}
-                        </Flex>
+                        </div>
                     )}
-                </Flex>
+                </div>
 
 
-            </Box>
+            </div>
         );
     };
 

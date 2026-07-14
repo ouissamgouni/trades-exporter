@@ -13,22 +13,13 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    NativeSelect,
-    Popover,
-    Portal,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
+import * as RadixPopover from '@radix-ui/react-popover';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, Bundle } from '../../types';
 import { TaxabilityStatus, UnitPattern } from '../../enums';
 import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
+import { Badge, Button, Spinner } from '../ui/primitives';
 
 interface BundleMembershipPopoverProps {
     /** The bundle ID to display */
@@ -172,163 +163,147 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
     };
 
     return (
-        <Popover.Root
-            open={open}
-            onOpenChange={(e) => onOpenChange(e.open)}
-            positioning={{ placement: 'right-start' }}
-            lazyMount
-            unmountOnExit
-        >
-            <Popover.Trigger asChild>
+        <RadixPopover.Root open={open} onOpenChange={onOpenChange}>
+            <RadixPopover.Trigger asChild>
                 {children}
-            </Popover.Trigger>
-            <Portal>
-                <Popover.Positioner>
-                    <Popover.Content
-                        width="680px"
-                        shadow="lg"
-                        borderWidth={1}
-                        borderColor="purple.200"
-                        bg="white"
-                        p={0}
-                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                    >
-                        <Popover.Arrow>
-                            <Popover.ArrowTip />
-                        </Popover.Arrow>
+            </RadixPopover.Trigger>
+            <RadixPopover.Portal>
+                <RadixPopover.Content
+                    side="right"
+                    align="start"
+                    sideOffset={4}
+                    className="w-[680px] border border-purple-200 bg-white p-0 shadow-lg"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
+                    <RadixPopover.Arrow className="fill-white" />
 
-                        {/* Header */}
-                        <Box p={3} bg="purple.50" borderBottomWidth={1} borderColor="purple.100">
-                            <Flex justify="space-between" align="center" mb={1}>
-                                {loading ? (
-                                    <Spinner size="xs" />
-                                ) : bundle ? (
-                                    <NativeSelect.Root size="sm" width="120px">
-                                        <NativeSelect.Field
-                                            value={pattern}
-                                            onChange={(e) => handlePatternChange(e.target.value)}
-                                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                            style={{
-                                                fontSize: '11px',
-                                                padding: '2px 6px',
-                                                fontWeight: 600,
-                                                backgroundColor: {
-                                                    [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
-                                                    [UnitPattern.SWAP]: '#FEEBC8',
-                                                    [UnitPattern.SPLIT]: '#E9D8FD',
-                                                    [UnitPattern.FLOW]: '#C6F6D5',
-                                                    [UnitPattern.SPINOFF]: '#FED7E2',
-                                                    [UnitPattern.CUSTOM]: '#E2E8F0',
-                                                    [UnitPattern.UNKNOWN]: '#EDF2F7',
-                                                }[pattern] || '#EDF2F7',
-                                                borderRadius: '4px',
-                                            }}
-                                        >
-                                            <option value={UnitPattern.SWAP}>Swap</option>
-                                            <option value={UnitPattern.INTERNAL_TRANSFER}>Internal Transfer</option>
-                                            <option value={UnitPattern.SPLIT}>Split</option>
-                                            <option value={UnitPattern.FLOW}>Flow</option>
-                                            <option value={UnitPattern.SPINOFF}>Spin-Off</option>
-                                            <option value={UnitPattern.CUSTOM}>Custom</option>
-                                            <option value={UnitPattern.UNKNOWN}>Unknown</option>
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
-                                ) : null}
-                                <Badge size="sm" colorPalette="purple" variant="subtle">
-                                    📦 #{bundleId}
-                                </Badge>
-                            </Flex>
-                            {error && (
-                                <Text fontSize="xs" color="red.500">{error}</Text>
-                            )}
-                            {bundle && (
-                                <>
-                                    <Text fontWeight="bold" fontSize="sm" color="purple.800">
-                                        {bundle.label || `Bundle #${bundleId}`}
-                                    </Text>
-                                    {bundle.notes && (
-                                        <Text fontSize="xs" color="gray.600" mt={0.5}>
-                                            {bundle.notes}
-                                        </Text>
-                                    )}
-                                    {/* Taxability Override */}
-                                    <Flex align="center" gap={2} mt={2}>
-                                        <Text fontSize="xs" color="gray.500" flexShrink={0}>
-                                            Taxability:
-                                        </Text>
-                                        <NativeSelect.Root size="sm" width="130px">
-                                            <NativeSelect.Field
-                                                value={taxability}
-                                                onChange={(e) => handleTaxabilityChange(e.target.value)}
-                                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                                style={{
-                                                    fontSize: '11px',
-                                                    padding: '2px 6px',
-                                                    backgroundColor:
-                                                        taxability === TaxabilityStatus.TAXABLE
-                                                            ? '#FED7AA'
-                                                            : taxability === TaxabilityStatus.NON_TAXABLE
-                                                                ? '#C6F6D5'
-                                                                : '#FEFCBF',
-                                                    borderRadius: '4px',
-                                                }}
-                                            >
-                                                <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
-                                                <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
-                                                <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Flex>
-                                </>
-                            )}
-                        </Box>
-
-                        {/* Transactions */}
-                        <Box p={3}>
+                    {/* Header */}
+                    <div className="border-b border-purple-100 bg-purple-50 p-3">
+                        <div className="mb-1 flex items-center justify-between">
                             {loading ? (
-                                <Flex align="center" gap={2}>
-                                    <Spinner size="xs" />
-                                    <Text fontSize="xs" color="gray.500">Loading...</Text>
-                                </Flex>
+                                <Spinner size="xs" />
                             ) : bundle ? (
-                                <>
-                                    <Text fontSize="xs" color="gray.500" mb={1} fontWeight="medium">
-                                        {bundle.transaction_count} transaction
-                                        {bundle.transaction_count !== 1 ? 's' : ''}
-                                    </Text>
-                                    <BundleMemberTransactionsTable
-                                        transactionIds={bundle.transactions.map(t => t.id)}
-                                        onTransactionClick={onTransactionClick}
-                                    />
-                                </>
+                                <select
+                                    value={pattern}
+                                    onChange={(e) => handlePatternChange(e.target.value)}
+                                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                    style={{
+                                        fontSize: '11px',
+                                        padding: '2px 6px',
+                                        fontWeight: 600,
+                                        backgroundColor: {
+                                            [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
+                                            [UnitPattern.SWAP]: '#FEEBC8',
+                                            [UnitPattern.SPLIT]: '#E9D8FD',
+                                            [UnitPattern.FLOW]: '#C6F6D5',
+                                            [UnitPattern.SPINOFF]: '#FED7E2',
+                                            [UnitPattern.CUSTOM]: '#E2E8F0',
+                                            [UnitPattern.UNKNOWN]: '#EDF2F7',
+                                        }[pattern] || '#EDF2F7',
+                                        borderRadius: '4px',
+                                    }}
+                                >
+                                    <option value={UnitPattern.SWAP}>Swap</option>
+                                    <option value={UnitPattern.INTERNAL_TRANSFER}>Internal Transfer</option>
+                                    <option value={UnitPattern.SPLIT}>Split</option>
+                                    <option value={UnitPattern.FLOW}>Flow</option>
+                                    <option value={UnitPattern.SPINOFF}>Spin-Off</option>
+                                    <option value={UnitPattern.CUSTOM}>Custom</option>
+                                    <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                                </select>
                             ) : null}
-                        </Box>
-
-                        {/* Actions */}
-                        {bundle && (
-                            <Box p={3} pt={0}>
-                                <Flex gap={2}>
-                                    <Button
-                                        size="xs"
-                                        variant="ghost"
-                                        colorPalette="red"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            // Remove the triggering tx from the bundle
-                                            // We don't know which tx triggered, so we close for now
-                                            onOpenChange(false);
-                                        }}
-                                        flex={1}
-                                    >
-                                        Close
-                                    </Button>
-                                </Flex>
-                            </Box>
+                            <Badge colorScheme="purple">
+                                📦 #{bundleId}
+                            </Badge>
+                        </div>
+                        {error && (
+                            <span className="block text-xs text-red-500">{error}</span>
                         )}
-                    </Popover.Content>
-                </Popover.Positioner>
-            </Portal>
-        </Popover.Root>
+                        {bundle && (
+                            <>
+                                <span className="block text-sm font-bold text-purple-800">
+                                    {bundle.label || `Bundle #${bundleId}`}
+                                </span>
+                                {bundle.notes && (
+                                    <span className="mt-0.5 block text-xs text-slate-600">
+                                        {bundle.notes}
+                                    </span>
+                                )}
+                                {/* Taxability Override */}
+                                <div className="mt-2 flex items-center gap-2">
+                                    <span className="shrink-0 text-xs text-slate-500">
+                                        Taxability:
+                                    </span>
+                                    <select
+                                        value={taxability}
+                                        onChange={(e) => handleTaxabilityChange(e.target.value)}
+                                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                        style={{
+                                            fontSize: '11px',
+                                            padding: '2px 6px',
+                                            backgroundColor:
+                                                taxability === TaxabilityStatus.TAXABLE
+                                                    ? '#FED7AA'
+                                                    : taxability === TaxabilityStatus.NON_TAXABLE
+                                                        ? '#C6F6D5'
+                                                        : '#FEFCBF',
+                                            borderRadius: '4px',
+                                        }}
+                                    >
+                                        <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
+                                        <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
+                                        <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
+                                    </select>
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    {/* Transactions */}
+                    <div className="p-3">
+                        {loading ? (
+                            <div className="flex items-center gap-2">
+                                <Spinner size="xs" />
+                                <span className="text-xs text-slate-500">Loading...</span>
+                            </div>
+                        ) : bundle ? (
+                            <>
+                                <span className="mb-1 block text-xs font-medium text-slate-500">
+                                    {bundle.transaction_count} transaction
+                                    {bundle.transaction_count !== 1 ? 's' : ''}
+                                </span>
+                                <BundleMemberTransactionsTable
+                                    transactionIds={bundle.transactions.map(t => t.id)}
+                                    onTransactionClick={onTransactionClick}
+                                />
+                            </>
+                        ) : null}
+                    </div>
+
+                    {/* Actions */}
+                    {bundle && (
+                        <div className="p-3 pt-0">
+                            <div className="flex gap-2">
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    colorScheme="red"
+                                    className="flex-1"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        // Remove the triggering tx from the bundle
+                                        // We don't know which tx triggered, so we close for now
+                                        onOpenChange(false);
+                                    }}
+                                >
+                                    Close
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </RadixPopover.Content>
+            </RadixPopover.Portal>
+        </RadixPopover.Root>
     );
 };
 

@@ -1,8 +1,4 @@
-import {
-    Badge, Box,
-    Button, Card, Checkbox, Collapsible, Flex, Grid,
-    GridItem, Heading, HStack, Input, NativeSelect, Spinner, Text
-} from '@chakra-ui/react';
+import { Badge, Button, Input, Spinner, type BadgeColorScheme } from './ui/primitives';
 import React, { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Account, API_URL, Asset } from '../types';
@@ -432,45 +428,45 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
     // Helper component for form labels
     const Label: React.FC<{ children: React.ReactNode; required?: boolean }> = ({ children, required }) => (
-        <Text fontSize="xs" fontWeight="semibold" color="gray.600" mb={1} textTransform="uppercase" letterSpacing="wide">
-            {children}{required && <Text as="span" color="red.500"> *</Text>}
-        </Text>
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            {children}{required && <span className="text-red-500"> *</span>}
+        </p>
     );
 
     return (
-        <Box fontSize="xs">
+        <div className="text-xs">
             {/* Header */}
-            <Box mb={4}>
-                <Heading as="h2" size="sm" mb={1} color="gray.800">
+            <div className="mb-4">
+                <h2 className="mb-1 text-sm font-semibold text-slate-800">
                     Add Transaction
-                </Heading>
-                <Text color="gray.500" fontSize="xs">
+                </h2>
+                <p className="text-xs text-slate-500">
                     Create a new transaction manually for OTC trades, airdrops, or other non-exchange activities.
-                </Text>
-            </Box>
+                </p>
+            </div>
             {/* Alerts */}
             {error && (
-                <Box mb={4} p={4} bg="red.50" borderRadius="lg" borderLeft="4px solid" borderLeftColor="red.500">
-                    <Text color="red.700" fontWeight="medium">❌ {error}</Text>
-                </Box>
+                <div className="mb-4 border-l-4 border-l-red-500 bg-red-50 p-4">
+                    <p className="font-medium text-red-700">❌ {error}</p>
+                </div>
             )}
             {success && (
-                <Box mb={4} p={4} bg="green.50" borderRadius="lg" borderLeft="4px solid" borderLeftColor="green.500">
-                    <Text color="green.700" fontWeight="medium">✅ {success}</Text>
-                </Box>
+                <div className="mb-4 border-l-4 border-l-green-500 bg-green-50 p-4">
+                    <p className="font-medium text-green-700">✅ {success}</p>
+                </div>
             )}
 
             <form onSubmit={handleSubmit}>
-                <Flex direction="column" gap={5}>
+                <div className="flex flex-col gap-5">
 
                     {/* Section 1: Source & Timing */}
-                    <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
-                        <Card.Header bg="gray.50" py={2} px={3} borderTopRadius="xl">
-                            <Heading size="xs" color="gray.700">📍 Source & Timing</Heading>
-                        </Card.Header>
-                        <Card.Body p={3}>
-                            <Grid templateColumns={{ base: "1fr", md: "repeat(5, 1fr)" }} gap={4}>
-                                <GridItem>
+                    <div className="overflow-visible border border-slate-200 bg-white shadow-sm">
+                        <div className="bg-slate-50 px-3 py-2">
+                            <h3 className="text-xs font-semibold text-slate-700">📍 Source & Timing</h3>
+                        </div>
+                        <div className="p-3">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+                                <div>
                                     <Label required>Account</Label>
                                     <AccountSelector
                                         value={formData.account_id}
@@ -486,8 +482,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                     {formData.source_account && !formData.account_id && (() => {
                                         const suggestions = getAccountSuggestions(formData.source_account, accounts, 0.5, 3);
                                         return suggestions.length > 0 ? (
-                                            <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                                                <span className="text-xs text-slate-500">Suggestions:</span>
                                                 {suggestions.map((s, idx) => (
                                                     <Tooltip
                                                         key={idx}
@@ -495,21 +491,19 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                         openDelay={100}
                                                     >
                                                         <Badge
-                                                            size="xs"
-                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                            cursor="pointer"
+                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                            className="cursor-pointer"
                                                             onClick={() => handleInputChange('account_id', s.item.id)}
                                                         >
                                                             {s.item.name}{s.confidence >= 0.9 && ' ✓'}
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
-                                            </HStack>
+                                            </div>
                                         ) : null;
                                     })()}
-                                </GridItem>
-                                <GridItem>
+                                </div>
+                                <div>
                                     <Label required>Source</Label>
                                     <ComboSelect
                                         value={formData.source}
@@ -519,174 +513,167 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         width="100%"
                                         size="xs"
                                     />
-                                </GridItem>
-                                <GridItem>
+                                </div>
+                                <div>
                                     <Label required>Date & Time</Label>
                                     <Input
                                         type="datetime-local"
                                         value={formData.date_time}
                                         onChange={e => handleInputChange('date_time', e.target.value)}
-                                        size="xs"
-                                        borderRadius="md"
+                                        className="h-7 text-xs"
                                     />
-                                </GridItem>
-                                <GridItem>
+                                </div>
+                                <div>
                                     <Label>Source TX Type</Label>
                                     <Input
                                         placeholder="e.g., airdrop, otc"
                                         value={formData.source_transaction_type}
                                         onChange={e => handleInputChange('source_transaction_type', e.target.value)}
-                                        size="xs"
-                                        borderRadius="md"
+                                        className="h-7 text-xs"
                                     />
-                                </GridItem>
-                                <GridItem>
+                                </div>
+                                <div>
                                     <Label>Source TX ID</Label>
                                     <Input
                                         placeholder="External transaction ID"
                                         value={formData.source_transaction_id}
                                         onChange={e => handleInputChange('source_transaction_id', e.target.value)}
-                                        size="xs"
-                                        borderRadius="md"
+                                        className="h-7 text-xs"
                                     />
-                                </GridItem>
-                            </Grid>
-                        </Card.Body>
-                    </Card.Root>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
 
                     {/* Section 2 + Pricing: Transaction Details (1/2) and Pricing & Fees (1/2) side by side */}
-                    <Flex gap={4} direction={{ base: "column", lg: "row" }}>
+                    <div className="flex flex-col gap-4 lg:flex-row">
                         {/* Section 2: Transaction Details - 50% */}
-                        <Box flex="1">
-                            <Card.Root shadow="sm" borderRadius="xl" overflow="visible" h="100%">
-                                <Card.Header bg="blue.50" py={2} px={3} borderTopRadius="xl">
-                                    <Heading size="xs" color="blue.700">💱 Transaction Details</Heading>
-                                </Card.Header>
-                                <Card.Body p={3}>
-                                    <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
-                                        <GridItem>
+                        <div className="flex-1">
+                            <div className="h-full overflow-visible border border-slate-200 bg-white shadow-sm">
+                                <div className="bg-blue-50 px-3 py-2">
+                                    <h3 className="text-xs font-semibold text-blue-700">💱 Transaction Details</h3>
+                                </div>
+                                <div className="p-3">
+                                    <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                                        <div>
                                             <Label required>Type</Label>
-                                            <NativeSelect.Root size="xs">
-                                                <NativeSelect.Field
-                                                    value={formData.simplified_type}
-                                                    onChange={e => handleInputChange('simplified_type', e.target.value)}
-                                                    borderRadius="md"
-                                                >
-                                                    <option value="trade">💱 Trade (Buy/Sell/Swap)</option>
-                                                    <option value="transfer">↔️ Transfer</option>
-                                                    <option value="margin">📈 Margin (Derivative)</option>
-                                                    <option value="cost">💸 Cost (Fee-only)</option>
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
-                                        </GridItem>
-                                        <GridItem>
+                                            <select
+                                                title="Type"
+                                                value={formData.simplified_type}
+                                                onChange={e => handleInputChange('simplified_type', e.target.value)}
+                                                className="h-7 w-full border border-slate-200 bg-white px-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            >
+                                                <option value="trade">💱 Trade (Buy/Sell/Swap)</option>
+                                                <option value="transfer">↔️ Transfer</option>
+                                                <option value="margin">📈 Margin (Derivative)</option>
+                                                <option value="cost">💸 Cost (Fee-only)</option>
+                                            </select>
+                                        </div>
+                                        <div>
                                             <Label required>Direction</Label>
-                                            <NativeSelect.Root size="xs">
-                                                <NativeSelect.Field
-                                                    value={formData.direction}
-                                                    onChange={e => handleInputChange('direction', e.target.value)}
-                                                    borderRadius="md"
-                                                >
-                                                    <option value="inflow">↓ Inflow (Receive)</option>
-                                                    <option value="outflow">↑ Outflow (Send)</option>
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
-                                            <Text fontSize="xs" color="gray.500" mt={1}>
+                                            <select
+                                                title="Direction"
+                                                value={formData.direction}
+                                                onChange={e => handleInputChange('direction', e.target.value)}
+                                                className="h-7 w-full border border-slate-200 bg-white px-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            >
+                                                <option value="inflow">↓ Inflow (Receive)</option>
+                                                <option value="outflow">↑ Outflow (Send)</option>
+                                            </select>
+                                            <p className="mt-1 text-xs text-slate-500">
                                                 {formData.simplified_type === 'trade'
                                                     ? (formData.direction === 'inflow' ? '→ Acquisition' : '→ Disposal')
                                                     : (formData.direction === 'inflow' ? '→ Transfer In' : '→ Transfer Out')
                                                 }
-                                            </Text>
-                                        </GridItem>
-                                        <GridItem>
+                                            </p>
+                                        </div>
+                                        <div>
                                             <Label>Review Status</Label>
-                                            <NativeSelect.Root size="xs">
-                                                <NativeSelect.Field
-                                                    value={formData.review_status}
-                                                    onChange={e => handleInputChange('review_status', e.target.value)}
-                                                    borderRadius="md"
-                                                >
-                                                    <option value="pending">🟡 Pending</option>
-                                                    <option value="valid">🟢 Valid</option>
-                                                    <option value="invalid">🔴 Invalid</option>
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
-                                        </GridItem>
-                                    </Grid>
+                                            <select
+                                                title="Review Status"
+                                                value={formData.review_status}
+                                                onChange={e => handleInputChange('review_status', e.target.value)}
+                                                className="h-7 w-full border border-slate-200 bg-white px-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            >
+                                                <option value="pending">🟡 Pending</option>
+                                                <option value="valid">🟢 Valid</option>
+                                                <option value="invalid">🔴 Invalid</option>
+                                            </select>
+                                        </div>
+                                    </div>
 
                                     {/* Transfer Destination Account - only show for transfers */}
                                     {formData.simplified_type === 'transfer' && (
-                                        <Box bg="purple.50" p={4} borderRadius="lg" mb={4}>
-                                            <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={4} alignItems="end">
-                                                <GridItem>
+                                        <div className="mb-4 bg-purple-50 p-4">
+                                            <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-2">
+                                                <div>
                                                     <Label required>
                                                         {formData.direction === 'outflow' ? 'Destination Account' : 'Origin Account'}
                                                     </Label>
                                                     {!creatingAccount ? (
-                                                        <Flex gap={2}>
-                                                            <NativeSelect.Root size="xs" flex={1}>
-                                                                <NativeSelect.Field
-                                                                    value={formData.direction === 'outflow' ? (formData.to_account_id || '') : (formData.from_account_id || '')}
-                                                                    onChange={e => {
-                                                                        const selectedId = e.target.value ? parseInt(e.target.value) : null;
-                                                                        if (formData.direction === 'outflow') {
-                                                                            handleInputChange('to_account_id', selectedId);
-                                                                        } else {
-                                                                            handleInputChange('from_account_id', selectedId);
-                                                                        }
-                                                                    }}
-                                                                    borderRadius="md"
-                                                                >
-                                                                    <option value="">Select account...</option>
-                                                                    {accounts.map(acc => (
-                                                                        <option key={acc.id} value={acc.id}>
-                                                                            {acc.name} ({acc.account_type}) {acc.owned ? '✓ Owned' : ''}
-                                                                        </option>
-                                                                    ))}
-                                                                </NativeSelect.Field>
-                                                            </NativeSelect.Root>
-                                                            <Button size="xs" variant="outline" onClick={() => setCreatingAccount(true)}>
+                                                        <div className="flex gap-2">
+                                                            <select
+                                                                title="Account"
+                                                                value={formData.direction === 'outflow' ? (formData.to_account_id || '') : (formData.from_account_id || '')}
+                                                                onChange={e => {
+                                                                    const selectedId = e.target.value ? parseInt(e.target.value) : null;
+                                                                    if (formData.direction === 'outflow') {
+                                                                        handleInputChange('to_account_id', selectedId);
+                                                                    } else {
+                                                                        handleInputChange('from_account_id', selectedId);
+                                                                    }
+                                                                }}
+                                                                className="h-7 flex-1 border border-slate-200 bg-white px-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                            >
+                                                                <option value="">Select account...</option>
+                                                                {accounts.map(acc => (
+                                                                    <option key={acc.id} value={acc.id}>
+                                                                        {acc.name} ({acc.account_type}) {acc.owned ? '✓ Owned' : ''}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <Button size="sm" variant="outline" onClick={() => setCreatingAccount(true)} className="h-7">
                                                                 + New
                                                             </Button>
-                                                        </Flex>
+                                                        </div>
                                                     ) : (
-                                                        <Flex direction="column" gap={2}>
+                                                        <div className="flex flex-col gap-2">
                                                             <Input
                                                                 placeholder="New account name"
                                                                 value={newAccountName}
                                                                 onChange={e => setNewAccountName(e.target.value)}
-                                                                size="xs"
-                                                                borderRadius="md"
+                                                                className="h-7 text-xs"
                                                             />
-                                                            <Flex gap={2}>
-                                                                <NativeSelect.Root size="xs" flex={1}>
-                                                                    <NativeSelect.Field
-                                                                        value={newAccountType}
-                                                                        onChange={e => setNewAccountType(e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment')}
-                                                                        borderRadius="md"
-                                                                    >
-                                                                        <option value="wallet">Wallet</option>
-                                                                        <option value="cex">CEX</option>
-                                                                        <option value="dex">DEX</option>
-                                                                        <option value="broker">Broker</option>
-                                                                        <option value="bank">Bank</option>
-                                                                        <option value="investment">Investment</option>
-                                                                    </NativeSelect.Field>
-                                                                </NativeSelect.Root>
-                                                                <Checkbox.Root
-                                                                    checked={newAccountOwned}
-                                                                    onCheckedChange={(e) => setNewAccountOwned(!!e.checked)}
-                                                                    size="xs"
+                                                            <div className="flex gap-2">
+                                                                <select
+                                                                    title="Account Type"
+                                                                    value={newAccountType}
+                                                                    onChange={e => setNewAccountType(e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment')}
+                                                                    className="h-7 flex-1 border border-slate-200 bg-white px-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                                                 >
-                                                                    <Checkbox.HiddenInput />
-                                                                    <Checkbox.Control />
-                                                                    <Checkbox.Label fontSize="xs">Owned</Checkbox.Label>
-                                                                </Checkbox.Root>
-                                                            </Flex>
-                                                            <Flex gap={2}>
+                                                                    <option value="wallet">Wallet</option>
+                                                                    <option value="cex">CEX</option>
+                                                                    <option value="dex">DEX</option>
+                                                                    <option value="broker">Broker</option>
+                                                                    <option value="bank">Bank</option>
+                                                                    <option value="investment">Investment</option>
+                                                                </select>
+                                                                <label className="flex items-center gap-1 text-xs">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={newAccountOwned}
+                                                                        onChange={(e) => setNewAccountOwned(e.target.checked)}
+                                                                        className="h-4 w-4 cursor-pointer accent-blue-500"
+                                                                    />
+                                                                    Owned
+                                                                </label>
+                                                            </div>
+                                                            <div className="flex gap-2">
                                                                 <Button
-                                                                    size="xs"
-                                                                    colorPalette="green"
+                                                                    size="sm"
+                                                                    colorScheme="green"
+                                                                    className="h-7"
                                                                     onClick={async () => {
                                                                         if (newAccountName) {
                                                                             const created = await createAccount(newAccountName, newAccountType, newAccountOwned);
@@ -704,17 +691,17 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                 >
                                                                     Create
                                                                 </Button>
-                                                                <Button size="xs" variant="ghost" onClick={() => {
+                                                                <Button size="sm" variant="ghost" className="h-7" onClick={() => {
                                                                     setCreatingAccount(false);
                                                                     setNewAccountName('');
                                                                 }}>
                                                                     Cancel
                                                                 </Button>
-                                                            </Flex>
-                                                        </Flex>
+                                                            </div>
+                                                        </div>
                                                     )}
-                                                </GridItem>
-                                                <GridItem>
+                                                </div>
+                                                <div>
                                                     {/* Internal transfer indicator */}
                                                     {(() => {
                                                         const mainAcc = accounts.find(a => a.id === formData.account_id);
@@ -725,42 +712,42 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
                                                         if (counterpartyId && formData.account_id) {
                                                             return (
-                                                                <Box p={3} borderRadius="md" bg={isInternal ? 'green.100' : isExternal ? 'orange.100' : 'gray.100'}>
+                                                                <div className={`p-3 ${isInternal ? 'bg-green-100' : isExternal ? 'bg-orange-100' : 'bg-slate-100'}`}>
                                                                     {isInternal ? (
-                                                                        <Flex align="center" gap={2}>
-                                                                            <Text fontSize="lg">🏠</Text>
-                                                                            <Box>
-                                                                                <Text fontSize="xs" fontWeight="bold" color="green.700">Internal Transfer</Text>
-                                                                                <Text fontSize="xs" color="green.600">Both accounts are owned - no taxable event</Text>
-                                                                            </Box>
-                                                                        </Flex>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-lg">🏠</span>
+                                                                            <div>
+                                                                                <p className="text-xs font-bold text-green-700">Internal Transfer</p>
+                                                                                <p className="text-xs text-green-600">Both accounts are owned - no taxable event</p>
+                                                                            </div>
+                                                                        </div>
                                                                     ) : isExternal ? (
-                                                                        <Flex align="center" gap={2}>
-                                                                            <Text fontSize="lg">🌐</Text>
-                                                                            <Box>
-                                                                                <Text fontSize="xs" fontWeight="bold" color="orange.700">External Transfer</Text>
-                                                                                <Text fontSize="xs" color="orange.600">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-lg">🌐</span>
+                                                                            <div>
+                                                                                <p className="text-xs font-bold text-orange-700">External Transfer</p>
+                                                                                <p className="text-xs text-orange-600">
                                                                                     {!counterpartyAcc?.owned ? 'To external party' : 'From external party'}
-                                                                                </Text>
-                                                                            </Box>
-                                                                        </Flex>
+                                                                                </p>
+                                                                            </div>
+                                                                        </div>
                                                                     ) : (
-                                                                        <Text fontSize="xs" color="gray.500">Select both accounts to see transfer type</Text>
+                                                                        <p className="text-xs text-slate-500">Select both accounts to see transfer type</p>
                                                                     )}
-                                                                </Box>
+                                                                </div>
                                                             );
                                                         }
                                                         return null;
                                                     })()}
-                                                </GridItem>
-                                            </Grid>
-                                        </Box>
+                                                </div>
+                                            </div>
+                                        </div>
                                     )}
 
                                     {/* Asset Row */}
-                                    <Box bg="gray.50" p={4} borderRadius="lg" mb={4}>
-                                        <Grid templateColumns={{ base: "1fr", md: "2fr 1fr 1fr" }} gap={4} alignItems="end">
-                                            <GridItem>
+                                    <div className="mb-4 bg-slate-50 p-4">
+                                        <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-[2fr_1fr_1fr]">
+                                            <div>
                                                 <Label required>Asset</Label>
                                                 <AssetSelector
                                                     value={formData.asset_id}
@@ -777,8 +764,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                 {formData.source_asset_symbol && !formData.asset_id && (() => {
                                                     const suggestions = getAssetSuggestions(formData.source_asset_symbol, assets, 0.5, 3);
                                                     return suggestions.length > 0 ? (
-                                                        <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                            <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                                                            <span className="text-xs text-slate-500">Suggestions:</span>
                                                             {suggestions.map((s, idx) => (
                                                                 <Tooltip
                                                                     key={idx}
@@ -786,31 +773,28 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                     openDelay={100}
                                                                 >
                                                                     <Badge
-                                                                        size="xs"
-                                                                        colorPalette={getConfidenceColor(s.confidence)}
-                                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                        cursor="pointer"
+                                                                        colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                                        className="cursor-pointer"
                                                                         onClick={() => handleInputChange('asset_id', s.item.asset_id!)}
                                                                     >
                                                                         {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
                                                                     </Badge>
                                                                 </Tooltip>
                                                             ))}
-                                                        </HStack>
+                                                        </div>
                                                     ) : null;
                                                 })()}
-                                            </GridItem>
-                                            <GridItem>
+                                            </div>
+                                            <div>
                                                 <Label>Source Symbol</Label>
                                                 <Input
                                                     placeholder="Original symbol"
                                                     value={formData.source_asset_symbol}
                                                     onChange={e => handleInputChange('source_asset_symbol', e.target.value.toUpperCase())}
-                                                    size="xs"
-                                                    borderRadius="md"
+                                                    className="h-7 text-xs"
                                                 />
-                                            </GridItem>
-                                            <GridItem>
+                                            </div>
+                                            <div>
                                                 <Label required>Quantity</Label>
                                                 <Input
                                                     type="number"
@@ -818,31 +802,29 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     placeholder="0.00"
                                                     value={formData.quantity}
                                                     onChange={e => handleInputChange('quantity', e.target.value)}
-                                                    size="xs"
-                                                    borderRadius="md"
-                                                    fontWeight="semibold"
+                                                    className="h-7 text-xs font-semibold"
                                                 />
-                                            </GridItem>
-                                        </Grid>
-                                    </Box>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                                </Card.Body>
-                            </Card.Root>
-                        </Box>
+                                </div>
+                            </div>
+                        </div>
 
                         {/* Section 3: Pricing & Fees - 50% */}
-                        <Box flex="1">
-                            <Card.Root shadow="sm" borderRadius="xl" overflow="visible" h="100%">
-                                <Card.Header bg="green.50" py={2} px={3} borderTopRadius="xl">
-                                    <Heading size="xs" color="green.700">💰 Pricing & Fees</Heading>
-                                </Card.Header>
-                                <Card.Body p={3}>
-                                    <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6}>
+                        <div className="flex-1">
+                            <div className="h-full overflow-visible border border-slate-200 bg-white shadow-sm">
+                                <div className="bg-green-50 px-3 py-2">
+                                    <h3 className="text-xs font-semibold text-green-700">💰 Pricing & Fees</h3>
+                                </div>
+                                <div className="p-3">
+                                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                         {/* Price Section */}
-                                        <Box>
-                                            <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={3} textTransform="uppercase">Price</Text>
-                                            <Grid templateColumns="1fr 1fr" gap={3}>
-                                                <GridItem>
+                                        <div>
+                                            <p className="mb-3 text-xs font-bold uppercase text-slate-500">Price</p>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
                                                     <Label>Unit Price</Label>
                                                     <Input
                                                         type="number"
@@ -850,11 +832,10 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                         placeholder="0.00"
                                                         value={formData.price}
                                                         onChange={e => handleInputChange('price', e.target.value)}
-                                                        size="xs"
-                                                        borderRadius="md"
+                                                        className="h-7 text-xs"
                                                     />
-                                                </GridItem>
-                                                <GridItem>
+                                                </div>
+                                                <div>
                                                     <Label required>Quote Asset</Label>
                                                     <AssetSelector
                                                         value={formData.price_quote_asset_id}
@@ -871,8 +852,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     {formData.source_price_quote_asset_symbol && !formData.price_quote_asset_id && (() => {
                                                         const suggestions = getAssetSuggestions(formData.source_price_quote_asset_symbol, assets, 0.5, 3);
                                                         return suggestions.length > 0 ? (
-                                                            <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                                <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                                                                <span className="text-xs text-slate-500">Suggestions:</span>
                                                                 {suggestions.map((s, idx) => (
                                                                     <Tooltip
                                                                         key={idx}
@@ -880,22 +861,20 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                         openDelay={100}
                                                                     >
                                                                         <Badge
-                                                                            size="xs"
-                                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                            cursor="pointer"
+                                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                                            className="cursor-pointer"
                                                                             onClick={() => handleInputChange('price_quote_asset_id', s.item.asset_id!)}
                                                                         >
                                                                             {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
                                                                         </Badge>
                                                                     </Tooltip>
                                                                 ))}
-                                                            </HStack>
+                                                            </div>
                                                         ) : null;
                                                     })()}
-                                                </GridItem>
-                                            </Grid>
-                                            <Box mt={3}>
+                                                </div>
+                                            </div>
+                                            <div className="mt-3">
                                                 <Label>Total Value</Label>
                                                 <Input
                                                     type="number"
@@ -903,18 +882,16 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     placeholder="Auto: Price × Quantity"
                                                     value={formData.total}
                                                     onChange={e => handleInputChange('total', e.target.value)}
-                                                    size="xs"
-                                                    borderRadius="md"
-                                                    bg="gray.50"
+                                                    className="h-7 bg-slate-50 text-xs"
                                                 />
-                                            </Box>
-                                        </Box>
+                                            </div>
+                                        </div>
 
                                         {/* Fee Section */}
-                                        <Box>
-                                            <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={3} textTransform="uppercase">Fee</Text>
-                                            <Grid templateColumns="1fr 1fr" gap={3}>
-                                                <GridItem>
+                                        <div>
+                                            <p className="mb-3 text-xs font-bold uppercase text-slate-500">Fee</p>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
                                                     <Label>Fee Amount</Label>
                                                     <Input
                                                         type="number"
@@ -922,11 +899,10 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                         placeholder="0.00"
                                                         value={formData.fee}
                                                         onChange={e => handleInputChange('fee', e.target.value)}
-                                                        size="xs"
-                                                        borderRadius="md"
+                                                        className="h-7 text-xs"
                                                     />
-                                                </GridItem>
-                                                <GridItem>
+                                                </div>
+                                                <div>
                                                     <Label required>Fee Quote Asset</Label>
                                                     <AssetSelector
                                                         value={formData.fee_quote_asset_id}
@@ -943,8 +919,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     {formData.source_fee_quote_asset_symbol && !formData.fee_quote_asset_id && (() => {
                                                         const suggestions = getAssetSuggestions(formData.source_fee_quote_asset_symbol, assets, 0.5, 3);
                                                         return suggestions.length > 0 ? (
-                                                            <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                                <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                                                                <span className="text-xs text-slate-500">Suggestions:</span>
                                                                 {suggestions.map((s, idx) => (
                                                                     <Tooltip
                                                                         key={idx}
@@ -952,90 +928,86 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                         openDelay={100}
                                                                     >
                                                                         <Badge
-                                                                            size="xs"
-                                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                            cursor="pointer"
+                                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                                            className="cursor-pointer"
                                                                             onClick={() => handleInputChange('fee_quote_asset_id', s.item.asset_id!)}
                                                                         >
                                                                             {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
                                                                         </Badge>
                                                                     </Tooltip>
                                                                 ))}
-                                                            </HStack>
+                                                            </div>
                                                         ) : null;
                                                     })()}
-                                                </GridItem>
-                                            </Grid>
-                                        </Box>
-                                    </Grid>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
 
                                     {/* P&L Options */}
-                                    <Flex gap={6} mt={4} pt={4} borderTop="1px" borderColor="gray.200">
-                                        <Checkbox.Root
-                                            checked={formData.include_fee}
-                                            onCheckedChange={(e) => handleInputChange('include_fee', !!e.checked)}
+                                    <div className="mt-4 flex gap-6 border-t border-slate-200 pt-4">
+                                        <label className="flex items-center gap-1 text-xs">
+                                            <input
+                                                type="checkbox"
+                                                checked={formData.include_fee}
+                                                onChange={(e) => handleInputChange('include_fee', e.target.checked)}
+                                                className="h-4 w-4 cursor-pointer accent-blue-500"
+                                            />
+                                            Include Fee in P&L
+                                        </label>
+                                        <select
+                                            title="Taxability Status"
+                                            value={formData.taxability_status}
+                                            onChange={(e) => handleInputChange('taxability_status', e.target.value)}
+                                            className="h-7 max-w-[160px] border border-slate-200 bg-white px-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                         >
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control />
-                                            <Checkbox.Label fontSize="xs">Include Fee in P&L</Checkbox.Label>
-                                        </Checkbox.Root>
-                                        <NativeSelect.Root size="xs" maxW="160px">
-                                            <NativeSelect.Field
-                                                value={formData.taxability_status}
-                                                onChange={(e) => handleInputChange('taxability_status', e.target.value)}
-                                            >
-                                                <option value="unknown">Unknown</option>
-                                                <option value="taxable">Taxable</option>
-                                                <option value="non_taxable">Non-Taxable</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Flex>
-                                </Card.Body>
-                            </Card.Root>
-                        </Box>
-                    </Flex>
+                                            <option value="unknown">Unknown</option>
+                                            <option value="taxable">Taxable</option>
+                                            <option value="non_taxable">Non-Taxable</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     {/* Section 4: Tags (1/3) + Network & Advanced (2/3) side by side */}
-                    <Flex gap={4} direction={{ base: "column", lg: "row" }}>
+                    <div className="flex flex-col gap-4 lg:flex-row">
                         {/* Tags - 1/3 */}
-                        <Box flex="1" minW={0}>
-                            <Card.Root shadow="sm" borderRadius="xl" overflow="hidden" h="100%">
-                                <Card.Header bg="purple.50" py={2} px={3} borderTopRadius="xl">
-                                    <Heading size="xs" color="purple.700">🏷️ Tags</Heading>
-                                </Card.Header>
-                                <Card.Body p={3}>
-                                    <Text fontSize="xs" color="gray.500" mb={3}>
+                        <div className="min-w-0 flex-1">
+                            <div className="h-full overflow-hidden border border-slate-200 bg-white shadow-sm">
+                                <div className="bg-purple-50 px-3 py-2">
+                                    <h3 className="text-xs font-semibold text-purple-700">🏷️ Tags</h3>
+                                </div>
+                                <div className="p-3">
+                                    <p className="mb-3 text-xs text-slate-500">
                                         Add key-value tags to categorize this transaction
-                                    </Text>
+                                    </p>
 
                                     {/* Selected tags */}
                                     {formData.tags.length > 0 && (
-                                        <Flex gap={2} wrap="wrap" mb={3}>
+                                        <div className="mb-3 flex flex-wrap gap-2">
                                             {formData.tags.map((tag, idx) => (
                                                 <Badge
                                                     key={idx}
-                                                    colorPalette="purple"
-                                                    variant="solid"
-                                                    cursor="pointer"
+                                                    colorScheme="purple"
+                                                    className="cursor-pointer"
                                                     onClick={() => handleInputChange('tags', formData.tags.filter((_, i) => i !== idx))}
                                                     title="Click to remove"
                                                 >
                                                     {tag.key}: {tag.value} ✕
                                                 </Badge>
                                             ))}
-                                        </Flex>
+                                        </div>
                                     )}
 
                                     {/* Add new tag */}
-                                    <Flex gap={2} mb={3}>
+                                    <div className="mb-3 flex gap-2">
                                         <Input
                                             placeholder="Key (e.g., category)"
                                             value={newTagKey}
                                             onChange={e => setNewTagKey(e.target.value)}
-                                            size="xs"
-                                            borderRadius="md"
-                                            flex={1}
+                                            className="h-7 flex-1 text-xs"
                                         />
                                         <Input
                                             placeholder="Value (e.g., airdrop)"
@@ -1057,13 +1029,12 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     setNewTagValue('');
                                                 }
                                             }}
-                                            size="xs"
-                                            borderRadius="md"
-                                            flex={1}
+                                            className="h-7 flex-1 text-xs"
                                         />
                                         <Button
-                                            size="xs"
+                                            size="sm"
                                             variant="outline"
+                                            className="h-7"
                                             onClick={() => {
                                                 if (newTagKey.trim() && newTagValue.trim()) {
                                                     const key = newTagKey.trim().toLowerCase();
@@ -1082,189 +1053,151 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         >
                                             Add
                                         </Button>
-                                    </Flex>
-                                </Card.Body>
-                            </Card.Root>
-                        </Box>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
                         {/* Network & Advanced - 2/3 */}
-                        <Box flex="2">
-                            <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
-                                <Collapsible.Root open={showAdvanced} onOpenChange={(e) => setShowAdvanced(e.open)}>
-                                    <Collapsible.Trigger asChild>
-                                        <Card.Header
-                                            bg="purple.50"
-                                            py={3}
-                                            px={4}
-                                            borderTopRadius="xl"
-                                            cursor="pointer"
-                                            _hover={{ bg: "purple.100" }}
-                                            transition="background 0.2s"
-                                        >
-                                            <Flex justify="space-between" align="center">
-                                                <Heading size="xs" color="purple.700">🔗 Network & Advanced</Heading>
-                                                <Text color="purple.600" fontSize="xs">
-                                                    {showAdvanced ? '▲ Hide' : '▼ Show'}
-                                                </Text>
-                                            </Flex>
-                                        </Card.Header>
-                                    </Collapsible.Trigger>
-                                    <Collapsible.Content>
-                                        <Card.Body p={3}>
-                                            <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
-                                                <GridItem>
-                                                    <Label>Network</Label>
-                                                    <Input
-                                                        placeholder="ethereum, base, solana..."
-                                                        value={formData.network}
-                                                        onChange={e => handleInputChange('network', e.target.value)}
-                                                        size="xs"
-                                                        borderRadius="md"
-                                                    />
-                                                </GridItem>
-                                                <GridItem>
-                                                    <Label>From Address</Label>
-                                                    <Input
-                                                        placeholder="0x..."
-                                                        value={formData.from_address}
-                                                        onChange={e => handleInputChange('from_address', e.target.value)}
-                                                        size="xs"
-                                                        borderRadius="md"
-                                                        fontFamily="mono"
-                                                        fontSize="xs"
-                                                    />
-                                                </GridItem>
-                                                <GridItem>
-                                                    <Label>To Address</Label>
-                                                    <Input
-                                                        placeholder="0x..."
-                                                        value={formData.to_address}
-                                                        onChange={e => handleInputChange('to_address', e.target.value)}
-                                                        size="xs"
-                                                        borderRadius="md"
-                                                        fontFamily="mono"
-                                                        fontSize="xs"
-                                                    />
-                                                </GridItem>
-                                            </Grid>
-                                            <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={4}>
-                                                <GridItem>
-                                                    <Label>Transaction Hash</Label>
-                                                    <Input
-                                                        placeholder="0x..."
-                                                        value={formData.network_transaction_id}
-                                                        onChange={e => handleInputChange('network_transaction_id', e.target.value)}
-                                                        size="xs"
-                                                        borderRadius="md"
-                                                        fontFamily="mono"
-                                                        fontSize="xs"
-                                                    />
-                                                </GridItem>
-                                                <GridItem>
-                                                    <Label>Token Contract</Label>
-                                                    <Input
-                                                        placeholder="0x..."
-                                                        value={formData.token_contract_address}
-                                                        onChange={e => handleInputChange('token_contract_address', e.target.value)}
-                                                        size="xs"
-                                                        borderRadius="md"
-                                                        fontFamily="mono"
-                                                        fontSize="xs"
-                                                    />
-                                                </GridItem>
-                                            </Grid>
-                                            <Box mt={4}>
-                                                <Label>Review Notes</Label>
+                        <div className="flex-[2]">
+                            <div className="overflow-visible border border-slate-200 bg-white shadow-sm">
+                                <button
+                                    type="button"
+                                    title={showAdvanced ? 'Hide Network & Advanced' : 'Show Network & Advanced'}
+                                    onClick={() => setShowAdvanced(!showAdvanced)}
+                                    className="w-full bg-purple-50 px-4 py-3 text-left transition-colors hover:bg-purple-100"
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-xs font-semibold text-purple-700">🔗 Network & Advanced</h3>
+                                        <span className="text-xs text-purple-600">
+                                            {showAdvanced ? '▲ Hide' : '▼ Show'}
+                                        </span>
+                                    </div>
+                                </button>
+                                {showAdvanced && (
+                                    <div className="p-3">
+                                        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                                            <div>
+                                                <Label>Network</Label>
                                                 <Input
-                                                    placeholder="Add any notes about this transaction..."
-                                                    value={formData.review_notes}
-                                                    onChange={e => handleInputChange('review_notes', e.target.value)}
-                                                    size="xs"
-                                                    borderRadius="md"
+                                                    placeholder="ethereum, base, solana..."
+                                                    value={formData.network}
+                                                    onChange={e => handleInputChange('network', e.target.value)}
+                                                    className="h-7 text-xs"
                                                 />
-                                            </Box>
-                                        </Card.Body>
-                                    </Collapsible.Content>
-                                </Collapsible.Root>
-                            </Card.Root>
-                        </Box>
-                    </Flex>
+                                            </div>
+                                            <div>
+                                                <Label>From Address</Label>
+                                                <Input
+                                                    placeholder="0x..."
+                                                    value={formData.from_address}
+                                                    onChange={e => handleInputChange('from_address', e.target.value)}
+                                                    className="h-7 font-mono text-xs"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label>To Address</Label>
+                                                <Input
+                                                    placeholder="0x..."
+                                                    value={formData.to_address}
+                                                    onChange={e => handleInputChange('to_address', e.target.value)}
+                                                    className="h-7 font-mono text-xs"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                            <div>
+                                                <Label>Transaction Hash</Label>
+                                                <Input
+                                                    placeholder="0x..."
+                                                    value={formData.network_transaction_id}
+                                                    onChange={e => handleInputChange('network_transaction_id', e.target.value)}
+                                                    className="h-7 font-mono text-xs"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label>Token Contract</Label>
+                                                <Input
+                                                    placeholder="0x..."
+                                                    value={formData.token_contract_address}
+                                                    onChange={e => handleInputChange('token_contract_address', e.target.value)}
+                                                    className="h-7 font-mono text-xs"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="mt-4">
+                                            <Label>Review Notes</Label>
+                                            <Input
+                                                placeholder="Add any notes about this transaction..."
+                                                value={formData.review_notes}
+                                                onChange={e => handleInputChange('review_notes', e.target.value)}
+                                                className="h-7 text-xs"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
-                </Flex>
+                </div>
 
                 {/* Sticky Action Bar */}
-                <Box
-                    position="sticky"
-                    bottom={0}
-                    bg="white"
-                    py={4}
-                    mt={6}
-                    borderTop="1px solid"
-                    borderColor="gray.200"
-                    zIndex={10}
-                >
-                    <Flex gap={3} justify="flex-end">
+                <div className="sticky bottom-0 z-10 mt-6 border-t border-slate-200 bg-white py-4">
+                    <div className="flex justify-end gap-3">
                         <Button
                             variant="ghost"
                             onClick={handleClear}
                             disabled={loading}
-                            size="xs"
+                            size="sm"
                         >
                             Clear
                         </Button>
                         <Button
                             type="submit"
-                            colorPalette="blue"
+                            colorScheme="blue"
                             disabled={loading}
-                            size="xs"
-                            px={6}
+                            size="sm"
+                            className="px-6"
                         >
-                            {loading ? <Spinner size="xs" mr={2} /> : null}
+                            {loading ? <Spinner size="xs" className="mr-2" /> : null}
                             {loading ? 'Creating...' : '➕ Create Transaction'}
                         </Button>
-                    </Flex>
-                </Box>
+                    </div>
+                </div>
             </form>
 
             {/* Recent Transactions */}
             {recentTransactions.length > 0 && (
-                <Card.Root mt={8} shadow="sm" borderRadius="xl">
-                    <Card.Header bg="gray.50" py={2} px={3}>
-                        <Heading size="xs" color="gray.700">✨ Recently Created</Heading>
-                    </Card.Header>
-                    <Card.Body p={3}>
-                        <Flex direction="column" gap={2}>
+                <div className="mt-8 border border-slate-200 bg-white shadow-sm">
+                    <div className="bg-slate-50 px-3 py-2">
+                        <h3 className="text-xs font-semibold text-slate-700">✨ Recently Created</h3>
+                    </div>
+                    <div className="p-3">
+                        <div className="flex flex-col gap-2">
                             {recentTransactions.map(tx => (
-                                <Flex
+                                <div
                                     key={tx.id}
-                                    align="center"
-                                    gap={3}
-                                    p={3}
-                                    bg="gray.50"
-                                    borderRadius="lg"
-                                    fontSize="xs"
-                                    _hover={{ bg: "gray.100" }}
-                                    transition="background 0.2s"
+                                    className="flex items-center gap-3 bg-slate-50 p-3 text-xs transition-colors hover:bg-slate-100"
                                 >
-                                    <Badge colorPalette="purple" variant="solid">#{tx.id}</Badge>
+                                    <Badge colorScheme="purple">#{tx.id}</Badge>
                                     <Badge
-                                        colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
-                                        variant="subtle"
+                                        colorScheme={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
                                     >
                                         {tx.direction === 'inflow' ? '↓' : tx.direction === 'outflow' ? '↑' : '↔'} {tx.direction}
                                     </Badge>
-                                    <Text fontWeight="bold">{tx.quantity}</Text>
-                                    <Text color="gray.600">{tx.linked_asset_symbol || tx.source_asset_symbol || 'Unknown'}</Text>
-                                    <Badge variant="outline">{tx.transaction_type}</Badge>
-                                    <Text color="gray.400" fontSize="xs" ml="auto">
+                                    <span className="font-bold">{tx.quantity}</span>
+                                    <span className="text-slate-600">{tx.linked_asset_symbol || tx.source_asset_symbol || 'Unknown'}</span>
+                                    <Badge colorScheme="gray" className="border border-slate-300 bg-transparent text-slate-600">{tx.transaction_type}</Badge>
+                                    <span className="ml-auto text-xs text-slate-400">
                                         {formatDateTimeLocale(tx.date_time)}
-                                    </Text>
-                                </Flex>
+                                    </span>
+                                </div>
                             ))}
-                        </Flex>
-                    </Card.Body>
-                </Card.Root>
+                        </div>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

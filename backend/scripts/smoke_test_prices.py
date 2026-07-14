@@ -8,8 +8,9 @@ Outputs a formatted console summary with per-getter success rates and reordering
 
 Usage:
     cd backend
-    PYTHONPATH=/path/to/trades-exporter .venv/bin/python scripts/smoke_test_prices.py
+    PYTHONPATH=/path/to/trades-exporter ../.venv/bin/python scripts/smoke_test_prices.py
 """
+
 import sys
 import os
 import time
@@ -173,9 +174,7 @@ def main():
     last_call_time: Dict[str, float] = {}  # rate limit tracker per getter
 
     with get_session() as session:
-        assets = session.exec(
-            select(Asset).order_by(Asset.symbol)
-        ).all()
+        assets = session.exec(select(Asset).order_by(Asset.symbol)).all()
 
         # For each asset, eager-load price getters
         asset_getter_map: List[Tuple[Asset, List[AssetPriceGetter]]] = []
@@ -199,13 +198,17 @@ def main():
 
         test_num = 0
         for asset, db_getters in asset_getter_map:
-            summary = AssetTestSummary(symbol=asset.symbol, price_type=asset.price_type or "unknown")
+            summary = AssetTestSummary(
+                symbol=asset.symbol, price_type=asset.price_type or "unknown"
+            )
             sym_display = f"{asset.symbol:20s}"
 
             for apg in db_getters:
                 getter_name = apg.price_getter
                 if getter_name not in getter_instances:
-                    print(f"  {sym_display} {YELLOW}SKIP{RESET} getter={getter_name} (not registered)")
+                    print(
+                        f"  {sym_display} {YELLOW}SKIP{RESET} getter={getter_name} (not registered)"
+                    )
                     continue
 
                 getter = getter_instances[getter_name]
@@ -226,8 +229,14 @@ def main():
                 last_call_time[getter_name] = time.monotonic()
                 summary.results.append(r_curr)
 
-                status_curr = f"{GREEN}OK{RESET}" if r_curr.success else f"{RED}FAIL{RESET}"
-                price_str = f"{r_curr.price:.4f} {r_curr.quote_currency}" if r_curr.success else r_curr.error[:50]
+                status_curr = (
+                    f"{GREEN}OK{RESET}" if r_curr.success else f"{RED}FAIL{RESET}"
+                )
+                price_str = (
+                    f"{r_curr.price:.4f} {r_curr.quote_currency}"
+                    if r_curr.success
+                    else r_curr.error[:50]
+                )
 
                 # Rate limit before historical
                 time.sleep(delay)
@@ -239,8 +248,14 @@ def main():
                 last_call_time[getter_name] = time.monotonic()
                 summary.results.append(r_hist)
 
-                status_hist = f"{GREEN}OK{RESET}" if r_hist.success else f"{RED}FAIL{RESET}"
-                price_hist_str = f"{r_hist.price:.4f} {r_hist.quote_currency}" if r_hist.success else (r_hist.error[:50] if r_hist.error else "?")
+                status_hist = (
+                    f"{GREEN}OK{RESET}" if r_hist.success else f"{RED}FAIL{RESET}"
+                )
+                price_hist_str = (
+                    f"{r_hist.price:.4f} {r_hist.quote_currency}"
+                    if r_hist.success
+                    else (r_hist.error[:50] if r_hist.error else "?")
+                )
 
                 ext_display = (apg.external_id or asset.symbol)[:20]
                 print(
@@ -258,11 +273,20 @@ def main():
     print(f"{'=' * 80}\n")
 
     # 1. Per-getter success rates
-    getter_stats: Dict[str, Dict[str, int]] = {}  # getter -> {total, success, current_ok, hist_ok}
+    getter_stats: Dict[
+        str, Dict[str, int]
+    ] = {}  # getter -> {total, success, current_ok, hist_ok}
     for s in all_summaries:
         for r in s.results:
             if r.getter_name not in getter_stats:
-                getter_stats[r.getter_name] = {"total": 0, "success": 0, "curr_ok": 0, "hist_ok": 0, "curr_total": 0, "hist_total": 0}
+                getter_stats[r.getter_name] = {
+                    "total": 0,
+                    "success": 0,
+                    "curr_ok": 0,
+                    "hist_ok": 0,
+                    "curr_total": 0,
+                    "hist_total": 0,
+                }
             gs = getter_stats[r.getter_name]
             gs["total"] += 1
             if r.success:
@@ -280,9 +304,9 @@ def main():
     print(f"  {'Getter':<14s} {'Overall':>10s}  {'Current':>10s}  {'Historical':>10s}")
     print(f"  {'─' * 50}")
     for gname, gs in sorted(getter_stats.items()):
-        overall = f"{gs['success']}/{gs['total']} ({100*gs['success']/max(gs['total'],1):.0f}%)"
-        curr = f"{gs['curr_ok']}/{gs['curr_total']} ({100*gs['curr_ok']/max(gs['curr_total'],1):.0f}%)"
-        hist = f"{gs['hist_ok']}/{gs['hist_total']} ({100*gs['hist_ok']/max(gs['hist_total'],1):.0f}%)"
+        overall = f"{gs['success']}/{gs['total']} ({100 * gs['success'] / max(gs['total'], 1):.0f}%)"
+        curr = f"{gs['curr_ok']}/{gs['curr_total']} ({100 * gs['curr_ok'] / max(gs['curr_total'], 1):.0f}%)"
+        hist = f"{gs['hist_ok']}/{gs['hist_total']} ({100 * gs['hist_ok'] / max(gs['hist_total'], 1):.0f}%)"
         print(f"  {gname:<14s} {overall:>10s}  {curr:>10s}  {hist:>10s}")
 
     # 2. Assets where ALL getters failed
@@ -302,14 +326,20 @@ def main():
 
     # 3. Reorder candidates: lower-priority getter works but higher-priority fails
     print(f"\n  {BOLD}3. Reorder Candidates{RESET}")
-    print(f"  {DIM}(Assets where a lower-priority getter succeeded but a higher-priority one failed){RESET}\n")
+    print(
+        f"  {DIM}(Assets where a lower-priority getter succeeded but a higher-priority one failed){RESET}\n"
+    )
     reorder_count = 0
     for s in all_summaries:
         # Group results by getter_name
         getter_results: Dict[str, Dict] = {}
         for r in s.results:
             if r.getter_name not in getter_results:
-                getter_results[r.getter_name] = {"priority": r.priority, "successes": 0, "total": 0}
+                getter_results[r.getter_name] = {
+                    "priority": r.priority,
+                    "successes": 0,
+                    "total": 0,
+                }
             getter_results[r.getter_name]["total"] += 1
             if r.success:
                 getter_results[r.getter_name]["successes"] += 1
@@ -338,7 +368,9 @@ def main():
     # 4. Per-type recommendations
     print(f"\n  {BOLD}4. Recommendations by Asset Type{RESET}\n")
 
-    type_getter_success: Dict[str, Dict[str, Tuple[int, int]]] = {}  # type -> getter -> (ok, total)
+    type_getter_success: Dict[
+        str, Dict[str, Tuple[int, int]]
+    ] = {}  # type -> getter -> (ok, total)
     for s in all_summaries:
         pt = s.price_type
         if pt not in type_getter_success:
@@ -347,7 +379,10 @@ def main():
             if r.getter_name not in type_getter_success[pt]:
                 type_getter_success[pt][r.getter_name] = (0, 0)
             old_ok, old_total = type_getter_success[pt][r.getter_name]
-            type_getter_success[pt][r.getter_name] = (old_ok + (1 if r.success else 0), old_total + 1)
+            type_getter_success[pt][r.getter_name] = (
+                old_ok + (1 if r.success else 0),
+                old_total + 1,
+            )
 
     for pt in sorted(type_getter_success.keys()):
         getters_ranked = sorted(
@@ -379,9 +414,11 @@ def main():
         print(f"  {GREEN}No failures!{RESET}")
 
     print(f"\n{BOLD}{'=' * 80}{RESET}")
-    print(f"  Total tests: {sum(len(s.results) for s in all_summaries)}, "
-          f"Successes: {sum(1 for s in all_summaries for r in s.results if r.success)}, "
-          f"Failures: {failure_count}")
+    print(
+        f"  Total tests: {sum(len(s.results) for s in all_summaries)}, "
+        f"Successes: {sum(1 for s in all_summaries for r in s.results if r.success)}, "
+        f"Failures: {failure_count}"
+    )
     print(f"{BOLD}{'=' * 80}{RESET}\n")
 
 

@@ -48,25 +48,16 @@ duplicate_detection:
   # - Resolution uses Option B: re-resolves entire group when user takes action
 
 # Web3 Wallets Configuration
+# Do NOT hardcode API keys or personal wallet addresses here. Provide the
+# Etherscan API key via the ETHERSCAN_API_KEY / secrets env, and wallet
+# addresses via the WEB3_WALLETS env variable (JSON) or your own local
+# override. The block below only documents the expected schema.
 web3_wallets:
-  etherscan_api_key: "REDACTED_ETHERSCAN_KEY" # Etherscan API key for all EVM chains
+  etherscan_api_key: "REPLACE_WITH_YOUR_ETHERSCAN_API_KEY" # placeholder — override via env / secrets
   request_delay: 1.25 # seconds between API calls to respect rate limits
   max_retries: 7 # retry attempts if free-tier temporarily unavailable
-  addresses:
-    - wallet_address: "0x1111111111111111111111111111111111111111"
-      chain_name: "ethereum"
-      scanner: "blockscout" #"etherscan-api"
-    - wallet_address: "0x1111111111111111111111111111111111111111"
-      chain_name: "base"
-      scanner: "blockscout"
-      # Scanner type to use for this address
-    # - wallet_address: "0x1111111111111111111111111111111111111111"
-    #   chain_name: "Base"
-    #   native_token: "ETH"
-    #   scanner: "basescan-api"
-    #   scanner_chain_id: 8453
-    # - wallet_address: "0x1111111111111111111111111111111111111111"
-    #   chain_name: "BSC"
-    #   native_token: "BNB"
-    #   scanner: "bscscan-api"
-    #   scanner_chain_id: 56
+  addresses: []
+    # Example (add your own addresses locally):
+    # - wallet_address: "0x0000000000000000000000000000000000000000"
+    #   chain_name: "ethereum"
+    #   scanner: "blockscout"

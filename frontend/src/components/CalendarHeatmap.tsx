@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback } from 'react';
-import { Box, Text, Flex, Badge } from '@chakra-ui/react';
 import { ResponsiveCalendar, CalendarTooltipProps } from '@nivo/calendar';
+import { Badge } from './ui/primitives';
 
 export interface DailyStats {
     date: string;
@@ -75,62 +75,54 @@ export const CalendarHeatmap: React.FC<CalendarHeatmapProps> = ({
     const renderTooltip = useCallback(({ day, value }: CalendarTooltipProps) => {
         const dayStats = statsMap.get(day);
         const numValue = typeof value === 'number' ? value : 0;
-        
+
         return (
-            <Box
-                bg="white"
-                p={3}
-                borderRadius="md"
-                boxShadow="lg"
-                border="1px solid"
-                borderColor="gray.200"
-                minW="180px"
-            >
-                <Text fontWeight="bold" fontSize="sm" mb={2}>
+            <div className="min-w-[180px] border border-slate-200 bg-white p-3 shadow-lg">
+                <span className="mb-2 block text-sm font-bold">
                     {formatTooltipDate(day)}
-                </Text>
-                <Flex direction="column" gap={1}>
-                    <Flex justify="space-between" align="center">
-                        <Text fontSize="xs" color="gray.600">Transactions:</Text>
-                        <Badge colorPalette="blue" size="sm">{numValue}</Badge>
-                    </Flex>
+                </span>
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-600">Transactions:</span>
+                        <Badge colorScheme="blue">{numValue}</Badge>
+                    </div>
                     {dayStats && (
                         <>
-                            <Flex justify="space-between" align="center">
-                                <Text fontSize="xs" color="gray.600">Volume:</Text>
-                                <Text fontSize="xs" fontWeight="medium">{formatVolume(dayStats.volume)}</Text>
-                            </Flex>
-                            <Flex justify="space-between" align="center" gap={2}>
-                                <Text fontSize="xs" color="gray.600">Flow:</Text>
-                                <Flex gap={1}>
-                                    <Badge colorPalette="green" size="sm" variant="subtle">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-600">Volume:</span>
+                                <span className="text-xs font-medium">{formatVolume(dayStats.volume)}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs text-slate-600">Flow:</span>
+                                <div className="flex gap-1">
+                                    <Badge colorScheme="green">
                                         ↓{dayStats.inflow_count}
                                     </Badge>
-                                    <Badge colorPalette="red" size="sm" variant="subtle">
+                                    <Badge colorScheme="red">
                                         ↑{dayStats.outflow_count}
                                     </Badge>
-                                </Flex>
-                            </Flex>
+                                </div>
+                            </div>
                         </>
                     )}
-                </Flex>
-                <Text fontSize="xs" color="blue.500" mt={2} textAlign="center">
+                </div>
+                <span className="mt-2 block text-center text-xs text-blue-500">
                     Click to view transactions
-                </Text>
-            </Box>
+                </span>
+            </div>
         );
     }, [statsMap]);
 
     if (isLoading) {
         return (
-            <Box h="200px" display="flex" alignItems="center" justifyContent="center">
-                <Text color="gray.500">Loading calendar data...</Text>
-            </Box>
+            <div className="flex h-[200px] items-center justify-center">
+                <span className="text-slate-500">Loading calendar data...</span>
+            </div>
         );
     }
 
     return (
-        <Box h="200px" w="100%">
+        <div className="h-[200px] w-full">
             <ResponsiveCalendar
                 data={calendarData}
                 from={`${year}-01-01`}
@@ -167,6 +159,6 @@ export const CalendarHeatmap: React.FC<CalendarHeatmapProps> = ({
                     },
                 }}
             />
-        </Box>
+        </div>
     );
 };

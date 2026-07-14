@@ -1,7 +1,7 @@
-import { Box, Badge, HStack, Text, VStack } from "@chakra-ui/react";
-import { Tooltip } from "@chakra-ui/react/tooltip";
 import { LuClock, LuCheck, LuX, LuInfo } from "react-icons/lu";
 import { EnabledConnector } from "../types";
+import { Badge, type BadgeColorScheme } from "./ui/primitives";
+import { Tooltip } from "./ui/tooltip";
 
 interface ConnectorJobSnippetProps {
     connector: EnabledConnector;
@@ -38,21 +38,14 @@ export const ConnectorJobSnippet = ({ connector, onClick }: ConnectorJobSnippetP
     // No job data available
     if (!last_job_status) {
         return (
-            <Box
-                px={3}
-                py={2}
-                bg="gray.50"
-                borderRadius="md"
-                fontSize="sm"
-                color="gray.500"
-            >
+            <div className="px-3 py-2 bg-slate-50 text-sm text-slate-500">
                 No sync history
-            </Box>
+            </div>
         );
     }
 
     // Status badge configuration
-    const statusConfig = {
+    const statusConfig: Record<string, { color: BadgeColorScheme; icon: typeof LuCheck; label: string }> = {
         completed: { color: "green", icon: LuCheck, label: "Completed" },
         failed: { color: "red", icon: LuX, label: "Failed" },
         running: { color: "blue", icon: LuClock, label: "Running" },
@@ -61,7 +54,7 @@ export const ConnectorJobSnippet = ({ connector, onClick }: ConnectorJobSnippetP
         aborted: { color: "orange", icon: LuInfo, label: "Aborted" },
     };
 
-    const config = statusConfig[last_job_status as keyof typeof statusConfig] || statusConfig.completed;
+    const config = statusConfig[last_job_status] || statusConfig.completed;
     const StatusIcon = config.icon;
 
     // Format timing
@@ -78,42 +71,37 @@ export const ConnectorJobSnippet = ({ connector, onClick }: ConnectorJobSnippetP
     if (last_job_errors > 0) metrics.push(`${last_job_errors} errors`);
     const metricsText = metrics.length > 0 ? metrics.join(", ") : "No changes";
 
+    const isFailed = last_job_status === "failed";
+
+    const content = (
+        <div
+            className={`px-3 py-2 border ${isFailed ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'} ${onClick ? 'cursor-pointer' : 'cursor-default'} transition-colors`}
+            onClick={onClick}
+        >
+            <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <Badge colorScheme={config.color}>
+                        <StatusIcon size={12} />
+                        {config.label}
+                    </Badge>
+                    <span className="truncate text-xs text-slate-600">
+                        {timeText}
+                    </span>
+                </div>
+                <span className="flex-shrink-0 text-xs font-medium text-slate-700">
+                    {metricsText}
+                </span>
+            </div>
+        </div>
+    );
+
+    if (!last_job_error_message) {
+        return content;
+    }
+
     return (
-        <Tooltip.Root disabled={!last_job_error_message}>
-            <Tooltip.Trigger asChild>
-                <Box
-                    px={3}
-                    py={2}
-                    bg={last_job_status === "failed" ? "red.50" : "gray.50"}
-                    borderRadius="md"
-                    borderWidth="1px"
-                    borderColor={last_job_status === "failed" ? "red.200" : "gray.200"}
-                    cursor={onClick ? "pointer" : "default"}
-                    _hover={onClick ? { bg: last_job_status === "failed" ? "red.100" : "gray.100", borderColor: config.color + ".300" } : undefined}
-                    onClick={onClick}
-                    transition="all 0.2s"
-                >
-                    <HStack justify="space-between" gap={2}>
-                        <HStack gap={2} flex={1} minW={0}>
-                            <Badge colorScheme={config.color} display="flex" alignItems="center" gap={1}>
-                                <StatusIcon size={12} />
-                                {config.label}
-                            </Badge>
-                            <Text fontSize="xs" color="gray.600" truncate>
-                                {timeText}
-                            </Text>
-                        </HStack>
-                        <Text fontSize="xs" color="gray.700" fontWeight="medium" flexShrink={0}>
-                            {metricsText}
-                        </Text>
-                    </HStack>
-                </Box>
-            </Tooltip.Trigger>
-            <Tooltip.Positioner>
-                <Tooltip.Content>
-                    {last_job_error_message || "Click to view full job details"}
-                </Tooltip.Content>
-            </Tooltip.Positioner>
-        </Tooltip.Root>
+        <Tooltip content={last_job_error_message}>
+            {content}
+        </Tooltip>
     );
 };

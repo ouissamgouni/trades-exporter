@@ -12,7 +12,7 @@ task stop:dev
 task start:dev
 ```
 
-Check that Docker is running and the backend virtual environment exists at `backend/.venv`.
+Check that Docker is running and the root virtual environment exists at `.venv`.
 
 If dependencies are missing:
 

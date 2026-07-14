@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Box, Flex, Text } from '@chakra-ui/react';
 import { FiCopy, FiCheck } from 'react-icons/fi';
 import { Tooltip } from './ui/tooltip';
 
@@ -43,36 +42,22 @@ export const CopyableValue: React.FC<CopyableValueProps> = ({
     const needsTooltip = truncate > 0 && value.length > truncate;
 
     const content = (
-        <Flex
-            align="center"
-            gap={1}
-            role="group"
-            css={{ userSelect: 'text', cursor: 'text' }}
-        >
-            <Text
-                fontSize={fontSize}
-                fontFamily="mono"
-                color="gray.700"
-                wordBreak="break-all"
-                textAlign="right"
+        <div className="group flex items-center gap-1" style={{ userSelect: 'text', cursor: 'text' }}>
+            <span
+                className="break-all text-right font-mono text-slate-700"
+                style={{ fontSize }}
             >
                 {displayValue}
-            </Text>
-            <Box
-                as="button"
+            </span>
+            <button
+                type="button"
                 onClick={handleCopy}
-                opacity={0}
-                _groupHover={{ opacity: 1 }}
-                transition="opacity 0.15s"
-                cursor="pointer"
-                flexShrink={0}
-                color={copied ? 'green.500' : 'gray.400'}
-                _hover={{ color: copied ? 'green.500' : 'blue.500' }}
+                className={`shrink-0 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100 ${copied ? 'text-green-500 hover:text-green-500' : 'text-slate-400 hover:text-blue-500'}`}
                 aria-label="Copy to clipboard"
             >
                 {copied ? <FiCheck size={10} /> : <FiCopy size={10} />}
-            </Box>
-        </Flex>
+            </button>
+        </div>
     );
 
     if (needsTooltip) {

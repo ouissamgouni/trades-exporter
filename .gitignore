@@ -12,6 +12,19 @@ config/secrets.*.env
 # Per-scenario secrets (gitignored globally; commit *.example if a scenario needs them).
 scenarios/*/secrets.env
 
+# Personal scenario data (kept locally, never published). Contains real accounts,
+# wallet addresses, and transactions. Purged from history; do not re-commit.
+scenarios/private-accounts/
+
+# Runtime symlinks created by `task start:scenario:ref` (config/scenario-default.env,
+# config/scenario-<name>.env -> config/scenario.env) so docker-compose.unified.yml's
+# env_file: config/${ENV_NAME}.env lookup resolves.
+config/scenario-*.env
+
+# Persisted scenario port state (written by start:scenario/start:scenario:ref, read by
+# stop/logs/open/db tasks so overridden ports survive across separate task invocations).
+.taskfiles/.scenario-state/
+
 # Python
 __pycache__/
 *.py[cod]

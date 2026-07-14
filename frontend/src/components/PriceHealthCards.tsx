@@ -10,8 +10,8 @@
 
 import React, { useMemo, useState } from 'react';
 import {
-    Badge, Box, Button, Flex, Input, NativeSelect, Spinner, Text,
-} from '@chakra-ui/react';
+    Badge, type BadgeColorScheme, Button, Input, Spinner, Text,
+} from './ui/primitives';
 import {
     FiInfo, FiSearch, FiRefreshCw, FiX,
     FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight,
@@ -58,11 +58,19 @@ const Sparkline: React.FC<{ prices: number[]; width?: number; height?: number; c
 // Status config
 // ---------------------------------------------------------------------------
 
-const STATUS_CONFIG: Record<string, { color: string; label: string; emoji: string }> = {
+const STATUS_CONFIG: Record<string, { color: BadgeColorScheme; label: string; emoji: string }> = {
     healthy: { color: 'green', label: 'Healthy', emoji: '✅' },
     warning: { color: 'yellow', label: 'Warning', emoji: '⚠️' },
     stale: { color: 'red', label: 'Stale', emoji: '🔴' },
     no_transactions: { color: 'gray', label: 'No txns', emoji: 'ℹ️' },
+};
+
+const PILL_ACTIVE: Record<string, string> = {
+    gray: 'bg-slate-600 text-white',
+    green: 'bg-green-600 text-white',
+    yellow: 'bg-yellow-600 text-white',
+    red: 'bg-red-600 text-white',
+    orange: 'bg-orange-600 text-white',
 };
 
 // ---------------------------------------------------------------------------
@@ -187,75 +195,72 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
     // ── Loading / Error / Empty ──────────────────────────────────────────
     if (isLoading) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading price health data...</Text>
-            </Box>
+            <div className="bg-gray-50 py-10 text-center">
+                <Spinner size="lg" className="text-blue-500" />
+                <Text className="mt-4 block">Loading price health data...</Text>
+            </div>
         );
     }
     if (error) {
         return (
-            <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                <Text color="red.600">Error: {error}</Text>
-                <Button size="sm" mt={3} onClick={() => refetch()}>Retry</Button>
-            </Box>
+            <div className="border border-red-200 bg-red-50 py-10 text-center">
+                <Text className="text-red-600">Error: {error}</Text>
+                <Button size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+            </div>
         );
     }
     if (!data || data.items.length === 0) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Text color="gray.500">No price snapshot data found. Import prices first.</Text>
-            </Box>
+            <div className="bg-gray-50 py-10 text-center">
+                <Text className="text-gray-500">No price snapshot data found. Import prices first.</Text>
+            </div>
         );
     }
 
     // ── Pagination bar (PnL style) ──────────────────────────────────────
     const paginationBar = totalRows > PAGE_SIZE_OPTIONS[0] ? (
-        <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
-            <Flex align="center" gap={2}>
-                <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+        <div className="flex w-full items-center justify-between px-3 py-2">
+            <div className="flex items-center gap-2">
+                <Text className="text-[10px] text-gray-500">Rows:</Text>
+                <div className="inline-flex overflow-hidden border border-gray-200">
                     {PAGE_SIZE_OPTIONS.map(size => (
                         <Button
                             key={size}
-                            size="2xs"
-                            variant={pageSize === size ? 'subtle' : 'ghost'}
-                            colorPalette={pageSize === size ? 'blue' : 'gray'}
-                            borderRadius="0"
+                            variant={pageSize === size ? 'outline' : 'ghost'}
+                            colorScheme={pageSize === size ? 'blue' : 'gray'}
                             onClick={() => { setPageSize(size); setPage(0); }}
-                            px={2}
-                            fontSize="xs"
+                            className="px-2 text-xs"
                         >
                             {size}
                         </Button>
                     ))}
-                </Flex>
-            </Flex>
-            <Text fontSize="2xs" color="gray.500">
+                </div>
+            </div>
+            <Text className="text-[10px] text-gray-500">
                 {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
             </Text>
-            <Flex align="center" gap={1}>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+            <div className="flex items-center gap-1">
+                <Button variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} className="px-1">
                     <FiChevronsLeft size={12} />
                 </Button>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                <Button variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="px-1">
                     <FiChevronLeft size={14} />
                 </Button>
-                <Text fontSize="xs" color="gray.600" mx={1}>
+                <Text className="mx-1 text-xs text-gray-600">
                     {safePage + 1} / {pageCount}
                 </Text>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                <Button variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className="px-1">
                     <FiChevronRight size={14} />
                 </Button>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                <Button variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} className="px-1">
                     <FiChevronsRight size={12} />
                 </Button>
-            </Flex>
-        </Flex>
+            </div>
+        </div>
     ) : null;
 
     // ── Filter pills ────────────────────────────────────────────────────
-    const pills: Array<{ key: StatusFilter; label: string; count: number; color: string }> = [
+    const pills: Array<{ key: StatusFilter; label: string; count: number; color: BadgeColorScheme }> = [
         { key: 'all', label: 'All', count: counts.all, color: 'gray' },
         { key: 'healthy', label: 'Healthy', count: counts.healthy, color: 'green' },
         { key: 'warning', label: 'Warning', count: counts.warning, color: 'yellow' },
@@ -264,54 +269,54 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
     ];
 
     return (
-        <Box>
+        <div>
             {/* ── Toolbar: pills + search + sort + refresh ── */}
-            <Flex gap={2} mb={2} flexWrap="wrap" align="center">
-                {pills.map(p => (
-                    <Badge
-                        key={p.key}
-                        cursor="pointer"
-                        colorPalette={p.color}
-                        variant={filter === p.key ? 'solid' : 'outline'}
-                        size="sm"
-                        px={2}
-                        py={0.5}
-                        borderRadius="full"
-                        onClick={() => setFilter(filter === p.key ? 'all' : p.key)}
-                    >
-                        {p.label} ({p.count})
-                    </Badge>
-                ))}
-                <Box flex={1} />
-                <Box position="relative" w="160px">
-                    <Input placeholder="Search..." size="xs" value={search} onChange={e => setSearch(e.target.value)} pl={7} borderRadius="md" />
-                    <Box position="absolute" left={2} top="50%" transform="translateY(-50%)" color="gray.400"><FiSearch size={12} /></Box>
-                </Box>
-                <NativeSelect.Root size="xs" w="120px">
-                    <NativeSelect.Field value={sortKey} onChange={e => setSortKey(e.target.value as SortKey)}>
-                        <option value="status">Sort: Status</option>
-                        <option value="gaps">Sort: Gaps</option>
-                        <option value="days_stale">Sort: Stale</option>
-                        <option value="symbol">Sort: A-Z</option>
-                    </NativeSelect.Field>
-                </NativeSelect.Root>
-                <Button size="xs" variant="outline" onClick={() => refetch()}><FiRefreshCw size={12} /></Button>
-            </Flex>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+                {pills.map(p => {
+                    const isActive = filter === p.key;
+                    return (
+                        <Badge
+                            key={p.key}
+                            colorScheme={p.color}
+                            onClick={() => setFilter(isActive ? 'all' : p.key)}
+                            className={`cursor-pointer rounded-full px-2 py-0.5 hover:opacity-80 ${isActive ? PILL_ACTIVE[p.color] : ''}`}
+                        >
+                            {p.label} ({p.count})
+                        </Badge>
+                    );
+                })}
+                <div className="flex-1" />
+                <div className="relative w-[160px]">
+                    <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 pl-7 text-xs" />
+                    <div className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"><FiSearch size={12} /></div>
+                </div>
+                <select
+                    value={sortKey}
+                    onChange={e => setSortKey(e.target.value as SortKey)}
+                    className="h-7 w-[120px] border border-gray-200 px-1 text-xs"
+                >
+                    <option value="status">Sort: Status</option>
+                    <option value="gaps">Sort: Gaps</option>
+                    <option value="days_stale">Sort: Stale</option>
+                    <option value="symbol">Sort: A-Z</option>
+                </select>
+                <Button variant="outline" className="px-2 text-xs" onClick={() => refetch()}><FiRefreshCw size={12} /></Button>
+            </div>
 
             {/* ── Top pagination ── */}
             {paginationBar && (
-                <Box borderBottom="1px solid" borderColor="gray.100" mb={2}>
+                <div className="mb-2 border-b border-gray-100">
                     {paginationBar}
-                </Box>
+                </div>
             )}
 
             {/* ── Card grid ── */}
             {pageItems.length === 0 ? (
-                <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                    <Text color="gray.400">No assets match your criteria.</Text>
-                </Box>
+                <div className="bg-gray-50 py-10 text-center">
+                    <Text className="text-gray-400">No assets match your criteria.</Text>
+                </div>
             ) : (
-                <Flex flexWrap="wrap" gap={2}>
+                <div className="flex flex-wrap gap-2">
                     {pageItems.map(row => (
                         <HealthCard
                             key={row.asset_id}
@@ -324,16 +329,16 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
                             onViewTable={onViewTable}
                         />
                     ))}
-                </Flex>
+                </div>
             )}
 
             {/* ── Bottom pagination ── */}
             {paginationBar && (
-                <Box borderTop="1px solid" borderColor="gray.100" mt={2}>
+                <div className="mt-2 border-t border-gray-100">
                     {paginationBar}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -358,156 +363,125 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
     const [showPriceSetter, setShowPriceSetter] = useState(false);
 
     return (
-        <Box
-            bg="white"
-            border="1px solid"
-            borderColor={expanded ? 'orange.300' : noTx ? 'gray.100' : 'gray.200'}
-            borderRadius="md"
-            px={2.5}
-            py={1.5}
-            minW="185px"
-            maxW={expanded ? '660px' : '220px'}
-            flex={expanded ? '1 0 570px' : '1 0 185px'}
-            _hover={{ borderColor: expanded ? 'orange.400' : 'blue.300', boxShadow: 'xs' }}
-            transition="all 0.15s"
-            opacity={noTx ? 0.6 : 1}
-            position="relative"
+        <div
+            className={`relative border bg-white px-2.5 py-1.5 transition-all duration-150 ${noTx ? 'opacity-60' : 'opacity-100'} ${expanded
+                    ? 'min-w-[185px] max-w-[660px] flex-[1_0_570px] border-orange-300 hover:border-orange-400 hover:shadow-xs'
+                    : 'min-w-[185px] max-w-[220px] flex-[1_0_185px] hover:shadow-xs ' + (noTx ? 'border-gray-100 hover:border-blue-300' : 'border-gray-200 hover:border-blue-300')
+                }`}
         >
             {/* Row 1: name + icons + tiny chart */}
-            <Flex align="center" gap={1.5} mb={1}>
-                <Text fontSize="xs" fontWeight="bold" truncate flex={1}>
+            <div className="mb-1 flex items-center gap-1.5">
+                <Text className="flex-1 truncate text-xs font-bold">
                     {row.symbol}
                 </Text>
                 {onViewTable && (
                     <Tooltip content="View price table">
-                        <Box
-                            as="button"
-                            color="gray.400"
-                            _hover={{ color: 'blue.500' }}
-                            cursor="pointer"
+                        <button
+                            type="button"
+                            className="shrink-0 cursor-pointer text-gray-400 hover:text-blue-500"
                             onClick={e => { e.stopPropagation(); onViewTable(row.asset_id); }}
-                            flexShrink={0}
                         >
                             <FiList size={12} />
-                        </Box>
+                        </button>
                     </Tooltip>
                 )}
                 <Tooltip content="Open details">
-                    <Box
-                        as="button"
-                        color="gray.400"
-                        _hover={{ color: 'blue.500' }}
-                        cursor="pointer"
+                    <button
+                        type="button"
+                        className="shrink-0 cursor-pointer text-gray-400 hover:text-blue-500"
                         onClick={e => { e.stopPropagation(); onOpenPanel(); }}
-                        flexShrink={0}
                     >
                         <FiInfo size={12} />
-                    </Box>
+                    </button>
                 </Tooltip>
                 <Tooltip content="Set prices">
-                    <Box
-                        as="button"
-                        color="gray.400"
-                        _hover={{ color: 'blue.500' }}
-                        cursor="pointer"
+                    <button
+                        type="button"
+                        className="shrink-0 cursor-pointer text-gray-400 hover:text-blue-500"
                         onClick={e => { e.stopPropagation(); setShowPriceSetter(true); }}
-                        flexShrink={0}
                     >
                         <FiEdit3 size={11} />
-                    </Box>
+                    </button>
                 </Tooltip>
                 <Tooltip content="Refresh">
-                    <Box
-                        as="button"
-                        color="gray.300"
-                        _hover={{ color: 'blue.500' }}
-                        cursor="pointer"
+                    <button
+                        type="button"
+                        className="shrink-0 cursor-pointer text-gray-300 hover:text-blue-500"
                         onClick={e => { e.stopPropagation(); onRefresh(); }}
-                        flexShrink={0}
                     >
                         <FiRefreshCw size={10} />
-                    </Box>
+                    </button>
                 </Tooltip>
                 {expanded ? (
                     <Tooltip content="Collapse">
-                        <Box
-                            as="button"
-                            color="gray.400"
-                            _hover={{ color: 'red.500' }}
-                            cursor="pointer"
+                        <button
+                            type="button"
+                            className="shrink-0 cursor-pointer text-gray-400 hover:text-red-500"
                             onClick={e => { e.stopPropagation(); onToggleExpand(); }}
-                            flexShrink={0}
                         >
                             <FiX size={14} />
-                        </Box>
+                        </button>
                     </Tooltip>
                 ) : (
                     <Tooltip content="Expand">
-                        <Box
-                            as="button"
-                            color="gray.300"
-                            _hover={{ color: 'blue.500' }}
-                            cursor="pointer"
+                        <button
+                            type="button"
+                            className="shrink-0 cursor-pointer text-gray-300 hover:text-blue-500"
                             onClick={e => { e.stopPropagation(); onToggleExpand(); }}
-                            flexShrink={0}
                         >
                             <FiChevronDown size={14} />
-                        </Box>
+                        </button>
                     </Tooltip>
                 )}
-            </Flex>
+            </div>
 
             {/* Sparkline row */}
             {!expanded && row.sparkline && row.sparkline.length >= 2 && (
-                <Box h="28px" mt={0.5} mb={0.5}>
+                <div className="mb-0.5 mt-0.5 h-[28px]">
                     <Sparkline prices={row.sparkline} width={180} height={28} />
-                </Box>
+                </div>
             )}
 
             {/* Row 2: badges */}
-            <Flex gap={1} flexWrap="wrap" mb={0.5}>
-                <Badge size="xs" colorPalette={cfg.color} fontSize="9px">
+            <div className="mb-0.5 flex flex-wrap gap-1">
+                <Badge colorScheme={cfg.color} className="text-[9px]">
                     {cfg.label}
                 </Badge>
                 {row.is_flatline && (
                     <Tooltip content="Last 5+ prices identical — possible broken feed">
-                        <Badge size="xs" colorPalette="orange" fontSize="9px">Flat</Badge>
+                        <Badge colorScheme="orange" className="text-[9px]">Flat</Badge>
                     </Tooltip>
                 )}
                 {hasGaps && (
                     <Badge
-                        size="xs"
-                        colorPalette="orange"
-                        variant={expanded ? 'solid' : 'subtle'}
-                        fontSize="9px"
-                        cursor="pointer"
+                        colorScheme="orange"
                         onClick={onToggleExpand}
-                        _hover={{ opacity: 0.8 }}
+                        className={`cursor-pointer text-[9px] hover:opacity-80 ${expanded ? 'bg-orange-600 text-white' : ''}`}
                     >
                         {gapDays}d gaps
                     </Badge>
                 )}
                 {row.quote_currencies && row.quote_currencies.length > 0 && row.quote_currencies.map(q => (
-                    <Badge key={q.asset_id} size="xs" colorPalette="purple" variant="subtle" fontSize="8px">
+                    <Badge key={q.asset_id} colorScheme="purple" className="text-[8px]">
                         {q.symbol}
                     </Badge>
                 ))}
-            </Flex>
+            </div>
 
             {/* Row 3: price, age, source */}
-            <Flex gap={2} align="center">
-                <Text fontSize="xs" fontWeight="bold" fontFamily="mono">
+            <div className="flex items-center gap-2">
+                <Text className="font-mono text-xs font-bold">
                     {formatPrice(row.last_price)}
                 </Text>
                 <Tooltip content={row.last_updated ? new Date(row.last_updated).toLocaleString() : ''}>
-                    <Text fontSize="2xs" color={row.status === 'stale' ? 'red.600' : 'gray.500'}>
+                    <Text className={`text-[10px] ${row.status === 'stale' ? 'text-red-600' : 'text-gray-500'}`}>
                         {formatRelativeTime(row.last_updated)}
                     </Text>
                 </Tooltip>
-                <Text fontSize="2xs" color="gray.400" truncate>
+                <Text className="truncate text-[10px] text-gray-400">
                     {row.last_source || '—'}
                 </Text>
-            </Flex>
+            </div>
 
             {/* Expanded section: chart + gap CTAs */}
             {expanded && (
@@ -525,7 +499,7 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                     defaultDate={new Date().toISOString()}
                 />
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -534,9 +508,9 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
 // ---------------------------------------------------------------------------
 
 const ExpandedSection: React.FC<{ assetId: number; symbol: string; onOpenPriceSetter: () => void }> = ({ assetId, symbol, onOpenPriceSetter }) => (
-    <Box mt={2} pt={2} borderTop="1px solid" borderColor="orange.100">
+    <div className="mt-2 border-t border-orange-100 pt-2">
         <GapFixPanel assetId={assetId} symbol={symbol} onOpenPriceSetter={onOpenPriceSetter} />
-    </Box>
+    </div>
 );
 
 export default PriceHealthCards;

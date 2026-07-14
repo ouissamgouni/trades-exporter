@@ -8,10 +8,20 @@
  */
 
 import React, { useState } from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { Badge, BadgeColorScheme } from '../ui/primitives';
 import { Tooltip } from '../ui/tooltip';
 import { ValueDisplay } from '../ValueDisplay';
 import { API_URL } from '../../types';
+
+export const costSourceColor = (source?: string): BadgeColorScheme => {
+    switch (source) {
+        case 'fmv': return 'purple';
+        case 'provisional': return 'orange';
+        case 'proceeds': return 'green';
+        case 'inherited': return 'blue';
+        default: return 'gray';
+    }
+};
 
 // ============================================================================
 // CostLotLineageTooltip — Shows consumed slices, settlements, origin TX
@@ -86,81 +96,74 @@ export const CostLotLineageTooltip: React.FC<CostLotLineageTooltipProps> = ({
     };
 
     const tooltipContent = (
-        <Box p={2} bg="gray.800" borderRadius="md" minW="280px" maxW="360px" onMouseEnter={fetchLineage}>
+        <div className="min-w-[280px] max-w-[360px] rounded-md bg-gray-800 p-2" onMouseEnter={fetchLineage}>
             {loading ? (
-                <Text fontSize="xs" color="gray.300">Loading lineage…</Text>
+                <div className="text-xs text-gray-300">Loading lineage…</div>
             ) : error ? (
-                <Text fontSize="xs" color="red.300">Error: {error}</Text>
+                <div className="text-xs text-red-300">Error: {error}</div>
             ) : data ? (
-                <Box fontSize="xs">
+                <div className="text-xs">
                     {/* Lot summary */}
-                    <Text fontWeight="semibold" color="white" mb={1}>
+                    <div className="mb-1 font-semibold text-white">
                         Lot #{data.lot.cost_lot_id} — {data.lot.asset.symbol}
-                    </Text>
-                    <Flex justify="space-between" mb={0.5}>
-                        <Text color="gray.400">Qty</Text>
-                        <Text color="white" fontFamily="mono">
+                    </div>
+                    <div className="mb-0.5 flex justify-between">
+                        <span className="text-gray-400">Qty</span>
+                        <span className="font-mono text-white">
                             {Number(data.lot.qty_original).toFixed(4)} → {Number(data.lot.qty_remaining).toFixed(4)} remaining
-                        </Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={0.5}>
-                        <Text color="gray.400">Unit Cost</Text>
-                        <Text color="white"><ValueDisplay value={data.lot.unit_cost_in_base} currency={baseCurrency} /></Text>
-                    </Flex>
+                        </span>
+                    </div>
+                    <div className="mb-0.5 flex justify-between">
+                        <span className="text-gray-400">Unit Cost</span>
+                        <span className="text-white"><ValueDisplay value={data.lot.unit_cost_in_base} currency={baseCurrency} /></span>
+                    </div>
                     {data.lot.cost_source && (
-                        <Flex justify="space-between" mb={0.5}>
-                            <Text color="gray.400">Source</Text>
-                            <Badge size="xs" colorPalette={
-                                data.lot.cost_source === 'fmv' ? 'cyan' :
-                                    data.lot.cost_source === 'provisional' ? 'orange' :
-                                        data.lot.cost_source === 'proceeds' ? 'green' :
-                                            data.lot.cost_source === 'inherited' ? 'blue' : 'gray'
-                            }>{data.lot.cost_source}</Badge>
-                        </Flex>
+                        <div className="mb-0.5 flex justify-between">
+                            <span className="text-gray-400">Source</span>
+                            <Badge colorScheme={costSourceColor(data.lot.cost_source)}>{data.lot.cost_source}</Badge>
+                        </div>
                     )}
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Acquired</Text>
-                        <Text color="white">{data.lot.acquired_at ? new Date(data.lot.acquired_at).toLocaleDateString() : '-'}</Text>
-                    </Flex>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Acquired</span>
+                        <span className="text-white">{data.lot.acquired_at ? new Date(data.lot.acquired_at).toLocaleDateString() : '-'}</span>
+                    </div>
 
                     {/* Origin TX */}
                     {data.origin_transaction && (
                         <>
-                            <Box borderTop="1px solid" borderColor="gray.600" my={1} />
-                            <Text fontWeight="semibold" color="gray.300" mb={0.5}>Origin Transaction</Text>
-                            <Flex justify="space-between" mb={0.5}>
-                                <Text color="gray.400">TX</Text>
-                                <Text
-                                    color="blue.300"
-                                    cursor={onTransactionClick ? 'pointer' : undefined}
+                            <div className="my-1 border-t border-gray-600" />
+                            <div className="mb-0.5 font-semibold text-gray-300">Origin Transaction</div>
+                            <div className="mb-0.5 flex justify-between">
+                                <span className="text-gray-400">TX</span>
+                                <span
+                                    className={`text-blue-300 ${onTransactionClick ? 'cursor-pointer underline' : ''}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         if (onTransactionClick && data.origin_transaction) {
                                             onTransactionClick(data.origin_transaction.id);
                                         }
                                     }}
-                                    textDecoration={onTransactionClick ? 'underline' : undefined}
                                 >
                                     #{data.origin_transaction.id}
-                                </Text>
-                            </Flex>
+                                </span>
+                            </div>
                             {data.origin_transaction.date_time && (
-                                <Flex justify="space-between" mb={0.5}>
-                                    <Text color="gray.400">Date</Text>
-                                    <Text color="white">{new Date(data.origin_transaction.date_time).toLocaleString()}</Text>
-                                </Flex>
+                                <div className="mb-0.5 flex justify-between">
+                                    <span className="text-gray-400">Date</span>
+                                    <span className="text-white">{new Date(data.origin_transaction.date_time).toLocaleString()}</span>
+                                </div>
                             )}
                             {data.origin_transaction.source && (
-                                <Flex justify="space-between" mb={0.5}>
-                                    <Text color="gray.400">Source</Text>
-                                    <Text color="white">{data.origin_transaction.source}</Text>
-                                </Flex>
+                                <div className="mb-0.5 flex justify-between">
+                                    <span className="text-gray-400">Source</span>
+                                    <span className="text-white">{data.origin_transaction.source}</span>
+                                </div>
                             )}
                             {data.origin_transaction.transaction_type && (
-                                <Flex justify="space-between" mb={0.5}>
-                                    <Text color="gray.400">Type</Text>
-                                    <Text color="white">{data.origin_transaction.transaction_type}</Text>
-                                </Flex>
+                                <div className="mb-0.5 flex justify-between">
+                                    <span className="text-gray-400">Type</span>
+                                    <span className="text-white">{data.origin_transaction.transaction_type}</span>
+                                </div>
                             )}
                         </>
                     )}
@@ -168,23 +171,23 @@ export const CostLotLineageTooltip: React.FC<CostLotLineageTooltipProps> = ({
                     {/* Consumed slices */}
                     {data.consumed_slices.length > 0 && (
                         <>
-                            <Box borderTop="1px solid" borderColor="gray.600" my={1} />
-                            <Text fontWeight="semibold" color="gray.300" mb={0.5}>
+                            <div className="my-1 border-t border-gray-600" />
+                            <div className="mb-0.5 font-semibold text-gray-300">
                                 Consumed × {data.consumed_slices.length}
-                            </Text>
+                            </div>
                             {data.consumed_slices.slice(0, 3).map((s, i) => (
-                                <Flex key={i} justify="space-between" mb={0.5}>
-                                    <Text color="gray.400">
+                                <div key={i} className="mb-0.5 flex justify-between">
+                                    <span className="text-gray-400">
                                         {s.consumed_at ? new Date(s.consumed_at).toLocaleDateString() : '-'}
                                         {s.holding_period_days != null && ` (${s.holding_period_days}d)`}
-                                    </Text>
-                                    <Text color="white" fontFamily="mono">
+                                    </span>
+                                    <span className="font-mono text-white">
                                         {Number(s.quantity).toFixed(4)} @ <ValueDisplay value={s.unit_cost_in_base} currency={baseCurrency} />
-                                    </Text>
-                                </Flex>
+                                    </span>
+                                </div>
                             ))}
                             {data.consumed_slices.length > 3 && (
-                                <Text color="gray.400" fontSize="2xs">+{data.consumed_slices.length - 3} more…</Text>
+                                <div className="text-[10px] text-gray-400">+{data.consumed_slices.length - 3} more…</div>
                             )}
                         </>
                     )}
@@ -192,40 +195,40 @@ export const CostLotLineageTooltip: React.FC<CostLotLineageTooltipProps> = ({
                     {/* Settlements (for negative lots) */}
                     {data.settlements.length > 0 && (
                         <>
-                            <Box borderTop="1px solid" borderColor="gray.600" my={1} />
-                            <Text fontWeight="semibold" color="gray.300" mb={0.5}>
+                            <div className="my-1 border-t border-gray-600" />
+                            <div className="mb-0.5 font-semibold text-gray-300">
                                 Settlements × {data.settlements.length}
-                            </Text>
+                            </div>
                             {data.settlements.slice(0, 3).map((s, i) => (
-                                <Flex key={i} justify="space-between" mb={0.5}>
-                                    <Text color="gray.400">Lot #{s.settling_lot_id}</Text>
-                                    <Text color="white" fontFamily="mono">
+                                <div key={i} className="mb-0.5 flex justify-between">
+                                    <span className="text-gray-400">Lot #{s.settling_lot_id}</span>
+                                    <span className="font-mono text-white">
                                         {Number(s.qty_settled).toFixed(4)}
                                         {s.cost_basis_applied != null && ` @ ${Number(s.cost_basis_applied).toFixed(2)}`}
-                                    </Text>
-                                </Flex>
+                                    </span>
+                                </div>
                             ))}
                         </>
                     )}
 
                     {/* Events count */}
                     {data.events_count > 0 && (
-                        <Text color="gray.500" fontSize="2xs" mt={1}>
+                        <div className="mt-1 text-[10px] text-gray-500">
                             {data.events_count} event{data.events_count !== 1 ? 's' : ''} total
-                        </Text>
+                        </div>
                     )}
-                </Box>
+                </div>
             ) : (
-                <Text fontSize="xs" color="gray.400">Hover to load lineage</Text>
+                <div className="text-xs text-gray-400">Hover to load lineage</div>
             )}
-        </Box>
+        </div>
     );
 
     return (
         <Tooltip content={tooltipContent} openDelay={200} closeDelay={100}>
-            <Box onMouseEnter={fetchLineage} display="inline-block">
+            <div onMouseEnter={fetchLineage} className="inline-block">
                 {children}
-            </Box>
+            </div>
         </Tooltip>
     );
 };
@@ -305,74 +308,72 @@ export const RealizedPnlLineageTooltip: React.FC<RealizedPnlLineageTooltipProps>
     };
 
     const tooltipContent = (
-        <Box p={2} bg="gray.800" borderRadius="md" minW="280px" maxW="360px" onMouseEnter={fetchLineage}>
+        <div className="min-w-[280px] max-w-[360px] rounded-md bg-gray-800 p-2" onMouseEnter={fetchLineage}>
             {loading ? (
-                <Text fontSize="xs" color="gray.300">Loading lineage…</Text>
+                <div className="text-xs text-gray-300">Loading lineage…</div>
             ) : error ? (
-                <Text fontSize="xs" color="red.300">Error: {error}</Text>
+                <div className="text-xs text-red-300">Error: {error}</div>
             ) : data ? (
-                <Box fontSize="xs">
+                <div className="text-xs">
                     {/* PnL summary */}
-                    <Text fontWeight="semibold" color="white" mb={1}>
+                    <div className="mb-1 font-semibold text-white">
                         P&L #{data.pnl.pnl_id} — {data.pnl.asset.symbol}
-                    </Text>
-                    <Flex justify="space-between" mb={0.5}>
-                        <Text color="gray.400">Qty Disposed</Text>
-                        <Text color="white" fontFamily="mono">{Number(data.pnl.qty).toFixed(4)}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={0.5}>
-                        <Text color="gray.400">Proceeds</Text>
-                        <Text color="white"><ValueDisplay value={data.pnl.proceeds_in_base} currency={baseCurrency} /></Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={0.5}>
-                        <Text color="gray.400">Cost Basis</Text>
-                        <Text color="white"><ValueDisplay value={data.pnl.cost_basis_in_base} currency={baseCurrency} /></Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={0.5}>
-                        <Text color="gray.400">P&L</Text>
-                        <Text color={data.pnl.pnl_in_base >= 0 ? 'green.300' : 'red.300'} fontWeight="bold">
+                    </div>
+                    <div className="mb-0.5 flex justify-between">
+                        <span className="text-gray-400">Qty Disposed</span>
+                        <span className="font-mono text-white">{Number(data.pnl.qty).toFixed(4)}</span>
+                    </div>
+                    <div className="mb-0.5 flex justify-between">
+                        <span className="text-gray-400">Proceeds</span>
+                        <span className="text-white"><ValueDisplay value={data.pnl.proceeds_in_base} currency={baseCurrency} /></span>
+                    </div>
+                    <div className="mb-0.5 flex justify-between">
+                        <span className="text-gray-400">Cost Basis</span>
+                        <span className="text-white"><ValueDisplay value={data.pnl.cost_basis_in_base} currency={baseCurrency} /></span>
+                    </div>
+                    <div className="mb-0.5 flex justify-between">
+                        <span className="text-gray-400">P&L</span>
+                        <span className={`font-bold ${data.pnl.pnl_in_base >= 0 ? 'text-green-300' : 'text-red-300'}`}>
                             <ValueDisplay value={data.pnl.pnl_in_base} currency={baseCurrency} />
-                        </Text>
-                    </Flex>
+                        </span>
+                    </div>
                     {data.pnl.holding_period_days != null && (
-                        <Flex justify="space-between" mb={0.5}>
-                            <Text color="gray.400">Holding</Text>
-                            <Text color="white">{data.pnl.holding_period_days} days</Text>
-                        </Flex>
+                        <div className="mb-0.5 flex justify-between">
+                            <span className="text-gray-400">Holding</span>
+                            <span className="text-white">{data.pnl.holding_period_days} days</span>
+                        </div>
                     )}
 
                     {/* Disposal TX */}
                     {data.disposal_transaction && (
                         <>
-                            <Box borderTop="1px solid" borderColor="gray.600" my={1} />
-                            <Text fontWeight="semibold" color="gray.300" mb={0.5}>Disposal Transaction</Text>
-                            <Flex justify="space-between" mb={0.5}>
-                                <Text color="gray.400">TX</Text>
-                                <Text
-                                    color="blue.300"
-                                    cursor={onTransactionClick ? 'pointer' : undefined}
+                            <div className="my-1 border-t border-gray-600" />
+                            <div className="mb-0.5 font-semibold text-gray-300">Disposal Transaction</div>
+                            <div className="mb-0.5 flex justify-between">
+                                <span className="text-gray-400">TX</span>
+                                <span
+                                    className={`text-blue-300 ${onTransactionClick ? 'cursor-pointer underline' : ''}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         if (onTransactionClick && data.disposal_transaction) {
                                             onTransactionClick(data.disposal_transaction.id);
                                         }
                                     }}
-                                    textDecoration={onTransactionClick ? 'underline' : undefined}
                                 >
                                     #{data.disposal_transaction.id}
-                                </Text>
-                            </Flex>
+                                </span>
+                            </div>
                             {data.disposal_transaction.date_time && (
-                                <Flex justify="space-between" mb={0.5}>
-                                    <Text color="gray.400">Date</Text>
-                                    <Text color="white">{new Date(data.disposal_transaction.date_time).toLocaleString()}</Text>
-                                </Flex>
+                                <div className="mb-0.5 flex justify-between">
+                                    <span className="text-gray-400">Date</span>
+                                    <span className="text-white">{new Date(data.disposal_transaction.date_time).toLocaleString()}</span>
+                                </div>
                             )}
                             {data.disposal_transaction.source && (
-                                <Flex justify="space-between" mb={0.5}>
-                                    <Text color="gray.400">Source</Text>
-                                    <Text color="white">{data.disposal_transaction.source}</Text>
-                                </Flex>
+                                <div className="mb-0.5 flex justify-between">
+                                    <span className="text-gray-400">Source</span>
+                                    <span className="text-white">{data.disposal_transaction.source}</span>
+                                </div>
                             )}
                         </>
                     )}
@@ -380,47 +381,43 @@ export const RealizedPnlLineageTooltip: React.FC<RealizedPnlLineageTooltipProps>
                     {/* Source lots (cost basis came from these lots) */}
                     {data.consumed_slices.length > 0 && (
                         <>
-                            <Box borderTop="1px solid" borderColor="gray.600" my={1} />
-                            <Text fontWeight="semibold" color="gray.300" mb={0.5}>
+                            <div className="my-1 border-t border-gray-600" />
+                            <div className="mb-0.5 font-semibold text-gray-300">
                                 Source Lots × {data.consumed_slices.length}
-                            </Text>
+                            </div>
                             {data.consumed_slices.slice(0, 4).map((s, i) => {
                                 const srcLot = data.source_lots.find(l => l.cost_lot_id === s.cost_lot_id);
                                 return (
-                                    <Flex key={i} justify="space-between" mb={0.5} align="center">
-                                        <Flex align="center" gap={1}>
-                                            <Text color="gray.400">Lot #{s.cost_lot_id}</Text>
+                                    <div key={i} className="mb-0.5 flex items-center justify-between">
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-gray-400">Lot #{s.cost_lot_id}</span>
                                             {srcLot?.cost_source && (
-                                                <Badge size="xs" colorPalette={
-                                                    srcLot.cost_source === 'fmv' ? 'cyan' :
-                                                        srcLot.cost_source === 'provisional' ? 'orange' :
-                                                            srcLot.cost_source === 'proceeds' ? 'green' : 'gray'
-                                                }>{srcLot.cost_source}</Badge>
+                                                <Badge colorScheme={costSourceColor(srcLot.cost_source)}>{srcLot.cost_source}</Badge>
                                             )}
-                                        </Flex>
-                                        <Text color="white" fontFamily="mono">
+                                        </div>
+                                        <span className="font-mono text-white">
                                             {Number(s.quantity).toFixed(4)} @ <ValueDisplay value={s.unit_cost_in_base} currency={baseCurrency} />
-                                        </Text>
-                                    </Flex>
+                                        </span>
+                                    </div>
                                 );
                             })}
                             {data.consumed_slices.length > 4 && (
-                                <Text color="gray.400" fontSize="2xs">+{data.consumed_slices.length - 4} more…</Text>
+                                <div className="text-[10px] text-gray-400">+{data.consumed_slices.length - 4} more…</div>
                             )}
                         </>
                     )}
-                </Box>
+                </div>
             ) : (
-                <Text fontSize="xs" color="gray.400">Hover to load lineage</Text>
+                <div className="text-xs text-gray-400">Hover to load lineage</div>
             )}
-        </Box>
+        </div>
     );
 
     return (
         <Tooltip content={tooltipContent} openDelay={200} closeDelay={100}>
-            <Box onMouseEnter={fetchLineage} display="inline-block">
+            <div onMouseEnter={fetchLineage} className="inline-block">
                 {children}
-            </Box>
+            </div>
         </Tooltip>
     );
 };

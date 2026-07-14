@@ -34,12 +34,12 @@ export const computeDelta = (
     return { delta, pct, matched, totalGap };
 };
 
-/** Chakra color token for a given delta percentage */
+/** Tailwind text color class for a given delta percentage */
 export const deltaColor = (pct: number): string => {
     const absPct = Math.abs(pct);
-    if (absPct < MATCH_TOLERANCE) return 'green.600';
-    if (absPct < 0.01) return 'orange.500';
-    return 'red.600';
+    if (absPct < MATCH_TOLERANCE) return 'text-green-600';
+    if (absPct < 0.01) return 'text-orange-500';
+    return 'text-red-600';
 };
 
 /** Format a ratio as a signed percentage string, e.g. "+12.34%" */

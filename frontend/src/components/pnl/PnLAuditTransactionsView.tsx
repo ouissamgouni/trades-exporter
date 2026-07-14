@@ -11,13 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button } from '../ui/primitives';
 import {
     FiRepeat,
     FiArrowRightCircle,
@@ -42,23 +36,23 @@ import type { EnrichedTransaction, EnrichedTransactionsFilterOptions } from './t
 // ─── Pattern icon mapping (shared with ActivityFeed) ─────────────────────────
 
 const PATTERN_ICONS: Record<string, { icon: React.ReactNode; color: string }> = {
-    [UnitPattern.SWAP]: { icon: <FiRepeat size={13} />, color: 'orange.500' },
-    [UnitPattern.INTERNAL_TRANSFER]: { icon: <FiArrowRightCircle size={13} />, color: 'blue.500' },
-    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: { icon: <FiLink size={13} />, color: 'cyan.500' },
-    [UnitPattern.SPLIT]: { icon: <FiScissors size={13} />, color: 'purple.500' },
-    [UnitPattern.FLOW]: { icon: <FiTrendingUp size={13} />, color: 'green.500' },
-    [UnitPattern.CUSTOM]: { icon: <FiEdit size={13} />, color: 'teal.500' },
-    [UnitPattern.UNKNOWN]: { icon: <FiHelpCircle size={13} />, color: 'gray.400' },
+    [UnitPattern.SWAP]: { icon: <FiRepeat size={13} />, color: 'text-orange-500' },
+    [UnitPattern.INTERNAL_TRANSFER]: { icon: <FiArrowRightCircle size={13} />, color: 'text-blue-500' },
+    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: { icon: <FiLink size={13} />, color: 'text-cyan-500' },
+    [UnitPattern.SPLIT]: { icon: <FiScissors size={13} />, color: 'text-purple-500' },
+    [UnitPattern.FLOW]: { icon: <FiTrendingUp size={13} />, color: 'text-green-500' },
+    [UnitPattern.CUSTOM]: { icon: <FiEdit size={13} />, color: 'text-teal-500' },
+    [UnitPattern.UNKNOWN]: { icon: <FiHelpCircle size={13} />, color: 'text-gray-400' },
 };
 
 const PATTERN_BORDER_COLORS: Record<string, string> = {
-    [UnitPattern.SWAP]: 'orange.400',
-    [UnitPattern.INTERNAL_TRANSFER]: 'blue.400',
-    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'cyan.400',
-    [UnitPattern.SPLIT]: 'purple.400',
-    [UnitPattern.FLOW]: 'green.400',
-    [UnitPattern.CUSTOM]: 'teal.400',
-    [UnitPattern.UNKNOWN]: 'gray.300',
+    [UnitPattern.SWAP]: 'border-orange-400',
+    [UnitPattern.INTERNAL_TRANSFER]: 'border-blue-400',
+    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'border-cyan-400',
+    [UnitPattern.SPLIT]: 'border-purple-400',
+    [UnitPattern.FLOW]: 'border-green-400',
+    [UnitPattern.CUSTOM]: 'border-teal-400',
+    [UnitPattern.UNKNOWN]: 'border-slate-300',
 };
 
 const getPatternIcon = (pattern: string | null | undefined) =>
@@ -149,19 +143,17 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
             cellBg: 'white',
             render: (tx: Transaction) => {
                 const etx = tx as unknown as EnrichedTransaction;
-                if (!etx.unit_id) return <Text fontSize="xs" color="gray.400">-</Text>;
+                if (!etx.unit_id) return <span className="text-xs text-gray-400">-</span>;
                 const { icon, color } = getPatternIcon(etx.unit_pattern);
                 return (
                     <Tooltip content={etx.unit_label || getUnitPatternLabel(etx.unit_pattern || 'unknown')}>
-                        <Flex
-                            align="center"
-                            gap={1}
-                            cursor="pointer"
+                        <div
+                            className="flex cursor-pointer items-center gap-1"
                             onClick={(e) => { e.stopPropagation(); setSlidePanelUnitId(etx.unit_id!); }}
                         >
-                            <Box color={color}>{icon}</Box>
-                            <Text fontSize="xs" color="gray.600">#{etx.unit_id}</Text>
-                        </Flex>
+                            <span className={color}>{icon}</span>
+                            <span className="text-xs text-gray-600">#{etx.unit_id}</span>
+                        </div>
                     </Tooltip>
                 );
             },
@@ -174,7 +166,7 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
             cellBg: 'white',
             render: (tx: Transaction) => {
                 const etx = tx as unknown as EnrichedTransaction;
-                if (etx.realized_pnl_in_base == null) return <Text fontSize="xs" color="gray.400">-</Text>;
+                if (etx.realized_pnl_in_base == null) return <span className="text-xs text-gray-400">-</span>;
                 const isPositive = etx.realized_pnl_in_base >= 0;
                 const entries = etx.realized_entries || [];
                 const tooltipLines: string[] = [];
@@ -198,11 +190,11 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                     : `${etx.realized_pnl_in_base >= 0 ? '+' : ''}${etx.realized_pnl_in_base.toFixed(2)} ${baseCurrency}`;
                 return (
                     <Tooltip content={tooltipContent}>
-                        <Box textAlign="right">
-                            <Text fontSize="xs" fontWeight="semibold" color={isPositive ? 'green.600' : 'red.600'}>
+                        <div className="text-right">
+                            <span className={`text-xs font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
                                 {isPositive ? '+' : ''}<ValueDisplay value={etx.realized_pnl_in_base} currency={baseCurrency} />
-                            </Text>
-                        </Box>
+                            </span>
+                        </div>
                     </Tooltip>
                 );
             },
@@ -215,13 +207,13 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
             cellBg: 'white',
             render: (tx: Transaction) => {
                 const etx = tx as unknown as EnrichedTransaction;
-                if (etx.total_fees_in_base == null) return <Text fontSize="xs" color="gray.400">-</Text>;
+                if (etx.total_fees_in_base == null) return <span className="text-xs text-gray-400">-</span>;
                 return (
-                    <Box textAlign="right">
-                        <Text fontSize="xs" color="orange.600">
+                    <div className="text-right">
+                        <span className="text-xs text-orange-600">
                             <ValueDisplay value={etx.total_fees_in_base} currency={baseCurrency} />
-                        </Text>
-                    </Box>
+                        </span>
+                    </div>
                 );
             },
         },
@@ -234,19 +226,16 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
             render: (tx: Transaction) => {
                 const etx = tx as unknown as EnrichedTransaction;
                 const events = etx.cost_lot_event_summary || [];
-                if (events.length === 0) return <Text fontSize="xs" color="gray.400">-</Text>;
+                if (events.length === 0) return <span className="text-xs text-gray-400">-</span>;
                 const tooltipContent = events.slice(0, 5).map(
                     e => `${e.event_type}: Δ${e.quantity_delta >= 0 ? '+' : ''}${e.quantity_delta.toFixed(4)} (lot #${e.lot_id || '?'})`
                 ).join('\n') + (events.length > 5 ? `\n...+${events.length - 5} more` : '');
                 return (
                     <Tooltip content={tooltipContent}>
-                        <Flex justify="center">
+                        <div className="flex justify-center">
                             <Badge
-                                size="sm"
-                                colorPalette="gray"
-                                variant="subtle"
-                                cursor={etx.unit_id ? 'pointer' : undefined}
-                                _hover={etx.unit_id ? { colorPalette: 'blue' } : undefined}
+                                colorScheme="gray"
+                                className={etx.unit_id ? 'cursor-pointer hover:bg-blue-100 hover:text-blue-700' : undefined}
                                 onClick={etx.unit_id ? (e: React.MouseEvent) => {
                                     e.stopPropagation();
                                     setEventsPanelUnitId(etx.unit_id!);
@@ -254,7 +243,7 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                             >
                                 {events.length}
                             </Badge>
-                        </Flex>
+                        </div>
                     </Tooltip>
                 );
             },
@@ -273,11 +262,11 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
     }, []);
 
     return (
-        <Box>
+        <div>
             {/* PnL Filter Bar */}
-            <Flex wrap="wrap" gap={2} mb={3} align="center">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
                 {/* Search */}
-                <Flex align="center" gap={1} bg="gray.50" borderRadius="md" px={2} py={1} maxW="200px">
+                <div className="flex max-w-[200px] items-center gap-1 border border-slate-200 bg-slate-50 px-2 py-1">
                     <FiSearch size={12} color="gray" />
                     <input
                         type="text"
@@ -292,15 +281,15 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                             width: '100%',
                         }}
                     />
-                </Flex>
+                </div>
 
                 {/* Pattern filter chips */}
                 {filterOptions?.patterns.map(p => (
                     <Button
                         key={p.value}
-                        size="xs"
+                        size="sm"
                         variant={typeFilter === p.value ? 'solid' : 'outline'}
-                        colorPalette={typeFilter === p.value ? 'blue' : 'gray'}
+                        colorScheme={typeFilter === p.value ? 'blue' : 'gray'}
                         onClick={() => setTypeFilter(typeFilter === p.value ? null : p.value)}
                     >
                         {getUnitPatternLabel(p.value)} ({p.count})
@@ -310,9 +299,9 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 {/* Boolean filter chips */}
                 {filterOptions && filterOptions.has_realized_pnl_count > 0 && (
                     <Button
-                        size="xs"
+                        size="sm"
                         variant={hasRealizedPnl ? 'solid' : 'outline'}
-                        colorPalette={hasRealizedPnl ? 'green' : 'gray'}
+                        colorScheme={hasRealizedPnl ? 'green' : 'gray'}
                         onClick={() => setHasRealizedPnl(hasRealizedPnl ? null : true)}
                     >
                         Has P&L ({filterOptions.has_realized_pnl_count})
@@ -320,9 +309,10 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 )}
                 {filterOptions && filterOptions.has_fees_count > 0 && (
                     <Button
-                        size="xs"
+                        size="sm"
                         variant={hasFees ? 'solid' : 'outline'}
-                        colorPalette={hasFees ? 'orange' : 'gray'}
+                        colorScheme="gray"
+                        className={hasFees ? 'bg-orange-600 text-white hover:bg-orange-700' : 'border-orange-300 text-orange-700 hover:bg-orange-50'}
                         onClick={() => setHasFees(hasFees ? null : true)}
                     >
                         Has Fees ({filterOptions.has_fees_count})
@@ -331,11 +321,11 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
 
                 {/* Clear filters */}
                 {hasAnyFilter && (
-                    <Button size="xs" variant="ghost" onClick={clearFilters}>
+                    <Button size="sm" variant="ghost" onClick={clearFilters}>
                         Clear
                     </Button>
                 )}
-            </Flex>
+            </div>
 
             {/* TransactionsTable with enriched data */}
             <TransactionsTable
@@ -374,7 +364,7 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 width="800px"
             >
                 {eventsPanelUnitId !== null && (
-                    <Box maxH="calc(100vh - 140px)" overflow="auto">
+                    <div className="max-h-[calc(100vh-140px)] overflow-auto">
                         <CostLotEventsTable
                             {...EVENT_TABLE_PRESETS.UNIT_DETAIL}
                             versionId={versionId}
@@ -386,9 +376,9 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                                 setSlidePanelUnitId(uid);
                             }}
                         />
-                    </Box>
+                    </div>
                 )}
             </SlidePanel>
-        </Box>
+        </div>
     );
 };

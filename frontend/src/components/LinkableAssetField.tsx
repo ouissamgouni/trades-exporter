@@ -11,7 +11,6 @@
  */
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Badge, Box, Flex, Input, Text } from '@chakra-ui/react';
 import { FiEdit2, FiCopy, FiPlusCircle } from 'react-icons/fi';
 import { LuLoader } from 'react-icons/lu';
 import { Asset, AssetRef } from '../types';
@@ -19,6 +18,10 @@ import { AssetBadge } from './AssetBadge';
 import { AssetSelector } from './AssetSelector';
 import { getAssetSuggestions, getConfidenceColor, formatConfidence } from '../utils/similarity';
 import { Tooltip } from './ui/tooltip';
+import { Badge, type BadgeColorScheme } from './ui/primitives';
+
+const SCHEMES = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toScheme = (c: string): BadgeColorScheme => (SCHEMES.includes(c) ? c : 'gray') as BadgeColorScheme;
 
 export interface LinkableAssetFieldProps {
     /** Label shown on the left */
@@ -152,21 +155,18 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
     // ---- Edit mode: show selector + suggestions ----
     if (isEditing) {
         return (
-            <Box ref={containerRef} py={0.5}>
-                <Flex justify="space-between" gap={2} align="center" mb={1}>
-                    <Text fontSize={fontSize} color="blue.600" fontWeight="medium" flexShrink={0}>{label}</Text>
+            <div ref={containerRef} className="py-0.5">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="shrink-0 font-medium text-blue-600" style={{ fontSize }}>{label}</span>
                     {isSaving && <LuLoader size={10} className="animate-spin" />}
-                </Flex>
+                </div>
 
                 {/* Editable source text */}
                 {onSourceChange && (
-                    <Flex align="center" gap={1} mb={1}>
-                        <Text fontSize="9px" color="gray.500" flexShrink={0}>Source:</Text>
+                    <div className="mb-1 flex items-center gap-1">
+                        <span className="shrink-0 text-[9px] text-slate-500">Source:</span>
                         {editingSource ? (
-                            <Input
-                                size="xs"
-                                fontSize="9px"
-                                fontFamily="mono"
+                            <input
                                 value={localSource}
                                 onChange={(e) => setLocalSource(e.target.value)}
                                 onBlur={handleSourceSave}
@@ -174,22 +174,17 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
                                     if (e.key === 'Enter') { e.preventDefault(); handleSourceSave(); }
                                 }}
                                 autoFocus
-                                flex={1}
+                                className="flex-1 border border-slate-300 bg-white px-1 py-0.5 font-mono text-[9px] outline-none focus:border-blue-500"
                             />
                         ) : (
-                            <Text
-                                fontSize="9px"
-                                fontFamily="mono"
-                                color={sourceValue ? 'gray.600' : 'gray.400'}
-                                cursor="pointer"
-                                _hover={{ color: 'blue.500' }}
+                            <span
+                                className={`flex-1 cursor-pointer font-mono text-[9px] hover:text-blue-500 ${sourceValue ? 'text-slate-600' : 'text-slate-400'}`}
                                 onClick={() => setEditingSource(true)}
-                                flex={1}
                             >
                                 {sourceValue || '(empty)'}
-                            </Text>
+                            </span>
                         )}
-                    </Flex>
+                    </div>
                 )}
 
                 {/* Asset selector */}
@@ -205,7 +200,7 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
 
                 {/* Suggestions */}
                 {sourceValue && !isLinked && suggestions.length > 0 && (
-                    <Flex gap={1} wrap="wrap" mt={1}>
+                    <div className="mt-1 flex flex-wrap gap-1">
                         {suggestions.map((s, idx) => (
                             <Tooltip
                                 key={idx}
@@ -213,11 +208,9 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
                                 openDelay={100}
                             >
                                 <Badge
-                                    size="xs"
-                                    colorPalette={getConfidenceColor(s.confidence)}
-                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                    cursor="pointer"
-                                    fontSize="8px"
+                                    colorScheme={toScheme(getConfidenceColor(s.confidence))}
+                                    className={`cursor-pointer ${s.confidence >= 0.9 ? 'font-semibold' : ''}`}
+                                    style={{ fontSize: '8px' }}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         handleAcceptSuggestion(s.item.asset_id!);
@@ -228,45 +221,23 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
                                 </Badge>
                             </Tooltip>
                         ))}
-                    </Flex>
+                    </div>
                 )}
-            </Box>
+            </div>
         );
     }
 
     // ---- View mode ----
     return (
-        <Flex
-            justify="space-between"
-            py={0.5}
-            gap={2}
-            align="center"
-            cursor="pointer"
+        <div
+            className="group -mx-1 flex cursor-pointer items-center justify-between gap-2 border border-transparent px-1 py-0.5 transition-all hover:border-blue-200 hover:bg-blue-50"
             onClick={() => setIsEditing(true)}
-            px={1}
-            mx={-1}
-            borderWidth="1px"
-            borderColor="transparent"
-            borderRadius="sm"
-            transition="all 0.1s"
-            _hover={{ borderColor: 'blue.200', bg: 'blue.50' }}
-            css={{ '&:hover .ef-pencil': { opacity: 0.5 } }}
         >
-            <Text fontSize={fontSize} color="gray.500" flexShrink={0}>{label}</Text>
-            <Flex
-                align="center"
-                gap={1}
-                minW={0}
-            >
-                <Box
-                    className="ef-pencil"
-                    opacity={0}
-                    transition="opacity 0.15s"
-                    flexShrink={0}
-                    color="blue.400"
-                >
+            <span className="shrink-0 text-slate-500" style={{ fontSize }}>{label}</span>
+            <div className="flex min-w-0 items-center gap-1">
+                <span className="shrink-0 text-blue-400 opacity-0 transition-opacity group-hover:opacity-50">
                     <FiEdit2 size={9} />
-                </Box>
+                </span>
 
                 {isLinked ? (
                     <AssetBadge
@@ -277,7 +248,7 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
                         maxLength={maxLength}
                     />
                 ) : sourceValue ? (
-                    <Flex align="center" gap={1}>
+                    <div className="flex items-center gap-1">
                         <AssetBadge
                             sourceSymbol={sourceValue}
                             size="xs"
@@ -286,19 +257,16 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
                         />
                         {onCreateNew && (
                             <Tooltip content="Create new asset" openDelay={100}>
-                                <Box
-                                    as="button"
+                                <button
+                                    type="button"
                                     onClick={(e: React.MouseEvent) => {
                                         e.stopPropagation();
                                         onCreateNew();
                                     }}
-                                    color="green.500"
-                                    cursor="pointer"
-                                    flexShrink={0}
-                                    _hover={{ color: 'green.700' }}
+                                    className="shrink-0 cursor-pointer text-green-500 hover:text-green-700"
                                 >
                                     <FiPlusCircle size={9} />
-                                </Box>
+                                </button>
                             </Tooltip>
                         )}
                         {suggestions.length > 0 && suggestions.map((s, idx) => (
@@ -308,11 +276,9 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
                                 openDelay={100}
                             >
                                 <Badge
-                                    size="xs"
-                                    colorPalette={getConfidenceColor(s.confidence)}
-                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                    cursor="pointer"
-                                    fontSize="7px"
+                                    colorScheme={toScheme(getConfidenceColor(s.confidence))}
+                                    className={`cursor-pointer ${s.confidence >= 0.9 ? 'font-semibold' : ''}`}
+                                    style={{ fontSize: '7px' }}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         handleAcceptSuggestion(s.item.asset_id!);
@@ -323,12 +289,12 @@ export const LinkableAssetField: React.FC<LinkableAssetFieldProps> = ({
                                 </Badge>
                             </Tooltip>
                         ))}
-                    </Flex>
+                    </div>
                 ) : (
-                    <Text fontSize={fontSize} color="gray.400">-</Text>
+                    <span className="text-slate-400" style={{ fontSize }}>-</span>
                 )}
-            </Flex>
-        </Flex>
+            </div>
+        </div>
     );
 };
 

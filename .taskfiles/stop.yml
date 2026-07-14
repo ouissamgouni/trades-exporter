@@ -198,23 +198,30 @@ tasks:
     cmds:
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
-        echo "Stopping scenario environment ($QA_ENV_NAME)..."
+
+        # Use persisted ports if available (overrides may have been used at start time)
+        SCENARIO_LABEL="{{.SCENARIO}}"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+        STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
+        [ -f "$STATE_FILE" ] && source "$STATE_FILE"
+
+        echo "Stopping scenario environment ($ENV_NAME)..."
 
         # Stop Docker containers (both scenario-DB-only and unified compose)
-        docker compose -f infra/docker/docker-compose.scenario-db.yml -p $QA_PROJECT down -v 2>/dev/null || true
-        docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT down -v 2>/dev/null || true
+        docker compose -f infra/docker/docker-compose.scenario-db.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+        docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
 
         # Remove Docker images
-        docker rmi trades-exporter-backend:$QA_ENV_NAME trades-exporter-frontend:$QA_ENV_NAME 2>/dev/null || true
+        docker rmi trades-exporter-backend:$ENV_NAME trades-exporter-frontend:$ENV_NAME 2>/dev/null || true
 
         # Kill local processes (hybrid mode)
-        pkill -f "uvicorn.*--port $QA_API_PORT" 2>/dev/null || true
-        pkill -f "vite.*--port $QA_WEB_PORT" 2>/dev/null || true
+        pkill -f "uvicorn.*--port $SC_API_PORT" 2>/dev/null || true
+        pkill -f "vite.*--port $SC_WEB_PORT" 2>/dev/null || true
 
         # Cleanup env symlink
-        if [ "$QA_ENV_NAME" != "qa" ]; then
-          rm -f ".env.${QA_ENV_NAME}" 2>/dev/null || true
-        fi
+        rm -f "{{.ROOT_DIR}}/config/${ENV_NAME}.env" 2>/dev/null || true
+
+        # Cleanup persisted port state
+        rm -f "$STATE_FILE" 2>/dev/null || true
 
         # Cleanup isolated browser sessions unless explicitly kept.
         if [ "{{.KEEP_BROWSER}}" != "1" ]; then
@@ -224,10 +231,10 @@ tasks:
         fi
 
         echo ""
-        echo "✅ Scenario environment stopped ($QA_ENV_NAME)"
+        echo "✅ Scenario environment stopped ($ENV_NAME)"
         echo "   Containers: removed"
         echo "   DB volume:  removed"
-        echo "   Ports:      $QA_DB_PORT, $QA_API_PORT, $QA_WEB_PORT freed"
+        echo "   Ports:      $SC_DB_PORT, $SC_API_PORT, $SC_WEB_PORT freed"
 
   scenario:all:
     desc: "Stop ALL running scenario instances. KEEP_BROWSER=1 skips browser cleanup."
@@ -246,24 +253,28 @@ tasks:
         echo "Scanning for running scenario instances..."
         FOUND=0
 
-        # Find all scenario database containers (trades_db_qa, trades_db_qa-*)
-        for CONTAINER in $(docker ps --filter "name=trades_db_qa" --format '{{`{{.Names}}`}}' 2>/dev/null); do
+        # Find all scenario database containers (trades_db_scenario-default, trades_db_scenario-<name>)
+        for CONTAINER in $(docker ps --filter "name=trades_db_scenario-" --format '{{`{{.Names}}`}}' 2>/dev/null); do
           FOUND=$((FOUND + 1))
           # Extract scenario from container name
-          SCENARIO="${CONTAINER#trades_db_qa}"
-          SCENARIO="${SCENARIO#-}"
+          SCENARIO="${CONTAINER#trades_db_scenario-}"
 
           source {{.SCENARIO_PORTS_SH}} "$SCENARIO"
-          echo "Stopping $QA_ENV_NAME (DB: $QA_DB_PORT, API: $QA_API_PORT, WEB: $QA_WEB_PORT)..."
 
-          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $QA_PROJECT down -v 2>/dev/null || true
-          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT down -v 2>/dev/null || true
-          docker rmi trades-exporter-backend:$QA_ENV_NAME trades-exporter-frontend:$QA_ENV_NAME 2>/dev/null || true
-          pkill -f "uvicorn.*--port $QA_API_PORT" 2>/dev/null || true
-          pkill -f "vite.*--port $QA_WEB_PORT" 2>/dev/null || true
-          if [ "$QA_ENV_NAME" != "qa" ]; then
-            rm -f ".env.${QA_ENV_NAME}" 2>/dev/null || true
-          fi
+          # Use persisted ports if available (overrides may have been used at start time)
+          SCENARIO_LABEL="$SCENARIO"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+          STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
+          [ -f "$STATE_FILE" ] && source "$STATE_FILE"
+
+          echo "Stopping $ENV_NAME (DB: $SC_DB_PORT, API: $SC_API_PORT, WEB: $SC_WEB_PORT)..."
+
+          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+          docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+          docker rmi trades-exporter-backend:$ENV_NAME trades-exporter-frontend:$ENV_NAME 2>/dev/null || true
+          pkill -f "uvicorn.*--port $SC_API_PORT" 2>/dev/null || true
+          pkill -f "vite.*--port $SC_WEB_PORT" 2>/dev/null || true
+          rm -f "{{.ROOT_DIR}}/config/${ENV_NAME}.env" 2>/dev/null || true
+          rm -f "$STATE_FILE" 2>/dev/null || true
         done
 
         if [ "{{.KEEP_BROWSER}}" != "1" ]; then

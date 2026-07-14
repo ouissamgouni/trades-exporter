@@ -10,7 +10,6 @@
  */
 
 import React from 'react';
-import { Box, Flex, Text } from '@chakra-ui/react';
 import { Tooltip } from '../ui/tooltip';
 import { formatQuantityFullPrecision } from '../../utils/numberUtils';
 import { type DeltaInfo, formatPct } from './deltaUtils';
@@ -42,9 +41,9 @@ export const DeltaBar: React.FC<DeltaBarProps> = ({
 }) => {
     if (!delta) {
         return (
-            <Text fontSize={size} color="gray.400">
+            <span className={`text-slate-400 ${size === 'sm' ? 'text-sm' : 'text-xs'}`}>
                 —
-            </Text>
+            </span>
         );
     }
 
@@ -53,18 +52,18 @@ export const DeltaBar: React.FC<DeltaBarProps> = ({
 
     // Tooltip content — always shows exact values
     const tooltipContent = (
-        <Box p={1} fontSize="xs">
+        <div className="p-1 text-xs">
             {liveQty != null && (
-                <Text>Live: {formatQuantityFullPrecision(liveQty)}</Text>
+                <div>Live: {formatQuantityFullPrecision(liveQty)}</div>
             )}
             {pnlQty != null && (
-                <Text>P&L: {formatQuantityFullPrecision(pnlQty)}</Text>
+                <div>P&L: {formatQuantityFullPrecision(pnlQty)}</div>
             )}
-            <Text>
+            <div>
                 Delta: {delta.delta >= 0 ? '+' : ''}
                 {formatQuantityFullPrecision(delta.delta)} ({formatPct(delta.pct)})
-            </Text>
-        </Box>
+            </div>
+        </div>
     );
 
     // Green portion = how much matches (1 - gap), clamped 0–1
@@ -73,30 +72,20 @@ export const DeltaBar: React.FC<DeltaBarProps> = ({
 
     return (
         <Tooltip content={tooltipContent} openDelay={200}>
-            <Flex
-                align="center"
-                justify="center"
-                cursor="help"
-                w={barW}
-                h="16px"
+            <div
+                className="flex cursor-help items-center justify-center"
+                style={{ width: barW, height: '16px' }}
             >
-                <Box
-                    w="100%"
-                    h={barH}
-                    borderRadius="full"
-                    overflow="hidden"
-                    bg="red.300"
-                    position="relative"
+                <div
+                    className="relative w-full overflow-hidden bg-red-300"
+                    style={{ height: barH }}
                 >
-                    <Box
-                        h="100%"
-                        w={`${(greenFraction * 100).toFixed(1)}%`}
-                        bg="green.400"
-                        borderRadius="full"
-                        transition="width 0.2s"
+                    <div
+                        className="h-full bg-green-400 transition-[width] duration-200"
+                        style={{ width: `${(greenFraction * 100).toFixed(1)}%` }}
                     />
-                </Box>
-            </Flex>
+                </div>
+            </div>
         </Tooltip>
     );
 };

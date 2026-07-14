@@ -4,7 +4,6 @@
  */
 
 import React from 'react';
-import { Box, Text } from '@chakra-ui/react';
 import { SlidePanel } from './SlidePanel';
 import { CostLotEventsTable, EVENT_TABLE_PRESETS } from './CostLotEventsTable';
 
@@ -29,11 +28,11 @@ export const LotEventsSlidePanel: React.FC<LotEventsSlidePanelProps> = ({
 }) => {
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Cost Lot Events" width="900px">
-            <Text fontSize="2xs" color="gray.500" mb={2}>
+            <span className="mb-2 block text-[10px] text-slate-500">
                 Full audit trail of lot lifecycle events — opens, consumptions, settlements, adjustments.
-            </Text>
+            </span>
             {isOpen && (
-                <Box maxH="calc(100vh - 140px)" overflow="auto">
+                <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
                     <CostLotEventsTable
                         {...EVENT_TABLE_PRESETS.AUDIT}
                         versionId={versionId}
@@ -44,7 +43,7 @@ export const LotEventsSlidePanel: React.FC<LotEventsSlidePanelProps> = ({
                         defaultFiltersCollapsed={false}
                         storageKey="pnl_slide_lot_events"
                     />
-                </Box>
+                </div>
             )}
         </SlidePanel>
     );

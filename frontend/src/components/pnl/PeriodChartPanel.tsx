@@ -7,7 +7,6 @@
  * Includes a fullscreen button that opens a modal with zoom controls.
  */
 import React, { useMemo, useState } from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import { FiAlertTriangle, FiMaximize2 } from 'react-icons/fi';
 import type { TimelinePoint } from '../../hooks/useChartData';
 import { usePriceGaps } from '../../hooks/usePriceGaps';
@@ -19,6 +18,7 @@ import { CostBasisVsMarketValueChart } from './CostBasisVsMarketValueChart';
 import { AssetPerformanceComparison } from './AssetPerformanceComparison';
 import { ChartFullscreenModal } from './ChartFullscreenModal';
 import { GapFixPanel } from '../GapFixPanel';
+import { Badge } from '../ui/primitives';
 
 type ChartMode = 'performance' | 'cost-vs-value' | 'price';
 
@@ -97,46 +97,40 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
     return (
         <>
             {/* Inline chart */}
-            <Box position="relative">
+            <div className="relative">
                 {/* Header: toggle + fullscreen */}
-                <Flex justify="space-between" align="center" mb={1}>
-                    <Flex gap={0.5}>
+                <div className="mb-1 flex items-center justify-between">
+                    <div className="flex gap-0.5">
                         {modes.map(([mode, label]) => (
                             <Badge
                                 key={mode}
-                                cursor="pointer"
-                                variant={chartMode === mode ? 'solid' : 'outline'}
-                                colorPalette={chartMode === mode ? 'blue' : 'gray'}
-                                size="xs"
-                                px={1.5}
+                                className={`cursor-pointer px-1.5 ${chartMode === mode ? 'bg-blue-500 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}
                                 onClick={() => setChartMode(mode)}
                             >
                                 {label}
                             </Badge>
                         ))}
-                    </Flex>
-                    <Box
-                        cursor="pointer"
-                        color="gray.400"
-                        _hover={{ color: 'blue.500' }}
+                    </div>
+                    <div
+                        className="cursor-pointer text-slate-400 hover:text-blue-500"
                         onClick={handleOpenFullscreen}
                         title="Fullscreen"
                     >
                         <FiMaximize2 size={12} />
-                    </Box>
-                </Flex>
+                    </div>
+                </div>
 
                 {/* Error state */}
                 {error && chartMode !== 'price' ? (
-                    <Flex align="center" justify="center" h="200px" direction="column" gap={1}>
-                        <FiAlertTriangle size={16} color="var(--chakra-colors-red-400)" />
-                        <Text fontSize="xs" color="red.500">Failed to load chart data</Text>
-                        <Text fontSize="xs" color="red.400">{error}</Text>
-                    </Flex>
+                    <div className="flex h-[200px] flex-col items-center justify-center gap-1">
+                        <span className="text-red-400"><FiAlertTriangle size={16} /></span>
+                        <span className="text-xs text-red-500">Failed to load chart data</span>
+                        <span className="text-xs text-red-400">{error}</span>
+                    </div>
                 ) : !isLoading && points.length === 0 && chartMode !== 'price' ? (
-                    <Flex align="center" justify="center" h="200px" direction="column" gap={1}>
-                        <Text fontSize="xs" color="gray.400">No chart data available for this period</Text>
-                    </Flex>
+                    <div className="flex h-[200px] flex-col items-center justify-center gap-1">
+                        <span className="text-xs text-slate-400">No chart data available for this period</span>
+                    </div>
                 ) : chartMode === 'performance' ? (
                     <PortfolioPerformanceChart
                         points={points}
@@ -163,34 +157,20 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
 
                 {/* Period-scoped gap warning (Performance / Cost vs Value tabs only) */}
                 {chartMode !== 'price' && assetId != null && periodGapCount > 0 && (
-                    <Flex
-                        align="center"
-                        gap={1}
-                        mt={1}
-                        px={2}
-                        py={1}
-                        bg="orange.50"
-                        border="1px solid"
-                        borderColor="orange.200"
-                        borderRadius="sm"
-                    >
-                        <FiAlertTriangle size={11} color="var(--chakra-colors-orange-500)" />
-                        <Text fontSize="2xs" color="orange.700">
+                    <div className="mt-1 flex items-center gap-1 border border-orange-200 bg-orange-50 px-2 py-1">
+                        <span className="text-orange-500"><FiAlertTriangle size={11} /></span>
+                        <span className="text-[10px] text-orange-700">
                             {periodGapCount} price gap{periodGapCount !== 1 ? 's' : ''} in this period — chart accuracy may be affected.
-                        </Text>
-                        <Text
-                            fontSize="2xs"
-                            color="blue.500"
-                            cursor="pointer"
-                            fontWeight="semibold"
-                            _hover={{ textDecoration: 'underline' }}
+                        </span>
+                        <span
+                            className="cursor-pointer text-[10px] font-semibold text-blue-500 hover:underline"
                             onClick={() => setChartMode('price')}
                         >
                             Fix gaps
-                        </Text>
-                    </Flex>
+                        </span>
+                    </div>
                 )}
-            </Box>
+            </div>
 
             {/* Fullscreen modal */}
             <ChartFullscreenModal
@@ -201,23 +181,19 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                     : chartMode === 'performance' ? 'Performance (Rebased)' : chartMode === 'cost-vs-value' ? 'Cost Basis vs Market Value' : 'Price'}
             >
                 {/* Mode toggle + zoom badges */}
-                <Flex justify="space-between" align="center" mb={3} wrap="wrap" gap={2}>
-                    <Flex gap={1}>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex gap-1">
                         {modes.map(([mode, label]) => (
                             <Badge
                                 key={mode}
-                                cursor="pointer"
-                                variant={chartMode === mode ? 'solid' : 'outline'}
-                                colorPalette={chartMode === mode ? 'blue' : 'gray'}
-                                size="sm"
-                                px={2}
+                                className={`cursor-pointer px-2 ${chartMode === mode ? 'bg-blue-500 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}
                                 onClick={() => setChartMode(mode)}
                             >
                                 {label}
                             </Badge>
                         ))}
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
 
                 {/* Full-size chart with own zoom controls */}
                 {chartMode === 'performance' ? (

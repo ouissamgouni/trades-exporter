@@ -5,7 +5,6 @@
  * Zoom presets: All / 1Y / 6M / 3M / 1M.
  */
 import React, { useMemo, useState } from 'react';
-import { Badge, Box, Flex, Heading, Text } from '@chakra-ui/react';
 import { ResponsiveLine } from '@nivo/line';
 import type { TimelinePoint } from '../../hooks/useChartData';
 import {
@@ -16,6 +15,7 @@ import {
     getTickValues,
     filterPointsByZoom,
 } from './chartUtils';
+import { Badge } from '../ui/primitives';
 
 interface CostBasisVsMarketValueChartProps {
     points: TimelinePoint[];
@@ -66,38 +66,34 @@ export const CostBasisVsMarketValueChart: React.FC<CostBasisVsMarketValueChartPr
     if (!points.length && !isLoading) return null;
 
     return (
-        <Box p={hideControls ? 0 : 4} bg="white" borderRadius={hideControls ? 'none' : 'md'} border={hideControls ? 'none' : '1px solid'} borderColor="gray.200" mb={hideControls ? 0 : 4}>
+        <div className={hideControls ? '' : 'mb-4 border border-slate-200 bg-white p-4'}>
             {!hideControls && (
-                <Flex justify="space-between" align="center" mb={3} wrap="wrap" gap={2}>
-                    <Heading size="sm" color="gray.700">{contextLabel ? `${contextLabel} — Cost Basis vs Market Value` : 'Cost Basis vs Market Value'}</Heading>
-                    <Flex gap={1}>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-slate-700">{contextLabel ? `${contextLabel} — Cost Basis vs Market Value` : 'Cost Basis vs Market Value'}</span>
+                    <div className="flex gap-1">
                         {(Object.keys(ZOOM_PRESETS) as ZoomPreset[]).map(k => (
                             <Badge
                                 key={k}
-                                cursor="pointer"
-                                variant={zoom === k ? 'solid' : 'outline'}
-                                colorPalette={zoom === k ? 'purple' : 'gray'}
+                                className={`cursor-pointer px-2 ${zoom === k ? 'bg-purple-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}
                                 onClick={() => setZoom(k)}
-                                size="sm"
-                                px={2}
                             >
                                 {ZOOM_PRESETS[k].label}
                             </Badge>
                         ))}
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
             )}
 
             {isLoading ? (
-                <Box h={height} display="flex" alignItems="center" justifyContent="center">
-                    <Text fontSize="sm" color="gray.400">Loading...</Text>
-                </Box>
+                <div className="flex items-center justify-center" style={{ height }}>
+                    <span className="text-sm text-slate-400">Loading...</span>
+                </div>
             ) : lineData.length === 0 ? (
-                <Box h={height} display="flex" alignItems="center" justifyContent="center">
-                    <Text fontSize="xs" color="gray.400">Not enough data</Text>
-                </Box>
+                <div className="flex items-center justify-center" style={{ height }}>
+                    <span className="text-xs text-slate-400">Not enough data</span>
+                </div>
             ) : (
-                <Box h={height}>
+                <div style={{ height }}>
                     <ResponsiveLine
                         data={lineData}
                         animate={false}
@@ -129,30 +125,30 @@ export const CostBasisVsMarketValueChart: React.FC<CostBasisVsMarketValueChartPr
                             const costVal = slice.points.find(p => p.seriesId === 'Cost Basis')?.data.y as number | undefined;
                             const unrealized = (marketVal ?? 0) - (costVal ?? 0);
                             return (
-                                <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="180px">
-                                    <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={1}>
+                                <div className="min-w-[180px] border border-slate-200 bg-white p-2 shadow-md">
+                                    <span className="mb-1 block text-xs font-bold text-slate-600">
                                         {slice.points[0]?.data.xFormatted}
-                                    </Text>
+                                    </span>
                                     {slice.points.map(p => (
-                                        <Flex key={p.id} justify="space-between" gap={3}>
-                                            <Flex align="center" gap={1}>
-                                                <Box w="8px" h="8px" borderRadius="full" bg={p.seriesColor} />
-                                                <Text fontSize="xs">{p.seriesId}</Text>
-                                            </Flex>
-                                            <Text fontSize="xs" fontWeight="bold">
+                                        <div key={p.id} className="flex justify-between gap-3">
+                                            <div className="flex items-center gap-1">
+                                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.seriesColor }} />
+                                                <span className="text-xs">{p.seriesId}</span>
+                                            </div>
+                                            <span className="text-xs font-bold">
                                                 {Number(p.data.yFormatted).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                            </Text>
-                                        </Flex>
+                                            </span>
+                                        </div>
                                     ))}
-                                    <Box borderTop="1px solid" borderColor="gray.100" mt={1} pt={1}>
-                                        <Flex justify="space-between">
-                                            <Text fontSize="xs" color="gray.500">Unrealized</Text>
-                                            <Text fontSize="xs" fontWeight="bold" color={unrealized >= 0 ? 'green.600' : 'red.600'}>
+                                    <div className="mt-1 border-t border-slate-100 pt-1">
+                                        <div className="flex justify-between">
+                                            <span className="text-xs text-slate-500">Unrealized</span>
+                                            <span className={`text-xs font-bold ${unrealized >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                 {unrealized >= 0 ? '+' : ''}{formatCompact(unrealized)} {baseCurrency}
-                                            </Text>
-                                        </Flex>
-                                    </Box>
-                                </Box>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
                             );
                         }}
                         legends={[{
@@ -171,8 +167,8 @@ export const CostBasisVsMarketValueChart: React.FC<CostBasisVsMarketValueChartPr
                             tooltip: { container: { fontFamily: 'inherit', fontSize: 12 } },
                         }}
                     />
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

@@ -6,18 +6,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Heading,
-    HStack,
-    Spinner,
-    Tabs,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import { Badge, Button, Heading, Spinner, Tabs, TabsList, TabsTrigger, Text } from './ui/primitives';
 import {
     FiActivity,
     FiAlertCircle,
@@ -163,66 +152,33 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
     return (
         <>
             {/* Backdrop */}
-            <Box
-                position="fixed"
-                inset={0}
-                bg="blackAlpha.400"
-                zIndex={99}
+            <div
+                className="fixed inset-0 z-[99] bg-black/40"
                 onClick={onClose}
             />
 
             {/* Panel */}
-            <Box
-                position="fixed"
-                right={0}
-                top={0}
-                bottom={0}
-                width={`${drawerWidth}px`}
-                maxW="95vw"
-                bg="white"
-                boxShadow="xl"
-                zIndex={100}
-                overflowY="auto"
-                borderLeft="1px solid"
-                borderColor="gray.200"
+            <div
+                className="fixed bottom-0 right-0 top-0 z-[100] max-w-[95vw] overflow-y-auto border-l border-gray-200 bg-white shadow-xl"
+                style={{ width: `${drawerWidth}px` }}
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Resize Handle */}
-                <Box
-                    position="absolute"
-                    left={0}
-                    top={0}
-                    bottom={0}
-                    width="4px"
-                    cursor="col-resize"
-                    bg={isResizing ? 'blue.400' : 'transparent'}
-                    _hover={{ bg: 'blue.200' }}
-                    transition="background-color 0.2s"
+                <div
+                    className={`absolute bottom-0 left-0 top-0 z-[1] w-[4px] cursor-col-resize transition-colors hover:bg-blue-200 ${isResizing ? 'bg-blue-400' : 'bg-transparent'}`}
                     onMouseDown={handleResizeStart}
-                    zIndex={1}
                 />
 
                 {/* Header */}
-                <Flex
-                    justify="space-between"
-                    align="center"
-                    px={3}
-                    py={2}
-                    borderBottom="1px solid"
-                    borderColor="gray.200"
-                    bg="gray.50"
-                    position="sticky"
-                    top={0}
-                    zIndex={1}
-                >
-                    <Flex align="center" gap={2}>
+                <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">
+                    <div className="flex items-center gap-2">
                         <FiActivity size={16} />
-                        <Heading size="sm">Data Health Check</Heading>
-                    </Flex>
-                    <HStack gap={1}>
+                        <Heading as="h3" className="text-sm">Data Health Check</Heading>
+                    </div>
+                    <div className="flex gap-1">
                         <Button
                             variant="ghost"
-                            size="xs"
+                            className="h-7 w-7 p-0"
                             onClick={() => {
                                 fetchStatus();
                             }}
@@ -231,126 +187,122 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                         >
                             <FiRefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
                         </Button>
-                        <Button variant="ghost" size="xs" onClick={onClose}>
+                        <Button variant="ghost" className="h-7 w-7 p-0" onClick={onClose}>
                             <FiX size={16} />
                         </Button>
-                    </HStack>
-                </Flex>
+                    </div>
+                </div>
 
                 {/* Content */}
-                <Box p={3}>
+                <div className="p-3">
                     {/* Loading */}
                     {isLoading && !data && (
-                        <Flex justify="center" py={8}>
+                        <div className="flex justify-center py-8">
                             <Spinner size="md" />
-                        </Flex>
+                        </div>
                     )}
 
                     {/* Error */}
                     {error && (
-                        <Box p={3} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                            <Flex align="center" gap={2}>
-                                <FiAlertCircle color="var(--chakra-colors-red-500)" />
-                                <Text color="red.700" fontSize="sm">{error}</Text>
-                            </Flex>
-                        </Box>
+                        <div className="border border-red-200 bg-red-50 p-3">
+                            <div className="flex items-center gap-2">
+                                <FiAlertCircle color="#E53E3E" />
+                                <span className="text-sm text-red-700">{error}</span>
+                            </div>
+                        </div>
                     )}
 
                     {data && (
-                        <VStack gap={3} align="stretch">
+                        <div className="flex flex-col gap-3">
                             {/* Summary */}
-                            <Flex
-                                align="center"
-                                gap={3}
-                                p={2}
-                                bg="gray.50"
-                                borderRadius="md"
-                                justify="space-between"
-                                flexWrap="wrap"
-                                fontSize="xs"
-                            >
-                                <Text fontWeight="medium" color="gray.600">
+                            <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-2 text-xs">
+                                <span className="font-medium text-gray-600">
                                     Transaction Status
-                                </Text>
-                                <HStack gap={3}>
-                                    <Text><b>{data.total_count}</b> total</Text>
-                                    <Text><b style={{ color: 'var(--chakra-colors-green-600)' }}>{data.valid_count}</b> valid</Text>
-                                    <Text><b style={{ color: 'var(--chakra-colors-yellow-600)' }}>{data.pending_count}</b> pending</Text>
-                                    <Text><b style={{ color: 'var(--chakra-colors-red-600)' }}>{data.invalid_count}</b> invalid</Text>
-                                </HStack>
-                            </Flex>
+                                </span>
+                                <div className="flex gap-3">
+                                    <span><b>{data.total_count}</b> total</span>
+                                    <span><b style={{ color: '#2F855A' }}>{data.valid_count}</b> valid</span>
+                                    <span><b style={{ color: '#B7791F' }}>{data.pending_count}</b> pending</span>
+                                    <span><b style={{ color: '#C53030' }}>{data.invalid_count}</b> invalid</span>
+                                </div>
+                            </div>
 
                             {/* Tabs for different issue types */}
-                            <Tabs.Root value={activeTab} onValueChange={(e) => setActiveTab(e.value as typeof activeTab)}>
-                                <Tabs.List>
-                                    <Tabs.Trigger value="missing-data">
+                            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+                                <TabsList>
+                                    <TabsTrigger value="missing-data">
                                         Missing Data
                                         {data.missing_data_issues_count > 0 && (
-                                            <Badge ml={1} size="xs" colorPalette="red">
+                                            <Badge colorScheme="red" className="ml-1 text-[10px]">
                                                 {data.missing_data_issues_count}
                                             </Badge>
                                         )}
-                                    </Tabs.Trigger>
-                                    <Tabs.Trigger value="assets-linkage">
+                                    </TabsTrigger>
+                                    <TabsTrigger value="assets-linkage">
                                         Assets Linkage
                                         {((data.linkage_issues_count || 0) > 0) && (
-                                            <Badge ml={1} size="xs" colorPalette="purple">
+                                            <Badge colorScheme="purple" className="ml-1 text-[10px]">
                                                 {data.linkage_issues_count}
                                             </Badge>
                                         )}
-                                    </Tabs.Trigger>
-                                    <Tabs.Trigger value="accounts-linkage">
+                                    </TabsTrigger>
+                                    <TabsTrigger value="accounts-linkage">
                                         Accounts Linkage
                                         {(data.transfer_issues_count || 0) > 0 && (
-                                            <Badge ml={1} size="xs" colorPalette="orange">
+                                            <Badge colorScheme="orange" className="ml-1 text-[10px]">
                                                 {data.transfer_issues_count}
                                             </Badge>
                                         )}
-                                    </Tabs.Trigger>
-                                    <Tabs.Trigger value="pending">
+                                    </TabsTrigger>
+                                    <TabsTrigger value="pending">
                                         Pending
                                         {data.pending_count > 0 && (
-                                            <Badge ml={1} size="xs" colorPalette="yellow">
+                                            <Badge colorScheme="yellow" className="ml-1 text-[10px]">
                                                 {data.pending_count}
                                             </Badge>
                                         )}
-                                    </Tabs.Trigger>
-                                    <Tabs.Trigger value="duplicates">
+                                    </TabsTrigger>
+                                    <TabsTrigger value="duplicates">
                                         Duplicates
                                         {(data.duplicate_count || 0) > 0 && (
-                                            <Badge ml={1} size="xs" colorPalette="red">
+                                            <Badge colorScheme="red" className="ml-1 text-[10px]">
                                                 {data.duplicate_count}
                                             </Badge>
                                         )}
-                                    </Tabs.Trigger>
-                                </Tabs.List>
-                            </Tabs.Root>
+                                    </TabsTrigger>
+                                </TabsList>
+                            </Tabs>
 
                             {/* All Clear */}
                             {allClear && (
-                                <Box p={4} bg="green.50" borderRadius="md" borderWidth={1} borderColor="green.200" textAlign="center">
-                                    <FiCheckCircle size={32} color="var(--chakra-colors-green-500)" style={{ margin: '0 auto 8px' }} />
-                                    <Text fontWeight="bold" color="green.700">All Clear! ✓</Text>
-                                    <Text color="green.600" fontSize="xs">All transactions have complete data.</Text>
-                                </Box>
+                                <div className="border border-green-200 bg-green-50 p-4 text-center">
+                                    <FiCheckCircle size={32} color="#38A169" style={{ margin: '0 auto 8px' }} />
+                                    <Text className="block font-bold text-green-700">All Clear! ✓</Text>
+                                    <Text className="block text-xs text-green-600">All transactions have complete data.</Text>
+                                </div>
                             )}
 
                             {/* Quick Actions */}
                             {!allClear && (
-                                <Flex gap={2} flexWrap="wrap">
+                                <div className="flex flex-wrap gap-2">
                                     {data.pending_count > 0 && onNavigateToPendingTransactions && (
-                                        <Button size="xs" colorPalette="blue" variant="outline" onClick={onNavigateToPendingTransactions}>
-                                            <Badge colorPalette="blue" size="xs" mr={1}>{data.pending_count}</Badge>
+                                        <Button colorScheme="blue" variant="outline" className="h-6 px-2 text-xs" onClick={onNavigateToPendingTransactions}>
+                                            <Badge colorScheme="blue" className="mr-1 text-[10px]">{data.pending_count}</Badge>
                                             Pending Review
                                         </Button>
                                     )}
                                     {data.bundle_suggestions_count > 0 && onNavigateToBundleSuggestions && (
-                                        <Button size="xs" colorPalette="teal" variant="outline" onClick={onNavigateToBundleSuggestions}>
-                                            <Badge colorPalette="teal" size="xs" mr={1}>{data.bundle_suggestions_count}</Badge>
+                                        <Button
+                                            colorScheme="gray"
+                                            variant="outline"
+                                            className="h-6 border-teal-300 px-2 text-xs text-teal-700 hover:bg-teal-50"
+                                            onClick={onNavigateToBundleSuggestions}
+                                        >
+                                            <Badge colorScheme="green" className="mr-1 text-[10px]">{data.bundle_suggestions_count}</Badge>
                                             Bundle Suggestions
                                         </Button>
                                     )}
-                                </Flex>
+                                </div>
                             )}
 
                             {/* Missing Data tab content */}
@@ -382,22 +334,22 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
 
                             {/* Duplicates tab content */}
                             {activeTab === 'duplicates' && (
-                                <Box>
+                                <div>
                                     {(data.duplicate_count || 0) > 0 ? (
                                         <DuplicateResolutionPanel compactMode={true} />
                                     ) : (
-                                        <Box p={3} bg="green.50" borderRadius="md" textAlign="center">
-                                            <Text fontSize="sm" color="green.700">
+                                        <div className="bg-green-50 p-3 text-center">
+                                            <span className="text-sm text-green-700">
                                                 No duplicate transactions found! ✓
-                                            </Text>
-                                        </Box>
+                                            </span>
+                                        </div>
                                     )}
-                                </Box>
+                                </div>
                             )}
 
                             {/* Pending tab content */}
                             {activeTab === 'pending' && (
-                                <Box>
+                                <div>
                                     {data.pending_count > 0 ? (
                                         <TransactionsTable
                                             tableId="dataHealth-pending"
@@ -406,18 +358,18 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                             compact={true}
                                         />
                                     ) : (
-                                        <Box p={3} bg="green.50" borderRadius="md" textAlign="center">
-                                            <Text fontSize="sm" color="green.700">
+                                        <div className="bg-green-50 p-3 text-center">
+                                            <span className="text-sm text-green-700">
                                                 All transactions reviewed! ✓
-                                            </Text>
-                                        </Box>
+                                            </span>
+                                        </div>
                                     )}
-                                </Box>
+                                </div>
                             )}
-                        </VStack>
+                        </div>
                     )}
-                </Box>
-            </Box>
+                </div>
+            </div>
 
             {/* Transaction Detail Drawer */}
             <TransactionDetailDrawer

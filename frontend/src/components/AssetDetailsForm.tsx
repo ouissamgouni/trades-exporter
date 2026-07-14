@@ -6,11 +6,11 @@
  */
 
 import React from 'react';
-import { Badge, Box, Flex, SimpleGrid, Text } from '@chakra-ui/react';
 import { API_URL, Asset } from '../types';
 import { EditableField } from './EditableField';
 import { toaster } from './ui/toaster';
 import { useAssets } from '../hooks/useAssets';
+import { Badge } from './ui/primitives';
 
 const NOOP = async () => { };
 
@@ -63,10 +63,10 @@ export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSav
     };
 
     return (
-        <Box>
-            <SimpleGrid columns={3} gap={0} css={{ columnGap: '32px' }}>
+        <div>
+            <div className="grid grid-cols-3 gap-x-8">
                 {/* Column 1 */}
-                <Box css={{ '& > div': { justifyContent: 'flex-start' } }}>
+                <div className="[&>div]:justify-start">
                     <EditableField
                         label="Asset ID"
                         value={asset.asset_id != null ? `#${asset.asset_id}` : '-'}
@@ -80,9 +80,9 @@ export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSav
                         value={asset.symbol || ''}
                         onSave={v => patchField('symbol', v)}
                     />
-                </Box>
+                </div>
                 {/* Column 2 */}
-                <Box css={{ '& > div': { justifyContent: 'flex-start' } }}>
+                <div className="[&>div]:justify-start">
                     <EditableField
                         label="Created"
                         value={asset.created_at ? new Date(asset.created_at).toLocaleDateString() : '-'}
@@ -100,9 +100,9 @@ export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSav
                         value={asset.isin || ''}
                         onSave={v => patchField('isin', v)}
                     />
-                </Box>
+                </div>
                 {/* Column 3 */}
-                <Box css={{ '& > div': { justifyContent: 'flex-start' } }}>
+                <div className="[&>div]:justify-start">
                     <EditableField
                         label="Price Type"
                         value={asset.price_type || ''}
@@ -116,7 +116,7 @@ export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSav
                         type="select"
                         options={STATUS_OPTIONS}
                         displayValue={
-                            <Badge size="xs" colorPalette={asset.status === 0 ? 'green' : 'gray'}>
+                            <Badge colorScheme={asset.status === 0 ? 'green' : 'gray'}>
                                 {asset.status === 0 ? 'Active' : 'Inactive'}
                             </Badge>
                         }
@@ -129,32 +129,32 @@ export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSav
                         options={denominationCurrencyOptions}
                         displayValue={
                             asset.denomination_currency ? (
-                                <Badge size="xs" colorPalette="teal" variant="subtle">
+                                <Badge colorScheme="green">
                                     {asset.denomination_currency.symbol}
                                 </Badge>
                             ) : (
-                                <Text fontSize="10px" color="gray.400">Not set</Text>
+                                <span className="text-[10px] text-slate-400">Not set</span>
                             )
                         }
                         onSave={v => patchField('denomination_currency_id', v)}
                     />
-                </Box>
-            </SimpleGrid>
+                </div>
+            </div>
 
             {/* Tags (read-only) */}
             {asset.tags && asset.tags.length > 0 && (
-                <Flex py={0.5} gap={2} align="center" mt={1}>
-                    <Text fontSize="10px" color="gray.500" flexShrink={0}>Tags</Text>
-                    <Flex gap={1} flexWrap="wrap" justify="flex-end" flex={1}>
+                <div className="mt-1 flex items-center gap-2 py-0.5">
+                    <span className="flex-shrink-0 text-[10px] text-slate-500">Tags</span>
+                    <div className="flex flex-1 flex-wrap justify-end gap-1">
                         {asset.tags.map((tag, i) => (
-                            <Badge key={i} size="xs" colorPalette="blue" variant="subtle" fontSize="9px">
+                            <Badge key={i} colorScheme="blue" className="text-[9px]">
                                 {Object.entries(tag).map(([k, v]) => `${k}: ${v}`).join(', ')}
                             </Badge>
                         ))}
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

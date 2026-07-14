@@ -9,7 +9,6 @@
  * with an optional fullscreen mode that shows zoom controls.
  */
 import React, { useMemo, useState } from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import { ResponsiveLine } from '@nivo/line';
 import {
     useMultiBenchmarkSeries,
@@ -22,6 +21,7 @@ import {
     getTickValues,
     filterPointsByZoom,
 } from './chartUtils';
+import { Badge } from '../ui/primitives';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -168,35 +168,31 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
     if (!points.length && !isLoading) return null;
 
     return (
-        <Box>
+        <div>
             {!hideControls && (
-                <Flex gap={1} mb={2} justify="flex-end">
+                <div className="mb-2 flex justify-end gap-1">
                     {(Object.keys(ZOOM_PRESETS) as ZoomPreset[]).map(k => (
                         <Badge
                             key={k}
-                            cursor="pointer"
-                            variant={zoom === k ? 'solid' : 'outline'}
-                            colorPalette={zoom === k ? 'purple' : 'gray'}
+                            className={`cursor-pointer px-2 ${zoom === k ? 'bg-purple-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}
                             onClick={() => setZoom(k)}
-                            size="sm"
-                            px={2}
                         >
                             {ZOOM_PRESETS[k].label}
                         </Badge>
                     ))}
-                </Flex>
+                </div>
             )}
 
             {isLoading ? (
-                <Box h={height} display="flex" alignItems="center" justifyContent="center">
-                    <Text fontSize="sm" color="gray.400">Loading...</Text>
-                </Box>
+                <div className="flex items-center justify-center" style={{ height }}>
+                    <span className="text-sm text-slate-400">Loading...</span>
+                </div>
             ) : chartData.length === 0 ? (
-                <Box h={height} display="flex" alignItems="center" justifyContent="center">
-                    <Text fontSize="xs" color="gray.400">Not enough data</Text>
-                </Box>
+                <div className="flex items-center justify-center" style={{ height }}>
+                    <span className="text-xs text-slate-400">Not enough data</span>
+                </div>
             ) : (
-                <Box h={height}>
+                <div style={{ height }}>
                     <ResponsiveLine
                         data={chartData}
                         animate={false}
@@ -224,22 +220,22 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                         curve="monotoneX"
                         enableSlices="x"
                         sliceTooltip={({ slice }) => (
-                            <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="140px">
-                                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={1}>
+                            <div className="min-w-[140px] border border-slate-200 bg-white p-2 shadow-md">
+                                <div className="mb-1 text-xs font-bold text-slate-600">
                                     {slice.points[0]?.data.xFormatted}
-                                </Text>
+                                </div>
                                 {slice.points.map(p => (
-                                    <Flex key={p.id} justify="space-between" gap={3}>
-                                        <Flex align="center" gap={1}>
-                                            <Box w="8px" h="8px" borderRadius="full" bg={p.seriesColor} />
-                                            <Text fontSize="xs">{p.seriesId}</Text>
-                                        </Flex>
-                                        <Text fontSize="xs" fontWeight="bold">
+                                    <div key={p.id} className="flex justify-between gap-3">
+                                        <div className="flex items-center gap-1">
+                                            <div className="h-2 w-2 rounded-full" style={{ backgroundColor: p.seriesColor }} />
+                                            <span className="text-xs">{p.seriesId}</span>
+                                        </div>
+                                        <span className="text-xs font-bold">
                                             {Number(p.data.y).toFixed(1)}%
-                                        </Text>
-                                    </Flex>
+                                        </span>
+                                    </div>
                                 ))}
-                            </Box>
+                            </div>
                         )}
                         legends={[{
                             anchor: 'top-right',
@@ -257,8 +253,8 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                             tooltip: { container: { fontFamily: 'inherit', fontSize: 11 } },
                         }}
                     />
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

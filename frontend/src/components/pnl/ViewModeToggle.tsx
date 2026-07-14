@@ -1,5 +1,4 @@
 import React from 'react';
-import { Button, Flex } from '@chakra-ui/react';
 import { FiList } from 'react-icons/fi';
 import { LuLayoutGrid, LuChartPie } from 'react-icons/lu';
 
@@ -17,24 +16,19 @@ const MODES: { key: AssetsViewMode; label: string; icon: React.ReactNode }[] = [
 ];
 
 export const ViewModeToggle: React.FC<ViewModeToggleProps> = ({ value, onChange }) => (
-    <Flex align="center" gap={1}>
-        <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden">
+    <div className="flex items-center gap-1">
+        <div className="flex overflow-hidden border border-slate-200">
             {MODES.map(({ key, label, icon }) => (
-                <Button
+                <button
                     key={key}
-                    size="xs"
-                    variant={value === key ? 'solid' : 'ghost'}
-                    colorPalette="gray"
-                    borderRadius="0"
+                    type="button"
                     onClick={() => onChange(key)}
-                    px={2.5}
-                    fontSize="xs"
-                    gap={1}
+                    className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium ${value === key ? 'bg-slate-700 text-white' : 'bg-transparent text-slate-700 hover:bg-slate-100'}`}
                 >
                     {icon}
                     {label}
-                </Button>
+                </button>
             ))}
-        </Flex>
-    </Flex>
+        </div>
+    </div>
 );

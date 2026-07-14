@@ -1,10 +1,10 @@
 import React from 'react';
-import { VStack, Tabs, Badge } from '@chakra-ui/react';
 import { useQuery } from '@tanstack/react-query';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, TransactionFilterState } from './TransactionFilters';
 import { BundlesListPanel, BundleSuggestionsPanel } from './bundles';
 import { API_URL, BundleSuggestion } from '../types';
+import { Badge, Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
 
 // ============================================================================
 // View Presets
@@ -94,6 +94,7 @@ export interface TransactionsViewProps {
  */
 export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
     const preset = VIEW_PRESETS[mode];
+    const [activeTab, setActiveTab] = React.useState('transactions');
 
     // Read suggestion count from shared cache (App.tsx owns the query)
     const { data: suggestions = [] } = useQuery({
@@ -109,21 +110,21 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
     });
 
     return (
-        <VStack gap={1} align="stretch" p={2} pt={0}>
-            <Tabs.Root defaultValue="transactions" lazyMount>
-                <Tabs.List mb={2}>
-                    <Tabs.Trigger value="transactions">
+        <div className="flex flex-col gap-1 p-2 pt-0">
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <TabsList className="mb-2">
+                    <TabsTrigger value="transactions">
                         {preset.heading ? `${preset.heading}` : '📋 Transactions'}
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="bundles">
+                    </TabsTrigger>
+                    <TabsTrigger value="bundles">
                         📦 Bundles
                         {suggestions.length > 0 && (
-                            <Badge colorPalette="teal" ml={2}>{suggestions.length} 💡</Badge>
+                            <Badge colorScheme="green" className="ml-2">{suggestions.length} 💡</Badge>
                         )}
-                    </Tabs.Trigger>
-                </Tabs.List>
+                    </TabsTrigger>
+                </TabsList>
 
-                <Tabs.Content value="transactions">
+                <TabsContent value="transactions">
                     <TransactionsTable
                         tableId={preset.tableId}
                         title=""
@@ -132,14 +133,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
                         resetFilters={preset.resetFilters}
                         showSuggestions={preset.showSuggestions}
                     />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="bundles">
+                <TabsContent value="bundles">
                     {preset.showSuggestions && <BundleSuggestionsPanel mb={2} />}
                     <BundlesListPanel title="" />
-                </Tabs.Content>
-            </Tabs.Root>
-        </VStack>
+                </TabsContent>
+            </Tabs>
+        </div>
     );
 };
 

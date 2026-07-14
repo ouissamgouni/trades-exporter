@@ -10,9 +10,10 @@ Outputs:
 - CSV file at data/output/isin_mapping_suggestions.csv for user review
 
 Usage:
-    PYTHONPATH=/path/to/trades-exporter .venv/bin/python scripts/suggest_isin_mapping.py \
+    PYTHONPATH=/path/to/trades-exporter ../.venv/bin/python scripts/suggest_isin_mapping.py \
         --transactions-csv data/input/brokers-exports/degiro/Transactions.csv
 """
+
 import sys
 import csv
 import argparse
@@ -61,7 +62,9 @@ def parse_degiro_csv(csv_path: str) -> list[dict]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Suggest ISIN→Asset mappings from DeGiro CSV")
+    parser = argparse.ArgumentParser(
+        description="Suggest ISIN→Asset mappings from DeGiro CSV"
+    )
     parser.add_argument(
         "--transactions-csv",
         required=True,
@@ -96,13 +99,16 @@ def main():
     engine = get_engine()
     with Session(engine) as session:
         # Load existing transactions for DeGiro account
-        db_rows = session.exec(text(
-            "SELECT nt.id, nt.source_asset_symbol, nt.date_time, nt.quantity, nt.price, a.asset_id, a.label "
-            "FROM normalized_transactions nt "
-            "LEFT JOIN assets a ON a.asset_id = nt.asset_id "
-            "WHERE nt.account_id = :account_id AND nt.source = :source "
-            "ORDER BY nt.date_time"
-        ), params={"account_id": DEGIRO_ACCOUNT_ID, "source": SOURCE}).all()
+        db_rows = session.exec(
+            text(
+                "SELECT nt.id, nt.source_asset_symbol, nt.date_time, nt.quantity, nt.price, a.asset_id, a.label "
+                "FROM normalized_transactions nt "
+                "LEFT JOIN assets a ON a.asset_id = nt.asset_id "
+                "WHERE nt.account_id = :account_id AND nt.source = :source "
+                "ORDER BY nt.date_time"
+            ),
+            params={"account_id": DEGIRO_ACCOUNT_ID, "source": SOURCE},
+        ).all()
 
         print(f"\n🗄️  Loaded {len(db_rows)} existing transactions from DB")
 
@@ -113,17 +119,21 @@ def main():
             day = dt.date() if dt else None
             # Normalize quantity/price for comparison
             key = (day, qty, price)
-            db_index[key].append({
-                "tx_id": tx_id,
-                "symbol": symbol,
-                "asset_id": asset_id,
-                "label": label or "",
-            })
+            db_index[key].append(
+                {
+                    "tx_id": tx_id,
+                    "symbol": symbol,
+                    "asset_id": asset_id,
+                    "label": label or "",
+                }
+            )
 
         # Load all assets for label matching fallback
-        all_assets = session.exec(text(
-            "SELECT asset_id, symbol, label FROM assets WHERE label IS NOT NULL AND label != ''"
-        )).all()
+        all_assets = session.exec(
+            text(
+                "SELECT asset_id, symbol, label FROM assets WHERE label IS NOT NULL AND label != ''"
+            )
+        ).all()
         assets_by_id: dict[int, dict] = {}
         for aid, sym, lbl in all_assets:
             assets_by_id[aid] = {"symbol": sym, "label": lbl}
@@ -179,23 +189,29 @@ def main():
                     confidence = "medium"
                     break
 
-        suggestions.append({
-            "isin": isin,
-            "csv_product": product_name,
-            "suggested_symbol": best_symbol,
-            "suggested_asset_id": matched_asset_id or "",
-            "match_count": match_count,
-            "csv_rows": len(rows),
-            "confidence": confidence,
-            "label_match": matched_label,
-        })
+        suggestions.append(
+            {
+                "isin": isin,
+                "csv_product": product_name,
+                "suggested_symbol": best_symbol,
+                "suggested_asset_id": matched_asset_id or "",
+                "match_count": match_count,
+                "csv_rows": len(rows),
+                "confidence": confidence,
+                "label_match": matched_label,
+            }
+        )
 
     # 4. Display results
-    print(f"\n{'='*120}")
-    print(f"{'ISIN':<15} {'CSV Product':<45} {'Symbol':<12} {'ID':<6} {'Matches':<9} {'Conf.':<8} {'Label'}")
-    print(f"{'='*120}")
+    print(f"\n{'=' * 120}")
+    print(
+        f"{'ISIN':<15} {'CSV Product':<45} {'Symbol':<12} {'ID':<6} {'Matches':<9} {'Conf.':<8} {'Label'}"
+    )
+    print(f"{'=' * 120}")
     for s in suggestions:
-        conf_icon = {"high": "✅", "medium": "⚠️ ", "none": "❌"}.get(s["confidence"], "?")
+        conf_icon = {"high": "✅", "medium": "⚠️ ", "none": "❌"}.get(
+            s["confidence"], "?"
+        )
         print(
             f"{s['isin']:<15} {s['csv_product'][:44]:<45} {s['suggested_symbol']:<12} "
             f"{str(s['suggested_asset_id']):<6} {s['match_count']}/{s['csv_rows']:<7} "
@@ -206,28 +222,42 @@ def main():
     high = sum(1 for s in suggestions if s["confidence"] == "high")
     medium = sum(1 for s in suggestions if s["confidence"] == "medium")
     none_ = sum(1 for s in suggestions if s["confidence"] == "none")
-    print(f"\n📊 Summary: {high} high, {medium} medium, {none_} unmatched out of {len(suggestions)} ISINs")
+    print(
+        f"\n📊 Summary: {high} high, {medium} medium, {none_} unmatched out of {len(suggestions)} ISINs"
+    )
 
     # 5. Write CSV
     with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "isin", "csv_product", "suggested_symbol", "suggested_asset_id",
-            "match_count", "confidence", "confirmed",
-        ])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "isin",
+                "csv_product",
+                "suggested_symbol",
+                "suggested_asset_id",
+                "match_count",
+                "confidence",
+                "confirmed",
+            ],
+        )
         writer.writeheader()
         for s in suggestions:
-            writer.writerow({
-                "isin": s["isin"],
-                "csv_product": s["csv_product"],
-                "suggested_symbol": s["suggested_symbol"],
-                "suggested_asset_id": s["suggested_asset_id"],
-                "match_count": s["match_count"],
-                "confidence": s["confidence"],
-                "confirmed": "yes" if s["confidence"] == "high" else "",
-            })
+            writer.writerow(
+                {
+                    "isin": s["isin"],
+                    "csv_product": s["csv_product"],
+                    "suggested_symbol": s["suggested_symbol"],
+                    "suggested_asset_id": s["suggested_asset_id"],
+                    "match_count": s["match_count"],
+                    "confidence": s["confidence"],
+                    "confirmed": "yes" if s["confidence"] == "high" else "",
+                }
+            )
 
     print(f"\n💾 Suggestions written to: {output_path}")
-    print("   Edit the 'confirmed' column and 'suggested_symbol' as needed, then run apply_isin_mapping.py")
+    print(
+        "   Edit the 'confirmed' column and 'suggested_symbol' as needed, then run apply_isin_mapping.py"
+    )
 
 
 if __name__ == "__main__":

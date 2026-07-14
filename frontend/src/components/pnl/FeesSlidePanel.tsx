@@ -3,7 +3,6 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Button, Flex, Text } from '@chakra-ui/react';
 import { FiSearch } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { usePagination } from '../../hooks/usePagination';
@@ -11,6 +10,7 @@ import { TablePagination } from '../TablePagination';
 import { ValueDisplay } from '../ValueDisplay';
 import { TabLoadingState, TabErrorState, TabEmptyState } from './AuditTabWrappers';
 import { API_URL } from '../../types';
+import { Button } from '../ui/primitives';
 
 interface FilterOption { value: string; label?: string; count: number }
 interface FeesFilterOptions {
@@ -148,15 +148,15 @@ export const FeesSlidePanel: React.FC<FeesSlidePanelProps> = ({
 
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Fees" width="700px">
-            <Flex gap={2} mb={3} wrap="wrap" align="center">
-                <Flex align="center" gap={1} bg="gray.50" borderRadius="md" px={2} py={0.5}>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 bg-slate-50 px-2 py-0.5">
                     <FiSearch size={12} color="gray" />
                     <input
                         type="text" placeholder="Search asset"
                         value={searchInput} onChange={e => setSearchInput(e.target.value)}
                         style={{ width: 100, fontSize: 11, background: 'transparent', border: 'none', outline: 'none' }}
                     />
-                </Flex>
+                </div>
                 {filterOpts && filterOpts.assets.length > 1 && (
                     <select value={assetFilter} onChange={e => setAssetFilter(e.target.value)}
                         style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid #e2e8f0' }}>
@@ -176,33 +176,33 @@ export const FeesSlidePanel: React.FC<FeesSlidePanelProps> = ({
                     </select>
                 )}
                 {hasAnyFilter && (
-                    <Button size="2xs" variant="ghost" onClick={() => {
+                    <Button size="sm" variant="ghost" onClick={() => {
                         setAssetFilter('all'); setRelatedAssetFilter('all'); setSearchInput('');
                     }}>Clear</Button>
                 )}
-            </Flex>
+            </div>
 
             {/* Summary */}
             {data?.summary && (
-                <Flex gap={3} mb={3} wrap="wrap">
-                    <Flex direction="column" bg="orange.50" px={3} py={1.5} borderRadius="md">
-                        <Text fontSize="2xs" color="gray.500">Total Fees</Text>
-                        <Text fontSize="sm" fontWeight="bold" color="orange.700">
+                <div className="mb-3 flex flex-wrap gap-3">
+                    <div className="flex flex-col bg-orange-50 px-3 py-1.5">
+                        <span className="text-[10px] text-slate-500">Total Fees</span>
+                        <span className="text-sm font-bold text-orange-700">
                             <ValueDisplay value={data.summary.total_fees_in_base} currency={baseCurrency} />
-                        </Text>
-                    </Flex>
-                    <Flex direction="column" bg="gray.50" px={3} py={1.5} borderRadius="md">
-                        <Text fontSize="2xs" color="gray.500">Entries</Text>
-                        <Text fontSize="sm" fontWeight="bold">{total}</Text>
-                    </Flex>
-                </Flex>
+                        </span>
+                    </div>
+                    <div className="flex flex-col bg-slate-50 px-3 py-1.5">
+                        <span className="text-[10px] text-slate-500">Entries</span>
+                        <span className="text-sm font-bold">{total}</span>
+                    </div>
+                </div>
             )}
 
             {isLoading ? <TabLoadingState message="Loading fees…" /> :
                 error ? <TabErrorState error={error} onRetry={() => { }} /> :
                     fees.length === 0 ? <TabEmptyState title="No fees" description={hasAnyFilter ? 'Try adjusting filters.' : 'No fee entries.'} /> : (
-                        <Box>
-                            <Box overflowX="auto" fontSize="11px">
+                        <div>
+                            <div className="overflow-x-auto text-[11px]">
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -221,31 +221,35 @@ export const FeesSlidePanel: React.FC<FeesSlidePanelProps> = ({
                                             <tr key={f.id} style={{ borderBottom: '1px solid #f1f3f5' }}>
                                                 <td style={{ padding: '3px 6px' }}>
                                                     {f.transaction_id ? (
-                                                        <Text fontSize="2xs" color="blue.500" fontFamily="mono" cursor="pointer"
-                                                            onClick={() => onTransactionClick?.(f.transaction_id!)}>
+                                                        <span
+                                                            className="cursor-pointer font-mono text-[10px] text-blue-500"
+                                                            onClick={() => onTransactionClick?.(f.transaction_id!)}
+                                                        >
                                                             #{f.transaction_id}
-                                                        </Text>
+                                                        </span>
                                                     ) : (
-                                                        <Text fontSize="2xs" color="gray.400">-</Text>
+                                                        <span className="text-[10px] text-slate-400">-</span>
                                                     )}
                                                 </td>
                                                 <td style={{ padding: '3px 6px' }}>
                                                     {f.unit_id ? (
-                                                        <Text fontSize="2xs" color="blue.500" fontFamily="mono" cursor="pointer"
-                                                            onClick={() => onUnitClick?.(f.unit_id!)}>
+                                                        <span
+                                                            className="cursor-pointer font-mono text-[10px] text-blue-500"
+                                                            onClick={() => onUnitClick?.(f.unit_id!)}
+                                                        >
                                                             {f.unit_id}
-                                                        </Text>
+                                                        </span>
                                                     ) : (
-                                                        <Text fontSize="2xs" color="gray.400">-</Text>
+                                                        <span className="text-[10px] text-slate-400">-</span>
                                                     )}
                                                 </td>
                                                 <td style={{ padding: '3px 6px' }}>
-                                                    <Text fontSize="2xs" color="gray.500">
+                                                    <span className="text-[10px] text-slate-500">
                                                         {f.date ? new Date(f.date).toLocaleDateString() : '-'}
-                                                    </Text>
+                                                    </span>
                                                 </td>
                                                 <td style={{ padding: '3px 6px' }}>
-                                                    <Text fontSize="xs" fontWeight="medium">{f.asset?.symbol || '?'}</Text>
+                                                    <span className="text-xs font-medium">{f.asset?.symbol || '?'}</span>
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'right', fontFamily: 'mono' }}>
                                                     {Number(f.fee_amount).toFixed(4)}
@@ -254,22 +258,22 @@ export const FeesSlidePanel: React.FC<FeesSlidePanelProps> = ({
                                                     <ValueDisplay value={f.fee_in_base} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ padding: '3px 6px' }}>
-                                                    <Text fontSize="2xs" color="gray.500">{f.source || '-'}</Text>
+                                                    <span className="text-[10px] text-slate-500">{f.source || '-'}</span>
                                                 </td>
                                                 <td style={{ padding: '3px 6px' }}>
-                                                    <Text fontSize="2xs" color="gray.500">{f.related_asset?.symbol || '-'}</Text>
+                                                    <span className="text-[10px] text-slate-500">{f.related_asset?.symbol || '-'}</span>
                                                 </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
-                            </Box>
+                            </div>
                             <TablePagination
                                 page={pagination.page} pageSize={pagination.pageSize}
                                 total={total} onPageChange={pagination.setPage}
                                 onPageSizeChange={pagination.setPageSize}
                             />
-                        </Box>
+                        </div>
                     )}
         </SlidePanel>
     );

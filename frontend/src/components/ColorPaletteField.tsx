@@ -7,7 +7,6 @@
  */
 
 import React from 'react';
-import { Box, ColorPicker, Flex, HStack, Portal, Text, parseColor } from '@chakra-ui/react';
 import { ENTITY_COLOR_PALETTE, DEFAULT_ENTITY_COLOR } from '../hooks/useEntityColors';
 
 interface ColorPaletteFieldProps {
@@ -27,49 +26,33 @@ export const ColorPaletteField: React.FC<ColorPaletteFieldProps> = ({
     const usedSet = new Set(usedColors.map(c => c?.toLowerCase()));
     const currentColor = value || DEFAULT_ENTITY_COLOR;
 
-    const handleValueChange = (details: ColorPicker.ValueChangeDetails) => {
-        onChange(details.value.toString('hex'));
-    };
-
     return (
-        <Box>
-            <Text fontWeight="medium" mb={1.5}>{label}</Text>
-            <ColorPicker.Root
-                value={parseColor(currentColor)}
-                onValueChange={handleValueChange}
-            >
-                <ColorPicker.Control>
-                    <ColorPicker.Input />
-                    <ColorPicker.Trigger />
-                </ColorPicker.Control>
-                <Portal>
-                    <ColorPicker.Positioner style={{ zIndex: 1500 }}>
-                        <ColorPicker.Content>
-                            <ColorPicker.Area />
-                            <HStack>
-                                <ColorPicker.EyeDropper />
-                                <ColorPicker.ChannelSlider channel="hue" />
-                            </HStack>
-                            <ColorPicker.SwatchGroup>
-                                {ENTITY_COLOR_PALETTE.map(hex => {
-                                    const isUsed = usedSet.has(hex.toLowerCase());
-                                    return (
-                                        <ColorPicker.SwatchTrigger
-                                            key={hex}
-                                            value={hex}
-                                            style={isUsed ? { opacity: 0.35 } : undefined}
-                                            title={isUsed ? `${hex} (in use)` : hex}
-                                        >
-                                            <ColorPicker.Swatch value={hex} />
-                                        </ColorPicker.SwatchTrigger>
-                                    );
-                                })}
-                            </ColorPicker.SwatchGroup>
-                        </ColorPicker.Content>
-                    </ColorPicker.Positioner>
-                </Portal>
-            </ColorPicker.Root>
-        </Box>
+        <div>
+            <span className="mb-1.5 block font-medium">{label}</span>
+            <div className="flex items-center gap-2">
+                <input
+                    type="color"
+                    value={currentColor}
+                    onChange={e => onChange(e.target.value)}
+                    className="h-8 w-8 cursor-pointer border border-slate-300 bg-white p-0.5"
+                />
+                <div className="flex flex-wrap items-center gap-1">
+                    {ENTITY_COLOR_PALETTE.map(hex => {
+                        const isUsed = usedSet.has(hex.toLowerCase());
+                        return (
+                            <button
+                                key={hex}
+                                type="button"
+                                onClick={() => onChange(hex)}
+                                title={isUsed ? `${hex} (in use)` : hex}
+                                style={{ backgroundColor: hex, opacity: isUsed ? 0.35 : 1 }}
+                                className={`h-5 w-5 rounded-full border ${currentColor.toLowerCase() === hex.toLowerCase() ? 'border-slate-900 ring-2 ring-offset-1 ring-slate-400' : 'border-slate-300'}`}
+                            />
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
     );
 };
 

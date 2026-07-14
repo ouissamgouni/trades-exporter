@@ -17,10 +17,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Flex, Button, Spinner, Text } from '@chakra-ui/react';
 import { FiX, FiFileText } from 'react-icons/fi';
 import { Transaction, Account, API_URL } from '../types';
 import { TransactionSidePanel } from './TransactionSidePanel';
+import { Button, Spinner } from './ui/primitives';
 
 interface TransactionDetailDrawerProps {
     /** Full transaction object (if already loaded) */
@@ -99,69 +99,44 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
     return (
         <>
             {/* Backdrop overlay - clicking closes the panel */}
-            <Box
-                position="fixed"
-                inset={0}
-                bg="blackAlpha.400"
-                zIndex={2000}
+            <div
+                className="fixed inset-0 z-[2000] cursor-pointer bg-black/40"
                 onClick={onClose}
-                cursor="pointer"
             />
 
             {/* Panel - opens from RIGHT side */}
-            <Box
-                position="fixed"
-                right={0}
-                top={0}
-                bottom={0}
-                width={width}
-                maxW="90vw"
-                bg="white"
-                boxShadow="xl"
-                zIndex={2001}
-                overflowY="auto"
-                borderLeft="1px solid"
-                borderColor="gray.200"
+            <div
+                className="fixed bottom-0 top-0 right-0 z-[2001] max-w-[90vw] overflow-y-auto border-l border-slate-200 bg-white shadow-xl"
+                style={{ width }}
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Compact Header */}
-                <Flex
-                    justify="space-between"
-                    align="center"
-                    px={3}
-                    py={2}
-                    borderBottom="1px solid"
-                    borderColor="gray.200"
-                    bg="gray.50"
-                    position="sticky"
-                    top={0}
-                    zIndex={1}
-                >
-                    <Flex align="center" gap={1.5}>
+                <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="flex items-center gap-1.5">
                         <FiFileText size={16} />
-                        <Text fontWeight="semibold" fontSize="sm">
+                        <span className="text-sm font-semibold">
                             TX #{transaction?.id || transactionId || '...'}
-                        </Text>
-                    </Flex>
-                    <Button variant="ghost" size="xs" onClick={onClose} p={1}>
+                        </span>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={onClose} className="p-1">
                         <FiX size={16} />
                     </Button>
-                </Flex>
+                </div>
 
                 {/* Content */}
-                <Box p={2}>
+                <div className="p-2">
                     {loading && (
-                        <Flex justify="center" align="center" py={8}>
+                        <div className="flex items-center justify-center py-8">
                             <Spinner size="lg" />
-                            <Text ml={3} color="gray.500">Loading transaction...</Text>
-                        </Flex>
+                            <span className="ml-3 text-slate-500">Loading transaction...</span>
+                        </div>
                     )}
 
                     {error && (
-                        <Box p={4} bg="red.50" borderRadius="md" color="red.600">
-                            <Text fontWeight="bold">Error loading transaction</Text>
-                            <Text fontSize="sm">{error}</Text>
-                        </Box>
+                        <div className="bg-red-50 p-4 text-red-600">
+                            <span className="block font-bold">Error loading transaction</span>
+                            <span className="block text-sm">{error}</span>
+                        </div>
                     )}
 
                     {transaction && !loading && !error && (
@@ -179,12 +154,12 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
                     )}
 
                     {!transaction && !loading && !error && (
-                        <Text color="gray.500" textAlign="center" py={8}>
+                        <span className="block py-8 text-center text-slate-500">
                             No transaction selected
-                        </Text>
+                        </span>
                     )}
-                </Box>
-            </Box>
+                </div>
+            </div>
         </>
     );
 };

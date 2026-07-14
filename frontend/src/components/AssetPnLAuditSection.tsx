@@ -5,7 +5,7 @@
  * Fetches the latest PnL version independently (no PnL context needed).
  */
 import React from 'react';
-import { Badge, Flex, Spinner, Text } from '@chakra-ui/react';
+import { Badge, Spinner } from './ui/primitives';
 import { FiClock } from 'react-icons/fi';
 
 import { useLatestPnLVersion } from '../hooks/useLatestPnLVersion';
@@ -30,18 +30,18 @@ export const AssetPnLAuditSection: React.FC<AssetPnLAuditSectionProps> = ({
 
     if (versionLoading) {
         return (
-            <Flex justify="center" py={6}>
+            <div className="flex justify-center py-6">
                 <Spinner size="sm" />
-                <Text ml={2} fontSize="xs" color="gray.500">Loading PnL data…</Text>
-            </Flex>
+                <span className="ml-2 text-xs text-slate-500">Loading PnL data…</span>
+            </div>
         );
     }
 
     if (!versionId) {
         return (
-            <Text fontSize="xs" color="gray.400" py={3} textAlign="center">
+            <span className="block py-3 text-center text-xs text-slate-400">
                 No PnL calculation available.
-            </Text>
+            </span>
         );
     }
 
@@ -55,25 +55,15 @@ export const AssetPnLAuditSection: React.FC<AssetPnLAuditSectionProps> = ({
     return (
         <>
             {/* Version info banner */}
-            <Flex
-                align="center"
-                gap={1.5}
-                px={2}
-                py={1}
-                mb={2}
-                bg="gray.50"
-                borderRadius="sm"
-                fontSize="2xs"
-                color="gray.500"
-            >
+            <div className="mb-2 flex items-center gap-1.5 bg-slate-50 px-2 py-1 text-[10px] text-slate-500">
                 <FiClock size={10} />
-                <Text>
+                <span>
                     Version #{version?.version_id} · {createdAt}
-                </Text>
-                <Badge size="xs" variant="subtle" colorPalette="gray" ml={1}>
+                </span>
+                <Badge colorScheme="gray" className="ml-1">
                     {version?.lot_method}
                 </Badge>
-            </Flex>
+            </div>
 
             <InvestigationView
                 versionId={versionId}

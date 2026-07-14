@@ -1,11 +1,7 @@
-import {
-    Box,
-    Input,
-    Text,
-} from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { API_URL, Asset } from '../types';
 import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
+import { Input } from './ui/primitives';
 
 interface AssetSelectorProps {
     value: number | null;
@@ -119,9 +115,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     };
 
     return (
-        <Box position="relative" ref={containerRef}>
+        <div className="relative" ref={containerRef}>
             <Input
-                size={size}
                 value={isOpen ? search : (selectedAsset ? selectedAsset.symbol : '')}
                 onChange={e => {
                     setSearch(e.target.value);
@@ -129,74 +124,46 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 }}
                 onFocus={() => setIsOpen(true)}
                 placeholder={placeholder}
-                bg="white"
+                className="bg-white"
             />
 
             {isOpen && (
-                <Box
-                    position="absolute"
-                    top="100%"
-                    left={0}
-                    right={0}
-                    zIndex={1000}
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
-                    boxShadow="lg"
-                    maxH="250px"
-                    overflowY="auto"
-                    mt={1}
-                >
+                <div className="absolute left-0 right-0 top-full z-[1000] mt-1 max-h-[250px] overflow-y-auto border border-slate-200 bg-white shadow-lg">
                     {/* Clear selection option */}
-                    <Box
-                        p={2}
-                        cursor="pointer"
-                        _hover={{ bg: 'gray.100' }}
+                    <div
+                        className="cursor-pointer p-2 text-xs text-slate-500 hover:bg-slate-100"
                         onClick={() => handleSelect(null)}
-                        color="gray.500"
-                        fontSize="xs"
                     >
                         -- Not linked --
-                    </Box>
+                    </div>
 
                     {/* Filtered assets */}
                     {filteredAssets.map(asset => (
-                        <Box
+                        <div
                             key={asset.asset_id}
-                            p={2}
-                            cursor="pointer"
-                            bg={value === asset.asset_id ? 'blue.50' : undefined}
-                            _hover={{ bg: 'blue.100' }}
+                            className={`cursor-pointer p-2 text-xs hover:bg-blue-100 ${value === asset.asset_id ? 'bg-blue-50' : ''}`}
                             onClick={() => handleSelect(asset.asset_id!)}
-                            fontSize="xs"
                         >
-                            <Text fontWeight="medium">{asset.symbol}</Text>
-                            {asset.label && <Text fontSize="xs" color="gray.500">{asset.label}</Text>}
-                        </Box>
+                            <span className="block font-medium">{asset.symbol}</span>
+                            {asset.label && <span className="block text-xs text-slate-500">{asset.label}</span>}
+                        </div>
                     ))}
 
                     {/* No results / Create new */}
                     {filteredAssets.length === 0 && (
-                        <Box p={2} color="gray.500" fontSize="xs">
+                        <div className="p-2 text-xs text-slate-500">
                             No assets found
-                        </Box>
+                        </div>
                     )}
 
                     {/* Create new asset option */}
-                    <Box
-                        p={2}
-                        cursor="pointer"
-                        _hover={{ bg: 'green.50' }}
+                    <div
+                        className="cursor-pointer border-t border-slate-100 p-2 text-xs text-green-600 hover:bg-green-50"
                         onClick={openCreateDialog}
-                        color="green.600"
-                        fontSize="xs"
-                        borderTop="1px solid"
-                        borderColor="gray.100"
                     >
                         ➕ Create new asset {search && `"${search.toUpperCase()}"`}
-                    </Box>
-                </Box>
+                    </div>
+                </div>
             )}
 
             {/* Create Asset Dialog — delegated to canonical AssetFormDialog */}
@@ -207,6 +174,6 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 rawAssetSource={rawAssetSource}
                 rawAssetSymbol={rawAssetSymbol}
             />
-        </Box>
+        </div>
     );
 };

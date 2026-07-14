@@ -10,7 +10,6 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Box, Badge, Spinner, Text, Flex } from '@chakra-ui/react';
 import { LuEyeOff } from 'react-icons/lu';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
@@ -19,6 +18,7 @@ import { presetToVisibility } from '../useTransactionsTable';
 import { API_URL, Account, Asset, Transaction, TransactionIssue } from '../../../types';
 import { Tooltip } from '../../ui/tooltip';
 import { toaster } from '../../ui/toaster';
+import { Badge, type BadgeColorScheme, Spinner } from '../../ui/primitives';
 
 // ============================================================================
 // Types
@@ -30,11 +30,11 @@ interface AccountsLinkageTableProps {
 }
 
 // Issue type configuration for account issues
-const ACCOUNT_ISSUE_CONFIG: Record<string, { color: string; label: string }> = {
+const ACCOUNT_ISSUE_CONFIG: Record<string, { color: BadgeColorScheme; label: string }> = {
     missing_transfer_from_account: { color: 'blue', label: 'Missing From' },
     missing_transfer_to_account: { color: 'blue', label: 'Missing To' },
-    unlinked_transfer_from_account: { color: 'cyan', label: 'Unlinked From' },
-    unlinked_transfer_to_account: { color: 'cyan', label: 'Unlinked To' },
+    unlinked_transfer_from_account: { color: 'blue', label: 'Unlinked From' },
+    unlinked_transfer_to_account: { color: 'blue', label: 'Unlinked To' },
     unlinked_account: { color: 'orange', label: 'Unlinked Account' },
     missing_source_account: { color: 'orange', label: 'Missing Account' },
 };
@@ -210,23 +210,23 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
                 if (txIssues.length === 0) return null;
 
                 return (
-                    <Flex direction="column" gap={0.5}>
+                    <div className="flex flex-col gap-0.5">
                         {txIssues.map((issue, idx) => {
-                            const config = ACCOUNT_ISSUE_CONFIG[issue.issue_type] || { color: 'gray', label: issue.issue_type };
+                            const config = ACCOUNT_ISSUE_CONFIG[issue.issue_type] || { color: 'gray' as BadgeColorScheme, label: issue.issue_type };
                             return (
-                                <Flex key={idx} align="center" gap={1}>
-                                    <Badge size="xs" colorPalette={config.color} fontSize="7px">
+                                <div key={idx} className="flex items-center gap-1">
+                                    <Badge colorScheme={config.color} className="text-[7px]">
                                         {config.label}
                                     </Badge>
                                     <Tooltip content={issue.raw_value} openDelay={100}>
-                                        <Text fontSize="7px" color="orange.600" truncate maxW="80px">
+                                        <span className="max-w-[80px] truncate text-[7px] text-orange-600">
                                             {issue.raw_value}
-                                        </Text>
+                                        </span>
                                     </Tooltip>
-                                </Flex>
+                                </div>
                             );
                         })}
-                    </Flex>
+                    </div>
                 );
             },
         },
@@ -251,23 +251,23 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
 
     if (isLoading) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading account linkage issues...</Text>
-            </Box>
+            <div className="bg-slate-50 py-10 text-center">
+                <Spinner size="lg" className="text-blue-500" />
+                <p className="mt-4">Loading account linkage issues...</p>
+            </div>
         );
     }
 
     if (transactionIds.length === 0) {
         return (
-            <Box p={6} bg="green.50" borderRadius="md" textAlign="center">
-                <Text color="green.600" fontWeight="medium">✓ No account linkage issues found!</Text>
-            </Box>
+            <div className="bg-green-50 p-6 text-center">
+                <span className="font-medium text-green-600">✓ No account linkage issues found!</span>
+            </div>
         );
     }
 
     return (
-        <Box position="relative">
+        <div className="relative">
             <TransactionsTable
                 title="Account Linkage Issues"
                 subtitle={`${transactionIds.length} transaction${transactionIds.length !== 1 ? 's' : ''} with unlinked accounts`}
@@ -288,7 +288,7 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
                 onDataChange={onFixed}
                 onSelectionChange={handleSelectionChange}
             />
-        </Box>
+        </div>
     );
 };
 

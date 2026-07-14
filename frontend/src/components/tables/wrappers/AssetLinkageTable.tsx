@@ -13,7 +13,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Box, Badge, Spinner, Text, Flex } from '@chakra-ui/react';
+import { Badge, Spinner, type BadgeColorScheme } from '../../ui/primitives';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
 import { ColumnPlugin, TableConfig } from '../types';
@@ -45,7 +45,7 @@ interface LinkageIssuesResponse {
 }
 
 // Issue type configuration
-const ISSUE_CONFIG: Record<string, { color: string; label: string }> = {
+const ISSUE_CONFIG: Record<string, { color: BadgeColorScheme; label: string }> = {
     unlinked_asset: { color: 'red', label: 'Asset' },
     unlinked_price_quote: { color: 'purple', label: 'Price' },
     unlinked_fee_quote: { color: 'yellow', label: 'Fee' },
@@ -125,23 +125,23 @@ export const AssetLinkageTable: React.FC<AssetLinkageTableProps> = ({
                 if (txIssues.length === 0) return null;
 
                 return (
-                    <Flex direction="column" gap={0.5}>
+                    <div className="flex flex-col gap-0.5">
                         {txIssues.map((issue, idx) => {
-                            const config = ISSUE_CONFIG[issue.issue_type] || { color: 'gray', label: issue.issue_type };
+                            const config = ISSUE_CONFIG[issue.issue_type] || { color: 'gray' as BadgeColorScheme, label: issue.issue_type };
                             return (
-                                <Flex key={idx} align="center" gap={1}>
-                                    <Badge size="xs" colorPalette={config.color} fontSize="7px">
+                                <div key={idx} className="flex items-center gap-1">
+                                    <Badge colorScheme={config.color} className="text-[7px]">
                                         {config.label}
                                     </Badge>
                                     <Tooltip content={issue.raw_value} openDelay={100}>
-                                        <Text fontSize="7px" color="orange.600" truncate maxW="60px">
+                                        <span className="max-w-[60px] truncate text-[7px] text-orange-600">
                                             {issue.raw_value}
-                                        </Text>
+                                        </span>
                                     </Tooltip>
-                                </Flex>
+                                </div>
                             );
                         })}
-                    </Flex>
+                    </div>
                 );
             },
         },
@@ -167,19 +167,19 @@ export const AssetLinkageTable: React.FC<AssetLinkageTableProps> = ({
     // Loading state
     if (issuesLoading) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading linkage issues...</Text>
-            </Box>
+            <div className="bg-slate-50 py-10 text-center">
+                <Spinner size="lg" className="text-blue-500" />
+                <span className="mt-4 block">Loading linkage issues...</span>
+            </div>
         );
     }
 
     // No issues
     if (totalCount === 0 || transactionIds.length === 0) {
         return (
-            <Box p={6} bg="green.50" borderRadius="md" textAlign="center">
-                <Text color="green.600" fontWeight="medium">✓ No asset linkage issues found!</Text>
-            </Box>
+            <div className="bg-green-50 p-6 text-center">
+                <span className="font-medium text-green-600">✓ No asset linkage issues found!</span>
+            </div>
         );
     }
 

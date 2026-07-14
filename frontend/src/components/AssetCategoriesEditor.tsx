@@ -5,9 +5,9 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Badge, Box, Checkbox, Flex, Spinner, Text } from '@chakra-ui/react';
 import { API_URL, Asset, DimensionWithCategories } from '../types';
 import { toaster } from './ui/toaster';
+import { Badge, Spinner } from './ui/primitives';
 
 interface AssetCategoriesEditorProps {
     asset: Asset;
@@ -60,64 +60,57 @@ export const AssetCategoriesEditor: React.FC<AssetCategoriesEditorProps> = ({ as
     };
 
     if (loading) {
-        return <Flex justify="center" py={3}><Spinner size="sm" /></Flex>;
+        return <div className="flex justify-center py-3"><Spinner size="sm" /></div>;
     }
 
     if (dimensionData.length === 0) {
-        return <Text fontSize="xs" color="gray.500" py={2}>No categories available.</Text>;
+        return <span className="block py-2 text-xs text-slate-500">No categories available.</span>;
     }
 
     return (
-        <Box>
+        <div>
             {saving && (
-                <Flex justify="flex-end" mb={1}>
+                <div className="mb-1 flex justify-end">
                     <Spinner size="xs" />
-                </Flex>
+                </div>
             )}
             {dimensionData.map(dim => {
                 const selected = dim.categories.filter(c => selectedIds.has(c.id));
                 return (
-                    <Box key={dim.id} mb={2}>
-                        <Flex align="center" gap={1} mb={0.5}>
-                            <Text fontSize="10px" fontWeight="bold" color="gray.600" textTransform="uppercase">
+                    <div key={dim.id} className="mb-2">
+                        <div className="mb-0.5 flex items-center gap-1">
+                            <span className="text-[10px] font-bold uppercase text-slate-600">
                                 {dim.label}
-                            </Text>
+                            </span>
                             {selected.length > 0 && (
-                                <Badge size="xs" colorPalette="blue">{selected.length}</Badge>
+                                <Badge colorScheme="blue">{selected.length}</Badge>
                             )}
-                        </Flex>
-                        <Flex gap={1} flexWrap="wrap">
+                        </div>
+                        <div className="flex flex-wrap gap-1">
                             {dim.categories.map(cat => {
                                 const isSelected = selectedIds.has(cat.id);
                                 return (
-                                    <Flex
+                                    <div
                                         key={cat.id}
-                                        align="center"
-                                        gap={1}
-                                        px={1.5}
-                                        py={0.5}
-                                        borderRadius="sm"
-                                        bg={isSelected ? 'blue.50' : 'transparent'}
-                                        border="1px solid"
-                                        borderColor={isSelected ? 'blue.200' : 'gray.200'}
-                                        cursor="pointer"
-                                        _hover={{ bg: isSelected ? 'blue.100' : 'gray.50' }}
+                                        className={`flex cursor-pointer items-center gap-1 border px-1.5 py-0.5 ${isSelected ? 'border-blue-200 bg-blue-50 hover:bg-blue-100' : 'border-slate-200 bg-transparent hover:bg-slate-50'}`}
                                         onClick={() => toggle(cat.id)}
                                     >
-                                        <Checkbox.Root size="sm" checked={isSelected} onCheckedChange={() => toggle(cat.id)}>
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control />
-                                        </Checkbox.Root>
-                                        {cat.color && <Box w={2} h={2} borderRadius="full" bg={cat.color} />}
-                                        <Text fontSize="xs">{cat.label}</Text>
-                                    </Flex>
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => toggle(cat.id)}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                        {cat.color && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: cat.color }} />}
+                                        <span className="text-xs">{cat.label}</span>
+                                    </div>
                                 );
                             })}
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
                 );
             })}
-        </Box>
+        </div>
     );
 };
 

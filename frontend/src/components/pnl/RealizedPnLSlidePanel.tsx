@@ -10,7 +10,8 @@
  */
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Box, Button, Dialog, Flex, Input, SimpleGrid, Text } from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Badge, Button, Input } from '../ui/primitives';
 import { FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight } from 'react-icons/fi';
 import { LuChevronDown, LuCircleAlert, LuCircleCheck, LuFilter, LuInfo, LuPencil, LuRotateCcw, LuX } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
@@ -272,77 +273,76 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
     const safePage = pagination.page; // 1-indexed from usePagination
 
     const paginationBar = total > PAGE_SIZE_OPTIONS[0] ? (
-        <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
-            <Flex align="center" gap={2}>
-                <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+        <div className="flex w-full items-center justify-between px-3 py-2">
+            <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-500">Rows:</span>
+                <div className="inline-flex overflow-hidden border border-gray-200">
                     {PAGE_SIZE_OPTIONS.map(size => (
-                        <Button key={size} size="2xs"
+                        <Button key={size}
+                            size="sm"
                             variant={pagination.pageSize === size ? 'subtle' : 'ghost'}
-                            colorPalette={pagination.pageSize === size ? 'blue' : 'gray'}
-                            borderRadius="0"
+                            colorScheme={pagination.pageSize === size ? 'blue' : 'gray'}
                             onClick={() => { pagination.setPageSize(size); pagination.setPage(1); }}
-                            px={2} fontSize="xs">
+                            className="h-6 px-2 text-xs">
                             {size}
                         </Button>
                     ))}
-                </Flex>
-            </Flex>
-            <Text fontSize="2xs" color="gray.500">
+                </div>
+            </div>
+            <span className="text-[10px] text-gray-500">
                 {(safePage - 1) * pagination.pageSize + 1}–{Math.min(safePage * pagination.pageSize, total)} of {total}
-            </Text>
-            <Flex align="center" gap={1}>
-                <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(1)} disabled={safePage <= 1} px={1}>
+            </span>
+            <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={() => pagination.setPage(1)} disabled={safePage <= 1} className="h-6 px-1">
                     <FiChevronsLeft size={12} />
                 </Button>
-                <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(safePage - 1)} disabled={safePage <= 1} px={1}>
+                <Button size="sm" variant="ghost" onClick={() => pagination.setPage(safePage - 1)} disabled={safePage <= 1} className="h-6 px-1">
                     <FiChevronLeft size={14} />
                 </Button>
-                <Text fontSize="xs" color="gray.600" mx={1}>{safePage} / {pageCount}</Text>
-                <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(safePage + 1)} disabled={safePage >= pageCount} px={1}>
+                <span className="mx-1 text-xs text-gray-600">{safePage} / {pageCount}</span>
+                <Button size="sm" variant="ghost" onClick={() => pagination.setPage(safePage + 1)} disabled={safePage >= pageCount} className="h-6 px-1">
                     <FiChevronRight size={14} />
                 </Button>
-                <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(pageCount)} disabled={safePage >= pageCount} px={1}>
+                <Button size="sm" variant="ghost" onClick={() => pagination.setPage(pageCount)} disabled={safePage >= pageCount} className="h-6 px-1">
                     <FiChevronsRight size={12} />
                 </Button>
-            </Flex>
-        </Flex>
+            </div>
+        </div>
     ) : null;
 
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Realized P&L" width="1100px">
             {/* ─── Collapsible Filter Section ─── */}
-            <Box mb={3}>
-                <Box bg="gray.50" borderRadius="md" border="1px solid" borderColor={hasAnyFilter ? 'blue.300' : 'gray.200'} overflow="visible">
+            <div className="mb-3">
+                <div className={`overflow-visible border bg-gray-50 ${hasAnyFilter ? 'border-blue-300' : 'border-gray-200'}`}>
                     {/* Clickable header */}
-                    <Flex align="center" justify="space-between" p={3}
-                        cursor="pointer" transition="background 0.15s" _hover={{ bg: 'gray.100' }}
-                        onClick={() => setFiltersExpanded(p => !p)} borderRadius="md">
-                        <Flex align="center" gap={1.5} flexWrap="wrap">
-                            <Box transition="transform 0.2s" transform={filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
+                    <div className="flex cursor-pointer items-center justify-between p-3 transition-colors hover:bg-gray-100"
+                        onClick={() => setFiltersExpanded(p => !p)}>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            <div className={`transition-transform duration-200 ${filtersExpanded ? 'rotate-0' : '-rotate-90'}`}>
                                 <LuChevronDown size={14} />
-                            </Box>
+                            </div>
                             <LuFilter size={12} />
-                            <Text fontWeight="semibold" fontSize="xs">Filters</Text>
+                            <span className="text-xs font-semibold">Filters</span>
                             {activeChips.length > 0 && (
-                                <Badge size="xs" colorPalette="blue">{activeChips.length} active</Badge>
+                                <Badge colorScheme="blue">{activeChips.length} active</Badge>
                             )}
                             {activeChips.map(chip => <FilterChip key={chip.id} chip={chip} />)}
-                        </Flex>
-                        <Flex gap={1.5} onClick={e => e.stopPropagation()}>
+                        </div>
+                        <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
                             {hasAnyFilter && (
-                                <Button size="xs" variant="ghost" onClick={clearFilters} color="gray.500" _hover={{ color: 'gray.700' }}>
+                                <Button size="sm" variant="ghost" onClick={clearFilters} className="h-6 px-2 text-gray-500 hover:text-gray-700">
                                     <LuRotateCcw size={10} />
-                                    <Text ml={0.5} fontSize="2xs">Clear All</Text>
+                                    <span className="ml-0.5 text-[10px]">Clear All</span>
                                 </Button>
                             )}
-                        </Flex>
-                    </Flex>
+                        </div>
+                    </div>
 
                     {/* Expanded filter cards */}
                     {filtersExpanded && (
-                        <Box p={3} pt={1} overflow="visible">
-                            <SimpleGrid columns={{ base: 2, md: 4, lg: 6 }} gap={2}>
+                        <div className="overflow-visible p-3 pt-1">
+                            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-6">
                                 {/* Taxability card */}
                                 {filterOpts?.taxable_options && filterOpts.taxable_options.length > 0 && (
                                     <RFilterCard label="Taxability" icon="🏷️" options={filterOpts.taxable_options}
@@ -383,41 +383,41 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                 <RDateCard dateFrom={dateFrom} dateTo={dateTo}
                                     onChangeFrom={setDateFrom} onChangeTo={setDateTo}
                                     onClear={() => { setDateFrom(''); setDateTo(''); }} />
-                            </SimpleGrid>
+                            </div>
 
                             {/* Absolute P&L threshold slider */}
-                            <Box mt={2} px={1}>
-                                <Flex align="center" gap={2}>
-                                    <Text fontSize="2xs" fontWeight="medium" color="gray.600" whiteSpace="nowrap">|P&L| ≥</Text>
+                            <div className="mt-2 px-1">
+                                <div className="flex items-center gap-2">
+                                    <span className="whitespace-nowrap text-[10px] font-medium text-gray-600">|P&L| ≥</span>
                                     <input type="range" min={0} max={100} step={1} value={minAbsPnl}
                                         onChange={e => setMinAbsPnl(Number(e.target.value))}
-                                        style={{ flex: 1, height: 4, accentColor: '#3182CE' }} />
-                                    <Flex align="center" gap={0.5}>
-                                        <Text fontSize="2xs" color="gray.500">€</Text>
+                                        className="h-1 flex-1 accent-blue-500" />
+                                    <div className="flex items-center gap-0.5">
+                                        <span className="text-[10px] text-gray-500">€</span>
                                         <input type="number" min={0} step={1} value={minAbsPnl}
                                             onChange={e => setMinAbsPnl(Math.max(0, Number(e.target.value)))}
-                                            style={{ width: 48, height: 22, padding: '0 4px', fontSize: 10, border: '1px solid #E2E8F0', borderRadius: 4, textAlign: 'right' }} />
-                                    </Flex>
-                                </Flex>
-                                <Text fontSize="2xs" color="gray.400" mt={0.5}>Hides entries where absolute P&L is below this threshold</Text>
-                            </Box>
-                        </Box>
+                                            className="h-[22px] w-12 border border-gray-200 px-1 text-right text-[10px]" />
+                                    </div>
+                                </div>
+                                <div className="mt-0.5 text-[10px] text-gray-400">Hides entries where absolute P&L is below this threshold</div>
+                            </div>
+                        </div>
                     )}
-                </Box>
-            </Box>
+                </div>
+            </div>
 
             {isLoading ? <TabLoadingState message="Loading realized P&L…" /> :
                 error ? <TabErrorState error={error} onRetry={refetch} /> :
                     entries.length === 0 ? <TabEmptyState title="No entries" description={hasAnyFilter ? 'Try adjusting filters.' : 'No realized P&L entries.'} /> : (
-                        <Box>
-                            <Flex justify="space-between" align="center" mb={1}>
-                                <Text fontSize="2xs" color="gray.500">{total} entr{total !== 1 ? 'ies' : 'y'}</Text>
-                            </Flex>
+                        <div>
+                            <div className="mb-1 flex items-center justify-between">
+                                <span className="text-[10px] text-gray-500">{total} entr{total !== 1 ? 'ies' : 'y'}</span>
+                            </div>
 
                             {/* Top pagination bar */}
                             {paginationBar}
 
-                            <Box overflowX="auto">
+                            <div className="overflow-x-auto">
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                                     <thead>
                                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -444,49 +444,44 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                         {entries.map((e: RealizedPnLEntry, idx: number) => (
                                             <tr key={e.pnl_id ?? idx} style={{ borderBottom: '1px solid #f1f3f5' }}>
                                                 <td style={{ ...TD }}>
-                                                    <Text fontSize="3xs" color="gray.400" fontFamily="mono">#{e.pnl_id}</Text>
+                                                    <span className="font-mono text-[9px] text-gray-400">#{e.pnl_id}</span>
                                                 </td>
                                                 <td style={{ ...TD }}>
-                                                    <Text fontSize="2xs" color="gray.600" whiteSpace="nowrap">
+                                                    <span className="whitespace-nowrap text-[10px] text-gray-600">
                                                         {e.realized_at ? fmtDate(e.realized_at) : '-'}
-                                                    </Text>
+                                                    </span>
                                                 </td>
                                                 <td style={{ ...TD }}>
-                                                    <Flex align="center" gap={1}>
+                                                    <div className="flex items-center gap-1">
                                                         <Tooltip content={
-                                                            <Box p={1} fontSize="xs">
-                                                                <Text fontWeight="bold">{e.asset.label || e.asset.symbol}</Text>
-                                                                <Text fontFamily="mono" color="gray.300">{e.asset.symbol}</Text>
-                                                                {e.asset.id && <Text color="gray.400" fontSize="2xs">ID: {e.asset.id}</Text>}
-                                                            </Box>
+                                                            <div className="p-1 text-xs">
+                                                                <div className="font-bold">{e.asset.label || e.asset.symbol}</div>
+                                                                <div className="font-mono text-gray-300">{e.asset.symbol}</div>
+                                                                {e.asset.id && <div className="text-[10px] text-gray-400">ID: {e.asset.id}</div>}
+                                                            </div>
                                                         }>
-                                                            <Text fontSize="2xs" fontWeight="medium" color="purple.600"
-                                                                cursor={onAssetClick ? 'pointer' : 'default'}
-                                                                _hover={onAssetClick ? { textDecoration: 'underline' } : undefined}
-                                                                onClick={() => e.asset.id && onAssetClick?.(e.asset.id)}
-                                                                maxW="80px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                                                            <span
+                                                                className={`max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-medium text-purple-600 ${onAssetClick ? 'cursor-pointer hover:underline' : 'cursor-default'}`}
+                                                                onClick={() => e.asset.id && onAssetClick?.(e.asset.id)}>
                                                                 {e.asset.label || e.asset.symbol}
-                                                            </Text>
+                                                            </span>
                                                         </Tooltip>
                                                         {e.asset.id != null && assetPanelCtx && (
-                                                            <Box
-                                                                as="button"
+                                                            <button
+                                                                type="button"
                                                                 onClick={(ev: React.MouseEvent) => { ev.stopPropagation(); assetPanelCtx.openAssetPanel(e.asset.id!, { pnlVersionId: versionId }); }}
-                                                                p={0.5}
-                                                                borderRadius="sm"
-                                                                color="gray.400"
-                                                                _hover={{ color: 'purple.500', bg: 'purple.50' }}
+                                                                className="p-0.5 text-gray-400 hover:bg-purple-50 hover:text-purple-500"
                                                                 title="Asset details"
                                                             >
                                                                 <LuInfo size={10} />
-                                                            </Box>
+                                                            </button>
                                                         )}
-                                                    </Flex>
+                                                    </div>
                                                 </td>
                                                 <td style={{ ...TD }}>
-                                                    <Text fontSize="2xs" color="gray.500" maxW="80px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+                                                    <span className="max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-gray-500">
                                                         {e.account_name || '-'}
-                                                    </Text>
+                                                    </span>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
                                                     <ValueDisplay value={e.qty} />
@@ -495,40 +490,39 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                                     <ValueDisplay value={e.proceeds_in_base} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
-                                                    <Flex align="center" justify="flex-end" gap={1}>
+                                                    <div className="flex items-center justify-end gap-1">
                                                         {e.proceeds_price != null
                                                             ? <ValueDisplay value={e.proceeds_price} currency={baseCurrency} />
-                                                            : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                            : <span className="text-[10px] text-gray-400">-</span>}
                                                         {e.proceeds_source !== 'transfer' && (
-                                                            <Box as="button" display="inline-flex" alignItems="center"
-                                                                color="gray.400" _hover={{ color: 'blue.500' }}
-                                                                cursor="pointer" title="Override FMV"
+                                                            <button type="button" className="inline-flex cursor-pointer items-center text-gray-400 hover:text-blue-500"
+                                                                title="Override FMV"
                                                                 onClick={() => {
                                                                     setOverrideEntry(e);
                                                                     setOverridePrice(e.proceeds_price != null ? String(e.proceeds_price) : '');
                                                                     setOverrideError(null);
                                                                 }}>
                                                                 <LuPencil size={10} />
-                                                            </Box>
+                                                            </button>
                                                         )}
-                                                    </Flex>
+                                                    </div>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
                                                     {e.proceeds_price_source ? (
-                                                        <Badge size="xs" variant="subtle"
-                                                            colorPalette={
-                                                                e.proceeds_source === 'fmv' || e.proceeds_source === 'fmv_lookup' ? 'cyan'
+                                                        <Badge
+                                                            colorScheme={
+                                                                e.proceeds_source === 'fmv' || e.proceeds_source === 'fmv_lookup' ? 'blue'
                                                                     : e.proceeds_source === 'provisional' ? 'orange'
                                                                         : 'gray'
                                                             }>
                                                             {e.proceeds_price_source}
                                                         </Badge>
-                                                    ) : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                    ) : <span className="text-[10px] text-gray-400">-</span>}
                                                 </td>
                                                 <td style={{ ...TD }}>
-                                                    <Text fontSize="2xs" color="gray.500" whiteSpace="nowrap">
+                                                    <span className="whitespace-nowrap text-[10px] text-gray-500">
                                                         {e.proceeds_price_timestamp ? fmtDate(e.proceeds_price_timestamp) : '-'}
-                                                    </Text>
+                                                    </span>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
                                                     <ValueDisplay value={e.cost_basis_in_base} currency={baseCurrency} />
@@ -537,92 +531,85 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                                     <CostBasisChainTooltip
                                                         pnlId={e.pnl_id} versionId={versionId}
                                                         baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
-                                                        <Text fontSize="2xs" color="blue.400" cursor="help" _hover={{ textDecoration: 'underline' }}>🔗</Text>
+                                                        <span className="cursor-help text-[10px] text-blue-400 hover:underline">🔗</span>
                                                     </CostBasisChainTooltip>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
-                                                    <Text color={e.pnl_in_base >= 0 ? 'green.600' : 'red.600'} fontWeight="medium" fontSize="2xs">
+                                                    <span className={`text-[10px] font-medium ${e.pnl_in_base >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                         <ValueDisplay value={e.pnl_in_base} currency={baseCurrency} />
-                                                    </Text>
+                                                    </span>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
                                                     <Tooltip content={e.taxable ? 'Taxable' : 'Non-Taxable'}>
-                                                        <Flex align="center" justify="center">
-                                                            <Box display="inline-flex" alignItems="center" justifyContent="center"
-                                                                w="18px" h="18px" borderRadius="full"
-                                                                bg={e.taxable ? 'red.100' : 'green.100'}
-                                                                color={e.taxable ? 'red.600' : 'green.600'}>
+                                                        <div className="flex items-center justify-center">
+                                                            <div className={`inline-flex h-[18px] w-[18px] items-center justify-center rounded-full ${e.taxable ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
                                                                 {e.taxable ? <LuCircleAlert size={11} /> : <LuCircleCheck size={11} />}
-                                                            </Box>
-                                                        </Flex>
+                                                            </div>
+                                                        </div>
                                                     </Tooltip>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
-                                                    <Badge size="xs" colorPalette={e.is_fee ? 'orange' : 'blue'} variant="subtle">
+                                                    <Badge colorScheme={e.is_fee ? 'orange' : 'blue'}>
                                                         {e.is_fee ? 'Fee' : 'Disposal'}
                                                     </Badge>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
-                                                    <Text fontSize="2xs" color="gray.500">{e.holding_period_days ?? '-'}</Text>
+                                                    <span className="text-[10px] text-gray-500">{e.holding_period_days ?? '-'}</span>
                                                 </td>
                                                 <td style={{ ...TD }}>
                                                     {e.transaction_id ? (
-                                                        <Text fontSize="2xs" color="blue.500" fontFamily="mono"
-                                                            cursor={onTransactionClick ? 'pointer' : undefined}
-                                                            _hover={onTransactionClick ? { textDecoration: 'underline' } : undefined}
+                                                        <span className={`font-mono text-[10px] text-blue-500 ${onTransactionClick ? 'cursor-pointer hover:underline' : ''}`}
                                                             onClick={() => onTransactionClick?.(e.transaction_id!)}>
                                                             #{e.transaction_id}
-                                                        </Text>
-                                                    ) : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                        </span>
+                                                    ) : <span className="text-[10px] text-gray-400">-</span>}
                                                 </td>
                                                 <td style={{ ...TD }}>
                                                     {e.unit_id ? (
-                                                        <Text fontSize="2xs" color="blue.500" fontFamily="mono"
-                                                            cursor={onUnitClick ? 'pointer' : undefined}
-                                                            _hover={onUnitClick ? { textDecoration: 'underline' } : undefined}
+                                                        <span className={`font-mono text-[10px] text-blue-500 ${onUnitClick ? 'cursor-pointer hover:underline' : ''}`}
                                                             onClick={() => onUnitClick?.(e.unit_id!)}>
                                                             #{e.unit_id}
-                                                        </Text>
-                                                    ) : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                        </span>
+                                                    ) : <span className="text-[10px] text-gray-400">-</span>}
                                                 </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
-                            </Box>
+                            </div>
 
                             {/* Bottom pagination bar */}
                             {paginationBar}
-                        </Box>
+                        </div>
                     )}
 
             {/* FMV Override Dialog */}
-            <Dialog.Root
+            <RadixDialog.Root
                 open={!!overrideEntry}
-                onOpenChange={(e) => { if (!e.open) { setOverrideEntry(null); setOverridePrice(''); setOverrideError(null); } }}
+                onOpenChange={(open) => { if (!open) { setOverrideEntry(null); setOverridePrice(''); setOverrideError(null); } }}
             >
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content>
-                        <Dialog.Header>
-                            <Dialog.Title>Override FMV Price</Dialog.Title>
-                        </Dialog.Header>
-                        <Dialog.Body>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-gray-200 px-5 py-3">
+                            <RadixDialog.Title className="text-sm font-semibold">Override FMV Price</RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
                             {overrideEntry && (
-                                <Box>
-                                    <Flex gap={2} mb={3} align="center">
-                                        <Badge colorPalette="purple">{overrideEntry.asset.symbol}</Badge>
-                                        <Text fontSize="sm" color="gray.500">
+                                <div>
+                                    <div className="mb-3 flex items-center gap-2">
+                                        <Badge colorScheme="purple">{overrideEntry.asset.symbol}</Badge>
+                                        <span className="text-sm text-gray-500">
                                             {overrideEntry.realized_at ? fmtDate(overrideEntry.realized_at) : ''}
-                                        </Text>
-                                    </Flex>
+                                        </span>
+                                    </div>
                                     {overrideEntry.proceeds_price != null && (
-                                        <Text fontSize="sm" color="gray.500" mb={2}>
+                                        <div className="mb-2 text-sm text-gray-500">
                                             Current FMV: <strong>{overrideEntry.proceeds_price}</strong>
                                             {overrideEntry.proceeds_price_source && ` (${overrideEntry.proceeds_price_source})`}
-                                        </Text>
+                                        </div>
                                     )}
-                                    <Text fontSize="sm" mb={1}>New FMV price per unit ({baseCurrency}):</Text>
+                                    <div className="mb-1 text-sm">New FMV price per unit ({baseCurrency}):</div>
                                     <Input
                                         type="number"
                                         step="any"
@@ -641,32 +628,30 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                         />
                                     )}
                                     {overrideError && (
-                                        <Text fontSize="sm" color="red.500" mt={2}>{overrideError}</Text>
+                                        <div className="mt-2 text-sm text-red-500">{overrideError}</div>
                                     )}
-                                    <Text fontSize="xs" color="gray.400" mt={2}>
+                                    <div className="mt-2 text-xs text-gray-400">
                                         This creates a manual price snapshot and triggers a full P&L recalculation.
-                                    </Text>
-                                </Box>
+                                    </div>
+                                </div>
                             )}
-                        </Dialog.Body>
-                        <Dialog.Footer>
-                            <Flex gap={2}>
-                                <Button variant="outline" onClick={() => { setOverrideEntry(null); setOverridePrice(''); setOverrideError(null); }}>
-                                    Cancel
-                                </Button>
-                                <Button
-                                    colorPalette="blue"
-                                    onClick={handleOverrideFmv}
-                                    loading={overrideLoading}
-                                    disabled={!overridePrice || overrideLoading}
-                                >
-                                    Save & Recalculate
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Dialog.Root>
+                        </div>
+                        <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-3">
+                            <Button variant="outline" onClick={() => { setOverrideEntry(null); setOverridePrice(''); setOverrideError(null); }}>
+                                Cancel
+                            </Button>
+                            <Button
+                                colorScheme="blue"
+                                onClick={handleOverrideFmv}
+                                loading={overrideLoading}
+                                disabled={!overridePrice || overrideLoading}
+                            >
+                                Save & Recalculate
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
         </SlidePanel>
     );
 };

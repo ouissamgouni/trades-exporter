@@ -15,20 +15,20 @@ tasks:
         echo "Pushing prod secrets to Fly.io..."
         cat config/secrets.env config/secrets.prod.env \
           | grep -vE '^[[:space:]]*$|^[[:space:]]*#|^VITE_|^CLOUDFLARE_|^FLY_API_TOKEN' \
-          | fly secrets import -c fly.toml --stage
+          | fly secrets import -c config/fly.toml --stage
         echo "Core prod secrets staged. Deploy to apply them."
 
   secrets:list:
     desc: List prod Fly.io secrets (names only)
     cmds:
-      - fly secrets list -c fly.toml
+      - fly secrets list -c config/fly.toml
 
   deploy:
     desc: Deploy prod backend to Fly.io
     cmds:
       - |
         echo "Deploying prod backend to Fly.io..."
-        fly deploy --remote-only -c fly.toml
+        fly deploy --remote-only -c config/fly.toml
       - task: health
 
   health:
@@ -46,22 +46,22 @@ tasks:
   logs:
     desc: Stream prod Fly.io backend logs
     cmds:
-      - fly logs -c fly.toml
+      - fly logs -c config/fly.toml
 
   ssh:
     desc: Open SSH console on prod Fly.io machine
     cmds:
-      - fly ssh console -c fly.toml
+      - fly ssh console -c config/fly.toml
 
   open:
     desc: Open prod Fly.io app in browser
     cmds:
-      - fly open -c fly.toml
+      - fly open -c config/fly.toml
 
   status:
     desc: Show prod Fly.io app status and machines
     cmds:
-      - fly status -c fly.toml
+      - fly status -c config/fly.toml
 
   staging:secrets:
     desc: Push staging secrets from config/secrets.env + config/secrets.staging.env to Fly.io
@@ -75,20 +75,20 @@ tasks:
         echo "Pushing staging secrets to Fly.io..."
         cat config/secrets.env config/secrets.staging.env \
           | grep -vE '^[[:space:]]*$|^[[:space:]]*#|^VITE_|^CLOUDFLARE_|^FLY_API_TOKEN' \
-          | fly secrets import -c fly.staging.toml --stage
+          | fly secrets import -c config/fly.staging.toml --stage
         echo "Core staging secrets staged. Deploy to apply them."
 
   staging:secrets:list:
     desc: List staging Fly.io secrets (names only)
     cmds:
-      - fly secrets list -c fly.staging.toml
+      - fly secrets list -c config/fly.staging.toml
 
   staging:deploy:
     desc: Deploy staging backend to Fly.io
     cmds:
       - |
         echo "Deploying staging backend to Fly.io..."
-        fly deploy --remote-only -c fly.staging.toml
+        fly deploy --remote-only -c config/fly.staging.toml
       - task: staging:health
 
   staging:health:
@@ -106,19 +106,19 @@ tasks:
   staging:logs:
     desc: Stream staging Fly.io backend logs
     cmds:
-      - fly logs -c fly.staging.toml
+      - fly logs -c config/fly.staging.toml
 
   staging:ssh:
     desc: Open SSH console on staging Fly.io machine
     cmds:
-      - fly ssh console -c fly.staging.toml
+      - fly ssh console -c config/fly.staging.toml
 
   staging:open:
     desc: Open staging Fly.io app in browser
     cmds:
-      - fly open -c fly.staging.toml
+      - fly open -c config/fly.staging.toml
 
   staging:status:
     desc: Show staging Fly.io app status and machines
     cmds:
-      - fly status -c fly.staging.toml
+      - fly status -c config/fly.staging.toml

@@ -9,10 +9,13 @@
  */
 
 import React from 'react';
-import { Badge, HStack, Text } from '@chakra-ui/react';
 import { useAccountSuggestions, AccountSuggestion } from '../hooks/useAccountSuggestions';
 import { getConfidenceColor, formatConfidence } from '../utils/similarity';
 import { Tooltip } from './ui/tooltip';
+import { Badge, type BadgeColorScheme } from './ui/primitives';
+
+const SCHEMES = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const scheme = (c: string): BadgeColorScheme => (SCHEMES.includes(c) ? c : 'gray') as BadgeColorScheme;
 
 export interface AccountSuggestionBadgesProps {
     /** Raw account label to match */
@@ -64,9 +67,9 @@ export const AccountSuggestionBadges: React.FC<AccountSuggestionBadgesProps> = (
     if (suggestions.length === 0) return null;
 
     return (
-        <HStack gap={1} flexWrap="wrap">
+        <div className="flex flex-wrap items-center gap-1">
             {showLabel && (
-                <Text fontSize={fontSize} color="gray.500">Suggestions:</Text>
+                <span className="text-slate-500" style={{ fontSize }}>Suggestions:</span>
             )}
             {suggestions.map((s, idx) => (
                 <Tooltip
@@ -75,11 +78,9 @@ export const AccountSuggestionBadges: React.FC<AccountSuggestionBadgesProps> = (
                     openDelay={100}
                 >
                     <Badge
-                        size="xs"
-                        colorPalette={getConfidenceColor(s.confidence)}
-                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                        cursor="pointer"
-                        fontSize={fontSize}
+                        colorScheme={scheme(getConfidenceColor(s.confidence))}
+                        className={`cursor-pointer ${s.confidence >= 0.9 ? 'font-semibold' : ''}`}
+                        style={{ fontSize }}
                         onClick={(e) => {
                             e.stopPropagation();
                             onAccept(s);
@@ -90,6 +91,6 @@ export const AccountSuggestionBadges: React.FC<AccountSuggestionBadgesProps> = (
                     </Badge>
                 </Tooltip>
             ))}
-        </HStack>
+        </div>
     );
 };

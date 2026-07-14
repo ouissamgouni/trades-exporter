@@ -80,7 +80,8 @@ def main():
     from backend.db.seed import seed_database
 
     result = seed_database(seed_data_dir=seed_dir_arg)
-    prices_count = result.get('prices', 0)
+    prices_count = result.get("prices", 0)
+    positions_count = result.get("positions", 0)
     print(
         f"   Seeded {result.get('accounts', 0)} accounts, "
         f"{result.get('connectors', 0)} connectors, "
@@ -88,6 +89,7 @@ def main():
         f"{result.get('bundles', 0)} bundles, "
         f"{result.get('transactions', 0)} transactions"
         + (f", {prices_count} prices" if prices_count else "")
+        + (f", {positions_count} positions" if positions_count else "")
     )
     print()
 

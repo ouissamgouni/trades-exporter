@@ -9,9 +9,7 @@
  * - Row click selects asset for investigation chart
  */
 import React, { useMemo, useState } from 'react';
-import {
-    Badge, Box, Button, Flex, Heading, Spinner, Table, Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner, type BadgeColorScheme } from './ui/primitives';
 import { usePriceHealth } from '../hooks/usePriceHealth';
 import { AssetBadge } from './AssetBadge';
 import type { PriceHealthRow } from '../types';
@@ -21,10 +19,10 @@ import { Tooltip } from './ui/tooltip';
 // Status config
 // ---------------------------------------------------------------------------
 
-const STATUS_CONFIG: Record<string, { color: string; label: string; emoji: string }> = {
-    healthy: { color: 'green', label: 'Healthy', emoji: '✅' },
-    warning: { color: 'yellow', label: 'Warning', emoji: '⚠️' },
-    stale: { color: 'red', label: 'Stale', emoji: '🔴' },
+const STATUS_CONFIG: Record<string, { badgeColor: BadgeColorScheme; label: string; emoji: string; border: string; text: string }> = {
+    healthy: { badgeColor: 'green', label: 'Healthy', emoji: '✅', border: 'border-green-200', text: 'text-green-600' },
+    warning: { badgeColor: 'yellow', label: 'Warning', emoji: '⚠️', border: 'border-yellow-200', text: 'text-yellow-600' },
+    stale: { badgeColor: 'red', label: 'Stale', emoji: '🔴', border: 'border-red-200', text: 'text-red-600' },
 };
 
 // ---------------------------------------------------------------------------
@@ -122,169 +120,143 @@ export const PriceHealthTable: React.FC = () => {
 
     if (isLoading) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading price health data...</Text>
-            </Box>
+            <div className="rounded-md bg-slate-50 py-10 text-center">
+                <Spinner size="lg" className="text-blue-500" />
+                <span className="mt-4 block">Loading price health data...</span>
+            </div>
         );
     }
 
     if (error) {
         return (
-            <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                <Text color="red.600">Error: {error}</Text>
-                <Button size="sm" mt={3} onClick={() => refetch()}>Retry</Button>
-            </Box>
+            <div className="rounded-md border border-red-200 bg-red-50 py-10 text-center">
+                <span className="text-red-600">Error: {error}</span>
+                <Button size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
+            </div>
         );
     }
 
     if (!data || data.items.length === 0) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Text color="gray.500">No price snapshot data found. Import prices first.</Text>
-            </Box>
+            <div className="rounded-md bg-slate-50 py-10 text-center">
+                <span className="text-slate-500">No price snapshot data found. Import prices first.</span>
+            </div>
         );
     }
 
     const { summary, staleness_threshold_days } = data;
 
     return (
-        <Box>
+        <div>
             {/* Summary cards */}
-            <Flex gap={4} mb={5} flexWrap="wrap">
+            <div className="mb-5 flex flex-wrap gap-4">
                 {(['healthy', 'warning', 'stale'] as const).map(status => {
                     const cfg = STATUS_CONFIG[status];
                     const count = summary[status];
                     return (
-                        <Box
+                        <div
                             key={status}
-                            flex="1"
-                            minW="120px"
-                            p={3}
-                            bg="white"
-                            borderRadius="md"
-                            border="1px solid"
-                            borderColor={`${cfg.color}.200`}
-                            boxShadow="sm"
+                            className={`min-w-[120px] flex-1 border bg-white p-3 shadow-sm ${cfg.border}`}
                         >
-                            <Flex align="center" gap={2} mb={1}>
-                                <Text fontSize="lg">{cfg.emoji}</Text>
-                                <Text fontSize="sm" fontWeight="medium" color="gray.600">{cfg.label}</Text>
-                            </Flex>
-                            <Text fontSize="2xl" fontWeight="bold" color={`${cfg.color}.600`}>
+                            <div className="mb-1 flex items-center gap-2">
+                                <span className="text-lg">{cfg.emoji}</span>
+                                <span className="text-sm font-medium text-slate-600">{cfg.label}</span>
+                            </div>
+                            <span className={`block text-2xl font-bold ${cfg.text}`}>
                                 {count}
-                            </Text>
-                        </Box>
+                            </span>
+                        </div>
                     );
                 })}
-                <Box
-                    flex="1"
-                    minW="120px"
-                    p={3}
-                    bg="white"
-                    borderRadius="md"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    boxShadow="sm"
-                >
-                    <Flex align="center" gap={2} mb={1}>
-                        <Text fontSize="lg">📊</Text>
-                        <Text fontSize="sm" fontWeight="medium" color="gray.600">Total Assets</Text>
-                    </Flex>
-                    <Text fontSize="2xl" fontWeight="bold" color="gray.700">
+                <div className="min-w-[120px] flex-1 border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="mb-1 flex items-center gap-2">
+                        <span className="text-lg">📊</span>
+                        <span className="text-sm font-medium text-slate-600">Total Assets</span>
+                    </div>
+                    <span className="block text-2xl font-bold text-slate-700">
                         {data.items.length}
-                    </Text>
-                </Box>
-            </Flex>
+                    </span>
+                </div>
+            </div>
 
             {/* Info bar */}
-            <Flex mb={3} justify="space-between" align="center">
-                <Text fontSize="xs" color="gray.500">
+            <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs text-slate-500">
                     Stale threshold: {staleness_threshold_days} days (configurable in P&L settings).
-                </Text>
-                <Button size="xs" variant="outline" onClick={() => refetch()}>
+                </span>
+                <Button size="sm" variant="outline" onClick={() => refetch()}>
                     🔄 Refresh
                 </Button>
-            </Flex>
+            </div>
 
             {/* Health table */}
-            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm">
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader
-                                cursor="pointer"
+            <div className="overflow-x-auto bg-white shadow-sm">
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr className="bg-slate-50 text-left">
+                            <th
+                                className="cursor-pointer select-none px-2 py-1"
                                 onClick={() => handleSort('status')}
-                                userSelect="none"
                             >
                                 Status{sortIndicator('status')}
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader
-                                cursor="pointer"
+                            </th>
+                            <th
+                                className="cursor-pointer select-none px-2 py-1"
                                 onClick={() => handleSort('symbol')}
-                                userSelect="none"
                             >
                                 Asset{sortIndicator('symbol')}
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader
-                                cursor="pointer"
+                            </th>
+                            <th
+                                className="cursor-pointer select-none px-2 py-1 text-right"
                                 onClick={() => handleSort('last_price')}
-                                userSelect="none"
-                                textAlign="right"
                             >
                                 Last Price{sortIndicator('last_price')}
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader>Last Updated</Table.ColumnHeader>
-                            <Table.ColumnHeader
-                                cursor="pointer"
+                            </th>
+                            <th className="px-2 py-1">Last Updated</th>
+                            <th
+                                className="cursor-pointer select-none px-2 py-1 text-right"
                                 onClick={() => handleSort('days_stale')}
-                                userSelect="none"
-                                textAlign="right"
                             >
                                 Days Stale{sortIndicator('days_stale')}
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader
-                                cursor="pointer"
+                            </th>
+                            <th
+                                className="cursor-pointer select-none px-2 py-1 text-right"
                                 onClick={() => handleSort('total_snapshots')}
-                                userSelect="none"
-                                textAlign="right"
                             >
                                 Snapshots{sortIndicator('total_snapshots')}
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader>Source</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+                            </th>
+                            <th className="px-2 py-1">Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {sortedItems.map(row => {
                             const cfg = STATUS_CONFIG[row.status];
                             return (
-                                <Table.Row
+                                <tr
                                     key={row.asset_id}
-                                    _hover={{ bg: 'gray.50' }}
+                                    className="border-b border-slate-100 hover:bg-slate-50"
                                 >
-                                    <Table.Cell>
-                                        <Flex gap={1.5} align="center">
+                                    <td className="px-2 py-1">
+                                        <div className="flex items-center gap-1.5">
                                             <Badge
-                                                size="xs"
-                                                colorPalette={cfg.color}
-                                                fontSize="10px"
+                                                colorScheme={cfg.badgeColor}
+                                                className="text-[10px]"
                                             >
                                                 {cfg.label}
                                             </Badge>
                                             {row.is_flatline && (
                                                 <Tooltip content="Last 5+ prices are identical — possible broken feed">
                                                     <Badge
-                                                        size="xs"
-                                                        colorPalette="orange"
-                                                        fontSize="10px"
+                                                        colorScheme="orange"
+                                                        className="text-[10px]"
                                                     >
                                                         Flat
                                                     </Badge>
                                                 </Tooltip>
                                             )}
-                                        </Flex>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                        </div>
+                                    </td>
+                                    <td className="px-2 py-1">
                                         <AssetBadge
                                             asset={{
                                                 id: row.asset_id,
@@ -294,49 +266,45 @@ export const PriceHealthTable: React.FC = () => {
                                             colorPalette="blue"
                                             size="xs"
                                         />
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right">
-                                        <Text fontWeight="medium" fontFamily="mono" fontSize="xs">
+                                    </td>
+                                    <td className="px-2 py-1 text-right">
+                                        <span className="font-mono text-xs font-medium">
                                             {formatPrice(row.last_price)}
-                                        </Text>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                        </span>
+                                    </td>
+                                    <td className="px-2 py-1">
                                         <Tooltip content={formatAbsoluteDate(row.last_updated)}>
-                                            <Text
-                                                fontSize="xs"
-                                                color={row.days_stale >= staleness_threshold_days ? 'red.600' : 'gray.600'}
+                                            <span
+                                                className={`text-xs ${row.days_stale >= staleness_threshold_days ? 'text-red-600' : 'text-slate-600'}`}
                                             >
                                                 {formatRelativeTime(row.last_updated)}
-                                            </Text>
+                                            </span>
                                         </Tooltip>
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right">
-                                        <Text
-                                            fontSize="xs"
-                                            fontWeight="bold"
-                                            color={
-                                                row.days_stale >= staleness_threshold_days
-                                                    ? 'red.600'
-                                                    : row.days_stale >= staleness_threshold_days / 2
-                                                        ? 'yellow.600'
-                                                        : 'gray.600'
-                                            }
+                                    </td>
+                                    <td className="px-2 py-1 text-right">
+                                        <span
+                                            className={`text-xs font-bold ${row.days_stale >= staleness_threshold_days
+                                                ? 'text-red-600'
+                                                : row.days_stale >= staleness_threshold_days / 2
+                                                    ? 'text-yellow-600'
+                                                    : 'text-slate-600'
+                                                }`}
                                         >
                                             {row.days_stale}
-                                        </Text>
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right">
-                                        <Text fontSize="xs" color="gray.600">{row.total_snapshots}</Text>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Text fontSize="xs" color="gray.500">{row.last_source || '-'}</Text>
-                                    </Table.Cell>
-                                </Table.Row>
+                                        </span>
+                                    </td>
+                                    <td className="px-2 py-1 text-right">
+                                        <span className="text-xs text-slate-600">{row.total_snapshots}</span>
+                                    </td>
+                                    <td className="px-2 py-1">
+                                        <span className="text-xs text-slate-500">{row.last_source || '-'}</span>
+                                    </td>
+                                </tr>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
-        </Box>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     );
 };

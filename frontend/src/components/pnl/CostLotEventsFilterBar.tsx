@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Box, Flex, Input, Button, Text, IconButton, Spinner, Badge } from '@chakra-ui/react';
+import { Input, Button, Spinner, Badge, type BadgeColorScheme } from '../ui/primitives';
 import { FiSearch, FiChevronDown, FiChevronUp, FiX, FiCalendar, FiRefreshCw } from 'react-icons/fi';
 import { LuChevronDown, LuFilter, LuRotateCcw, LuX } from 'react-icons/lu';
 import { LotEventType } from './types';
@@ -122,21 +122,14 @@ const TogglePill: React.FC<{
     disabled?: boolean;
 }> = ({ label, active, onClick, disabled }) => (
     <Button
-        size="2xs"
         variant={active ? 'solid' : 'outline'}
-        bg={active ? 'gray.700' : 'white'}
-        color={active ? 'white' : 'gray.600'}
-        borderColor={active ? 'gray.700' : 'gray.300'}
-        _hover={{
-            bg: active ? 'gray.800' : 'gray.50',
-            borderColor: active ? 'gray.800' : 'gray.400',
-        }}
+        colorScheme="gray"
         onClick={onClick}
         disabled={disabled}
-        fontWeight="normal"
-        fontSize="2xs"
-        px={2}
-        h="22px"
+        className={`h-[22px] px-2 text-[10px] font-normal ${active
+            ? 'border-gray-700 bg-gray-700 text-white hover:bg-gray-800'
+            : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50'
+            }`}
     >
         {label}
     </Button>
@@ -167,104 +160,74 @@ const FilterDropdown: React.FC<{
     }, [options, search]);
 
     return (
-        <Box position="relative" ref={ref}>
+        <div className="relative" ref={ref}>
             <Button
-                size="2xs"
                 variant="outline"
-                bg="white"
-                borderColor="gray.300"
-                color="gray.700"
+                colorScheme="gray"
                 onClick={() => !disabled && setIsOpen(!isOpen)}
-                minW="80px"
-                justifyContent="space-between"
-                fontWeight="normal"
-                h="22px"
                 disabled={disabled}
-                _hover={{ borderColor: 'gray.400' }}
+                className="h-[22px] min-w-[80px] justify-between bg-white px-2 text-[10px] font-normal text-gray-700 hover:border-gray-400"
             >
-                <Text truncate maxW="70px" fontSize="2xs">{value}</Text>
+                <span className="max-w-[70px] truncate text-[10px]">{value}</span>
                 <FiChevronDown size={10} />
             </Button>
 
             {isOpen && (
-                <Box
-                    position="absolute"
-                    top="100%"
-                    left={0}
-                    mt={1}
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
-                    boxShadow="lg"
-                    zIndex={1000}
-                    minW="180px"
-                    maxH="280px"
-                    overflow="hidden"
-                >
+                <div className="absolute left-0 top-full z-[1000] mt-1 min-w-[180px] max-h-[280px] overflow-hidden border border-gray-200 bg-white shadow-lg">
                     {/* Search */}
-                    <Box p={2} borderBottom="1px solid" borderColor="gray.100">
-                        <Flex align="center" bg="gray.50" px={2} borderRadius="md">
+                    <div className="border-b border-gray-100 p-2">
+                        <div className="flex items-center gap-1 bg-gray-50 px-2">
                             <FiSearch color="gray" size={12} />
                             <Input
                                 placeholder={searchPlaceholder}
-                                size="xs"
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
-                                border="none"
-                                _focus={{ boxShadow: 'none' }}
+                                className="h-6 border-none bg-transparent px-1 text-xs focus:ring-0"
                                 autoFocus
                             />
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
 
                     {/* Options */}
-                    <Box maxH="200px" overflowY="auto">
+                    <div className="max-h-[200px] overflow-y-auto">
                         {/* All option */}
-                        <Box
-                            px={3}
-                            py={2}
-                            cursor="pointer"
-                            bg={value === `All ${label}` ? 'gray.100' : 'transparent'}
-                            _hover={{ bg: 'gray.50' }}
+                        <div
+                            className={`cursor-pointer px-3 py-2 hover:bg-gray-50 ${value === `All ${label}` ? 'bg-gray-100' : 'bg-transparent'}`}
                             onClick={() => {
                                 onSelect(null);
                                 setIsOpen(false);
                                 setSearch('');
                             }}
                         >
-                            <Text fontSize="xs" color="gray.600">All {label}</Text>
-                        </Box>
+                            <span className="text-xs text-gray-600">All {label}</span>
+                        </div>
 
                         {filtered.map(opt => (
-                            <Box
+                            <div
                                 key={opt.id}
-                                px={3}
-                                py={2}
-                                cursor="pointer"
-                                _hover={{ bg: 'gray.50' }}
+                                className="cursor-pointer px-3 py-2 hover:bg-gray-50"
                                 onClick={() => {
                                     onSelect(opt.id);
                                     setIsOpen(false);
                                     setSearch('');
                                 }}
                             >
-                                <Text fontSize="xs">{opt.name}</Text>
+                                <span className="text-xs">{opt.name}</span>
                                 {opt.subtitle && (
-                                    <Text fontSize="2xs" color="gray.500">{opt.subtitle}</Text>
+                                    <span className="block text-[10px] text-gray-500">{opt.subtitle}</span>
                                 )}
-                            </Box>
+                            </div>
                         ))}
 
                         {filtered.length === 0 && (
-                            <Box px={3} py={2}>
-                                <Text fontSize="xs" color="gray.400">No results</Text>
-                            </Box>
+                            <div className="px-3 py-2">
+                                <span className="text-xs text-gray-400">No results</span>
+                            </div>
                         )}
-                    </Box>
-                </Box>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -339,121 +302,98 @@ const DateRangeFilter: React.FC<{
     const hasDateFilter = dateStart || dateEnd;
 
     return (
-        <Box position="relative" ref={ref}>
-            <Flex align="center" gap={1}>
+        <div className="relative" ref={ref}>
+            <div className="flex items-center gap-1">
                 <Button
-                    size="xs"
                     variant="outline"
-                    bg="white"
-                    borderColor={hasDateFilter ? 'blue.300' : 'gray.300'}
-                    color={hasDateFilter ? 'blue.600' : 'gray.700'}
+                    colorScheme="gray"
                     onClick={() => !disabled && setIsOpen(!isOpen)}
-                    fontWeight="normal"
-                    h="28px"
-                    px={2}
                     disabled={disabled}
-                    _hover={{ borderColor: hasDateFilter ? 'blue.400' : 'gray.400' }}
+                    className={`h-7 bg-white px-2 text-xs font-normal ${hasDateFilter ? 'border-blue-300 text-blue-600 hover:border-blue-400' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}
                 >
                     <FiCalendar size={12} style={{ marginRight: 4 }} />
-                    <Text fontSize="xs">{getDisplayLabel()}</Text>
+                    <span className="text-xs">{getDisplayLabel()}</span>
                     <FiChevronDown size={12} style={{ marginLeft: 4 }} />
                 </Button>
 
                 {hasDateFilter && (
-                    <IconButton
-                        size="xs"
+                    <Button
                         variant="ghost"
+                        colorScheme="gray"
                         aria-label="Clear date"
                         onClick={() => onApply('', '')}
-                        color="gray.400"
-                        _hover={{ color: 'gray.600' }}
+                        className="h-7 w-7 px-0 text-gray-400 hover:text-gray-600"
                     >
                         <FiX size={12} />
-                    </IconButton>
+                    </Button>
                 )}
-            </Flex>
+            </div>
 
             {isOpen && (
-                <Box
-                    position="absolute"
-                    top="100%"
-                    left={0}
-                    mt={1}
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
-                    boxShadow="lg"
-                    zIndex={1000}
-                    p={3}
-                    minW="280px"
-                >
+                <div className="absolute left-0 top-full z-[1000] mt-1 min-w-[280px] border border-gray-200 bg-white p-3 shadow-lg">
                     {/* Quick presets */}
-                    <Text fontSize="xs" color="gray.500" mb={2}>Quick select</Text>
-                    <Flex gap={1} wrap="wrap" mb={3}>
+                    <div className="mb-2 text-xs text-gray-500">Quick select</div>
+                    <div className="mb-3 flex flex-wrap gap-1">
                         {DATE_PRESETS.filter(p => p.value !== 'custom').map(preset => (
                             <Button
                                 key={preset.value}
-                                size="xs"
                                 variant="ghost"
+                                colorScheme="gray"
                                 onClick={() => applyPreset(preset.value)}
-                                fontWeight="normal"
-                                h="26px"
-                                _hover={{ bg: 'gray.100' }}
+                                className="h-[26px] px-2 text-xs font-normal hover:bg-gray-100"
                             >
                                 {preset.label}
                             </Button>
                         ))}
-                    </Flex>
+                    </div>
 
                     {/* Custom range */}
-                    <Box borderTop="1px solid" borderColor="gray.100" pt={3}>
-                        <Text fontSize="xs" color="gray.500" mb={2}>Custom range</Text>
-                        <Flex gap={2} align="center" mb={2}>
-                            <Text fontSize="xs" color="gray.600" minW="35px">From</Text>
+                    <div className="border-t border-gray-100 pt-3">
+                        <div className="mb-2 text-xs text-gray-500">Custom range</div>
+                        <div className="mb-2 flex items-center gap-2">
+                            <span className="min-w-[35px] text-xs text-gray-600">From</span>
                             <Input
                                 type="datetime-local"
-                                size="xs"
                                 value={tempStart}
                                 onChange={(e) => setTempStart(e.target.value)}
                                 max={tempEnd || undefined}
-                                flex={1}
+                                className="h-7 flex-1 text-xs"
                             />
-                        </Flex>
-                        <Flex gap={2} align="center" mb={3}>
-                            <Text fontSize="xs" color="gray.600" minW="35px">To</Text>
+                        </div>
+                        <div className="mb-3 flex items-center gap-2">
+                            <span className="min-w-[35px] text-xs text-gray-600">To</span>
                             <Input
                                 type="datetime-local"
-                                size="xs"
                                 value={tempEnd}
                                 onChange={(e) => setTempEnd(e.target.value)}
                                 min={tempStart || undefined}
-                                flex={1}
+                                className="h-7 flex-1 text-xs"
                             />
-                        </Flex>
-                        <Flex justify="flex-end" gap={2}>
+                        </div>
+                        <div className="flex justify-end gap-2">
                             <Button
-                                size="xs"
                                 variant="ghost"
+                                colorScheme="gray"
                                 onClick={() => {
                                     setTempStart('');
                                     setTempEnd('');
                                 }}
+                                className="h-7 px-2 text-xs"
                             >
                                 Clear
                             </Button>
                             <Button
-                                size="xs"
-                                colorPalette="blue"
+                                colorScheme="blue"
                                 onClick={handleApplyCustom}
+                                className="h-7 px-2 text-xs"
                             >
                                 Apply
                             </Button>
-                        </Flex>
-                    </Box>
-                </Box>
+                        </div>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -580,7 +520,7 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
 
     // Build active filter chips for inline display
     const activeChips = useMemo(() => {
-        const chips: { id: string; label: string; color: string; onClear: () => void }[] = [];
+        const chips: { id: string; label: string; color: BadgeColorScheme; onClear: () => void }[] = [];
         if (filters.eventTypes.length > 0) {
             chips.push({ id: 'events', label: `Events: ${filters.eventTypes.length}`, color: 'blue', onClear: () => onFiltersChange({ ...filters, eventTypes: [] }) });
         }
@@ -589,14 +529,14 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
         }
         if (filters.accountIds.length > 0) {
             const acc = accounts.find(a => a.id === filters.accountIds[0]);
-            chips.push({ id: 'account', label: `Acct: ${acc?.name || 'Unknown'}`, color: 'teal', onClear: () => onFiltersChange({ ...filters, accountIds: [] }) });
+            chips.push({ id: 'account', label: `Acct: ${acc?.name || 'Unknown'}`, color: 'green', onClear: () => onFiltersChange({ ...filters, accountIds: [] }) });
         }
         if (filters.assetIds.length > 0) {
             const asset = assets.find(a => a.id === filters.assetIds[0]);
             chips.push({ id: 'asset', label: `Asset: ${asset?.symbol || 'Unknown'}`, color: 'orange', onClear: () => onFiltersChange({ ...filters, assetIds: [] }) });
         }
         if (filters.dateStart || filters.dateEnd) {
-            chips.push({ id: 'date', label: 'Date range', color: 'cyan', onClear: () => onFiltersChange({ ...filters, dateStart: '', dateEnd: '' }) });
+            chips.push({ id: 'date', label: 'Date range', color: 'yellow', onClear: () => onFiltersChange({ ...filters, dateStart: '', dateEnd: '' }) });
         }
         if (filters.search) {
             chips.push({ id: 'search', label: `"${filters.search}"`, color: 'gray', onClear: () => { onFiltersChange({ ...filters, search: '' }); setLocalSearch(''); } });
@@ -605,55 +545,59 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
     }, [filters, accounts, assets, onFiltersChange]);
 
     return (
-        <Box mb={3}>
-            <Box bg="gray.50" borderRadius="md" border="1px solid" borderColor={isModified ? 'blue.300' : 'gray.200'} overflow="visible">
+        <div className="mb-3">
+            <div className={`border bg-gray-50 ${isModified ? 'border-blue-300' : 'border-gray-200'}`}>
                 {/* Clickable header */}
-                <Flex align="center" justify="space-between" p={3}
-                    cursor="pointer" transition="background 0.15s" _hover={{ bg: 'gray.100' }}
-                    onClick={() => setIsCollapsed(c => !c)} borderRadius="md">
-                    <Flex align="center" gap={1.5} flex={1} minW={0} flexWrap="wrap">
-                        <Box transition="transform 0.2s" transform={!isCollapsed ? 'rotate(0deg)' : 'rotate(-90deg)'} flexShrink={0}>
+                <div
+                    className="flex cursor-pointer items-center justify-between p-3 transition-colors hover:bg-gray-100"
+                    onClick={() => setIsCollapsed(c => !c)}
+                >
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                        <div className={`flex-shrink-0 transition-transform duration-200 ${!isCollapsed ? 'rotate-0' : '-rotate-90'}`}>
                             <LuChevronDown size={14} />
-                        </Box>
+                        </div>
                         <LuFilter size={12} />
-                        <Text fontWeight="semibold" fontSize="xs" flexShrink={0}>Filters</Text>
+                        <span className="flex-shrink-0 text-xs font-semibold">Filters</span>
                         {activeChips.length > 0 && (
-                            <Badge size="xs" colorPalette="blue">{activeChips.length} active</Badge>
+                            <Badge colorScheme="blue">{activeChips.length} active</Badge>
                         )}
-                        {isLoading && <Spinner size="xs" color="gray.400" />}
+                        {isLoading && <Spinner size="xs" className="text-gray-400" />}
                         {activeChips.length > 0 && (
-                            <Flex flexWrap="wrap" gap={1} align="center" ml={1} onClick={e => e.stopPropagation()}>
+                            <div className="ml-1 flex flex-wrap items-center gap-1" onClick={e => e.stopPropagation()}>
                                 {activeChips.map(chip => (
-                                    <Badge key={chip.id} size="sm" colorPalette={chip.color} display="inline-flex" alignItems="center" gap={1}
-                                        px={2} py={0.5} borderRadius="md" cursor="pointer" transition="all 0.15s"
-                                        _hover={{ transform: 'scale(0.95)', opacity: 0.8 }} onClick={e => { e.stopPropagation(); chip.onClear(); }}>
-                                        <Text fontSize="xs">{chip.label}</Text>
+                                    <Badge
+                                        key={chip.id}
+                                        colorScheme={chip.color}
+                                        className="inline-flex cursor-pointer items-center gap-1 transition-transform hover:scale-95 hover:opacity-80"
+                                        onClick={() => chip.onClear()}
+                                    >
+                                        <span className="text-xs">{chip.label}</span>
                                         <LuX size={12} />
                                     </Badge>
                                 ))}
-                            </Flex>
+                            </div>
                         )}
-                    </Flex>
-                    <Flex gap={1.5} onClick={e => e.stopPropagation()} flexShrink={0}>
+                    </div>
+                    <div className="flex flex-shrink-0 gap-1.5" onClick={e => e.stopPropagation()}>
                         {isModified && (
-                            <Button size="xs" variant="ghost" onClick={resetFilters} color="gray.500" _hover={{ color: 'gray.700' }}>
+                            <Button variant="ghost" colorScheme="gray" onClick={resetFilters} className="h-7 px-2 text-xs">
                                 <LuRotateCcw size={10} />
-                                <Text ml={0.5} fontSize="2xs">Clear All</Text>
+                                <span className="ml-0.5 text-[10px]">Clear All</span>
                             </Button>
                         )}
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
 
                 {/* Collapsible content */}
                 {!isCollapsed && (
-                    <Box p={3} pt={1}>
+                    <div className="p-3 pt-1">
                         {/* Row 1: Event Types & Unit Patterns */}
-                        <Flex gap={4} align="center" wrap="wrap" mb={2}>
+                        <div className="mb-2 flex flex-wrap items-center gap-4">
                             {/* Event type pills - dynamic from backend */}
                             {showEventTypes && eventTypeOptions.length > 0 && (
-                                <Flex align="center" gap={2}>
-                                    <Text fontSize="2xs" color="gray.500" fontWeight="medium">Event:</Text>
-                                    <Flex gap={1}>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-medium text-gray-500">Event:</span>
+                                    <div className="flex gap-1">
                                         {eventTypeOptions.map(opt => (
                                             <TogglePill
                                                 key={opt.value}
@@ -663,15 +607,15 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
                                                 disabled={isLoading}
                                             />
                                         ))}
-                                    </Flex>
-                                </Flex>
+                                    </div>
+                                </div>
                             )}
 
                             {/* Unit pattern pills - dynamic from backend */}
                             {showUnitPatterns && unitPatternOptions.length > 0 && (
-                                <Flex align="center" gap={2}>
-                                    <Text fontSize="2xs" color="gray.500" fontWeight="medium">Unit:</Text>
-                                    <Flex gap={1}>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-medium text-gray-500">Unit:</span>
+                                    <div className="flex gap-1">
                                         {unitPatternOptions.map(opt => (
                                             <TogglePill
                                                 key={opt.value}
@@ -681,13 +625,13 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
                                                 disabled={isLoading}
                                             />
                                         ))}
-                                    </Flex>
-                                </Flex>
+                                    </div>
+                                </div>
                             )}
-                        </Flex>
+                        </div>
 
                         {/* Row 2: Dropdowns, Date, Search, Reset */}
-                        <Flex gap={3} align="center" wrap="wrap">
+                        <div className="flex flex-wrap items-center gap-3">
                             {/* Account dropdown */}
                             {showAccountFilter && accounts.length > 0 && (
                                 <FilterDropdown
@@ -728,69 +672,48 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
 
                             {/* Search */}
                             {showSearch && (
-                                <Flex
-                                    align="center"
-                                    bg="white"
-                                    border="1px solid"
-                                    borderColor="gray.300"
-                                    borderRadius="md"
-                                    px={1.5}
-                                    h="22px"
-                                    flex="1"
-                                    maxW="160px"
-                                    _focusWithin={{ borderColor: 'blue.400' }}
-                                >
+                                <div className="flex h-[22px] max-w-[160px] flex-1 items-center gap-1 border border-gray-300 bg-white px-1.5 focus-within:border-blue-400">
                                     <FiSearch color="gray" size={10} />
                                     <Input
                                         placeholder="Search..."
-                                        size="2xs"
-                                        fontSize="2xs"
                                         value={localSearch}
                                         onChange={(e) => setLocalSearch(e.target.value)}
-                                        border="none"
-                                        _focus={{ boxShadow: 'none' }}
-                                        h="18px"
+                                        className="h-[18px] border-none bg-transparent px-1 text-[10px] focus:ring-0"
                                     />
                                     {localSearch && (
-                                        <IconButton
-                                            size="xs"
+                                        <Button
                                             variant="ghost"
+                                            colorScheme="gray"
                                             aria-label="Clear search"
                                             onClick={() => setLocalSearch('')}
-                                            p={0}
-                                            minW="16px"
-                                            h="16px"
+                                            className="h-4 min-w-[16px] p-0"
                                         >
                                             <FiX size={10} />
-                                        </IconButton>
+                                        </Button>
                                     )}
-                                </Flex>
+                                </div>
                             )}
 
                             {/* Loading indicator */}
-                            {isLoading && <Spinner size="xs" color="gray.400" />}
+                            {isLoading && <Spinner size="xs" className="text-gray-400" />}
 
                             {/* Reset button */}
                             {isModified && (
                                 <Button
-                                    size="2xs"
                                     variant="ghost"
+                                    colorScheme="gray"
                                     onClick={resetFilters}
-                                    color="gray.500"
-                                    fontWeight="normal"
-                                    fontSize="2xs"
-                                    h="22px"
-                                    _hover={{ color: 'gray.700', bg: 'gray.100' }}
+                                    className="h-[22px] px-2 text-[10px] font-normal hover:bg-gray-100 hover:text-gray-700"
                                 >
                                     <FiRefreshCw size={10} style={{ marginRight: 2 }} />
                                     Reset
                                 </Button>
                             )}
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
                 )}
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 };
 

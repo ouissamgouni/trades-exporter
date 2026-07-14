@@ -1,20 +1,11 @@
 import React, { useMemo } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Dialog,
-    Flex,
-    Grid,
-    Portal,
-    Text,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import {
     ConnectorOverride,
     EnabledConnector,
     AccountSummary,
 } from '../types';
+import { Badge, Button } from './ui/primitives';
 
 interface SyncRecapDialogProps {
     isOpen: boolean;
@@ -109,151 +100,151 @@ export const SyncRecapDialog: React.FC<SyncRecapDialogProps> = ({
     }, [grouped]);
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(); }} size="xl">
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content maxW="900px">
-                        <Dialog.Header>
-                            <Flex justify="space-between" align="center" w="100%">
-                                <Dialog.Title fontSize="md">
-                                    {renormalize ? '🔄 Re-Normalize Confirmation' : '🚀 Sync Job Summary'}
-                                </Dialog.Title>
-                                <Flex gap={3} align="center">
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="xs" color="gray.500">Connectors</Text>
-                                        <Text fontSize="sm" fontWeight="bold">{enabledConnectors.length}</Text>
-                                    </Flex>
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="xs" color="gray.500">Accounts</Text>
-                                        <Text fontSize="sm" fontWeight="bold">{enabledAccounts.length}</Text>
-                                    </Flex>
-                                    {disabledConnectors.length > 0 && (
-                                        <Flex align="center" gap={1}>
-                                            <Text fontSize="xs" color="gray.400">Skipped</Text>
-                                            <Text fontSize="sm" fontWeight="bold" color="gray.400">{disabledConnectors.length}</Text>
-                                        </Flex>
-                                    )}
-                                    {overriddenConnectors.length > 0 && (
-                                        <Badge colorPalette="orange" size="sm">{overriddenConnectors.length} override{overriddenConnectors.length !== 1 ? 's' : ''}</Badge>
-                                    )}
-                                    {testModeConnectors.length > 0 && (
-                                        <Badge colorPalette="orange" size="sm">🧪 {testModeConnectors.length} test</Badge>
-                                    )}
-                                </Flex>
-                            </Flex>
-                        </Dialog.Header>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[900px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-200 p-4">
+                        <div className="flex w-full items-center justify-between">
+                            <RadixDialog.Title className="text-base font-semibold">
+                                {renormalize ? '🔄 Re-Normalize Confirmation' : '🚀 Sync Job Summary'}
+                            </RadixDialog.Title>
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-1">
+                                    <span className="text-xs text-slate-500">Connectors</span>
+                                    <span className="text-sm font-bold">{enabledConnectors.length}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-xs text-slate-500">Accounts</span>
+                                    <span className="text-sm font-bold">{enabledAccounts.length}</span>
+                                </div>
+                                {disabledConnectors.length > 0 && (
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-xs text-slate-400">Skipped</span>
+                                        <span className="text-sm font-bold text-slate-400">{disabledConnectors.length}</span>
+                                    </div>
+                                )}
+                                {overriddenConnectors.length > 0 && (
+                                    <Badge colorScheme="orange">{overriddenConnectors.length} override{overriddenConnectors.length !== 1 ? 's' : ''}</Badge>
+                                )}
+                                {testModeConnectors.length > 0 && (
+                                    <Badge colorScheme="orange">🧪 {testModeConnectors.length} test</Badge>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
-                        <Dialog.Body pt={2}>
-                            {/* Warning for renormalize */}
-                            {renormalize && (
-                                <Box bg="orange.50" borderWidth="1px" borderColor="orange.200" borderRadius="md" p={2} mb={3}>
-                                    <Text fontSize="xs" color="orange.700" fontWeight="medium">
-                                        ⚠️ Re-normalization will delete existing normalized transactions and recreate them from stored raw data.
-                                        Derived data (cost lots, P&L) will also be removed.
-                                    </Text>
-                                </Box>
-                            )}
+                    <div className="p-4 pt-2">
+                        {/* Warning for renormalize */}
+                        {renormalize && (
+                            <div className="mb-3 border border-orange-200 bg-orange-50 p-2">
+                                <span className="text-xs font-medium text-orange-700">
+                                    ⚠️ Re-normalization will delete existing normalized transactions and recreate them from stored raw data.
+                                    Derived data (cost lots, P&L) will also be removed.
+                                </span>
+                            </div>
+                        )}
 
-                            {/* Warnings */}
-                            {fileConnectors.length > 0 && (
-                                <Box bg="blue.50" borderWidth="1px" borderColor="blue.200" borderRadius="md" p={2} mb={3}>
-                                    <Text fontSize="xs" color="blue.700">
-                                        📁 {fileConnectors.length} file connector{fileConnectors.length > 1 ? 's' : ''} included — ensure files are uploaded before syncing.
-                                    </Text>
-                                </Box>
-                            )}
+                        {/* Warnings */}
+                        {fileConnectors.length > 0 && (
+                            <div className="mb-3 border border-blue-200 bg-blue-50 p-2">
+                                <span className="text-xs text-blue-700">
+                                    📁 {fileConnectors.length} file connector{fileConnectors.length > 1 ? 's' : ''} included — ensure files are uploaded before syncing.
+                                </span>
+                            </div>
+                        )}
 
-                            {/* Account cards in 3-column grid */}
-                            <Box maxH="450px" overflowY="auto">
-                                <Grid templateColumns="repeat(3, 1fr)" gap={2}>
-                                    {accountCards.map(({ accountName, accountType, connectors: cps }) => (
-                                        <Card.Root key={accountName} size="sm" variant="outline">
-                                            <Card.Header py={1.5} px={3}>
-                                                <Flex align="center" gap={1.5}>
-                                                    <Text fontSize="xs" fontWeight="semibold" color="gray.700" truncate>
-                                                        {accountName}
-                                                    </Text>
-                                                    <Badge colorPalette="gray" size="xs" variant="subtle">{accountType}</Badge>
-                                                </Flex>
-                                            </Card.Header>
-                                            <Card.Body py={1} px={3}>
-                                                {cps.map(c => {
-                                                    const o = overridesMap.get(c.connector_id);
-                                                    const hasOverride = !!o;
-                                                    const isTest = o?.test_mode ?? c.test_mode;
-                                                    const since = o?.since_datetime !== undefined ? o.since_datetime : (c.default_since_datetime ?? c.start_datetime ?? null);
-                                                    const symbols = o?.symbols;
-                                                    const currencies = o?.currencies;
+                        {/* Account cards in 3-column grid */}
+                        <div className="max-h-[450px] overflow-y-auto">
+                            <div className="grid grid-cols-3 gap-2">
+                                {accountCards.map(({ accountName, accountType, connectors: cps }) => (
+                                    <div key={accountName} className="border border-slate-200 bg-white">
+                                        <div className="border-b border-slate-100 px-3 py-1.5">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="truncate text-xs font-semibold text-slate-700">
+                                                    {accountName}
+                                                </span>
+                                                <Badge colorScheme="gray">{accountType}</Badge>
+                                            </div>
+                                        </div>
+                                        <div className="px-3 py-1">
+                                            {cps.map(c => {
+                                                const o = overridesMap.get(c.connector_id);
+                                                const hasOverride = !!o;
+                                                const isTest = o?.test_mode ?? c.test_mode;
+                                                const since = o?.since_datetime !== undefined ? o.since_datetime : (c.default_since_datetime ?? c.start_datetime ?? null);
+                                                const symbols = o?.symbols;
+                                                const currencies = o?.currencies;
 
-                                                    // Collect which fields were overridden
-                                                    const overriddenFields: string[] = [];
-                                                    if (o?.enabled !== undefined) overriddenFields.push('enabled');
-                                                    if (o?.test_mode !== undefined) overriddenFields.push('test mode');
-                                                    if (o?.since_datetime !== undefined) overriddenFields.push('since date');
-                                                    if (o?.symbols && o.symbols.length > 0) overriddenFields.push('symbols');
-                                                    if (o?.currencies && o.currencies.length > 0) overriddenFields.push('currencies');
+                                                // Collect which fields were overridden
+                                                const overriddenFields: string[] = [];
+                                                if (o?.enabled !== undefined) overriddenFields.push('enabled');
+                                                if (o?.test_mode !== undefined) overriddenFields.push('test mode');
+                                                if (o?.since_datetime !== undefined) overriddenFields.push('since date');
+                                                if (o?.symbols && o.symbols.length > 0) overriddenFields.push('symbols');
+                                                if (o?.currencies && o.currencies.length > 0) overriddenFields.push('currencies');
 
-                                                    return (
-                                                        <Box key={c.connector_id} py={0.5} pl={hasOverride ? 1.5 : 0} borderLeftWidth={hasOverride ? '2px' : 0} borderColor="orange.400">
-                                                            <Flex align="center" gap={1} flexWrap="wrap">
-                                                                <Text fontSize="xs" color="gray.700" truncate>
-                                                                    {c.display_name || c.connector_type}
-                                                                </Text>
-                                                                {c.is_file_connector && (
-                                                                    <Badge colorPalette="blue" size="xs" variant="subtle">📁</Badge>
-                                                                )}
-                                                                {isTest && (
-                                                                    <Badge colorPalette="orange" size="xs">🧪</Badge>
-                                                                )}
-                                                                {c.chain_name && (
-                                                                    <Badge colorPalette="purple" size="xs" variant="subtle">{c.chain_name}</Badge>
-                                                                )}
-                                                            </Flex>
-                                                            {overriddenFields.length > 0 && (
-                                                                <Text fontSize="2xs" color="orange.500" truncate>
-                                                                    ⚙ {overriddenFields.join(', ')}
-                                                                </Text>
+                                                return (
+                                                    <div
+                                                        key={c.connector_id}
+                                                        className="py-0.5"
+                                                        style={hasOverride ? { paddingLeft: 6, borderLeft: '2px solid #fb923c' } : undefined}
+                                                    >
+                                                        <div className="flex flex-wrap items-center gap-1">
+                                                            <span className="truncate text-xs text-slate-700">
+                                                                {c.display_name || c.connector_type}
+                                                            </span>
+                                                            {c.is_file_connector && (
+                                                                <Badge colorScheme="blue">📁</Badge>
                                                             )}
-                                                            {since && (
-                                                                <Text fontSize="2xs" color="gray.400">since {formatDateTime(since)}</Text>
+                                                            {isTest && (
+                                                                <Badge colorScheme="orange">🧪</Badge>
                                                             )}
-                                                            {!since && c.supports_incremental_sync && (
-                                                                <Text fontSize="2xs" color="orange.500">⚠ full sync</Text>
+                                                            {c.chain_name && (
+                                                                <Badge colorScheme="purple">{c.chain_name}</Badge>
                                                             )}
-                                                            {symbols && symbols.length > 0 && (
-                                                                <Text fontSize="2xs" color="blue.500" truncate>{symbols.join(', ')}</Text>
-                                                            )}
-                                                            {currencies && currencies.length > 0 && (
-                                                                <Text fontSize="2xs" color="blue.500" truncate>{currencies.join(', ')}</Text>
-                                                            )}
-                                                        </Box>
-                                                    );
-                                                })}
-                                            </Card.Body>
-                                        </Card.Root>
-                                    ))}
-                                </Grid>
-                            </Box>
-                        </Dialog.Body>
+                                                        </div>
+                                                        {overriddenFields.length > 0 && (
+                                                            <span className="block truncate text-[10px] text-orange-500">
+                                                                ⚙ {overriddenFields.join(', ')}
+                                                            </span>
+                                                        )}
+                                                        {since && (
+                                                            <span className="block text-[10px] text-slate-400">since {formatDateTime(since)}</span>
+                                                        )}
+                                                        {!since && c.supports_incremental_sync && (
+                                                            <span className="block text-[10px] text-orange-500">⚠ full sync</span>
+                                                        )}
+                                                        {symbols && symbols.length > 0 && (
+                                                            <span className="block truncate text-[10px] text-blue-500">{symbols.join(', ')}</span>
+                                                        )}
+                                                        {currencies && currencies.length > 0 && (
+                                                            <span className="block truncate text-[10px] text-blue-500">{currencies.join(', ')}</span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
 
-                        <Dialog.Footer>
-                            <Flex gap={3}>
-                                <Button variant="outline" onClick={onClose} disabled={loading}>
-                                    Cancel
-                                </Button>
-                                <Button
-                                    colorPalette={renormalize ? 'purple' : 'blue'}
-                                    onClick={onConfirm}
-                                    loading={loading}
-                                >
-                                    {renormalize ? '🔄 Re-Normalize' : '🚀 Start Sync'}
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                    <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                        <Button variant="outline" onClick={onClose} disabled={loading}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={onConfirm}
+                            loading={loading}
+                            className={renormalize ? 'bg-purple-600 hover:bg-purple-700' : undefined}
+                        >
+                            {renormalize ? '🔄 Re-Normalize' : '🚀 Start Sync'}
+                        </Button>
+                    </div>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };

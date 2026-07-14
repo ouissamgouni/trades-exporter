@@ -9,21 +9,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Collapsible,
-    Dialog,
-    Flex,
-    Heading,
-    HStack,
-    IconButton,
-    Portal,
-    Spinner,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Badge, Button, Spinner } from './ui/primitives';
 import { DuplicateGroupTransactionsTable } from './tables/wrappers/DuplicateGroupTransactionsTable';
 import {
     FiCheck,
@@ -142,7 +129,7 @@ interface SmartSuggestionProps {
 
 const SmartSuggestion: React.FC<SmartSuggestionProps> = ({ breakdown, onSelectAll }) => (
     <Button
-        size="xs"
+        size="sm"
         variant="outline"
         colorScheme="blue"
         onClick={onSelectAll}
@@ -239,77 +226,68 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
     const price = formatNumber(firstTx.price);
 
     return (
-        <Box
-            borderWidth="1px"
-            borderRadius="md"
-            p={2}
-            mb={2}
-            bg={allResolved ? "green.50" : "orange.25"}
-            borderColor={allResolved ? "green.300" : "orange.200"}
+        <div
+            className={`mb-2 border p-2 ${allResolved ? 'border-green-300 bg-green-50' : 'border-orange-200 bg-orange-50/40'}`}
         >
             {/* Header - Badge-based summary starting with duplicate count */}
-            <Flex justify="space-between" align="center" mb={isCollapsed ? 0 : 2} flexWrap="wrap" gap={1}>
-                <HStack gap={1} flexWrap="wrap">
+            <div className={`flex flex-wrap items-center justify-between gap-1 ${isCollapsed ? '' : 'mb-2'}`}>
+                <div className="flex flex-wrap items-center gap-1">
                     {allResolved && (
-                        <Badge colorPalette="green" fontSize="2xs" px={1.5} py={0.5} variant="solid">
+                        <Badge colorScheme="green">
                             ✓ Resolved
                         </Badge>
                     )}
-                    <Badge colorPalette="orange" fontSize="2xs" px={1.5} py={0.5}>
+                    <Badge colorScheme="orange">
                         {group.transaction_count} Duplicates
                     </Badge>
-                    <Badge colorPalette="purple" variant="subtle" fontSize="2xs">
+                    <Badge colorScheme="purple">
                         {assetPair}
                     </Badge>
-                    <Badge
-                        colorPalette={direction === 'inflow' ? 'green' : 'red'}
-                        variant="subtle"
-                        fontSize="2xs"
-                    >
+                    <Badge colorScheme={direction === 'inflow' ? 'green' : 'red'}>
                         {direction}
                     </Badge>
-                    <Badge colorPalette="teal" variant="solid" fontSize="2xs">
+                    <Badge colorScheme="green">
                         {quantity} @ {price}
                     </Badge>
-                    <Badge colorPalette="blue" variant="solid" fontSize="2xs">
+                    <Badge colorScheme="blue">
                         {sourceCount} source{sourceCount !== 1 ? 's' : ''}
                     </Badge>
                     {unresolvedCount > 0 && (
-                        <Badge colorPalette="orange" variant="outline" fontSize="2xs">
+                        <Badge colorScheme="orange">
                             {unresolvedCount} unresolved
                         </Badge>
                     )}
-                    <Badge colorPalette="gray" variant="outline" fontSize="2xs" fontFamily="mono">
+                    <Badge colorScheme="gray" className="font-mono">
                         {group.group_hash.substring(0, 8)}
                     </Badge>
-                </HStack>
-                <HStack>
+                </div>
+                <div className="flex items-center gap-2">
                     {!allResolved && (
-                        <Badge colorPalette="blue" variant="subtle" fontSize="2xs">
+                        <Badge colorScheme="blue">
                             {selectedIds.size} selected
                         </Badge>
                     )}
-                    <IconButton
-                        size="xs"
+                    <Button
+                        size="sm"
                         variant="ghost"
                         onClick={() => setIsCollapsed(!isCollapsed)}
                         aria-label={isCollapsed ? "Expand" : "Collapse"}
                     >
                         {isCollapsed ? '▼' : '▲'}
-                    </IconButton>
-                </HStack>
-            </Flex>
+                    </Button>
+                </div>
+            </div>
 
             {/* Collapsible content */}
             {!isCollapsed && (
                 <>
                     {/* Smart Suggestions */}
                     {group.connector_breakdown.length > 1 && (
-                        <Box mb={3} p={2} bg="blue.50" borderRadius="md">
-                            <Text fontSize="xs" fontWeight="bold" mb={2} color="blue.700">
+                        <div className="mb-3 bg-blue-50 p-2">
+                            <p className="mb-2 text-xs font-bold text-blue-700">
                                 Smart Suggestions:
-                            </Text>
-                            <Flex gap={2} flexWrap="wrap">
+                            </p>
+                            <div className="flex flex-wrap gap-2">
                                 {group.connector_breakdown.map((breakdown, idx) => (
                                     <SmartSuggestion
                                         key={idx}
@@ -317,26 +295,26 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
                                         onSelectAll={() => selectAllFromConnector(breakdown)}
                                     />
                                 ))}
-                            </Flex>
-                        </Box>
+                            </div>
+                        </div>
                     )}
 
                     {/* Transaction List - Table-based UX with selection */}
-                    <Box mb={3}>
+                    <div className="mb-3">
                         <DuplicateGroupTransactionsTable
                             key={tableKey}
                             transactionIds={group.transactions.map(tx => tx.id)}
                             onSelectionChange={setSelectedIds}
                             preselectIds={preselectIds}
                         />
-                    </Box>
+                    </div>
 
                     {/* Action Buttons */}
                     {!allResolved && (
-                        <Flex justify="flex-end" gap={2}>
+                        <div className="flex justify-end gap-2">
                             <Button
                                 size="sm"
-                                colorPalette="green"
+                                colorScheme="green"
                                 onClick={() => handleResolve('keep_selected')}
                                 disabled={selectedIds.size === 0 || isResolving}
                                 loading={isResolving}
@@ -346,7 +324,7 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
                             </Button>
                             <Button
                                 size="sm"
-                                colorPalette="gray"
+                                colorScheme="gray"
                                 onClick={() => handleResolve('dismiss_selected')}
                                 disabled={selectedIds.size === 0 || isResolving}
                                 loading={isResolving}
@@ -354,11 +332,11 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
                                 <FiX />
                                 Dismiss Selected
                             </Button>
-                        </Flex>
+                        </div>
                     )}
                 </>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -643,21 +621,20 @@ export const DuplicateResolutionPanel: React.FC<DuplicateResolutionPanelProps> =
     }, [confirmAction]);
 
     return (
-        <Box p={compactMode ? 1 : 3}>
+        <div className={compactMode ? 'p-1' : 'p-3'}>
             {/* Time Filter */}
             {!compactMode && (
-                <HStack mb={2} gap={2}>
-                    <Text fontSize="2xs" fontWeight="bold">
+                <div className="mb-2 flex items-center gap-2">
+                    <span className="text-xs font-bold">
                         Time Range:
-                    </Text>
+                    </span>
                     {(['week', '30d', '90d', 'all'] as TimeFilter[]).map(filter => (
                         <Button
                             key={filter}
-                            size="xs"
+                            size="sm"
                             variant={timeFilter === filter ? 'solid' : 'outline'}
                             colorScheme="blue"
                             onClick={() => setTimeFilter(filter)}
-                            fontSize="2xs"
                         >
                             {filter === 'week'
                                 ? 'Last Week'
@@ -668,116 +645,104 @@ export const DuplicateResolutionPanel: React.FC<DuplicateResolutionPanelProps> =
                                         : 'All Time'}
                         </Button>
                     ))}
-                </HStack>
+                </div>
             )}
 
             {/* Quick Actions */}
             {!compactMode && quickActions.length > 0 && (
-                <Box mb={2} p={1.5} bg="purple.50" borderRadius="md" borderWidth="1px" borderColor="purple.200">
-                    <HStack mb={0.5} px={0.5}>
-                        <Text fontSize="2xs" fontWeight="bold" color="purple.700">
+                <div className="mb-2 border border-purple-200 bg-purple-50 p-1.5">
+                    <div className="mb-0.5 flex items-center px-0.5">
+                        <span className="text-xs font-bold text-purple-700">
                             ⚡ Quick Actions
-                        </Text>
-                    </HStack>
-                    <Flex gap={1} flexWrap="wrap">
+                        </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
                         {quickActions.map((action, idx) => (
                             <Button
                                 key={idx}
-                                size="xs"
-                                colorScheme="purple"
+                                size="sm"
+                                colorScheme="gray"
                                 variant="outline"
+                                className="border-purple-300 text-purple-700 hover:bg-purple-50"
                                 onClick={() => setConfirmAction(action)}
                                 disabled={loading || bulkResolving}
-                                px={1.5}
-                                py={0.5}
-                                h="auto"
-                                fontSize="2xs"
                             >
-                                <HStack gap={0.5}>
+                                <div className="flex items-center gap-0.5">
                                     <FiCheck size={10} />
-                                    <Text fontSize="2xs">{action.label}</Text>
-                                    <Badge colorPalette="purple" variant="solid" fontSize="2xs" px={1}>
+                                    <span className="text-xs">{action.label}</span>
+                                    <Badge colorScheme="purple">
                                         {action.groupsCount}g
                                     </Badge>
-                                    <Badge colorPalette="purple" variant="subtle" fontSize="2xs" px={1}>
+                                    <Badge colorScheme="purple">
                                         {action.count}tx
                                     </Badge>
                                     {action.description && (
-                                        <Badge colorPalette="gray" variant="subtle" fontSize="2xs" px={1}>
+                                        <Badge colorScheme="gray">
                                             {action.description}
                                         </Badge>
                                     )}
-                                </HStack>
+                                </div>
                             </Button>
                         ))}
-                    </Flex>
-                </Box>
+                    </div>
+                </div>
             )}
 
             {/* Stats */}
             {response && (
-                <Box mb={compactMode ? 1 : 2} p={compactMode ? 1.5 : 2} bg="blue.50" borderRadius="md"
-                    fontSize={compactMode ? '2xs' : '2xs'}
-                >
-                    <Flex gap={4}>
-                        <VStack align="start" gap={0}>
-                            <Text fontSize="lg" fontWeight="bold" color="blue.700">
+                <div className={`${compactMode ? 'mb-1 p-1.5' : 'mb-2 p-2'} bg-blue-50 text-xs`}>
+                    <div className="flex gap-4">
+                        <div className="flex flex-col items-start gap-0">
+                            <span className="text-lg font-bold text-blue-700">
                                 {response.total_groups}
-                            </Text>
-                            <Text fontSize="2xs" color="blue.600">
+                            </span>
+                            <span className="text-xs text-blue-600">
                                 Unresolved Groups
-                            </Text>
-                        </VStack>
-                        <VStack align="start" gap={0}>
-                            <Text fontSize="lg" fontWeight="bold" color="green.700">
+                            </span>
+                        </div>
+                        <div className="flex flex-col items-start gap-0">
+                            <span className="text-lg font-bold text-green-700">
                                 {response.groups.length - response.total_groups}
-                            </Text>
-                            <Text fontSize="2xs" color="green.600">
+                            </span>
+                            <span className="text-xs text-green-600">
                                 Resolved Groups
-                            </Text>
-                        </VStack>
-                        <VStack align="start" gap={0}>
-                            <Text fontSize="2xs" color="gray.700">
+                            </span>
+                        </div>
+                        <div className="flex flex-col items-start gap-0">
+                            <span className="text-xs text-slate-700">
                                 Time Tolerance: ±{response.time_tolerance_seconds}s
-                            </Text>
-                            <Text fontSize="2xs" color="gray.700">
+                            </span>
+                            <span className="text-xs text-slate-700">
                                 Amount Tolerance: ±{response.amount_tolerance_percent}%
-                            </Text>
-                        </VStack>
-                    </Flex>
-                </Box>
+                            </span>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Loading State */}
             {loading && !response && (
-                <Flex justify="center" align="center" h="200px">
-                    <Spinner size="xl" />
-                </Flex>
+                <div className="flex h-[200px] items-center justify-center">
+                    <Spinner size="lg" />
+                </div>
             )}
 
             {/* Empty State */}
             {!loading && response && response.total_groups === 0 && (
-                <Flex
-                    direction="column"
-                    align="center"
-                    justify="center"
-                    h="200px"
-                    bg="green.50"
-                    borderRadius="md"
-                >
+                <div className="flex h-[200px] flex-col items-center justify-center bg-green-50">
                     <FiCheck size={48} color="green" />
-                    <Text fontSize="lg" fontWeight="bold" mt={3} color="green.700">
+                    <p className="mt-3 text-lg font-bold text-green-700">
                         No Duplicates Found
-                    </Text>
-                    <Text fontSize="sm" color="green.600">
+                    </p>
+                    <p className="text-sm text-green-600">
                         All transactions appear to be unique
-                    </Text>
-                </Flex>
+                    </p>
+                </div>
             )}
 
             {/* Duplicate Groups */}
             {response && response.groups.length > 0 && (
-                <VStack gap={0} align="stretch">
+                <div className="flex flex-col items-stretch gap-0">
                     {response.groups.map(group => (
                         <DuplicateGroupRow
                             key={group.group_hash}
@@ -786,238 +751,220 @@ export const DuplicateResolutionPanel: React.FC<DuplicateResolutionPanelProps> =
                             onGroupUpdated={handleGroupUpdated}
                         />
                     ))}
-                </VStack>
+                </div>
             )}
 
             {/* Bulk Resolution Confirmation Modal */}
-            <Dialog.Root
-                open={confirmAction !== null}
-                onOpenChange={(e) => { if (!e.open) setConfirmAction(null); }}
-                size="xl"
-            >
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxW="900px">
-                            <Dialog.Header>
-                                <Dialog.Title>Confirm Bulk Resolution</Dialog.Title>
-                            </Dialog.Header>
+            <RadixDialog.Root open={confirmAction !== null} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[900px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white p-4 shadow-lg">
+                        <RadixDialog.Title className="mb-3 text-base font-semibold">Confirm Bulk Resolution</RadixDialog.Title>
 
-                            <Dialog.Body>
-                                <VStack align="stretch" gap={3}>
-                                    {/* Action Summary */}
-                                    <Box p={3} bg="purple.50" borderRadius="md" borderWidth="1px" borderColor="purple.200">
-                                        <HStack gap={2} mb={1}>
-                                            <Text fontSize="sm" fontWeight="bold" color="purple.700">
-                                                Action:
-                                            </Text>
-                                            <Badge colorPalette="purple" fontSize="sm" variant="solid">
-                                                Keep {confirmAction?.label}
-                                            </Badge>
-                                        </HStack>
-                                        <HStack gap={2} fontSize="xs" color="gray.600">
-                                            <Badge colorPalette="purple" variant="subtle" fontSize="xs">
-                                                {confirmAction?.groupsCount} groups
-                                            </Badge>
-                                            <Badge colorPalette="green" variant="subtle" fontSize="xs">
-                                                {preview.reduce((sum, p) => sum + p.kept.length, 0)} kept
-                                            </Badge>
-                                            <Badge colorPalette="orange" variant="subtle" fontSize="xs">
-                                                {preview.reduce((sum, p) => sum + p.merged.length, 0)} merged
-                                            </Badge>
-                                        </HStack>
-                                    </Box>
+                        <div className="flex flex-col items-stretch gap-3">
+                            {/* Action Summary */}
+                            <div className="border border-purple-200 bg-purple-50 p-3">
+                                <div className="mb-1 flex items-center gap-2">
+                                    <span className="text-sm font-bold text-purple-700">
+                                        Action:
+                                    </span>
+                                    <Badge colorScheme="purple">
+                                        Keep {confirmAction?.label}
+                                    </Badge>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs text-slate-600">
+                                    <Badge colorScheme="purple">
+                                        {confirmAction?.groupsCount} groups
+                                    </Badge>
+                                    <Badge colorScheme="green">
+                                        {preview.reduce((sum, p) => sum + p.kept.length, 0)} kept
+                                    </Badge>
+                                    <Badge colorScheme="orange">
+                                        {preview.reduce((sum, p) => sum + p.merged.length, 0)} merged
+                                    </Badge>
+                                </div>
+                            </div>
 
-                                    {/* Per-Group Preview */}
-                                    <Box>
-                                        <Text fontSize="sm" fontWeight="bold" mb={2}>
-                                            Groups Preview:
-                                        </Text>
-                                        <VStack align="stretch" gap={2} maxH="400px" overflowY="auto">
-                                            {preview.map((groupPreview, idx) => {
-                                                const isExpanded = expandedGroups.has(groupPreview.group.group_hash);
-                                                const firstTx = groupPreview.group.transactions[0];
-                                                const assetPair = `${firstTx.source_asset_symbol}/${firstTx.source_price_quote_asset_symbol}`;
-                                                const direction = firstTx.direction || 'unknown';
+                            {/* Per-Group Preview */}
+                            <div>
+                                <p className="mb-2 text-sm font-bold">
+                                    Groups Preview:
+                                </p>
+                                <div className="flex max-h-[400px] flex-col items-stretch gap-2 overflow-y-auto">
+                                    {preview.map((groupPreview, idx) => {
+                                        const isExpanded = expandedGroups.has(groupPreview.group.group_hash);
+                                        const firstTx = groupPreview.group.transactions[0];
+                                        const assetPair = `${firstTx.source_asset_symbol}/${firstTx.source_price_quote_asset_symbol}`;
+                                        const direction = firstTx.direction || 'unknown';
 
-                                                return (
-                                                    <Box
-                                                        key={groupPreview.group.group_hash}
-                                                        borderWidth="1px"
-                                                        borderRadius="md"
-                                                        borderColor="gray.200"
-                                                        bg="white"
-                                                    >
-                                                        {/* Group Header */}
-                                                        <Flex
-                                                            p={2}
-                                                            justify="space-between"
-                                                            align="center"
-                                                            cursor="pointer"
-                                                            onClick={() => {
-                                                                setExpandedGroups(prev => {
-                                                                    const next = new Set(prev);
-                                                                    if (next.has(groupPreview.group.group_hash)) {
-                                                                        next.delete(groupPreview.group.group_hash);
-                                                                    } else {
-                                                                        next.add(groupPreview.group.group_hash);
-                                                                    }
-                                                                    return next;
-                                                                });
-                                                            }}
-                                                            _hover={{ bg: "gray.50" }}
+                                        return (
+                                            <div
+                                                key={groupPreview.group.group_hash}
+                                                className="border border-slate-200 bg-white"
+                                            >
+                                                {/* Group Header */}
+                                                <div
+                                                    className="flex cursor-pointer items-center justify-between p-2 hover:bg-slate-50"
+                                                    onClick={() => {
+                                                        setExpandedGroups(prev => {
+                                                            const next = new Set(prev);
+                                                            if (next.has(groupPreview.group.group_hash)) {
+                                                                next.delete(groupPreview.group.group_hash);
+                                                            } else {
+                                                                next.add(groupPreview.group.group_hash);
+                                                            }
+                                                            return next;
+                                                        });
+                                                    }}
+                                                >
+                                                    <div className="flex flex-wrap items-center gap-1">
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            aria-label="Toggle group"
                                                         >
-                                                            <HStack gap={1} flexWrap="wrap">
-                                                                <IconButton
-                                                                    size="xs"
-                                                                    variant="ghost"
-                                                                    aria-label="Toggle group"
-                                                                >
-                                                                    {isExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                                                                </IconButton>
-                                                                <Badge colorPalette="gray" fontSize="xs" fontFamily="mono">
-                                                                    #{idx + 1}
-                                                                </Badge>
-                                                                <Badge colorPalette="purple" fontSize="xs" variant="subtle">
-                                                                    {assetPair}
-                                                                </Badge>
-                                                                <Badge colorPalette={direction === 'inflow' ? 'green' : 'red'} fontSize="xs" variant="subtle">
-                                                                    {direction}
-                                                                </Badge>
-                                                                <Badge colorPalette="orange" fontSize="xs">
-                                                                    {groupPreview.group.transaction_count} dup
-                                                                </Badge>
-                                                            </HStack>
-                                                            <HStack gap={1}>
-                                                                <Badge colorPalette="green" fontSize="xs" variant="solid">
-                                                                    ✓ {groupPreview.kept.length}
-                                                                </Badge>
-                                                                <Badge colorPalette="orange" fontSize="xs" variant="solid">
-                                                                    → {groupPreview.merged.length}
-                                                                </Badge>
-                                                            </HStack>
-                                                        </Flex>
+                                                            {isExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                                                        </Button>
+                                                        <Badge colorScheme="gray" className="font-mono">
+                                                            #{idx + 1}
+                                                        </Badge>
+                                                        <Badge colorScheme="purple">
+                                                            {assetPair}
+                                                        </Badge>
+                                                        <Badge colorScheme={direction === 'inflow' ? 'green' : 'red'}>
+                                                            {direction}
+                                                        </Badge>
+                                                        <Badge colorScheme="orange">
+                                                            {groupPreview.group.transaction_count} dup
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="flex items-center gap-1">
+                                                        <Badge colorScheme="green">
+                                                            ✓ {groupPreview.kept.length}
+                                                        </Badge>
+                                                        <Badge colorScheme="orange">
+                                                            → {groupPreview.merged.length}
+                                                        </Badge>
+                                                    </div>
+                                                </div>
 
-                                                        {/* Expanded Content */}
-                                                        {isExpanded && (
-                                                            <Box p={2} pt={0}>
-                                                                <Flex gap={2}>
-                                                                    {/* Kept Column */}
-                                                                    <Box flex={1} p={2} bg="green.50" borderRadius="md" borderWidth="1px" borderColor="green.200">
-                                                                        <HStack gap={1} mb={2}>
-                                                                            <Badge colorPalette="green" fontSize="xs" variant="solid">
-                                                                                ✓ KEPT
-                                                                            </Badge>
-                                                                            <Text fontSize="xs" color="green.700">
-                                                                                {groupPreview.kept.length}
-                                                                            </Text>
-                                                                        </HStack>
-                                                                        <VStack align="stretch" gap={1}>
-                                                                            {groupPreview.kept.slice(0, 3).map(tx => (
-                                                                                <Box key={tx.id} p={1.5} bg="white" borderRadius="sm">
-                                                                                    <HStack gap={1} flexWrap="wrap" fontSize="2xs">
-                                                                                        <Badge colorPalette="purple" size="xs">
-                                                                                            {tx.connector_type}
-                                                                                        </Badge>
-                                                                                        {tx.run_id && (
-                                                                                            <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                                                                #{tx.run_id}
-                                                                                            </Badge>
-                                                                                        )}
-                                                                                        <Badge colorPalette="cyan" size="xs">
-                                                                                            {formatDate(tx.date_time)}
-                                                                                        </Badge>
-                                                                                        <Badge colorPalette="teal" size="xs">
-                                                                                            {formatNumber(tx.quantity)}
-                                                                                        </Badge>
-                                                                                    </HStack>
-                                                                                </Box>
-                                                                            ))}
-                                                                            {groupPreview.kept.length > 3 && (
-                                                                                <Text fontSize="2xs" color="gray.500" textAlign="center">
-                                                                                    +{groupPreview.kept.length - 3} more...
-                                                                                </Text>
-                                                                            )}
-                                                                        </VStack>
-                                                                    </Box>
+                                                {/* Expanded Content */}
+                                                {isExpanded && (
+                                                    <div className="p-2 pt-0">
+                                                        <div className="flex gap-2">
+                                                            {/* Kept Column */}
+                                                            <div className="flex-1 border border-green-200 bg-green-50 p-2">
+                                                                <div className="mb-2 flex items-center gap-1">
+                                                                    <Badge colorScheme="green">
+                                                                        ✓ KEPT
+                                                                    </Badge>
+                                                                    <span className="text-xs text-green-700">
+                                                                        {groupPreview.kept.length}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex flex-col items-stretch gap-1">
+                                                                    {groupPreview.kept.slice(0, 3).map(tx => (
+                                                                        <div key={tx.id} className="bg-white p-1.5">
+                                                                            <div className="flex flex-wrap items-center gap-1 text-xs">
+                                                                                <Badge colorScheme="purple">
+                                                                                    {tx.connector_type}
+                                                                                </Badge>
+                                                                                {tx.run_id && (
+                                                                                    <Badge colorScheme="purple">
+                                                                                        #{tx.run_id}
+                                                                                    </Badge>
+                                                                                )}
+                                                                                <Badge colorScheme="blue">
+                                                                                    {formatDate(tx.date_time)}
+                                                                                </Badge>
+                                                                                <Badge colorScheme="green">
+                                                                                    {formatNumber(tx.quantity)}
+                                                                                </Badge>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                    {groupPreview.kept.length > 3 && (
+                                                                        <p className="text-center text-xs text-slate-500">
+                                                                            +{groupPreview.kept.length - 3} more...
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
 
-                                                                    {/* Merged Column */}
-                                                                    <Box flex={1} p={2} bg="orange.50" borderRadius="md" borderWidth="1px" borderColor="orange.200">
-                                                                        <HStack gap={1} mb={2}>
-                                                                            <Badge colorPalette="orange" fontSize="xs" variant="solid">
-                                                                                → MERGED
-                                                                            </Badge>
-                                                                            <Text fontSize="xs" color="orange.700">
-                                                                                {groupPreview.merged.length}
-                                                                            </Text>
-                                                                        </HStack>
-                                                                        <VStack align="stretch" gap={1}>
-                                                                            {groupPreview.merged.slice(0, 3).map(tx => (
-                                                                                <Box key={tx.id} p={1.5} bg="white" borderRadius="sm">
-                                                                                    <HStack gap={1} flexWrap="wrap" fontSize="2xs">
-                                                                                        <Badge colorPalette="purple" size="xs">
-                                                                                            {tx.connector_type}
-                                                                                        </Badge>
-                                                                                        {tx.run_id && (
-                                                                                            <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                                                                #{tx.run_id}
-                                                                                            </Badge>
-                                                                                        )}
-                                                                                        <Badge colorPalette="cyan" size="xs">
-                                                                                            {formatDate(tx.date_time)}
-                                                                                        </Badge>
-                                                                                        <Badge colorPalette="teal" size="xs">
-                                                                                            {formatNumber(tx.quantity)}
-                                                                                        </Badge>
-                                                                                    </HStack>
-                                                                                </Box>
-                                                                            ))}
-                                                                            {groupPreview.merged.length > 3 && (
-                                                                                <Text fontSize="2xs" color="gray.500" textAlign="center">
-                                                                                    +{groupPreview.merged.length - 3} more...
-                                                                                </Text>
-                                                                            )}
-                                                                        </VStack>
-                                                                    </Box>
-                                                                </Flex>
-                                                            </Box>
-                                                        )}
-                                                    </Box>
-                                                );
-                                            })}
-                                        </VStack>
-                                    </Box>
+                                                            {/* Merged Column */}
+                                                            <div className="flex-1 border border-orange-200 bg-orange-50 p-2">
+                                                                <div className="mb-2 flex items-center gap-1">
+                                                                    <Badge colorScheme="orange">
+                                                                        → MERGED
+                                                                    </Badge>
+                                                                    <span className="text-xs text-orange-700">
+                                                                        {groupPreview.merged.length}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex flex-col items-stretch gap-1">
+                                                                    {groupPreview.merged.slice(0, 3).map(tx => (
+                                                                        <div key={tx.id} className="bg-white p-1.5">
+                                                                            <div className="flex flex-wrap items-center gap-1 text-xs">
+                                                                                <Badge colorScheme="purple">
+                                                                                    {tx.connector_type}
+                                                                                </Badge>
+                                                                                {tx.run_id && (
+                                                                                    <Badge colorScheme="purple">
+                                                                                        #{tx.run_id}
+                                                                                    </Badge>
+                                                                                )}
+                                                                                <Badge colorScheme="blue">
+                                                                                    {formatDate(tx.date_time)}
+                                                                                </Badge>
+                                                                                <Badge colorScheme="green">
+                                                                                    {formatNumber(tx.quantity)}
+                                                                                </Badge>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                    {groupPreview.merged.length > 3 && (
+                                                                        <p className="text-center text-xs text-slate-500">
+                                                                            +{groupPreview.merged.length - 3} more...
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
 
-                                    {/* Info Footer */}
-                                    <Box p={2} bg="blue.50" borderRadius="md" fontSize="xs" color="blue.700" borderWidth="1px" borderColor="blue.200">
-                                        ℹ️ Merged transactions will be marked as duplicates and linked to the kept transactions.
-                                    </Box>
-                                </VStack>
-                            </Dialog.Body>
+                            {/* Info Footer */}
+                            <div className="border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700">
+                                ℹ️ Merged transactions will be marked as duplicates and linked to the kept transactions.
+                            </div>
+                        </div>
 
-                            <Dialog.Footer>
-                                <Flex gap={3}>
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => setConfirmAction(null)}
-                                        disabled={bulkResolving}
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        colorScheme="purple"
-                                        onClick={() => confirmAction && handleBulkResolve(confirmAction)}
-                                        loading={bulkResolving}
-                                    >
-                                        <FiCheck />
-                                        Confirm & Resolve {confirmAction?.groupsCount} Groups
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-        </Box>
+                        <div className="mt-4 flex justify-end gap-3">
+                            <Button
+                                variant="outline"
+                                onClick={() => setConfirmAction(null)}
+                                disabled={bulkResolving}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                colorScheme="gray"
+                                className="border-purple-300 bg-purple-600 text-white hover:bg-purple-700"
+                                onClick={() => confirmAction && handleBulkResolve(confirmAction)}
+                                loading={bulkResolving}
+                            >
+                                <FiCheck />
+                                Confirm & Resolve {confirmAction?.groupsCount} Groups
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+        </div>
     );
 };

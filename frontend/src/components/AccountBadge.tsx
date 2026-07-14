@@ -9,8 +9,8 @@
  */
 
 import React from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import { FiHome, FiGlobe } from 'react-icons/fi';
+import { Badge } from './ui/primitives';
 import { Tooltip } from './ui/tooltip';
 import { Account } from '../types';
 import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
@@ -80,24 +80,22 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
         return (
             <Tooltip
                 content={
-                    <Box p={2} fontSize="xs">
-                        <Text color="orange.300" fontWeight="bold" mb={1}>⚠ Unlinked Account</Text>
-                        <Flex justify="space-between" gap={4}>
-                            <Text color="gray.400">Source Label</Text>
-                            <Text color="white">{sourceAccount}</Text>
-                        </Flex>
-                        <Text color="gray.400" mt={1} fontSize="2xs">
+                    <div className="p-2 text-xs">
+                        <div className="mb-1 font-bold text-orange-300">⚠ Unlinked Account</div>
+                        <div className="flex justify-between gap-4">
+                            <span className="text-slate-400">Source Label</span>
+                            <span className="text-white">{sourceAccount}</span>
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-400">
                             Click to link to an account
-                        </Text>
-                    </Box>
+                        </div>
+                    </div>
                 }
                 openDelay={200}
             >
                 <Badge
-                    size={size}
-                    colorPalette="orange"
-                    variant="subtle"
-                    cursor={onClick ? 'pointer' : 'default'}
+                    colorScheme="orange"
+                    className={onClick ? 'cursor-pointer' : 'cursor-default'}
                     onClick={onClick}
                 >
                     ⚠ {sourceAccount.length > maxLength ? sourceAccount.slice(0, maxLength) + '…' : sourceAccount}
@@ -109,14 +107,13 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
     // No account and no source account
     if (!hasLinkedAccount) {
         return (
-            <Text
-                fontSize={size === 'xs' ? '9px' : size === 'sm' ? '11px' : '13px'}
-                color="gray.400"
-                cursor={onClick ? 'pointer' : 'default'}
+            <span
+                className={onClick ? 'cursor-pointer text-slate-400' : 'cursor-default text-slate-400'}
+                style={{ fontSize: size === 'xs' ? '9px' : size === 'sm' ? '11px' : '13px' }}
                 onClick={onClick}
             >
                 {fallback}
-            </Text>
+            </span>
         );
     }
 
@@ -133,68 +130,62 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
 
     // Build tooltip content
     const tooltipContent = (
-        <Box p={2} fontSize="xs" minW="150px">
-            <Flex justify="space-between" mb={1} gap={4}>
-                <Text color="gray.400">Name</Text>
-                <Text color="white" fontWeight="medium">{resolvedName}</Text>
-            </Flex>
+        <div className="min-w-[150px] p-2 text-xs">
+            <div className="mb-1 flex justify-between gap-4">
+                <span className="text-slate-400">Name</span>
+                <span className="font-medium text-white">{resolvedName}</span>
+            </div>
             {ownershipKnown && (
-                <Flex justify="space-between" mb={1} gap={4} align="center">
-                    <Text color="gray.400">Ownership</Text>
-                    <Flex align="center" gap={1}>
+                <div className="mb-1 flex items-center justify-between gap-4">
+                    <span className="text-slate-400">Ownership</span>
+                    <span className="flex items-center gap-1">
                         <OwnershipIcon size={10} />
-                        <Text color={isOwned ? 'green.300' : 'orange.300'}>{ownershipLabel}</Text>
-                    </Flex>
-                </Flex>
+                        <span className={isOwned ? 'text-green-300' : 'text-orange-300'}>{ownershipLabel}</span>
+                    </span>
+                </div>
             )}
             {sourceLabel && sourceLabel !== resolvedName && (
-                <Flex justify="space-between" mb={1} gap={4}>
-                    <Text color="gray.400">Source</Text>
-                    <Text color="gray.300" fontFamily="mono" fontSize="2xs" maxW="180px" truncate>
+                <div className="mb-1 flex justify-between gap-4">
+                    <span className="text-slate-400">Source</span>
+                    <span className="max-w-[180px] truncate font-mono text-[10px] text-slate-300">
                         {sourceLabel}
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
             )}
             {account?.account_type && (
-                <Flex justify="space-between" mb={1} gap={4}>
-                    <Text color="gray.400">Type</Text>
-                    <Text color="white">{account.account_type}</Text>
-                </Flex>
+                <div className="mb-1 flex justify-between gap-4">
+                    <span className="text-slate-400">Type</span>
+                    <span className="text-white">{account.account_type}</span>
+                </div>
             )}
             {account?.address_or_identifier && (
-                <Flex justify="space-between" mb={1} gap={4}>
-                    <Text color="gray.400">Address</Text>
-                    <Text color="gray.300" fontFamily="mono" fontSize="2xs">
+                <div className="mb-1 flex justify-between gap-4">
+                    <span className="text-slate-400">Address</span>
+                    <span className="font-mono text-[10px] text-slate-300">
                         {account.address_or_identifier.slice(0, 16)}...
-                    </Text>
-                </Flex>
+                    </span>
+                </div>
             )}
             {resolvedId && (
-                <Flex justify="space-between" gap={4}>
-                    <Text color="gray.400">ID</Text>
-                    <Text color="gray.300">#{resolvedId}</Text>
-                </Flex>
+                <div className="flex justify-between gap-4">
+                    <span className="text-slate-400">ID</span>
+                    <span className="text-slate-300">#{resolvedId}</span>
+                </div>
             )}
-        </Box>
+        </div>
     );
 
     return (
         <Tooltip content={tooltipContent} openDelay={200}>
-            <Badge
-                size={size}
-                bg={hexToRgba(entityColor, 0.18)}
-                color={entityColor}
-                variant="subtle"
-                cursor={onClick ? 'pointer' : 'default'}
+            <span
+                className={`inline-flex items-center gap-0.5 px-2 py-0.5 text-xs font-medium leading-tight ${onClick ? 'cursor-pointer' : 'cursor-default'}`}
+                style={{ backgroundColor: hexToRgba(entityColor, 0.18), color: entityColor }}
                 onClick={onClick}
                 title={resolvedName.length > maxLength ? resolvedName : undefined}
-                display="inline-flex"
-                alignItems="center"
-                gap={0.5}
             >
                 {ownershipKnown && <OwnershipIcon size={size === 'xs' ? 9 : size === 'sm' ? 11 : 13} />}
                 {displayName}
-            </Badge>
+            </span>
         </Tooltip>
     );
 };

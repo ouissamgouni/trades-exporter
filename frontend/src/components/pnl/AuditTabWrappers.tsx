@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Flex, Text, Spinner, Button } from '@chakra-ui/react';
+import { Button, Spinner } from '../ui/primitives';
 import { usePagination } from '../../hooks/usePagination';
 import { useLazyPaginatedQuery } from '../../hooks/useLazyPaginatedQuery';
 import { TablePagination } from '../TablePagination';
@@ -46,60 +46,42 @@ interface BaseTabWrapperProps {
 // ============================================================================
 
 export const TabLoadingState: React.FC<{ message?: string }> = ({ message = 'Loading...' }) => (
-    <Flex direction="column" align="center" justify="center" py={12} minH="200px">
-        <Spinner size="lg" mb={4} />
-        <Text fontSize="sm" color="gray.500">{message}</Text>
-    </Flex>
+    <div className="flex min-h-[200px] flex-col items-center justify-center py-12">
+        <Spinner size="lg" className="mb-4" />
+        <span className="text-sm text-gray-500">{message}</span>
+    </div>
 );
 
 export const TabErrorState: React.FC<{ error: string; onRetry?: () => void }> = ({ error, onRetry }) => (
-    <Flex
-        direction="column"
-        align="center"
-        justify="center"
-        py={12}
-        px={4}
-        bg="red.50"
-        borderRadius="md"
-        minH="200px"
-    >
-        <Text fontSize="lg" fontWeight="medium" color="red.600" mb={2}>
+    <div className="flex min-h-[200px] flex-col items-center justify-center rounded-md bg-red-50 px-4 py-12">
+        <div className="mb-2 text-lg font-medium text-red-600">
             Error Loading Data
-        </Text>
-        <Text fontSize="sm" color="gray.600" textAlign="center" mb={onRetry ? 3 : 0}>
+        </div>
+        <div className={`text-center text-sm text-gray-600 ${onRetry ? 'mb-3' : 'mb-0'}`}>
             {error}
-        </Text>
+        </div>
         {onRetry && (
             <Button
                 size="sm"
-                colorPalette="red"
+                colorScheme="red"
                 variant="outline"
                 onClick={onRetry}
             >
                 Retry
             </Button>
         )}
-    </Flex>
+    </div>
 );
 
 export const TabEmptyState: React.FC<{ title: string; description: string }> = ({ title, description }) => (
-    <Flex
-        direction="column"
-        align="center"
-        justify="center"
-        py={12}
-        px={4}
-        bg="gray.50"
-        borderRadius="md"
-        minH="200px"
-    >
-        <Text fontSize="lg" fontWeight="medium" color="gray.600" mb={2}>
+    <div className="flex min-h-[200px] flex-col items-center justify-center rounded-md bg-gray-50 px-4 py-12">
+        <div className="mb-2 text-lg font-medium text-gray-600">
             {title}
-        </Text>
-        <Text fontSize="sm" color="gray.500" textAlign="center">
+        </div>
+        <div className="text-center text-sm text-gray-500">
             {description}
-        </Text>
-    </Flex>
+        </div>
+    </div>
 );
 
 // ============================================================================
@@ -147,7 +129,7 @@ export const UnitsTabWrapper: React.FC<UnitsTabWrapperProps> = ({
     if (units.length === 0) return <TabEmptyState title="No Calculation Units" description="Units will appear here after P&L calculation." />;
 
     return (
-        <Box>
+        <div>
             {renderTab({
                 units,
                 baseCurrency,
@@ -161,7 +143,7 @@ export const UnitsTabWrapper: React.FC<UnitsTabWrapperProps> = ({
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
             />
-        </Box>
+        </div>
     );
 };
 
@@ -215,7 +197,7 @@ export const LotsTabWrapper: React.FC<LotsTabWrapperProps> = ({
     if (lots.length === 0) return <TabEmptyState title="No Cost Lots" description="Cost lots will appear here after P&L calculation." />;
 
     return (
-        <Box>
+        <div>
             {renderTab({
                 lots,
                 baseCurrency,
@@ -228,7 +210,7 @@ export const LotsTabWrapper: React.FC<LotsTabWrapperProps> = ({
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
             />
-        </Box>
+        </div>
     );
 };
 
@@ -279,7 +261,7 @@ export const RealizedTabWrapper: React.FC<RealizedTabWrapperProps> = ({
     if (entries.length === 0) return <TabEmptyState title="No Realized P&L" description="Realized P&L entries will appear here after disposals." />;
 
     return (
-        <Box>
+        <div>
             {renderTab({
                 entries,
                 baseCurrency,
@@ -292,7 +274,7 @@ export const RealizedTabWrapper: React.FC<RealizedTabWrapperProps> = ({
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
             />
-        </Box>
+        </div>
     );
 };
 
@@ -359,7 +341,7 @@ export const FeesTabWrapper: React.FC<FeesTabWrapperProps> = ({
     if (fees.length === 0) return <TabEmptyState title="No Fees Recorded" description="Fee entries will appear here after calculation." />;
 
     return (
-        <Box>
+        <div>
             {renderTab({
                 fees,
                 baseCurrency,
@@ -373,7 +355,7 @@ export const FeesTabWrapper: React.FC<FeesTabWrapperProps> = ({
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
             />
-        </Box>
+        </div>
     );
 };
 
@@ -441,28 +423,19 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
     if (error) return <TabErrorState error={error} onRetry={refetch} />;
     if (warnings.length === 0) {
         return (
-            <Flex
-                direction="column"
-                align="center"
-                justify="center"
-                py={12}
-                px={4}
-                bg="green.50"
-                borderRadius="md"
-                minH="200px"
-            >
-                <Text fontSize="lg" fontWeight="medium" color="green.600" mb={2}>
+            <div className="flex min-h-[200px] flex-col items-center justify-center rounded-md bg-green-50 px-4 py-12">
+                <div className="mb-2 text-lg font-medium text-green-600">
                     ✓ No Warnings
-                </Text>
-                <Text fontSize="sm" color="gray.500" textAlign="center">
+                </div>
+                <div className="text-center text-sm text-gray-500">
                     All calculations completed without issues
-                </Text>
-            </Flex>
+                </div>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {renderTab({
                 warnings,
                 baseCurrency,
@@ -478,7 +451,7 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
             />
-        </Box>
+        </div>
     );
 };
 
@@ -510,12 +483,12 @@ export const TransactionsTabWrapper: React.FC<TransactionsTabWrapperProps> = ({
     }
 
     return (
-        <Box>
+        <div>
             {renderTab({
                 versionId,
                 baseCurrency,
                 onTransactionClick,
             })}
-        </Box>
+        </div>
     );
 };

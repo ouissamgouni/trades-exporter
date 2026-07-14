@@ -126,6 +126,7 @@ tasks:
       ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      BACKEND_PORT: '{{.BACKEND_PORT | default ""}}'
     prompt: |
       Build Docker images from git ref: {{.REF}}
 
@@ -151,6 +152,7 @@ tasks:
         SHA=$(git rev-parse --short=7 "$REF")
         WORKTREE_PATH="{{.WORKTREE_DIR}}/ref-$SHA"
         TAG="ref-$SHA"
+        [ -n "{{.BACKEND_PORT}}" ] && BACKEND_PORT="{{.BACKEND_PORT}}"
 
         echo ""
         echo "Building from $REF ($SHA)..."
@@ -162,7 +164,7 @@ tasks:
         docker build -t trades-exporter-backend:$TAG -f $WORKTREE_PATH/backend/Dockerfile $WORKTREE_PATH
 
         # Build frontend
-        echo "Building frontend..."
+        echo "Building frontend (VITE_API_URL=http://localhost:${BACKEND_PORT:-8000})..."
         docker build -t trades-exporter-frontend:$TAG \
           --build-arg VITE_API_URL=http://localhost:${BACKEND_PORT:-8000} \
           $WORKTREE_PATH/frontend

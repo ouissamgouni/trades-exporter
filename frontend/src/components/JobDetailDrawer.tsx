@@ -1,16 +1,5 @@
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Heading,
-    HStack,
-    IconButton,
-    Spinner,
-    Tabs,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner, type BadgeColorScheme } from './ui/primitives';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     LuChevronRight,
@@ -123,72 +112,66 @@ const ConnectorRunCard: React.FC<ConnectorRunCardProps> = ({ run, onExpand }) =>
     }, [run.id]);
 
     return (
-        <Box
-            p={3}
-            borderWidth="1px"
-            borderRadius="md"
-            bg="gray.50"
-            _dark={{ bg: 'gray.800' }}
-            cursor="pointer"
+        <div
+            className="cursor-pointer border border-slate-200 bg-slate-50 p-3 hover:bg-slate-100"
             onClick={onExpand}
-            _hover={{ bg: 'gray.100', _dark: { bg: 'gray.700' } }}
         >
-            <Flex justify="space-between" align="center">
-                <HStack gap={3}>
-                    <Badge colorPalette={statusColorMap[run.status]}>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <Badge colorScheme={statusColorMap[run.status] as BadgeColorScheme}>
                         {run.status}
                     </Badge>
-                    <VStack align="start" gap={0}>
-                        <Text fontWeight="medium" fontSize="sm">
+                    <div className="flex flex-col items-start gap-0">
+                        <span className="text-sm font-medium">
                             {run.connector_type || `Connector #${run.connector_id}`}
-                        </Text>
-                        <Text fontSize="xs" color="gray.500">
+                        </span>
+                        <span className="text-xs text-slate-500">
                             {run.account_name || '-'}
-                        </Text>
-                        <Text fontSize="xs" color="gray.400">
+                        </span>
+                        <span className="text-xs text-slate-400">
                             ID: {run.connector_id}
-                        </Text>
-                    </VStack>
+                        </span>
+                    </div>
                     {run.test_mode && (
-                        <Badge colorPalette="purple" size="sm">
+                        <Badge colorScheme="purple">
                             Test
                         </Badge>
                     )}
                     {duplicateCount !== null && duplicateCount > 0 && (
-                        <Badge colorPalette="orange" size="sm">
+                        <Badge colorScheme="orange">
                             ⚠ {duplicateCount} Duplicate{duplicateCount > 1 ? 's' : ''}
                         </Badge>
                     )}
-                </HStack>
-                <HStack gap={4} fontSize="sm">
-                    <VStack align="end" gap={0}>
-                        <Text color="gray.500">Processed</Text>
-                        <Text fontWeight="medium">{run.processed_count}</Text>
-                    </VStack>
-                    <VStack align="end" gap={0}>
-                        <Text color="green.600">New</Text>
-                        <Text fontWeight="medium" color="green.600">
+                </div>
+                <div className="flex items-center gap-4 text-sm">
+                    <div className="flex flex-col items-end gap-0">
+                        <span className="text-slate-500">Processed</span>
+                        <span className="font-medium">{run.processed_count}</span>
+                    </div>
+                    <div className="flex flex-col items-end gap-0">
+                        <span className="text-green-600">New</span>
+                        <span className="font-medium text-green-600">
                             +{run.synced_count}
-                        </Text>
-                    </VStack>
-                    <VStack align="end" gap={0}>
-                        <Text color="blue.600">Updated</Text>
-                        <Text fontWeight="medium" color="blue.600">
+                        </span>
+                    </div>
+                    <div className="flex flex-col items-end gap-0">
+                        <span className="text-blue-600">Updated</span>
+                        <span className="font-medium text-blue-600">
                             {run.updated_count}
-                        </Text>
-                    </VStack>
+                        </span>
+                    </div>
                     {run.error_count > 0 && (
-                        <VStack align="end" gap={0}>
-                            <Text color="red.600">Errors</Text>
-                            <Text fontWeight="medium" color="red.600">
+                        <div className="flex flex-col items-end gap-0">
+                            <span className="text-red-600">Errors</span>
+                            <span className="font-medium text-red-600">
                                 {run.error_count}
-                            </Text>
-                        </VStack>
+                            </span>
+                        </div>
                     )}
                     <LuChevronRight />
-                </HStack>
-            </Flex>
-        </Box>
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -252,138 +235,139 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
         fetchDuplicateCount();
     }, [fetchDetail, fetchDuplicateCount]);
 
+    const [activeTab, setActiveTab] = useState<'logs' | 'synced' | 'updated' | 'skipped' | 'errors' | 'duplicates'>('logs');
+
     if (loading) {
         return (
-            <Flex justify="center" py={8}>
+            <div className="flex justify-center py-8">
                 <Spinner />
-            </Flex>
+            </div>
         );
     }
 
     if (error || !detail) {
         return (
-            <Box>
-                <Button size="sm" variant="ghost" onClick={onBack} mb={4}>
+            <div>
+                <Button size="sm" variant="ghost" onClick={onBack} className="mb-4">
                     ← Back to Job
                 </Button>
-                <Text color="red.600">Error: {error || 'Not found'}</Text>
-            </Box>
+                <p className="text-red-600">Error: {error || 'Not found'}</p>
+            </div>
         );
     }
 
     return (
-        <Box>
-            <Button size="sm" variant="ghost" onClick={onBack} mb={4}>
+        <div>
+            <Button size="sm" variant="ghost" onClick={onBack} className="mb-4">
                 ← Back to Job
             </Button>
 
-            <Flex justify="space-between" align="start" mb={4}>
-                <VStack align="start" gap={1}>
-                    <HStack gap={2}>
-                        <Heading size="md">
+            <div className="mb-4 flex items-start justify-between">
+                <div className="flex flex-col items-start gap-1">
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold">
                             {detail.connector_type || `Connector #${detail.connector_id}`}
-                        </Heading>
-                        <Badge colorPalette={statusColorMap[detail.status]}>
+                        </h2>
+                        <Badge colorScheme={statusColorMap[detail.status] as BadgeColorScheme}>
                             {detail.status}
                         </Badge>
                         {detail.test_mode && (
-                            <Badge colorPalette="purple">Test Mode</Badge>
+                            <Badge colorScheme="purple">Test Mode</Badge>
                         )}
-                    </HStack>
-                    <Text fontSize="sm" color="gray.500">
+                    </div>
+                    <span className="text-sm text-slate-500">
                         {detail.account_name || '-'}
-                    </Text>
-                </VStack>
-            </Flex>
+                    </span>
+                </div>
+            </div>
 
             {/* Metrics */}
-            <Box mb={6} p={4} bg="gray.50" borderRadius="md" _dark={{ bg: 'gray.800' }}>
-                <Flex gap={6} wrap="wrap">
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Duration</Text>
-                        <Text fontWeight="medium">
+            <div className="mb-6 bg-slate-50 p-4">
+                <div className="flex flex-wrap gap-6">
+                    <div className="flex flex-col items-start gap-0">
+                        <span className="text-xs text-slate-500">Duration</span>
+                        <span className="font-medium">
                             {formatDuration(detail.started_at, detail.finished_at)}
-                        </Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Processed</Text>
-                        <Text fontWeight="medium">{detail.processed_count}</Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">New</Text>
-                        <Text fontWeight="medium" color="green.600">
+                        </span>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <span className="text-xs text-slate-500">Processed</span>
+                        <span className="font-medium">{detail.processed_count}</span>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <span className="text-xs text-slate-500">New</span>
+                        <span className="font-medium text-green-600">
                             +{detail.synced_count}
-                        </Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Updated</Text>
-                        <Text fontWeight="medium" color="blue.600">
+                        </span>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <span className="text-xs text-slate-500">Updated</span>
+                        <span className="font-medium text-blue-600">
                             {detail.updated_count}
-                        </Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Skipped</Text>
-                        <Text fontWeight="medium">{detail.skipped_count}</Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Errors</Text>
-                        <Text fontWeight="medium" color={detail.error_count > 0 ? 'red.600' : undefined}>
+                        </span>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <span className="text-xs text-slate-500">Skipped</span>
+                        <span className="font-medium">{detail.skipped_count}</span>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <span className="text-xs text-slate-500">Errors</span>
+                        <span className={`font-medium ${detail.error_count > 0 ? 'text-red-600' : ''}`}>
                             {detail.error_count}
-                        </Text>
-                    </VStack>
+                        </span>
+                    </div>
                     {duplicateCount && duplicateCount.group_count > 0 && (
-                        <VStack align="start" gap={0}>
-                            <Text fontSize="xs" color="gray.500">Duplicates</Text>
-                            <HStack gap={1}>
-                                <Text fontWeight="medium" color="orange.600">
+                        <div className="flex flex-col items-start gap-0">
+                            <span className="text-xs text-slate-500">Duplicates</span>
+                            <div className="flex items-center gap-1">
+                                <span className="font-medium text-orange-600">
                                     ⚠ {duplicateCount.group_count}
-                                </Text>
-                                <Text fontSize="xs" color="gray.400">
+                                </span>
+                                <span className="text-xs text-slate-400">
                                     ({duplicateCount.transaction_count} txs)
-                                </Text>
-                            </HStack>
-                        </VStack>
+                                </span>
+                            </div>
+                        </div>
                     )}
-                </Flex>
-            </Box>
+                </div>
+            </div>
 
-            <Tabs.Root defaultValue="logs" variant="line" size="sm">
-                <Tabs.List>
-                    <Tabs.Trigger value="logs">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+                <TabsList>
+                    <TabsTrigger value="logs">
                         Logs ({detail.logs.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="synced">
+                    </TabsTrigger>
+                    <TabsTrigger value="synced">
                         Synced ({detail.synced_ids.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="updated">
+                    </TabsTrigger>
+                    <TabsTrigger value="updated">
                         Updated ({detail.updated_ids.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="skipped">
+                    </TabsTrigger>
+                    <TabsTrigger value="skipped">
                         Skipped ({detail.skipped_ids.length})
-                    </Tabs.Trigger>
+                    </TabsTrigger>
                     {detail.error_details.length > 0 && (
-                        <Tabs.Trigger value="errors">
+                        <TabsTrigger value="errors">
                             Errors ({detail.error_details.length})
-                        </Tabs.Trigger>
+                        </TabsTrigger>
                     )}
-                    <Tabs.Trigger value="duplicates">
+                    <TabsTrigger value="duplicates">
                         Duplicates{duplicateCount && duplicateCount.group_count > 0 ? ` (${duplicateCount.group_count})` : ''}
-                    </Tabs.Trigger>
-                </Tabs.List>
+                    </TabsTrigger>
+                </TabsList>
 
-                <Tabs.Content value="logs">
-                    <Box maxH="300px" overflowY="auto" fontSize="xs" fontFamily="mono">
+                <TabsContent value="logs">
+                    <div className="max-h-[300px] overflow-y-auto font-mono text-xs">
                         {detail.logs.length === 0 ? (
-                            <Text color="gray.500" py={4}>No logs available</Text>
+                            <p className="py-4 text-slate-500">No logs available</p>
                         ) : (
                             detail.logs.map((log, idx) => (
-                                <Flex key={idx} gap={2} py={1} borderBottomWidth="1px">
-                                    <Text color="gray.400" flexShrink={0}>
+                                <div key={idx} className="flex gap-2 border-b border-slate-100 py-1">
+                                    <span className="shrink-0 text-slate-400">
                                         {new Date(log.timestamp).toLocaleTimeString()}
-                                    </Text>
+                                    </span>
                                     <Badge
-                                        size="sm"
-                                        colorPalette={
+                                        colorScheme={
                                             log.level === 'ERROR'
                                                 ? 'red'
                                                 : log.level === 'WARNING'
@@ -393,14 +377,14 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                                     >
                                         {log.level}
                                     </Badge>
-                                    <Text>{log.message}</Text>
-                                </Flex>
+                                    <span>{log.message}</span>
+                                </div>
                             ))
                         )}
-                    </Box>
-                </Tabs.Content>
+                    </div>
+                </TabsContent>
 
-                <Tabs.Content value="synced">
+                <TabsContent value="synced">
                     <TransactionsTable
                         tableId="jobDetail-synced"
                         title=""
@@ -418,9 +402,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         }}
                         onDataChange={fetchDetail}
                     />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="updated">
+                <TabsContent value="updated">
                     <TransactionsTable
                         tableId="jobDetail-updated"
                         title=""
@@ -438,9 +422,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         }}
                         onDataChange={fetchDetail}
                     />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="skipped">
+                <TabsContent value="skipped">
                     <TransactionsTable
                         tableId="jobDetail-skipped"
                         title=""
@@ -458,39 +442,35 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         }}
                         onDataChange={fetchDetail}
                     />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="errors">
-                    <Box maxH="300px" overflowY="auto">
+                <TabsContent value="errors">
+                    <div className="max-h-[300px] overflow-y-auto">
                         {detail.error_details.map((err, idx) => (
-                            <Box
+                            <div
                                 key={idx}
-                                p={2}
-                                mb={2}
-                                bg="red.50"
-                                borderRadius="md"
-                                _dark={{ bg: 'red.900' }}
+                                className="mb-2 bg-red-50 p-2"
                             >
-                                <Text fontSize="xs" fontFamily="mono" fontWeight="medium">
+                                <p className="font-mono text-xs font-medium">
                                     {err.source_transaction_id}
-                                </Text>
-                                <Text fontSize="xs" color="red.600">
+                                </p>
+                                <p className="text-xs text-red-600">
                                     {err.error}
-                                </Text>
-                            </Box>
+                                </p>
+                            </div>
                         ))}
-                    </Box>
-                </Tabs.Content>
+                    </div>
+                </TabsContent>
 
-                <Tabs.Content value="duplicates">
-                    <Box maxH="500px" overflowY="auto">
+                <TabsContent value="duplicates">
+                    <div className="max-h-[500px] overflow-y-auto">
                         <DuplicateResolutionPanel
                             connectorRunId={detail.id}
                             compactMode={true}
                         />
-                    </Box>
-                </Tabs.Content>
-            </Tabs.Root>
+                    </div>
+                </TabsContent>
+            </Tabs>
 
             {/* Transaction Detail Drawer */}
             <TransactionDetailDrawer
@@ -502,7 +482,7 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                 }}
                 accounts={accounts}
             />
-        </Box>
+        </div>
     );
 };
 
@@ -692,106 +672,63 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
     return (
         <>
             {/* Backdrop */}
-            <Box
-                position="fixed"
-                inset={0}
-                bg="blackAlpha.400"
-                zIndex={1000}
+            <div
+                className="fixed inset-0 z-[1000] bg-black/40"
                 onClick={onClose}
             />
 
             {/* Drawer Panel */}
-            <Box
-                position="fixed"
-                top={0}
-                right={0}
-                bottom={0}
-                width={`${drawerWidth}px`}
-                maxW="95vw"
-                bg="white"
-                _dark={{ bg: 'gray.900' }}
-                boxShadow="xl"
-                zIndex={1001}
-                overflow="hidden"
-                display="flex"
-                flexDirection="column"
+            <div
+                className="fixed bottom-0 right-0 top-0 z-[1001] flex max-w-[95vw] flex-col overflow-hidden bg-white shadow-xl"
+                style={{ width: `${drawerWidth}px` }}
             >
                 {/* Resize Handle */}
-                <Box
-                    position="absolute"
-                    left={0}
-                    top={0}
-                    bottom={0}
-                    width="4px"
-                    cursor="col-resize"
-                    bg={isResizing ? 'blue.400' : 'transparent'}
-                    _hover={{ bg: 'blue.200' }}
-                    transition="background-color 0.2s"
+                <div
+                    className={`absolute bottom-0 left-0 top-0 z-[1] w-1 cursor-col-resize transition-colors hover:bg-blue-200 ${isResizing ? 'bg-blue-400' : 'bg-transparent'}`}
                     onMouseDown={handleResizeStart}
-                    zIndex={1}
-                />
-                {/* Resize Handle */}
-                <Box
-                    position="absolute"
-                    left={0}
-                    top={0}
-                    bottom={0}
-                    width="4px"
-                    cursor="col-resize"
-                    bg={isResizing ? 'blue.400' : 'transparent'}
-                    _hover={{ bg: 'blue.200' }}
-                    transition="background-color 0.2s"
-                    onMouseDown={handleResizeStart}
-                    zIndex={1}
                 />
                 {/* Header */}
-                <Flex
-                    px={4}
-                    py={3}
-                    borderBottomWidth="1px"
-                    align="center"
-                    justify="space-between"
-                >
-                    <HStack gap={2}>
-                        <Heading size="md">
+                <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold">
                             {mergedJob ? `Job #${mergedJob.id}` : 'Job Details'}
-                        </Heading>
+                        </h2>
                         {mergedJob?.renormalize && (
-                            <Badge colorPalette="purple" size="sm">
+                            <Badge colorScheme="purple">
                                 Re-Normalize
                             </Badge>
                         )}
                         {realTimeStatus && (
-                            <Badge colorPalette="blue" size="sm">
+                            <Badge colorScheme="blue">
                                 Live
                             </Badge>
                         )}
-                    </HStack>
-                    <IconButton
+                    </div>
+                    <Button
                         aria-label="Close"
                         variant="ghost"
                         size="sm"
                         onClick={onClose}
                     >
                         <LuX />
-                    </IconButton>
-                </Flex>
+                    </Button>
+                </div>
 
                 {/* Body */}
-                <Box flex={1} overflow="auto" p={4}>
+                <div className="flex-1 overflow-auto p-4">
                     {loading && (
-                        <Flex justify="center" py={8}>
+                        <div className="flex justify-center py-8">
                             <Spinner size="lg" />
-                        </Flex>
+                        </div>
                     )}
 
                     {error && (
-                        <Box p={4} bg="red.50" borderRadius="md">
-                            <Text color="red.600">Error: {error}</Text>
-                            <Button size="sm" mt={2} onClick={fetchJob}>
+                        <div className="bg-red-50 p-4">
+                            <p className="text-red-600">Error: {error}</p>
+                            <Button size="sm" className="mt-2" onClick={fetchJob}>
                                 Retry
                             </Button>
-                        </Box>
+                        </div>
                     )}
 
                     {!loading && !error && mergedJob && (
@@ -805,120 +742,112 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                             ) : (
                                 <>
                                     {/* Job Header */}
-                                    <Flex justify="space-between" align="start" mb={4}>
-                                        <VStack align="start" gap={1}>
-                                            <HStack gap={2}>
+                                    <div className="mb-4 flex items-start justify-between">
+                                        <div className="flex flex-col items-start gap-1">
+                                            <div className="flex items-center gap-2">
                                                 <Badge
-                                                    colorPalette={statusColorMap[mergedJob.status]}
-                                                    size="lg"
+                                                    colorScheme={statusColorMap[mergedJob.status] as BadgeColorScheme}
                                                 >
                                                     {mergedJob.status}
                                                 </Badge>
                                                 {mergedJob.renormalize && (
-                                                    <Badge colorPalette="purple" size="sm">
+                                                    <Badge colorScheme="purple">
                                                         Re-Normalize
                                                     </Badge>
                                                 )}
                                                 {mergedJob.error_message && (
-                                                    <Text fontSize="sm" color="red.600">
+                                                    <span className="text-sm text-red-600">
                                                         {mergedJob.error_message}
-                                                    </Text>
+                                                    </span>
                                                 )}
-                                            </HStack>
-                                            <HStack gap={4} fontSize="xs" color="gray.500">
-                                                <HStack gap={1}>
+                                            </div>
+                                            <div className="flex items-center gap-4 text-xs text-slate-500">
+                                                <div className="flex items-center gap-1">
                                                     <LuClock size={12} />
-                                                    <Text>Started: {formatDateTime(mergedJob.started_at)}</Text>
-                                                </HStack>
+                                                    <span>Started: {formatDateTime(mergedJob.started_at)}</span>
+                                                </div>
                                                 {mergedJob.finished_at ? (
-                                                    <Text>
+                                                    <span>
                                                         Duration: {formatDuration(mergedJob.started_at, mergedJob.finished_at)}
-                                                    </Text>
+                                                    </span>
                                                 ) : mergedJob.status === 'running' ? (
-                                                    <Text>
+                                                    <span>
                                                         Running: {formatDuration(mergedJob.started_at)}
-                                                    </Text>
+                                                    </span>
                                                 ) : null}
-                                            </HStack>
-                                        </VStack>
-                                        <IconButton
+                                            </div>
+                                        </div>
+                                        <Button
                                             aria-label="Refresh"
                                             size="sm"
                                             variant="ghost"
                                             onClick={fetchJob}
                                         >
                                             <LuRefreshCw />
-                                        </IconButton>
-                                    </Flex>
+                                        </Button>
+                                    </div>
 
                                     {/* Summary Metrics */}
-                                    <Box
-                                        mb={6}
-                                        p={4}
-                                        bg="gray.50"
-                                        borderRadius="md"
-                                        _dark={{ bg: 'gray.800' }}
-                                    >
-                                        <Flex gap={6} wrap="wrap">
-                                            <VStack align="start" gap={0}>
-                                                <Text fontSize="xs" color="gray.500">
+                                    <div className="mb-6 bg-slate-50 p-4">
+                                        <div className="flex flex-wrap gap-6">
+                                            <div className="flex flex-col items-start gap-0">
+                                                <span className="text-xs text-slate-500">
                                                     Connectors
-                                                </Text>
-                                                <Text fontWeight="medium">
+                                                </span>
+                                                <span className="font-medium">
                                                     {mergedJob.total_connectors}
-                                                </Text>
-                                            </VStack>
-                                            <VStack align="start" gap={0}>
-                                                <Text fontSize="xs" color="gray.500">
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col items-start gap-0">
+                                                <span className="text-xs text-slate-500">
                                                     Processed
-                                                </Text>
-                                                <Text fontWeight="medium">
+                                                </span>
+                                                <span className="font-medium">
                                                     {mergedJob.total_processed.toLocaleString()}
-                                                </Text>
-                                            </VStack>
-                                            <VStack align="start" gap={0}>
-                                                <Text fontSize="xs" color="gray.500">
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col items-start gap-0">
+                                                <span className="text-xs text-slate-500">
                                                     New
-                                                </Text>
-                                                <Text fontWeight="medium" color="green.600">
+                                                </span>
+                                                <span className="font-medium text-green-600">
                                                     +{mergedJob.total_new}
-                                                </Text>
-                                            </VStack>
-                                            <VStack align="start" gap={0}>
-                                                <Text fontSize="xs" color="gray.500">
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col items-start gap-0">
+                                                <span className="text-xs text-slate-500">
                                                     Updated
-                                                </Text>
-                                                <Text fontWeight="medium" color="blue.600">
+                                                </span>
+                                                <span className="font-medium text-blue-600">
                                                     {mergedJob.total_updated}
-                                                </Text>
-                                            </VStack>
-                                            <VStack align="start" gap={0}>
-                                                <Text fontSize="xs" color="gray.500">
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col items-start gap-0">
+                                                <span className="text-xs text-slate-500">
                                                     Skipped
-                                                </Text>
-                                                <Text fontWeight="medium">
+                                                </span>
+                                                <span className="font-medium">
                                                     {mergedJob.total_skipped}
-                                                </Text>
-                                            </VStack>
-                                            <VStack align="start" gap={0}>
-                                                <Text fontSize="xs" color="gray.500">
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col items-start gap-0">
+                                                <span className="text-xs text-slate-500">
                                                     Errors
-                                                </Text>
-                                                <Text
-                                                    fontWeight="medium"
-                                                    color={mergedJob.total_errors > 0 ? 'red.600' : undefined}
+                                                </span>
+                                                <span
+                                                    className={`font-medium ${mergedJob.total_errors > 0 ? 'text-red-600' : ''}`}
                                                 >
                                                     {mergedJob.total_errors}
-                                                </Text>
-                                            </VStack>
-                                        </Flex>
-                                    </Box>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
 
                                     {/* Connector Runs */}
-                                    <Heading size="sm" mb={3}>
+                                    <h3 className="mb-3 text-sm font-semibold">
                                         Connector Runs
-                                    </Heading>
-                                    <VStack align="stretch" gap={2}>
+                                    </h3>
+                                    <div className="flex flex-col items-stretch gap-2">
                                         {mergedJob.connector_runs.map((run) => (
                                             <ConnectorRunCard
                                                 key={run.id}
@@ -926,19 +855,19 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                                                 onExpand={() => setSelectedRunId(run.id)}
                                             />
                                         ))}
-                                    </VStack>
+                                    </div>
 
                                     {mergedJob.connector_runs.length === 0 && (
-                                        <Text color="gray.500" py={4}>
+                                        <p className="py-4 text-slate-500">
                                             No connector runs found
-                                        </Text>
+                                        </p>
                                     )}
                                 </>
                             )}
                         </>
                     )}
-                </Box>
-            </Box>
+                </div>
+            </div>
         </>
     );
 };

@@ -11,8 +11,8 @@
  * ROI% = Total Return / Cost Basis
  */
 import React, { useContext, useMemo, useState } from 'react';
-import { Badge, Box, Card, Collapsible, Flex, SimpleGrid, Slider, Text } from '@chakra-ui/react';
-import { FiTrendingUp, FiTrendingDown, FiDollarSign, FiChevronDown, FiChevronRight } from 'react-icons/fi';
+import { Badge } from '../ui/primitives';
+import { FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import { LuReceipt, LuInfo, LuBanknote } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { Tooltip } from '../ui/tooltip';
@@ -62,6 +62,19 @@ export function fmtCurrencySigned(val: number, currency: string): string {
     if (abs >= 1_000_000) return `${prefix}${(abs / 1_000_000).toFixed(2)}M ${sym}`;
     if (abs >= 1_000) return `${prefix}${(abs / 1_000).toFixed(1)}K ${sym}`;
     return `${prefix}${abs.toFixed(2)} ${sym}`;
+}
+
+/**
+ * Converts a Chakra-style dot-notation color token (e.g. "blue.700") into a Tailwind
+ * utility class (e.g. "text-blue-700" / "bg-blue-700"). MetricItem's `color`/`bg` props
+ * keep this token format so existing callers across the app (including files not yet
+ * migrated off Chakra) don't need to change.
+ */
+function tokenToClass(token: string | undefined, prefix: 'text' | 'bg', fallback: string): string {
+    if (!token || token === 'transparent') return prefix === 'bg' ? 'bg-transparent' : fallback;
+    const parts = token.split('.');
+    if (parts.length === 2) return `${prefix}-${parts[0]}-${parts[1]}`;
+    return fallback;
 }
 
 export type Range = 'all' | '3y' | '1y' | '6m' | '3m' | '1m' | '1w';
@@ -450,57 +463,41 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     };
 
     return (
-        <Box
-            p={3}
-            bg="white"
-            borderRadius="lg"
-            border="1px solid"
-            borderColor="gray.200"
-        >
+        <div className="border border-gray-200 bg-white p-3">
             {/* Timeframe selector cards (hidden when rendered externally) */}
             {!hidePeriodCards && (
-                <Flex gap={1.5} mb={2} overflowX="auto">
+                <div className="mb-2 flex gap-1.5 overflow-x-auto">
                     {RANGES.map(r => {
                         const roi = allRangeRois[r.key];
                         const isActive = range === r.key;
                         return (
-                            <Card.Root
+                            <div
                                 key={r.key}
-                                cursor="pointer"
                                 onClick={() => onRangeChange(r.key)}
-                                minW="70px"
-                                flex="1"
-                                variant={isActive ? 'elevated' : 'outline'}
-                                borderWidth="2px"
-                                borderColor={isActive ? 'blue.500' : 'gray.200'}
-                                bg={isActive ? 'blue.50' : 'white'}
-                                _hover={{ borderColor: isActive ? 'blue.500' : 'gray.300', shadow: 'sm' }}
-                                transition="all 0.15s"
+                                className={`min-w-[70px] flex-1 cursor-pointer border-2 px-2 py-1.5 text-center transition-colors ${isActive ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'}`}
                             >
-                                <Card.Body py={1.5} px={2} textAlign="center">
-                                    <Text fontSize="2xs" fontWeight="bold" color={isActive ? 'blue.700' : 'gray.500'}>
-                                        {r.label}
-                                    </Text>
-                                    {roi !== null ? (
-                                        <Text fontSize="xs" fontWeight="bold" color={roi >= 0 ? 'green.600' : 'red.600'}>
-                                            {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
-                                        </Text>
-                                    ) : (
-                                        <Text fontSize="xs" color="gray.300">—</Text>
-                                    )}
-                                </Card.Body>
-                            </Card.Root>
+                                <div className={`text-[10px] font-bold ${isActive ? 'text-blue-700' : 'text-gray-500'}`}>
+                                    {r.label}
+                                </div>
+                                {roi !== null ? (
+                                    <div className={`text-xs font-bold ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
+                                    </div>
+                                ) : (
+                                    <div className="text-xs text-gray-300">—</div>
+                                )}
+                            </div>
                         );
                     })}
-                </Flex>
+                </div>
             )}
 
             {isLoading ? (
-                <Text fontSize="xs" color="gray.400">Loading...</Text>
+                <div className="text-xs text-gray-400">Loading...</div>
             ) : metrics ? (
                 <>
                     {/* Hero + Metrics + PnL bar */}
-                    <Box mb={2}>
+                    <div className="mb-2">
                         <HeroMetricsBar
                             totalReturn={metrics.totalReturn}
                             roi={metrics.roi}
@@ -584,16 +581,16 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                 </>
                             )}
                         </HeroMetricsBar>
-                    </Box>
+                    </div>
 
                     {/* Performers / custom slot — full width below */}
                     {hidePerformers ? (
-                        <Box>
+                        <div>
                             {/* Custom slot + Period Chart — side by side */}
-                            <Box display="grid" gridTemplateColumns={performerSlot ? '1fr 1fr' : '1fr'} gap={3} alignItems="start">
-                                {performerSlot && <Box>{performerSlot}</Box>}
+                            <div className={`grid items-start gap-3 ${performerSlot ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                {performerSlot && <div>{performerSlot}</div>}
                                 {/* Period chart */}
-                                <Box p={2} borderRadius="md" border="1px solid" borderColor="blue.200" bg="white">
+                                <div className="border border-blue-200 bg-white p-2">
                                     <PeriodChartPanel
                                         points={points}
                                         baseCurrency={baseCurrency}
@@ -605,40 +602,34 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         assetId={assetId}
                                         assetSymbol={assetSymbol}
                                     />
-                                </Box>
-                            </Box>
-                        </Box>
+                                </div>
+                            </div>
+                        </div>
                     ) : (
-                        <Box>
+                        <div>
                             {/* Best/Worst + Period Chart — side by side */}
-                            <Box display="grid" gridTemplateColumns="1fr 1fr" gap={3} alignItems="start">
+                            <div className="grid grid-cols-2 items-start gap-3">
                                 {/* Left half: Best & Worst */}
                                 {isPerformersLoading ? (
-                                    <Box p={2} borderRadius="md" border="1px solid" borderColor="purple.200" bg="white">
-                                        <Text fontSize="xs" color="gray.400">Loading performers...</Text>
-                                    </Box>
+                                    <div className="border border-purple-200 bg-white p-2">
+                                        <div className="text-xs text-gray-400">Loading performers...</div>
+                                    </div>
                                 ) : (
-                                    <Box p={2} borderRadius="md" border="1px solid" borderColor="purple.200" bg="white">
+                                    <div className="border border-purple-200 bg-white p-2">
                                         {/* Controls row: badges left, $/%+slider right */}
-                                        <Flex justify="space-between" align="center" mb={1.5} gap={2}>
+                                        <div className="mb-1.5 flex items-center justify-between gap-2">
                                             {/* Left: Asset/Account/Category + sort metric badges */}
-                                            <Flex gap={0.5} flexWrap="wrap" align="center">
+                                            <div className="flex flex-wrap items-center gap-0.5">
                                                 <Badge
-                                                    cursor="pointer"
-                                                    variant={groupBy === 'asset' ? 'solid' : 'outline'}
-                                                    colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
-                                                    size="xs"
-                                                    px={1.5}
+                                                    colorScheme={groupBy === 'asset' ? 'blue' : 'gray'}
+                                                    className={`cursor-pointer px-1.5 ${groupBy === 'asset' ? 'ring-2 ring-blue-400' : ''}`}
                                                     onClick={() => onGroupByChange?.('asset')}
                                                 >
                                                     Asset
                                                 </Badge>
                                                 <Badge
-                                                    cursor="pointer"
-                                                    variant={groupBy === 'account' ? 'solid' : 'outline'}
-                                                    colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
-                                                    size="xs"
-                                                    px={1.5}
+                                                    colorScheme={groupBy === 'account' ? 'blue' : 'gray'}
+                                                    className={`cursor-pointer px-1.5 ${groupBy === 'account' ? 'ring-2 ring-blue-400' : ''}`}
                                                     onClick={() => onGroupByChange?.('account')}
                                                 >
                                                     Account
@@ -646,11 +637,8 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                                 {dimensions.map(dim => (
                                                     <Badge
                                                         key={dim.id}
-                                                        cursor="pointer"
-                                                        variant={groupBy === 'category' && selectedDimensionId === dim.id ? 'solid' : 'outline'}
-                                                        colorPalette={groupBy === 'category' && selectedDimensionId === dim.id ? 'teal' : 'gray'}
-                                                        size="xs"
-                                                        px={1.5}
+                                                        colorScheme={groupBy === 'category' && selectedDimensionId === dim.id ? 'green' : 'gray'}
+                                                        className={`cursor-pointer px-1.5 ${groupBy === 'category' && selectedDimensionId === dim.id ? 'ring-2 ring-green-400' : ''}`}
                                                         onClick={() => {
                                                             onGroupByChange?.('category');
                                                             onDimensionChange?.(dim.id);
@@ -659,73 +647,62 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                                         {dim.label}
                                                     </Badge>
                                                 ))}
-                                                <Box w="1px" h="14px" bg="gray.300" mx={1} flexShrink={0} />
+                                                <div className="mx-1 h-3.5 w-px shrink-0 bg-gray-300" />
                                                 {([['TR', 'Total Return'], ['U', 'Unrealized P&L'], ['MV', 'Market Value'], ['Eff', 'Efficiency']] as [PerformerMetric, string][]).map(([key, tip]) => (
                                                     <Tooltip key={key} content={tip} openDelay={400}>
                                                         <Badge
-                                                            cursor="pointer"
-                                                            variant={sortMetric === key ? 'solid' : 'outline'}
-                                                            colorPalette={sortMetric === key ? 'teal' : 'gray'}
-                                                            size="xs"
-                                                            px={1}
+                                                            colorScheme={sortMetric === key ? 'green' : 'gray'}
+                                                            className={`cursor-pointer px-1 ${sortMetric === key ? 'ring-2 ring-green-400' : ''}`}
                                                             onClick={() => setSortMetric(key)}
                                                         >
                                                             {key}
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
-                                            </Flex>
+                                            </div>
 
                                             {/* Right: $/%  + count slider */}
-                                            <Flex align="center" gap={1.5} flexShrink={0}>
-                                                <Flex gap={0.5}>
+                                            <div className="flex shrink-0 items-center gap-1.5">
+                                                <div className="flex gap-0.5">
                                                     {([['$', 'Dollar values'], ['%', 'Percentages']] as [PerformerDisplay, string][]).map(([key, tip]) => (
                                                         <Tooltip key={key} content={tip} openDelay={400}>
                                                             <Badge
-                                                                cursor="pointer"
-                                                                variant={displayFormat === key ? 'solid' : 'outline'}
-                                                                colorPalette={displayFormat === key ? 'purple' : 'gray'}
-                                                                size="xs"
-                                                                px={1}
+                                                                colorScheme={displayFormat === key ? 'purple' : 'gray'}
+                                                                className={`cursor-pointer px-1 ${displayFormat === key ? 'ring-2 ring-purple-400' : ''}`}
                                                                 onClick={() => setDisplayFormat(key)}
                                                             >
                                                                 {key}
                                                             </Badge>
                                                         </Tooltip>
                                                     ))}
-                                                </Flex>
-                                                <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap">
+                                                </div>
+                                                <div className="whitespace-nowrap text-[10px] text-gray-400">
                                                     {performerCount}
-                                                </Text>
-                                                <Slider.Root
-                                                    size="sm"
+                                                </div>
+                                                <input
+                                                    type="range"
                                                     min={3}
                                                     max={Math.max(maxPerformerCount, 5)}
                                                     step={1}
-                                                    value={[performerCount]}
-                                                    onValueChange={(d) => setPerformerCount(d.value[0])}
-                                                    width="60px"
-                                                >
-                                                    <Slider.Control>
-                                                        <Slider.Track><Slider.Range /></Slider.Track>
-                                                        <Slider.Thumb index={0} />
-                                                    </Slider.Control>
-                                                </Slider.Root>
-                                            </Flex>
-                                        </Flex>
+                                                    value={performerCount}
+                                                    onChange={(e) => setPerformerCount(Number(e.target.value))}
+                                                    className="h-1 w-[60px] accent-blue-500"
+                                                />
+                                            </div>
+                                        </div>
 
-                                        <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
+                                        <div className="grid grid-cols-2 gap-2">
                                             {/* Best */}
-                                            <Box>
-                                                <Flex align="center" gap={1} mb={1}>
-                                                    <FiTrendingUp size={11} color="var(--chakra-colors-green-500)" />
-                                                    <Text fontSize="2xs" fontWeight="semibold" color="green.600">Best</Text>
-                                                </Flex>
+                                            <div>
+                                                <div className="mb-1 flex items-center gap-1">
+                                                    <FiTrendingUp size={11} color="#38A169" />
+                                                    <span className="text-[10px] font-semibold text-green-600">Best</span>
+                                                </div>
                                                 {visibleTop.length === 0 ? (
-                                                    <Text fontSize="2xs" color="gray.400">No positive returns</Text>
+                                                    <div className="text-[10px] text-gray-400">No positive returns</div>
                                                 ) : (
-                                                    <Box maxH="200px" overflowY="auto">
-                                                        <Flex direction="column" gap={0.5}>
+                                                    <div className="max-h-[200px] overflow-y-auto">
+                                                        <div className="flex flex-col gap-0.5">
                                                             {visibleTop.map((p, i) => (
                                                                 <PerformerMiniRow
                                                                     key={p.id}
@@ -740,22 +717,22 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                                                     onInfoClick={handleInfoClick}
                                                                 />
                                                             ))}
-                                                        </Flex>
-                                                    </Box>
+                                                        </div>
+                                                    </div>
                                                 )}
-                                            </Box>
+                                            </div>
 
                                             {/* Worst */}
-                                            <Box>
-                                                <Flex align="center" gap={1} mb={1}>
-                                                    <FiTrendingDown size={11} color="var(--chakra-colors-red-500)" />
-                                                    <Text fontSize="2xs" fontWeight="semibold" color="red.600">Worst</Text>
-                                                </Flex>
+                                            <div>
+                                                <div className="mb-1 flex items-center gap-1">
+                                                    <FiTrendingDown size={11} color="#E53E3E" />
+                                                    <span className="text-[10px] font-semibold text-red-600">Worst</span>
+                                                </div>
                                                 {visibleFlop.length === 0 ? (
-                                                    <Text fontSize="2xs" color="gray.400">No negative returns</Text>
+                                                    <div className="text-[10px] text-gray-400">No negative returns</div>
                                                 ) : (
-                                                    <Box maxH="200px" overflowY="auto">
-                                                        <Flex direction="column" gap={0.5}>
+                                                    <div className="max-h-[200px] overflow-y-auto">
+                                                        <div className="flex flex-col gap-0.5">
                                                             {visibleFlop.map((p, i) => (
                                                                 <PerformerMiniRow
                                                                     key={p.id}
@@ -770,16 +747,16 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                                                     onInfoClick={handleInfoClick}
                                                                 />
                                                             ))}
-                                                        </Flex>
-                                                    </Box>
+                                                        </div>
+                                                    </div>
                                                 )}
-                                            </Box>
-                                        </Box>
-                                    </Box>
+                                            </div>
+                                        </div>
+                                    </div>
                                 )}
 
                                 {/* Right half: Period chart */}
-                                <Box p={2} borderRadius="md" border="1px solid" borderColor="blue.200" bg="white">
+                                <div className="border border-blue-200 bg-white p-2">
                                     <PeriodChartPanel
                                         points={points}
                                         baseCurrency={baseCurrency}
@@ -791,16 +768,16 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         assetId={assetId}
                                         assetSymbol={assetSymbol}
                                     />
-                                </Box>
-                            </Box>
-                        </Box>
+                                </div>
+                            </div>
+                        </div>
                     )}
                 </>
             ) : (
-                <Text fontSize="xs" color="gray.400">No data for this period</Text>
+                <div className="text-xs text-gray-400">No data for this period</div>
             )}
 
-        </Box>
+        </div>
     );
 };
 
@@ -844,50 +821,39 @@ const PerformerMiniRow: React.FC<{
     const barPct = maxAbs > 0 ? Math.max((barVal / maxAbs) * 100, 4) : 4;
 
     return (
-        <Flex
-            align="center"
-            gap={1}
-            py={0.5}
-            px={1}
-            borderRadius="sm"
-            cursor={onClick ? 'pointer' : 'default'}
-            _hover={onClick ? { bg: 'gray.50' } : undefined}
+        <div
+            className={`flex items-center gap-1 px-1 py-0.5 transition-colors ${onClick ? 'cursor-pointer hover:bg-gray-50' : 'cursor-default'}`}
             onClick={onClick}
-            transition="background 0.15s"
         >
-            <Text fontSize="2xs" color="gray.400" fontWeight="bold" minW="12px" textAlign="right">{rank}</Text>
+            <div className="min-w-[12px] text-right text-[10px] font-bold text-gray-400">{rank}</div>
             <Tooltip content={item.name} openDelay={300}>
-                <Text fontSize="xs" fontWeight="semibold" color="gray.700" w="70px" flexShrink={0} truncate>
+                <div className="w-[70px] shrink-0 truncate text-xs font-semibold text-gray-700">
                     {item.name}
-                </Text>
+                </div>
             </Tooltip>
             {onInfoClick && (
-                <Box
-                    as="button"
+                <button
+                    type="button"
                     onClick={(e: React.MouseEvent) => { e.stopPropagation(); onInfoClick(item.id); }}
-                    p={0.5}
-                    borderRadius="sm"
-                    color="gray.400"
-                    _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                    className="shrink-0 p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
                     title="Asset details"
-                    flexShrink={0}
                 >
                     <LuInfo size={11} />
-                </Box>
+                </button>
             )}
-            <Box flex="1" bg={isPositive ? 'green.50' : 'red.50'} borderRadius="sm" h="12px" overflow="hidden" position="relative">
-                <Box bg={isPositive ? 'green.400' : 'red.400'} h="100%" w={`${barPct}%`} borderRadius="sm" transition="width 0.3s ease" />
-                <Text position="absolute" top="50%" left="4px" transform="translateY(-50%)" fontSize="2xs" fontWeight="bold" color={barPct > 30 ? 'white' : isPositive ? 'green.700' : 'red.700'}>
+            <div className={`relative h-3 flex-1 overflow-hidden ${isPositive ? 'bg-green-50' : 'bg-red-50'}`}>
+                <div className={`h-full transition-all duration-300 ${isPositive ? 'bg-green-400' : 'bg-red-400'}`} style={{ width: `${barPct}%` }} />
+                <div className={`absolute left-1 top-1/2 -translate-y-1/2 text-[10px] font-bold ${barPct > 30 ? 'text-white' : isPositive ? 'text-green-700' : 'text-red-700'}`}>
                     {performerPrimaryValue(item, sortBy, baseCurrency, display)}
-                </Text>
-            </Box>
-            <Text fontSize="2xs" fontWeight="bold" color={isPositive ? 'green.600' : 'red.600'} minW="36px" textAlign="right">
+                </div>
+            </div>
+            <div className={`min-w-[36px] text-right text-[10px] font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
                 {display === '$'
                     ? `${item.roiPct >= 0 ? '+' : ''}${item.roiPct.toFixed(1)}%`
                     : fmtCurrencySigned(item.totalReturn, baseCurrency)
                 }
-            </Text>
-        </Flex>
+            </div>
+        </div>
     );
 };
 
@@ -930,37 +896,36 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
     const Icon = metrics && metrics.totalReturn >= 0 ? FiTrendingUp : FiTrendingDown;
 
     return (
-        <Box p={5} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mb={4}>
-            <Flex align="center" gap={2} mb={4}>
-                <Box color={metrics ? (metrics.totalReturn >= 0 ? 'green.500' : 'red.500') : 'gray.400'}><Icon size={20} /></Box>
-                <Text fontSize="md" fontWeight="semibold" color="gray.700">Total Return</Text>
-            </Flex>
-            <Flex gap={2} mb={4} overflowX="auto">
+        <div className="mb-4 border border-gray-200 bg-white p-5">
+            <div className="mb-4 flex items-center gap-2">
+                <div className={tokenToClass(metrics ? (metrics.totalReturn >= 0 ? 'green.500' : 'red.500') : 'gray.400', 'text', 'text-gray-400')}><Icon size={20} /></div>
+                <div className="text-base font-semibold text-gray-700">Total Return</div>
+            </div>
+            <div className="mb-4 flex gap-2 overflow-x-auto">
                 {RANGES.map(r => {
                     const roi = allRangeRois[r.key];
                     const isActive = range === r.key;
                     return (
-                        <Card.Root key={r.key} cursor="pointer" onClick={() => setRange(r.key)} minW="90px" flex="1"
-                            variant={isActive ? 'elevated' : 'outline'} borderWidth="2px"
-                            borderColor={isActive ? 'blue.500' : 'gray.200'} bg={isActive ? 'blue.50' : 'white'}
-                            _hover={{ borderColor: isActive ? 'blue.500' : 'gray.300', shadow: 'sm' }} transition="all 0.15s">
-                            <Card.Body py={2} px={3} textAlign="center">
-                                <Text fontSize="xs" fontWeight="bold" color={isActive ? 'blue.700' : 'gray.500'}>{r.label}</Text>
-                                {roi !== null ? (
-                                    <Text fontSize="sm" fontWeight="bold" color={roi >= 0 ? 'green.600' : 'red.600'}>{roi >= 0 ? '+' : ''}{roi.toFixed(2)}%</Text>
-                                ) : (<Text fontSize="sm" color="gray.300">—</Text>)}
-                            </Card.Body>
-                        </Card.Root>
+                        <div
+                            key={r.key}
+                            onClick={() => setRange(r.key)}
+                            className={`min-w-[90px] flex-1 cursor-pointer border-2 px-3 py-2 text-center transition-colors ${isActive ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'}`}
+                        >
+                            <div className={`text-xs font-bold ${isActive ? 'text-blue-700' : 'text-gray-500'}`}>{r.label}</div>
+                            {roi !== null ? (
+                                <div className={`text-sm font-bold ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>{roi >= 0 ? '+' : ''}{roi.toFixed(2)}%</div>
+                            ) : (<div className="text-sm text-gray-300">—</div>)}
+                        </div>
                     );
                 })}
-            </Flex>
-            {isLoading ? <Text fontSize="sm" color="gray.400">Loading...</Text> : metrics ? (
+            </div>
+            {isLoading ? <div className="text-sm text-gray-400">Loading...</div> : metrics ? (
                 <>
-                    <Flex align="baseline" gap={3} mb={4}>
-                        <Text fontSize="3xl" fontWeight="bold" color={color(metrics.totalReturn)}>{fmtCurrency(metrics.totalReturn, baseCurrency)}</Text>
-                        <Badge colorPalette={metrics.roi >= 0 ? 'green' : 'red'} variant="subtle" size="lg">{metrics.roi >= 0 ? '+' : ''}{metrics.roi.toFixed(2)}%</Badge>
-                    </Flex>
-                    <SimpleGrid columns={{ base: 2, md: 5 }} gap={4}>
+                    <div className="mb-4 flex items-baseline gap-3">
+                        <div className={`text-3xl font-bold ${tokenToClass(color(metrics.totalReturn), 'text', 'text-gray-700')}`}>{fmtCurrency(metrics.totalReturn, baseCurrency)}</div>
+                        <Badge colorScheme={metrics.roi >= 0 ? 'green' : 'red'}>{metrics.roi >= 0 ? '+' : ''}{metrics.roi.toFixed(2)}%</Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
                         <MetricItem label="Portfolio Value" value={fmtCurrency(metrics.currentValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} />
                         <MetricItem label="Cost Basis" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.600" />
                         <MetricItem label="Unrealized P&L" value={fmtCurrency(metrics.unrealizedPnl, baseCurrency)} color={color(metrics.unrealizedPnl)} />
@@ -969,14 +934,17 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
                         {metrics.incomeEventCount > 0 && (
                             <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />
                         )}
-                    </SimpleGrid>
+                    </div>
                 </>
             ) : null}
-        </Box>
+        </div>
     );
 };
 
-/* Reusable metric display component — icon label value, with optional sub-value below */
+/* Reusable metric display component — icon label value, with optional sub-value below.
+ * `color`/`bg` accept Chakra-style dot-notation tokens (e.g. "blue.700") for backward
+ * compatibility with existing callers across the app; tokenToClass() converts them to
+ * Tailwind utility classes internally. */
 export const MetricItem: React.FC<{
     label: string;
     value: string;
@@ -987,23 +955,15 @@ export const MetricItem: React.FC<{
     onClick?: () => void;
     compact?: boolean;
 }> = ({ label, value, color, subValue, icon, bg, onClick, compact }) => (
-    <Flex
-        direction="column"
-        cursor={onClick ? 'pointer' : 'default'}
+    <div
+        className={`flex min-w-0 flex-1 flex-col ${onClick ? 'cursor-pointer hover:opacity-85' : 'cursor-default'} ${compact ? 'px-1.5 py-0.5' : 'px-2 py-2'} ${tokenToClass(bg, 'bg', 'bg-transparent')}`}
         onClick={onClick}
-        _hover={onClick ? { opacity: 0.85 } : undefined}
-        borderRadius="md"
-        px={compact ? 1.5 : 2}
-        py={compact ? 0.5 : 2}
-        bg={bg ?? 'transparent'}
-        flex={1}
-        minW={0}
     >
-        <Flex align="center" gap={1}>
-            {icon && <Box color={color} flexShrink={0}>{icon}</Box>}
-            <Text fontSize={compact ? '2xs' : 'xs'} color="gray.500" fontWeight="medium" whiteSpace="nowrap">{label}</Text>
-            <Text fontSize={compact ? 'xs' : 'sm'} fontWeight="bold" color={color} whiteSpace="nowrap">{value}</Text>
-        </Flex>
-        {subValue && <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap" mt={0.5}>{subValue}</Text>}
-    </Flex>
+        <div className="flex items-center gap-1">
+            {icon && <span className={`shrink-0 ${tokenToClass(color, 'text', 'text-gray-700')}`}>{icon}</span>}
+            <span className={`whitespace-nowrap font-medium text-gray-500 ${compact ? 'text-[10px]' : 'text-xs'}`}>{label}</span>
+            <span className={`whitespace-nowrap font-bold ${compact ? 'text-xs' : 'text-sm'} ${tokenToClass(color, 'text', 'text-gray-700')}`}>{value}</span>
+        </div>
+        {subValue && <span className="mt-0.5 whitespace-nowrap text-[10px] text-gray-400">{subValue}</span>}
+    </div>
 );

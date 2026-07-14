@@ -6,20 +6,11 @@
  */
 
 import React, { useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Flex,
-    Input,
-    Table,
-    Text,
-} from '@chakra-ui/react';
 import { FiExternalLink, FiSearch, FiDownload } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { FeeEntry, FeeSummary } from './types';
 import { formatDateLocale } from '../../utils/dateUtils';
+import { Badge, Button, Input } from '../ui/primitives';
 
 interface FeesPanelProps {
     fees: FeeEntry[];
@@ -76,66 +67,65 @@ export const FeesPanel: React.FC<FeesPanelProps> = ({
             width="700px"
         >
             {/* Summary Cards */}
-            <Flex gap={4} mb={4} wrap="wrap">
-                <Card.Root flex="1" minW="150px">
-                    <Card.Body py={3}>
-                        <Text fontSize="xs" color="gray.500">Total Fees</Text>
-                        <Text fontSize="xl" fontWeight="bold">
+            <div className="mb-4 flex flex-wrap gap-4">
+                <div className="min-w-[150px] flex-1 border border-slate-200 bg-white">
+                    <div className="px-4 py-3">
+                        <span className="block text-xs text-slate-500">Total Fees</span>
+                        <span className="block text-xl font-bold">
                             {formatCurrency(summary.total_fees_in_base, baseCurrency)}
-                        </Text>
-                    </Card.Body>
-                </Card.Root>
-                <Card.Root flex="1" minW="150px">
-                    <Card.Body py={3}>
-                        <Text fontSize="xs" color="gray.500">Taxable Fee Events</Text>
-                        <Text fontSize="xl" fontWeight="bold" color="orange.600">
+                        </span>
+                    </div>
+                </div>
+                <div className="min-w-[150px] flex-1 border border-slate-200 bg-white">
+                    <div className="px-4 py-3">
+                        <span className="block text-xs text-slate-500">Taxable Fee Events</span>
+                        <span className="block text-xl font-bold text-orange-600">
                             {summary.disposal_taxable_fee_count}
-                        </Text>
-                    </Card.Body>
-                </Card.Root>
-                <Card.Root flex="1" minW="150px">
-                    <Card.Body py={3}>
-                        <Text fontSize="xs" color="gray.500">Fee Entries</Text>
-                        <Text fontSize="xl" fontWeight="bold">
+                        </span>
+                    </div>
+                </div>
+                <div className="min-w-[150px] flex-1 border border-slate-200 bg-white">
+                    <div className="px-4 py-3">
+                        <span className="block text-xs text-slate-500">Fee Entries</span>
+                        <span className="block text-xl font-bold">
                             {fees.length}
-                        </Text>
-                    </Card.Body>
-                </Card.Root>
-            </Flex>
+                        </span>
+                    </div>
+                </div>
+            </div>
 
             {/* Fees by Asset */}
-            <Card.Root mb={4}>
-                <Card.Header>
-                    <Text fontWeight="bold" fontSize="sm">Fees by Asset</Text>
-                </Card.Header>
-                <Card.Body py={2}>
-                    <Flex gap={2} wrap="wrap">
+            <div className="mb-4 border border-slate-200 bg-white">
+                <div className="border-b border-slate-200 px-4 py-3">
+                    <span className="text-sm font-bold">Fees by Asset</span>
+                </div>
+                <div className="px-4 py-2">
+                    <div className="flex flex-wrap gap-2">
                         {Object.entries(summary.fees_by_asset)
                             .sort(([, a], [, b]) => b - a)
                             .slice(0, 10)
                             .map(([asset, amount]) => (
-                                <Badge key={asset} colorPalette="purple" px={2} py={1}>
+                                <Badge key={asset} colorScheme="purple" className="px-2 py-1">
                                     {asset}: {formatCurrency(amount, baseCurrency)}
                                 </Badge>
                             ))}
-                    </Flex>
-                </Card.Body>
-            </Card.Root>
+                    </div>
+                </div>
+            </div>
 
             {/* Filters */}
-            <Flex gap={2} mb={4} align="center">
-                <Box position="relative" flex="1">
+            <div className="mb-4 flex items-center gap-2">
+                <div className="relative flex-1">
                     <Input
                         placeholder="Search by asset..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        size="sm"
-                        pl={8}
+                        className="pl-8"
                     />
-                    <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
+                    <div className="absolute left-2 top-1/2 -translate-y-1/2">
                         <FiSearch size={14} color="gray" />
-                    </Box>
-                </Box>
+                    </div>
+                </div>
                 <select
                     value={sourceFilter}
                     onChange={(e) => setSourceFilter(e.target.value)}
@@ -154,99 +144,96 @@ export const FeesPanel: React.FC<FeesPanelProps> = ({
                 <Button size="sm" variant="outline">
                     <FiDownload /> Export
                 </Button>
-            </Flex>
+            </div>
 
             {/* Fees Table */}
-            <Card.Root>
-                <Card.Body p={0}>
-                    <Box overflowX="auto">
-                        <Table.Root size="sm">
-                            <Table.Header>
-                                <Table.Row>
-                                    <Table.ColumnHeader>Date</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Source</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Fee Amount</Table.ColumnHeader>
-                                    <Table.ColumnHeader>In Base</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Realized P&L</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Origin</Table.ColumnHeader>
-                                </Table.Row>
-                            </Table.Header>
-                            <Table.Body>
-                                {filtered.length === 0 ? (
-                                    <Table.Row>
-                                        <Table.Cell colSpan={7}>
-                                            <Text textAlign="center" py={4} color="gray.500">
-                                                No fees match your criteria
-                                            </Text>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                ) : (
-                                    filtered.map((fee) => (
-                                        <Table.Row key={fee.id}>
-                                            <Table.Cell>
-                                                <Text fontSize="sm">{formatDateLocale(fee.date)}</Text>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Badge size="sm" variant="subtle">
-                                                    {fee.source}
-                                                </Badge>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Badge>{fee.asset_symbol}</Badge>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Text fontFamily="mono" fontSize="sm">
-                                                    {formatQty(fee.fee_amount)}
-                                                </Text>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                {formatCurrency(fee.fee_in_base, baseCurrency)}
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                {fee.realized_pnl !== undefined ? (
-                                                    <Text
-                                                        fontSize="sm"
-                                                        color={fee.realized_pnl >= 0 ? 'green.600' : 'red.600'}
+            <div className="border border-slate-200 bg-white">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="bg-slate-50 text-left">
+                                <th className="px-2 py-1">Date</th>
+                                <th className="px-2 py-1">Source</th>
+                                <th className="px-2 py-1">Asset</th>
+                                <th className="px-2 py-1">Fee Amount</th>
+                                <th className="px-2 py-1">In Base</th>
+                                <th className="px-2 py-1">Realized P&L</th>
+                                <th className="px-2 py-1">Origin</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.length === 0 ? (
+                                <tr>
+                                    <td colSpan={7}>
+                                        <span className="block py-4 text-center text-slate-500">
+                                            No fees match your criteria
+                                        </span>
+                                    </td>
+                                </tr>
+                            ) : (
+                                filtered.map((fee) => (
+                                    <tr key={fee.id} className="border-b border-slate-100 hover:bg-slate-50">
+                                        <td className="px-2 py-1">
+                                            <span className="text-sm">{formatDateLocale(fee.date)}</span>
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            <Badge>
+                                                {fee.source}
+                                            </Badge>
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            <Badge>{fee.asset_symbol}</Badge>
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            <span className="font-mono text-sm">
+                                                {formatQty(fee.fee_amount)}
+                                            </span>
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            {formatCurrency(fee.fee_in_base, baseCurrency)}
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            {fee.realized_pnl !== undefined ? (
+                                                <span
+                                                    className={`text-sm ${fee.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                                                >
+                                                    {formatCurrency(fee.realized_pnl, baseCurrency)}
+                                                </span>
+                                            ) : (
+                                                <span className="text-sm text-slate-400">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2 py-1">
+                                            <div className="flex gap-1">
+                                                {fee.transaction_id && onTransactionClick && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => onTransactionClick(fee.transaction_id!)}
                                                     >
-                                                        {formatCurrency(fee.realized_pnl, baseCurrency)}
-                                                    </Text>
-                                                ) : (
-                                                    <Text fontSize="sm" color="gray.400">—</Text>
+                                                        TX
+                                                        <FiExternalLink size={12} />
+                                                    </Button>
                                                 )}
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Flex gap={1}>
-                                                    {fee.transaction_id && onTransactionClick && (
-                                                        <Button
-                                                            size="xs"
-                                                            variant="ghost"
-                                                            onClick={() => onTransactionClick(fee.transaction_id!)}
-                                                        >
-                                                            TX
-                                                            <FiExternalLink size={12} />
-                                                        </Button>
-                                                    )}
-                                                    {fee.unit_id && onUnitClick && (
-                                                        <Button
-                                                            size="xs"
-                                                            variant="ghost"
-                                                            onClick={() => onUnitClick(fee.unit_id!)}
-                                                        >
-                                                            Unit
-                                                            <FiExternalLink size={12} />
-                                                        </Button>
-                                                    )}
-                                                </Flex>
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    ))
-                                )}
-                            </Table.Body>
-                        </Table.Root>
-                    </Box>
-                </Card.Body>
-            </Card.Root>
+                                                {fee.unit_id && onUnitClick && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => onUnitClick(fee.unit_id!)}
+                                                    >
+                                                        Unit
+                                                        <FiExternalLink size={12} />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </SlidePanel>
     );
 };

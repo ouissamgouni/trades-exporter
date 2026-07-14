@@ -13,3 +13,27 @@
 
 /* Class-based dark mode to match next-themes (attribute="class" -> .dark on <html>). */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* Slim dark scrollbar used by log-style viewers (e.g. ConnectorLogViewer). */
+.log-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.log-scrollbar::-webkit-scrollbar-track {
+    background: #1a1a2e;
+}
+
+.log-scrollbar::-webkit-scrollbar-thumb {
+    background: #4a4a6a;
+    border-radius: 3px;
+}
+
+/* Slim light scrollbar used by compact filter-card option lists (e.g. RealizedPnLFilters). */
+.thin-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+    background: #CBD5E0;
+    border-radius: 2px;
+}

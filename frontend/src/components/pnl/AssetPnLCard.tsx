@@ -12,15 +12,8 @@
  */
 
 import React, { useContext } from 'react';
-import {
-    Badge,
-    Box,
-    Card,
-    Collapsible,
-    Flex,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
+import { Badge } from '../ui/primitives';
+import { Spinner } from '../ui/primitives';
 import { FiChevronRight, FiChevronDown, FiAlertCircle } from 'react-icons/fi';
 import { LuInfo } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
@@ -92,10 +85,10 @@ const Metric: React.FC<{
     children: React.ReactNode;
     flex?: string;
 }> = ({ label, children, flex }) => (
-    <Box flex={flex} minW={0}>
-        <Text fontSize="2xs" color="gray.500" mb={0.5} lineClamp={1}>{label}</Text>
+    <div className="min-w-0" style={{ flex }}>
+        <div className="mb-0.5 truncate text-[10px] text-gray-500">{label}</div>
         {children}
-    </Box>
+    </div>
 );
 
 /** Heatmap background: green for best, red for worst, white in the middle */
@@ -151,207 +144,181 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
     const compact = { compact: true } as const;
 
     return (
-        <Card.Root
-            cursor={isNoPnl ? 'default' : 'pointer'}
+        <div
+            className={`border border-gray-200 bg-white py-1.5 px-3 transition-shadow ${isNoPnl ? 'cursor-default bg-gray-50 hover:shadow-sm' : 'cursor-pointer hover:shadow-md hover:border-blue-200'} ${isExpanded ? 'border-blue-300' : ''} ${isUnmapped ? 'border-dashed opacity-70' : ''}`}
             onClick={isNoPnl ? undefined : () => onAssetClick(assetId)}
-            _hover={isNoPnl ? { shadow: 'sm' } : { shadow: 'md', borderColor: 'blue.200' }}
-            transition="all 0.15s"
-            borderColor={isExpanded ? 'blue.300' : undefined}
-            borderStyle={isUnmapped ? 'dashed' : undefined}
-            opacity={isUnmapped ? 0.7 : undefined}
-            bg={isNoPnl ? 'gray.50' : undefined}
-            size="sm"
         >
-            <Card.Body py={1.5} px={3}>
-                {/* ── Zone 1: Header ── */}
-                <Flex align="center" justify="space-between" mb={1}>
-                    <Flex align="center" gap={1.5} minW={0} flex={1}>
-                        {/* Expand chevron */}
-                        {isExpandable ? (
-                            <Box
-                                as="button"
-                                onClick={(e: React.MouseEvent) => {
-                                    e.stopPropagation();
-                                    if (assetId != null) onToggleExpand(assetId, e);
-                                }}
-                                p={0.5}
-                                borderRadius="sm"
-                                _hover={{ bg: 'gray.200' }}
-                                flexShrink={0}
-                            >
-                                {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                            </Box>
-                        ) : (
-                            <Box w="18px" flexShrink={0} />
-                        )}
+            {/* ── Zone 1: Header ── */}
+            <div className="mb-1 flex items-center justify-between">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                    {/* Expand chevron */}
+                    {isExpandable ? (
+                        <button
+                            type="button"
+                            onClick={(e: React.MouseEvent) => {
+                                e.stopPropagation();
+                                if (assetId != null) onToggleExpand(assetId, e);
+                            }}
+                            className="shrink-0 rounded-sm p-0.5 hover:bg-gray-200"
+                        >
+                            {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                        </button>
+                    ) : (
+                        <div className="w-[18px] shrink-0" />
+                    )}
 
-                        {/* Symbol badge */}
-                        <Tooltip content={row.asset.label || row.asset.symbol || ''} openDelay={300} disabled={!row.asset.label}>
-                            <Badge
-                                size="sm"
-                                colorPalette={isUnmapped ? 'gray' : 'blue'}
-                                variant={isUnmapped ? 'outline' : 'solid'}
-                                fontWeight="bold"
-                                maxW="100px"
-                                truncate
-                            >
-                                {row.asset.label
-                                    ? row.asset.label.length > 10
-                                        ? row.asset.label.slice(0, 10) + '…'
-                                        : row.asset.label
-                                    : row.asset.symbol}
-                            </Badge>
+                    {/* Symbol badge */}
+                    <Tooltip content={row.asset.label || row.asset.symbol || ''} openDelay={300} disabled={!row.asset.label}>
+                        <Badge colorScheme={isUnmapped ? 'gray' : 'blue'} className="max-w-[100px] truncate font-bold">
+                            {row.asset.label
+                                ? row.asset.label.length > 10
+                                    ? row.asset.label.slice(0, 10) + '…'
+                                    : row.asset.label
+                                : row.asset.symbol}
+                        </Badge>
+                    </Tooltip>
+                    {assetId != null && assetPanelCtx && (
+                        <button
+                            type="button"
+                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); assetPanelCtx.openAssetPanel(assetId, { pnlVersionId }); }}
+                            className="rounded-sm p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
+                            title="Asset details"
+                        >
+                            <LuInfo size={12} />
+                        </button>
+                    )}
+
+                    {isUnmapped && (
+                        <Tooltip content="This asset is not mapped in the database" openDelay={200}>
+                            <span className="cursor-help text-xs text-orange-500">⚠</span>
                         </Tooltip>
-                        {assetId != null && assetPanelCtx && (
-                            <Box
-                                as="button"
-                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); assetPanelCtx.openAssetPanel(assetId, { pnlVersionId }); }}
-                                p={0.5}
-                                borderRadius="sm"
-                                color="gray.400"
-                                _hover={{ color: 'blue.500', bg: 'blue.50' }}
-                                title="Asset details"
-                            >
-                                <LuInfo size={12} />
-                            </Box>
-                        )}
+                    )}
 
-                        {isUnmapped && (
-                            <Tooltip content="This asset is not mapped in the database" openDelay={200}>
-                                <Text color="orange.500" fontSize="xs" cursor="help">⚠</Text>
-                            </Tooltip>
-                        )}
+                    {/* Account color dots */}
+                    {accountBalances && accountBalances.length > 1 && (
+                        <div className="ml-1 flex gap-0.5">
+                            {accountBalances.slice(0, 3).map((bal) => (
+                                <div
+                                    key={bal.account_id}
+                                    className="h-[6px] w-[6px] rounded-full"
+                                    style={{ backgroundColor: getAccountColor(bal.account_id) }}
+                                    title={bal.account_name}
+                                />
+                            ))}
+                            {accountBalances.length > 3 && (
+                                <span className="text-[10px] text-gray-500">+{accountBalances.length - 3}</span>
+                            )}
+                        </div>
+                    )}
+                </div>
 
-                        {/* Account color dots */}
-                        {accountBalances && accountBalances.length > 1 && (
-                            <Flex gap={0.5} ml={1}>
-                                {accountBalances.slice(0, 3).map((bal) => (
-                                    <Box
-                                        key={bal.account_id}
-                                        w="6px"
-                                        h="6px"
-                                        borderRadius="full"
-                                        bg={getAccountColor(bal.account_id)}
-                                        title={bal.account_name}
-                                    />
-                                ))}
-                                {accountBalances.length > 3 && (
-                                    <Text fontSize="2xs" color="gray.500">+{accountBalances.length - 3}</Text>
-                                )}
-                            </Flex>
-                        )}
-                    </Flex>
-
-                    {/* Right side: badges */}
-                    <Flex align="center" gap={1.5} flexShrink={0}>
-                        {isNoPnl ? (
-                            isUnmapped
-                                ? <Badge size="xs" colorPalette="orange" variant="subtle">Unmapped</Badge>
-                                : <Badge size="xs" colorPalette="yellow" variant="subtle">No P&L</Badge>
-                        ) : (
-                            <>
-                                {row.warning_count > 0 && (
-                                    <Badge size="xs" colorPalette="orange">{row.warning_count} ⚠</Badge>
-                                )}
-                            </>
-                        )}
-                    </Flex>
-                </Flex>
+                {/* Right side: badges */}
+                <div className="flex shrink-0 items-center gap-1.5">
+                    {isNoPnl ? (
+                        isUnmapped
+                            ? <Badge colorScheme="orange">Unmapped</Badge>
+                            : <Badge colorScheme="yellow">No P&L</Badge>
+                    ) : (
+                        <>
+                            {row.warning_count > 0 && (
+                                <Badge colorScheme="orange">{row.warning_count} ⚠</Badge>
+                            )}
+                        </>
+                    )}
+                </div>
+            </div>
 
                 {/* ── Zone 2: Metrics grid ── */}
                 {!isNoPnl && (
-                    <Flex gap={3} mb={1}>
+                    <div className="mb-1 flex gap-3">
                         {/* Qty */}
                         <Metric label="Qty" flex="1">
-                            <Text fontSize="xs"><ValueDisplay value={row.quantity} options={compact} /></Text>
+                            <div className="text-xs"><ValueDisplay value={row.quantity} options={compact} /></div>
                         </Metric>
 
                         {/* Cost */}
                         <Metric label="Cost" flex="1">
                             <Tooltip
                                 content={
-                                    <Box p={1} fontSize="xs">
-                                        <Flex justify="space-between" gap={3}>
-                                            <Text color="gray.400">Unit cost</Text>
-                                            <Text fontWeight="medium">
+                                    <div className="p-1 text-xs">
+                                        <div className="flex justify-between gap-3">
+                                            <span className="text-gray-400">Unit cost</span>
+                                            <span className="font-medium">
                                                 {row.unit_cost != null
                                                     ? <ValueDisplay value={row.unit_cost} currency={baseCurrency} />
                                                     : '—'}
-                                            </Text>
-                                        </Flex>
-                                    </Box>
+                                            </span>
+                                        </div>
+                                    </div>
                                 }
                                 openDelay={200}
                             >
-                                <Box cursor="help">
-                                    <Text fontSize="xs">
+                                <div className="cursor-help">
+                                    <div className="text-xs">
                                         <ValueDisplay value={row.cost_basis} currency={baseCurrency} options={compact} />
-                                    </Text>
+                                    </div>
                                     {row.total_invested != null && Math.abs(row.total_invested - row.cost_basis) > 0.01 && (
-                                        <Text fontSize="2xs" color="gray.400" lineHeight="1">
+                                        <div className="text-[10px] leading-none text-gray-400">
                                             invested <ValueDisplay value={row.total_invested} currency={baseCurrency} options={compact} />
-                                        </Text>
+                                        </div>
                                     )}
-                                </Box>
+                                </div>
                             </Tooltip>
                         </Metric>
 
                         {/* Value */}
                         <Metric label="Value" flex="1">
                             {row.price_loading ? (
-                                <Spinner size="xs" color="gray.400" />
+                                <Spinner size="xs" className="text-gray-400" />
                             ) : (
                                 <Tooltip
                                     content={
-                                        <Box p={2} fontSize="xs">
-                                            <Flex justify="space-between" gap={4} mb={1}>
-                                                <Text color="gray.400">Unit price</Text>
-                                                <Text fontWeight="medium">
+                                        <div className="p-2 text-xs">
+                                            <div className="mb-1 flex justify-between gap-4">
+                                                <span className="text-gray-400">Unit price</span>
+                                                <span className="font-medium">
                                                     {hasPrice ? <ValueDisplay value={row.unit_value!} currency={baseCurrency} /> : '—'}
-                                                </Text>
-                                            </Flex>
-                                            <Flex justify="space-between" gap={4} mb={1}>
-                                                <Text color="gray.400">Source</Text>
-                                                <Text fontWeight="medium">{row.price_source || 'N/A'}</Text>
-                                            </Flex>
-                                            <Flex justify="space-between" gap={4} mb={1}>
-                                                <Text color="gray.400">Updated</Text>
-                                                <Text fontWeight="medium">{formatDateTimeLocale(row.price_fetched_at)}</Text>
-                                            </Flex>
+                                                </span>
+                                            </div>
+                                            <div className="mb-1 flex justify-between gap-4">
+                                                <span className="text-gray-400">Source</span>
+                                                <span className="font-medium">{row.price_source || 'N/A'}</span>
+                                            </div>
+                                            <div className="mb-1 flex justify-between gap-4">
+                                                <span className="text-gray-400">Updated</span>
+                                                <span className="font-medium">{formatDateTimeLocale(row.price_fetched_at)}</span>
+                                            </div>
                                             {hasError && (
-                                                <Flex justify="space-between" gap={4}>
-                                                    <Text color="red.400">Error</Text>
-                                                    <Text color="red.300" maxW="200px" wordBreak="break-word">{row.price_error}</Text>
-                                                </Flex>
+                                                <div className="flex justify-between gap-4">
+                                                    <span className="text-red-400">Error</span>
+                                                    <span className="max-w-[200px] break-words text-red-300">{row.price_error}</span>
+                                                </div>
                                             )}
-                                            {stale && <Text color="orange.400" mt={1}>⚠ Price is stale (over 1 hour old)</Text>}
-                                        </Box>
+                                            {stale && <div className="mt-1 text-orange-400">⚠ Price is stale (over 1 hour old)</div>}
+                                        </div>
                                     }
                                     openDelay={200}
                                     closeDelay={100}
                                 >
-                                    <Flex align="center" gap={1} cursor="help">
-                                        <Text
-                                            fontSize="xs"
-                                            fontWeight="medium"
-                                            color={stale ? 'orange.500' : undefined}
-                                            textDecoration={hasPrice ? 'underline dotted' : undefined}
+                                    <div className="flex cursor-help items-center gap-1">
+                                        <span
+                                            className={`text-xs font-medium ${stale ? 'text-orange-500' : ''} ${hasPrice ? 'underline decoration-dotted' : ''}`}
                                         >
                                             {hasPrice ? <ValueDisplay value={row.market_value} currency={baseCurrency} options={compact} /> : '—'}
-                                        </Text>
+                                        </span>
                                         {(stale || hasError) && (
                                             <FiAlertCircle size={10} color={hasError ? '#E53E3E' : '#DD6B20'} />
                                         )}
-                                    </Flex>
+                                    </div>
                                 </Tooltip>
                             )}
                         </Metric>
-                    </Flex>
+                    </div>
                 )}
 
                 {/* ── Cost vs PnL bar ── */}
                 {!isNoPnl && row.cost_basis > 0 && (
-                    <Box mb={1}>
+                    <div className="mb-1">
                         <PnLBreakdownBar
                             costBasis={row.cost_basis}
                             unrealizedPnl={row.unrealized_pnl}
@@ -359,208 +326,191 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                             fees={row.total_fees}
                             height={6}
                         />
-                    </Box>
+                    </div>
                 )}
 
                 {/* ── Zone 3: P&L row ── */}
                 {!isNoPnl && (
-                    <Flex gap={3} align="flex-start">
-                        <Box
-                            flex="1"
-                            minW={0}
-                            bg={hasPrice && unrealizedPnlRange ? unrealizedHeatmapBg(row.unrealized_pnl, unrealizedPnlRange) : undefined}
-                            borderRadius="md"
-                            px={1}
-                            py={0.5}
+                    <div className="flex items-start gap-3">
+                        <div
+                            className="min-w-0 flex-1 rounded-md px-1 py-0.5"
+                            style={{ backgroundColor: hasPrice && unrealizedPnlRange ? unrealizedHeatmapBg(row.unrealized_pnl, unrealizedPnlRange) : undefined }}
                         >
-                            <Text fontSize="2xs" color="gray.500" mb={0.5} lineClamp={1}>Unrealized</Text>
+                            <div className="mb-0.5 truncate text-[10px] text-gray-500">Unrealized</div>
                             {hasPrice ? (
                                 <>
-                                    <Text fontSize="xs" fontWeight="medium" color={row.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                    <div className={`text-xs font-medium ${row.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                         <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
-                                    </Text>
-                                    <Text fontSize="2xs" color="gray.500">{`${row.unrealized_pnl_pct >= 0 ? '+' : ''}${Math.round(row.unrealized_pnl_pct * 100)}%`}</Text>
+                                    </div>
+                                    <div className="text-[10px] text-gray-500">{`${row.unrealized_pnl_pct >= 0 ? '+' : ''}${Math.round(row.unrealized_pnl_pct * 100)}%`}</div>
                                     {periodDelta && periodLabel && (
-                                        <Text fontSize="2xs" color={periodDelta.unrealized_change >= 0 ? 'green.500' : 'red.500'}>
+                                        <div className={`text-[10px] ${periodDelta.unrealized_change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                                             {periodLabel}: <ValueDisplay value={periodDelta.unrealized_change} currency={baseCurrency} options={compact} />
-                                        </Text>
+                                        </div>
                                     )}
                                 </>
                             ) : (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="xs" color="gray.400">—</Text>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-xs text-gray-400">—</span>
                                     {hasError && <FiAlertCircle size={10} color="#E53E3E" />}
-                                </Flex>
+                                </div>
                             )}
-                        </Box>
+                        </div>
 
                         <Metric label="Realized" flex="1">
-                            <Text fontSize="xs" fontWeight="medium" color={row.realized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                            <div className={`text-xs font-medium ${row.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 <ValueDisplay value={row.realized_pnl} currency={baseCurrency} options={compact} />
-                            </Text>
+                            </div>
                             {row.taxable_realized_pnl !== 0 && (
-                                <Text fontSize="2xs" color="gray.500">
+                                <div className="text-[10px] text-gray-500">
                                     Tax: <ValueDisplay value={row.taxable_realized_pnl} currency={baseCurrency} options={compact} />
-                                </Text>
+                                </div>
                             )}
                             {periodDelta && periodLabel && (
-                                <Text fontSize="2xs" color={periodDelta.realized_in_period >= 0 ? 'green.500' : 'red.500'}>
+                                <div className={`text-[10px] ${periodDelta.realized_in_period >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                                     {periodLabel}: <ValueDisplay value={periodDelta.realized_in_period} currency={baseCurrency} options={compact} />
-                                </Text>
+                                </div>
                             )}
                         </Metric>
 
                         <Metric label="Fees" flex="1">
-                            <Text fontSize="2xs" color="gray.600">
+                            <div className="text-[10px] text-gray-600">
                                 <ValueDisplay value={Math.round(row.total_fees)} currency={baseCurrency} options={compact} />
-                            </Text>
+                            </div>
                         </Metric>
-                    </Flex>
+                    </div>
                 )}
 
                 {/* Live balance indicator — bottom right */}
                 {!isNoPnl && (
-                    <Flex justify="flex-end" mt={0.5}>
+                    <div className="mt-0.5 flex justify-end">
                         {liveBalanceLoading ? (
-                            <Spinner size="xs" color="gray.400" />
+                            <Spinner size="xs" className="text-gray-400" />
                         ) : (
-                            <Flex align="center" gap={0.5}>
+                            <div className="flex items-center gap-0.5">
                                 <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={row.quantity} size="xs" />
                                 {hasLiveErrors && (
                                     <Tooltip
                                         content={
-                                            <Box fontSize="xs">
-                                                <Text fontWeight="medium" mb={1}>Some accounts had fetch errors</Text>
+                                            <div className="text-xs">
+                                                <div className="mb-1 font-medium">Some accounts had fetch errors</div>
                                                 {assetErrorAccounts.map(accId => {
                                                     const errs = liveAccountErrors?.get(accId) ?? [];
                                                     const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
                                                     return errs.map((err, i) => (
-                                                        <Text key={`${accId}-${i}`} color="red.300">{accName}: {err}</Text>
+                                                        <div key={`${accId}-${i}`} className="text-red-300">{accName}: {err}</div>
                                                     ));
                                                 })}
-                                            </Box>
+                                            </div>
                                         }
                                         openDelay={200}
                                     >
-                                        <Text fontSize="xs" color="orange.500" cursor="help" flexShrink={0}>⚠</Text>
+                                        <span className="shrink-0 cursor-help text-xs text-orange-500">⚠</span>
                                     </Tooltip>
                                 )}
-                            </Flex>
+                            </div>
                         )}
-                    </Flex>
+                    </div>
                 )}
 
                 {/* ── Zone 4: Expandable account breakdown ── */}
-                {isExpandable && (
-                    <Collapsible.Root open={isExpanded}>
-                        <Collapsible.Content>
-                            <Box mt={2} pt={2} borderTop="1px solid" borderColor="gray.100">
-                                {accountBalances && accountBalances.length > 0 ? (
-                                    <Flex direction="column" gap={1}>
-                                        {accountBalances.map((balance) => {
-                                            const accountColor = getAccountColor(balance.account_id);
-                                            const unitPrice = row.unit_value;
-                                            const marketValue = unitPrice != null ? balance.qty * unitPrice : 0;
-                                            const unrealizedPnl = marketValue - balance.cost_basis_in_base;
-                                            const unrealizedPnlPct = balance.cost_basis_in_base > 0
-                                                ? unrealizedPnl / balance.cost_basis_in_base
-                                                : 0;
+                {isExpandable && isExpanded && (
+                    <div className="mt-2 border-t border-gray-100 pt-2">
+                        {accountBalances && accountBalances.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                                {accountBalances.map((balance) => {
+                                    const accountColor = getAccountColor(balance.account_id);
+                                    const unitPrice = row.unit_value;
+                                    const marketValue = unitPrice != null ? balance.qty * unitPrice : 0;
+                                    const unrealizedPnl = marketValue - balance.cost_basis_in_base;
+                                    const unrealizedPnlPct = balance.cost_basis_in_base > 0
+                                        ? unrealizedPnl / balance.cost_basis_in_base
+                                        : 0;
 
-                                            const acctLiveQty = liveAccountBalanceMap?.get(balance.account_id);
-                                            const acctDelta = computeDelta(balance.qty, acctLiveQty);
-                                            const acctErrors = liveAccountErrors?.get(balance.account_id);
-                                            const acctHasError = acctErrors && acctErrors.length > 0 && acctLiveQty == null;
+                                    const acctLiveQty = liveAccountBalanceMap?.get(balance.account_id);
+                                    const acctDelta = computeDelta(balance.qty, acctLiveQty);
+                                    const acctErrors = liveAccountErrors?.get(balance.account_id);
+                                    const acctHasError = acctErrors && acctErrors.length > 0 && acctLiveQty == null;
 
-                                            return (
-                                                <Box
-                                                    key={balance.account_id}
-                                                    bg="gray.50"
-                                                    borderRadius="sm"
-                                                    px={2}
-                                                    py={1.5}
-                                                    borderLeft="3px solid"
-                                                    borderLeftColor={accountColor}
+                                    return (
+                                        <div
+                                            key={balance.account_id}
+                                            className="rounded-sm bg-gray-50 px-2 py-1.5"
+                                            style={{ borderLeft: `3px solid ${accountColor}` }}
+                                        >
+                                            {/* Account name */}
+                                            <div className="mb-1 flex items-center gap-1">
+                                                <div className="h-[6px] w-[6px] shrink-0 rounded-full" style={{ backgroundColor: accountColor }} />
+                                                <span
+                                                    className={`text-xs font-medium text-gray-700 ${onAccountClick ? 'cursor-pointer hover:text-blue-600 hover:underline' : ''}`}
+                                                    onClick={(e) => {
+                                                        if (onAccountClick && assetId != null) {
+                                                            e.stopPropagation();
+                                                            onAccountClick(assetId, balance.account_id);
+                                                        }
+                                                    }}
                                                 >
-                                                    {/* Account name */}
-                                                    <Flex align="center" gap={1} mb={1}>
-                                                        <Box w="6px" h="6px" borderRadius="full" bg={accountColor} flexShrink={0} />
-                                                        <Text
-                                                            fontSize="xs"
-                                                            fontWeight="medium"
-                                                            color="gray.700"
-                                                            cursor={onAccountClick ? 'pointer' : undefined}
-                                                            _hover={onAccountClick ? { textDecoration: 'underline', color: 'blue.600' } : undefined}
-                                                            onClick={(e) => {
-                                                                if (onAccountClick && assetId != null) {
-                                                                    e.stopPropagation();
-                                                                    onAccountClick(assetId, balance.account_id);
-                                                                }
-                                                            }}
-                                                        >
-                                                            {balance.account_name}
-                                                        </Text>
-                                                    </Flex>
+                                                    {balance.account_name}
+                                                </span>
+                                            </div>
 
-                                                    {/* Account-level metrics */}
-                                                    <Flex gap={3} fontSize="xs">
-                                                        <Box flex="1">
-                                                            <Text fontSize="2xs" color="gray.400">Qty</Text>
-                                                            <Flex align="center" gap={1}>
-                                                                <Text color="gray.600"><ValueDisplay value={balance.qty} options={compact} /></Text>
-                                                                {acctHasError ? (
-                                                                    <Tooltip
-                                                                        content={
-                                                                            <Box fontSize="xs">
-                                                                                <Text fontWeight="medium" mb={1}>Fetch error:</Text>
-                                                                                {acctErrors!.map((err, i) => <Text key={i} color="red.300">{err}</Text>)}
-                                                                            </Box>
-                                                                        }
-                                                                        openDelay={200}
-                                                                    >
-                                                                        <Text fontSize="xs" color="red.500" cursor="help">⚠</Text>
-                                                                    </Tooltip>
-                                                                ) : (
-                                                                    <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={balance.qty} size="xs" />
-                                                                )}
-                                                            </Flex>
-                                                        </Box>
-                                                        <Box flex="1">
-                                                            <Text fontSize="2xs" color="gray.400">Value</Text>
-                                                            <Text color="gray.600">
-                                                                {unitPrice != null
-                                                                    ? <ValueDisplay value={marketValue} currency={baseCurrency} options={compact} />
-                                                                    : '—'}
-                                                            </Text>
-                                                        </Box>
-                                                        <Box flex="1">
-                                                            <Text fontSize="2xs" color="gray.400">Unrealized</Text>
-                                                            {unitPrice != null ? (
-                                                                <>
-                                                                    <Text color={unrealizedPnl >= 0 ? 'green.600' : 'red.600'}>
-                                                                        <ValueDisplay value={unrealizedPnl} currency={baseCurrency} options={compact} />
-                                                                    </Text>
-                                                                    <Text fontSize="2xs" color="gray.500">{formatPct(unrealizedPnlPct)}</Text>
-                                                                </>
-                                                            ) : (
-                                                                <Text color="gray.500">—</Text>
-                                                            )}
-                                                        </Box>
-                                                    </Flex>
-                                                </Box>
-                                            );
-                                        })}
-                                    </Flex>
-                                ) : (
-                                    <Text fontSize="xs" color="gray.400" textAlign="center" py={2}>
-                                        Loading account breakdown...
-                                    </Text>
-                                )}
-                            </Box>
-                        </Collapsible.Content>
-                    </Collapsible.Root>
+                                            {/* Account-level metrics */}
+                                            <div className="flex gap-3 text-xs">
+                                                <div className="flex-1">
+                                                    <div className="text-[10px] text-gray-400">Qty</div>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-gray-600"><ValueDisplay value={balance.qty} options={compact} /></span>
+                                                        {acctHasError ? (
+                                                            <Tooltip
+                                                                content={
+                                                                    <div className="text-xs">
+                                                                        <div className="mb-1 font-medium">Fetch error:</div>
+                                                                        {acctErrors!.map((err, i) => <div key={i} className="text-red-300">{err}</div>)}
+                                                                    </div>
+                                                                }
+                                                                openDelay={200}
+                                                            >
+                                                                <span className="cursor-help text-xs text-red-500">⚠</span>
+                                                            </Tooltip>
+                                                        ) : (
+                                                            <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={balance.qty} size="xs" />
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="text-[10px] text-gray-400">Value</div>
+                                                    <div className="text-gray-600">
+                                                        {unitPrice != null
+                                                            ? <ValueDisplay value={marketValue} currency={baseCurrency} options={compact} />
+                                                            : '—'}
+                                                    </div>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="text-[10px] text-gray-400">Unrealized</div>
+                                                    {unitPrice != null ? (
+                                                        <>
+                                                            <div className={unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                                                <ValueDisplay value={unrealizedPnl} currency={baseCurrency} options={compact} />
+                                                            </div>
+                                                            <div className="text-[10px] text-gray-500">{formatPct(unrealizedPnlPct)}</div>
+                                                        </>
+                                                    ) : (
+                                                        <div className="text-gray-500">—</div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="py-2 text-center text-xs text-gray-400">
+                                Loading account breakdown...
+                            </div>
+                        )}
+                    </div>
                 )}
-            </Card.Body>
-        </Card.Root>
+        </div>
     );
 };
 

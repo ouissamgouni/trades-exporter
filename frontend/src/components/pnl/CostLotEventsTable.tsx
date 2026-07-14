@@ -18,8 +18,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Box, Flex, Button, Badge, Text, IconButton, Spinner } from '@chakra-ui/react';
-import { Table } from '@chakra-ui/react';
+import { Button, Badge, Spinner, type BadgeColorScheme, type ButtonColorScheme } from '../ui/primitives';
 import { Tooltip } from '../ui/tooltip';
 import { FiHelpCircle, FiRefreshCw, FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight } from 'react-icons/fi';
 import { usePagination } from '../../hooks/usePagination';
@@ -134,12 +133,35 @@ const formatSmartNumber = (value: number): string => {
     return value.toFixed(2);
 };
 
-const getPatternColor = (pattern: string): string => {
-    const colorMap: Record<string, string> = {
+const BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toBadgeColor = (c: string): BadgeColorScheme => {
+    if ((BADGE_COLORS as string[]).includes(c)) return c as BadgeColorScheme;
+    if (c === 'teal') return 'green';
+    return 'gray';
+};
+
+const BUTTON_COLORS: ButtonColorScheme[] = ['blue', 'red', 'green', 'gray'];
+const toButtonColor = (c: string): ButtonColorScheme => {
+    if ((BUTTON_COLORS as string[]).includes(c)) return c as ButtonColorScheme;
+    if (c === 'orange') return 'red';
+    if (c === 'yellow') return 'gray';
+    if (c === 'teal') return 'green';
+    return 'gray';
+};
+
+/** Convert a Chakra-style dot-token (e.g. "green.50") to a Tailwind bg-* class */
+const bgTokenToClass = (token: string): string => {
+    const [name, shade] = token.split('.');
+    if (!name || !shade) return 'bg-gray-50';
+    return `bg-${name === 'teal' ? 'green' : name}-${shade}`;
+};
+
+const getPatternColor = (pattern: string): BadgeColorScheme => {
+    const colorMap: Record<string, BadgeColorScheme> = {
         'internal_transfer': 'blue',
         'unmatched_internal_transfer': 'orange',
         'swap': 'purple',
-        'split': 'teal',
+        'split': 'green',
         'flow': 'green',
         'unknown': 'gray',
     };
@@ -211,28 +233,28 @@ const EventLegendTooltip: React.FC = () => {
     return (
         <Tooltip
             content={
-                <Box fontSize="xs" maxW="400px" p={2}>
-                    <Text fontWeight="bold" mb={2}>Cost Lot Event Types:</Text>
+                <div className="max-w-[400px] p-2 text-xs">
+                    <div className="mb-2 font-bold">Cost Lot Event Types:</div>
                     {getSortedEventTypes().map(type => {
                         const cfg = EVENT_TYPE_CONFIG[type];
                         return (
-                            <Flex key={type} gap={2} mb={2} align="flex-start">
-                                <Badge size="xs" colorPalette={cfg.color} flexShrink={0}>
+                            <div key={type} className="mb-2 flex items-start gap-2">
+                                <Badge colorScheme={toBadgeColor(cfg.color)} className="shrink-0">
                                     {cfg.icon}
                                 </Badge>
-                                <Box>
-                                    <Text fontWeight="medium">{cfg.label}</Text>
-                                    <Text color="gray.500" fontSize="2xs">{cfg.description}</Text>
-                                </Box>
-                            </Flex>
+                                <div>
+                                    <div className="font-medium">{cfg.label}</div>
+                                    <div className="text-[10px] text-gray-500">{cfg.description}</div>
+                                </div>
+                            </div>
                         );
                     })}
-                </Box>
+                </div>
             }
         >
-            <IconButton size="xs" variant="ghost" aria-label="Event types help">
+            <Button variant="ghost" size="sm" aria-label="Event types help" className="h-6 min-w-[24px] p-0">
                 <FiHelpCircle />
-            </IconButton>
+            </Button>
         </Tooltip>
     );
 };
@@ -628,44 +650,28 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
     // Loading state
     if (isLoading) {
         return (
-            <Box p={4}>
-                <Flex
-                    direction="column"
-                    align="center"
-                    justify="center"
-                    py={12}
-                    px={4}
-                    minH="200px"
-                >
-                    <Spinner size="lg" mb={4} />
-                    <Text fontSize="sm" color="gray.500">Loading cost lot events...</Text>
-                </Flex>
-            </Box>
+            <div className="p-4">
+                <div className="flex min-h-[200px] flex-col items-center justify-center px-4 py-12">
+                    <Spinner size="lg" className="mb-4" />
+                    <div className="text-sm text-gray-500">Loading cost lot events...</div>
+                </div>
+            </div>
         );
     }
 
     // Error state
     if (error) {
         return (
-            <Box p={4}>
-                <Flex
-                    direction="column"
-                    align="center"
-                    justify="center"
-                    py={12}
-                    px={4}
-                    bg="red.50"
-                    borderRadius="md"
-                    minH="200px"
-                >
-                    <Text fontSize="lg" fontWeight="medium" color="red.600" mb={2}>
+            <div className="p-4">
+                <div className="flex min-h-[200px] flex-col items-center justify-center bg-red-50 px-4 py-12">
+                    <div className="mb-2 text-lg font-medium text-red-600">
                         Error Loading Events
-                    </Text>
-                    <Text fontSize="sm" color="gray.600" textAlign="center">
+                    </div>
+                    <div className="text-center text-sm text-gray-600">
                         {error}
-                    </Text>
-                </Flex>
-            </Box>
+                    </div>
+                </div>
+            </div>
         );
     }
 
@@ -686,7 +692,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
         );
 
         return (
-            <Box>
+            <div>
                 {/* Filter Bar - shown even when empty so user can adjust filters */}
                 {enabledFeatures.filterBar && !compact && (
                     <CostLotEventsFilterBar
@@ -709,15 +715,15 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                 )}
                 {/* Compact mode filter header */}
                 {compact && enabledFeatures.eventTypeFilters && (
-                    <Flex gap={2} mb={3} align="center" justify="space-between" pb={2} borderBottom="1px solid" borderColor="gray.200">
-                        <Text fontSize="xs" fontWeight="semibold" color="gray.600">
+                    <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-200 pb-2">
+                        <div className="text-xs font-semibold text-gray-600">
                             Event Filters
-                        </Text>
+                        </div>
                         {hasActiveFilters && (
                             <Button
-                                size="xs"
+                                size="sm"
                                 variant="ghost"
-                                colorPalette="gray"
+                                colorScheme="gray"
                                 onClick={() => {
                                     setFilterState(prev => ({
                                         ...prev,
@@ -731,32 +737,23 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                 <span style={{ marginLeft: '4px' }}>Reset Filters</span>
                             </Button>
                         )}
-                    </Flex>
+                    </div>
                 )}
-                <Flex
-                    direction="column"
-                    align="center"
-                    justify="center"
-                    py={12}
-                    px={4}
-                    bg="gray.50"
-                    borderRadius="md"
-                    minH="200px"
-                >
-                    <Text fontSize="lg" fontWeight="medium" color="gray.600" mb={2}>
+                <div className="flex min-h-[200px] flex-col items-center justify-center bg-gray-50 px-4 py-12">
+                    <div className="mb-2 text-lg font-medium text-gray-600">
                         {hasActiveFilters ? 'No Events Match Filters' : 'No Cost Lot Events'}
-                    </Text>
-                    <Text fontSize="sm" color="gray.500" textAlign="center" mb={hasActiveFilters ? 3 : 0}>
+                    </div>
+                    <div className={`text-center text-sm text-gray-500 ${hasActiveFilters ? 'mb-3' : ''}`}>
                         {hasActiveFilters
                             ? 'No events match your current filter criteria. Try adjusting or clearing the filters.'
                             : unitId
                                 ? 'No cost lot events for this unit.'
                                 : 'Cost lot events will appear here after P&L calculation.'}
-                    </Text>
+                    </div>
                     {hasActiveFilters && (
                         <Button
                             size="sm"
-                            colorPalette="blue"
+                            colorScheme="blue"
                             variant="outline"
                             onClick={() => {
                                 setFilterState({
@@ -775,13 +772,13 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                             <span style={{ marginLeft: '6px' }}>Clear All Filters</span>
                         </Button>
                     )}
-                </Flex>
-            </Box>
+                </div>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {/* New Collapsible Filter Bar - shown in AUDIT mode */}
             {enabledFeatures.filterBar && !compact && (
                 <CostLotEventsFilterBar
@@ -807,11 +804,11 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
             {compact && enabledFeatures.eventTypeFilters && (
                 <>
                     {/* Filter Header with Count Badge and Reset */}
-                    <Flex gap={2} mb={3} align="center" justify="space-between" pb={2} borderBottom="1px solid" borderColor="gray.200">
-                        <Flex gap={2} align="center">
-                            <Text fontSize="xs" fontWeight="semibold" color="gray.600">
+                    <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-200 pb-2">
+                        <div className="flex items-center gap-2">
+                            <div className="text-xs font-semibold text-gray-600">
                                 Event Filters
-                            </Text>
+                            </div>
                             {(() => {
                                 const defaultTypes = getDefaultEventTypes();
                                 const activeFilterCount = (
@@ -819,12 +816,12 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                     (filterState.unitPatterns.length !== getDefaultUnitPatterns().length ? 1 : 0)
                                 );
                                 return activeFilterCount > 0 ? (
-                                    <Badge size="xs" colorPalette="blue">
+                                    <Badge colorScheme="blue">
                                         {activeFilterCount} active
                                     </Badge>
                                 ) : null;
                             })()}
-                        </Flex>
+                        </div>
                         {(() => {
                             const defaultTypes = getDefaultEventTypes();
                             const hasActiveFilters = (
@@ -834,9 +831,9 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                             );
                             return hasActiveFilters ? (
                                 <Button
-                                    size="xs"
+                                    size="sm"
                                     variant="ghost"
-                                    colorPalette="gray"
+                                    colorScheme="gray"
                                     onClick={() => {
                                         setFilterState(prev => ({
                                             ...prev,
@@ -852,27 +849,14 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                 </Button>
                             ) : null;
                         })()}
-                    </Flex>
+                    </div>
 
                     {/* Event Type Filter Buttons */}
-                    <Flex gap={1} mb={3} wrap="wrap" position="relative">
+                    <div className="relative mb-3 flex flex-wrap gap-1">
                         {isRefreshing && (
-                            <Box
-                                position="absolute"
-                                top={0}
-                                left={0}
-                                right={0}
-                                bottom={0}
-                                bg="white"
-                                opacity={0.7}
-                                borderRadius="md"
-                                zIndex={1}
-                                display="flex"
-                                alignItems="center"
-                                justifyContent="center"
-                            >
+                            <div className="absolute inset-0 z-[1] flex items-center justify-center bg-white opacity-70">
                                 <Spinner size="sm" />
-                            </Box>
+                            </div>
                         )}
                         {getSortedEventTypes().map(type => {
                             const cfg = EVENT_TYPE_CONFIG[type];
@@ -882,124 +866,112 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                             return (
                                 <Button
                                     key={type}
-                                    size="xs"
+                                    size="sm"
                                     variant={filterState.eventTypes.includes(type) ? 'solid' : 'outline'}
-                                    colorPalette={cfg.color}
+                                    colorScheme={toButtonColor(cfg.color)}
                                     onClick={() => toggleEventType(type)}
                                     disabled={isRefreshing}
+                                    className="h-6 px-2 text-xs"
                                 >
                                     {cfg.icon} {cfg.label} ({count})
                                 </Button>
                             );
                         })}
-                    </Flex>
+                    </div>
                 </>
             )}
 
             {/* Event Legend for compact mode */}
             {compact && enabledFeatures.eventLegend && (
-                <Flex justify="flex-end" mb={2}>
+                <div className="mb-2 flex justify-end">
                     <EventLegendTooltip />
-                </Flex>
+                </div>
             )}
 
             {/* Summary Stats */}
             {!compact && (
-                <Flex gap={4} mb={3} fontSize="sm" color="gray.600" wrap="wrap">
-                    <Text>
-                        Showing: <Text as="span" fontWeight="bold">{filtered.length}</Text> of {total} events
-                    </Text>
-                </Flex>
+                <div className="mb-3 flex flex-wrap gap-4 text-sm text-gray-600">
+                    <div>
+                        Showing: <span className="font-bold">{filtered.length}</span> of {total} events
+                    </div>
+                </div>
             )}
 
             {/* Table */}
-            <Box position="relative">
+            <div className="relative">
                 {isRefreshing && (
-                    <Flex
-                        position="absolute"
-                        inset={0}
-                        bg="whiteAlpha.800"
-                        zIndex={10}
-                        align="center"
-                        justify="center"
-                        direction="column"
-                        gap={2}
-                    >
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/80">
                         <Spinner size="md" />
-                        <Text fontSize="sm" color="gray.600">Applying filter...</Text>
-                    </Flex>
+                        <div className="text-sm text-gray-600">Applying filter...</div>
+                    </div>
                 )}
-                <Box
-                    overflowX="auto"
-                    style={{ fontSize: compact ? '8px' : '9px' }}
-                    maxH={maxHeight}
-                    overflowY={maxHeight ? 'auto' : undefined}
-                    opacity={isRefreshing ? 0.5 : 1}
-                    transition="opacity 0.2s"
+                <div
+                    className={`overflow-x-auto transition-opacity duration-200 ${isRefreshing ? 'opacity-50' : 'opacity-100'} ${maxHeight ? 'overflow-y-auto' : ''}`}
+                    style={{ fontSize: compact ? '8px' : '9px', maxHeight }}
                 >
-                    <Table.Root size="sm">
-                        <Table.Header>
-                            <Table.Row>
-                                <Table.ColumnHeader width="50px">ID</Table.ColumnHeader>
-                                <Table.ColumnHeader width="60px">Type</Table.ColumnHeader>
-                                {columns.timestamp && <Table.ColumnHeader>Timestamp</Table.ColumnHeader>}
-                                {columns.asset && <Table.ColumnHeader>Asset</Table.ColumnHeader>}
-                                {columns.account && <Table.ColumnHeader>Account</Table.ColumnHeader>}
-                                {columns.quantityDelta && <Table.ColumnHeader textAlign="right">Qty Δ</Table.ColumnHeader>}
-                                {columns.costDelta && <Table.ColumnHeader textAlign="right">Cost Δ</Table.ColumnHeader>}
-                                {columns.accountBalance && <Table.ColumnHeader textAlign="right">Acct Balance</Table.ColumnHeader>}
-                                {columns.assetBalance && <Table.ColumnHeader textAlign="right" pr={6}>Asset Balance</Table.ColumnHeader>}
-                                {columns.unit && <Table.ColumnHeader pl={4}>Unit</Table.ColumnHeader>}
-                                {columns.triggeredBy && <Table.ColumnHeader>Triggered By</Table.ColumnHeader>}
-                                {columns.chain && <Table.ColumnHeader textAlign="center" width="40px">Chain</Table.ColumnHeader>}
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
+                    <table className="w-full text-left">
+                        <thead>
+                            <tr>
+                                <th className="w-[50px] px-2 py-1">ID</th>
+                                <th className="w-[60px] px-2 py-1">Type</th>
+                                {columns.timestamp && <th className="px-2 py-1">Timestamp</th>}
+                                {columns.asset && <th className="px-2 py-1">Asset</th>}
+                                {columns.account && <th className="px-2 py-1">Account</th>}
+                                {columns.quantityDelta && <th className="px-2 py-1 text-right">Qty Δ</th>}
+                                {columns.costDelta && <th className="px-2 py-1 text-right">Cost Δ</th>}
+                                {columns.accountBalance && <th className="px-2 py-1 text-right">Acct Balance</th>}
+                                {columns.assetBalance && <th className="px-2 py-1 pr-6 text-right">Asset Balance</th>}
+                                {columns.unit && <th className="px-2 py-1 pl-4">Unit</th>}
+                                {columns.triggeredBy && <th className="px-2 py-1">Triggered By</th>}
+                                {columns.chain && <th className="w-[40px] px-2 py-1 text-center">Chain</th>}
+                            </tr>
+                        </thead>
+                        <tbody>
                             {displayEvents.map((event, index) => {
                                 const cfg = getEventConfig(event.event_type);
                                 const prevEvent = index > 0 ? displayEvents[index - 1] : null;
 
                                 return (
-                                    <Table.Row key={event.event_id} bg={cfg.bgColor}>
-                                        <Table.Cell>
-                                            <Text fontSize="2xs" color="gray.400" fontFamily="mono">#{event.event_id}</Text>
-                                        </Table.Cell>
-                                        <Table.Cell>
+                                    <tr key={event.event_id} className={bgTokenToClass(cfg.bgColor)}>
+                                        <td className="px-2 py-1">
+                                            <div className="font-mono text-[10px] text-gray-400">#{event.event_id}</div>
+                                        </td>
+                                        <td className="px-2 py-1">
                                             <Tooltip content={cfg.description}>
-                                                <Badge size="xs" colorPalette={cfg.color}>
+                                                <Badge colorScheme={toBadgeColor(cfg.color)}>
                                                     {cfg.icon}
                                                 </Badge>
                                             </Tooltip>
-                                        </Table.Cell>
+                                        </td>
 
                                         {columns.timestamp && (
-                                            <Table.Cell fontSize="2xs">
+                                            <td className="px-2 py-1 text-[10px]">
                                                 {compact ? formatCompactDateTime(event.timestamp) : formatDateTimeLocale(event.timestamp)}
-                                            </Table.Cell>
+                                            </td>
                                         )}
 
                                         {columns.asset && (
-                                            <Table.Cell>
-                                                <Badge size="xs">{event.asset?.symbol || '?'}</Badge>
-                                            </Table.Cell>
+                                            <td className="px-2 py-1">
+                                                <Badge>{event.asset?.symbol || '?'}</Badge>
+                                            </td>
                                         )}
 
                                         {columns.account && (
-                                            <Table.Cell fontSize="2xs">
+                                            <td className="px-2 py-1 text-[10px]">
                                                 {event.account_name || '—'}
-                                            </Table.Cell>
+                                            </td>
                                         )}
 
                                         {columns.quantityDelta && (
-                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="2xs">
-                                                <Text color={event.quantity_delta >= 0 ? 'green.600' : 'red.600'}>
+                                            <td className="px-2 py-1 text-right font-mono text-[10px]">
+                                                <span className={event.quantity_delta >= 0 ? 'text-green-600' : 'text-red-600'}>
                                                     {event.quantity_delta >= 0 ? '+' : ''}{formatSmartNumber(event.quantity_delta)}
-                                                </Text>
-                                            </Table.Cell>
+                                                </span>
+                                            </td>
                                         )}
 
                                         {columns.costDelta && (
-                                            <Table.Cell textAlign="right" fontSize="2xs">
+                                            <td className="px-2 py-1 text-right text-[10px]">
                                                 {event.cost_basis_delta != null ? (
                                                     (event.event_type === 'created' || event.event_type === 'created-negative') && event.cost_source && (event.cost_source === 'fmv' || event.cost_source === 'provisional') ? (
                                                         <FmvBadge
@@ -1012,23 +984,23 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                                             stale={event.cost_fmv_stale}
                                                         />
                                                     ) : (
-                                                        <Text color={event.cost_basis_delta >= 0 ? 'green.600' : 'red.600'}>
+                                                        <span className={event.cost_basis_delta >= 0 ? 'text-green-600' : 'text-red-600'}>
                                                             {event.cost_basis_delta >= 0 ? '+' : ''}{formatSmartNumber(event.cost_basis_delta)}
-                                                        </Text>
+                                                        </span>
                                                     )
                                                 ) : '—'}
-                                            </Table.Cell>
+                                            </td>
                                         )}
 
                                         {columns.accountBalance && (
-                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="2xs">
+                                            <td className="px-2 py-1 text-right font-mono text-[10px]">
                                                 <Tooltip content="Balance for this account after event">
-                                                    <Text
-                                                        color={
-                                                            event.account_balance_after == null ? 'gray.400' :
-                                                                prevEvent?.account_balance_after == null ? 'gray.600' :
-                                                                    event.account_balance_after > prevEvent.account_balance_after ? 'green.600' :
-                                                                        event.account_balance_after < prevEvent.account_balance_after ? 'red.600' : 'gray.600'
+                                                    <span
+                                                        className={
+                                                            event.account_balance_after == null ? 'text-gray-400' :
+                                                                prevEvent?.account_balance_after == null ? 'text-gray-600' :
+                                                                    event.account_balance_after > prevEvent.account_balance_after ? 'text-green-600' :
+                                                                        event.account_balance_after < prevEvent.account_balance_after ? 'text-red-600' : 'text-gray-600'
                                                         }
                                                     >
                                                         {event.account_balance_after != null ? (
@@ -1040,22 +1012,20 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                                                 {formatSmartNumber(event.account_balance_after)}
                                                             </>
                                                         ) : '—'}
-                                                    </Text>
+                                                    </span>
                                                 </Tooltip>
-                                            </Table.Cell>
+                                            </td>
                                         )}
 
                                         {columns.assetBalance && (
-                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="2xs" pr={6}>
+                                            <td className="px-2 py-1 pr-6 text-right font-mono text-[10px]">
                                                 <Tooltip content="Total asset balance across all accounts after event">
-                                                    <Text
-                                                        fontWeight="medium"
-                                                        color={
-                                                            event.balance_after == null ? 'gray.400' :
-                                                                prevEvent?.balance_after == null ? 'gray.600' :
-                                                                    event.balance_after > prevEvent.balance_after ? 'green.600' :
-                                                                        event.balance_after < prevEvent.balance_after ? 'red.600' : 'gray.600'
-                                                        }
+                                                    <span
+                                                        className={`font-medium ${event.balance_after == null ? 'text-gray-400' :
+                                                                prevEvent?.balance_after == null ? 'text-gray-600' :
+                                                                    event.balance_after > prevEvent.balance_after ? 'text-green-600' :
+                                                                        event.balance_after < prevEvent.balance_after ? 'text-red-600' : 'text-gray-600'
+                                                            }`}
                                                     >
                                                         {event.balance_after != null ? (
                                                             <>
@@ -1066,17 +1036,17 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                                                 {formatSmartNumber(event.balance_after)}
                                                             </>
                                                         ) : '—'}
-                                                    </Text>
+                                                    </span>
                                                 </Tooltip>
-                                            </Table.Cell>
+                                            </td>
                                         )}
 
                                         {columns.unit && (
-                                            <Table.Cell fontSize="2xs" fontFamily="mono" pl={4}>
+                                            <td className="px-2 py-1 pl-4 font-mono text-[10px]">
                                                 {event.triggered_by_unit_id && event.triggered_by_unit_pattern ? (
-                                                    <Flex gap={1} align="center">
+                                                    <div className="flex items-center gap-1">
                                                         <Tooltip content={event.triggered_by_unit_pattern}>
-                                                            <Badge size="xs" colorPalette={getPatternColor(event.triggered_by_unit_pattern)}>
+                                                            <Badge colorScheme={getPatternColor(event.triggered_by_unit_pattern)}>
                                                                 {event.triggered_by_unit_pattern === 'internal_transfer' ? '⇄' :
                                                                     event.triggered_by_unit_pattern === 'unmatched_internal_transfer' ? '⇄?' :
                                                                         event.triggered_by_unit_pattern === 'swap' ? '⇋' :
@@ -1085,25 +1055,21 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                                                                     event.triggered_by_unit_pattern.charAt(0).toUpperCase()}
                                                             </Badge>
                                                         </Tooltip>
-                                                        <Text
-                                                            as="span"
-                                                            color={onUnitClick ? 'blue.500' : 'gray.500'}
-                                                            fontSize="9px"
-                                                            cursor={onUnitClick ? 'pointer' : undefined}
-                                                            _hover={onUnitClick ? { textDecoration: 'underline' } : undefined}
+                                                        <span
+                                                            className={`text-[9px] ${onUnitClick ? 'cursor-pointer text-blue-500 hover:underline' : 'text-gray-500'}`}
                                                             onClick={() => onUnitClick?.(event.triggered_by_unit_id!)}
                                                         >
                                                             #{event.triggered_by_unit_id}
-                                                        </Text>
-                                                    </Flex>
+                                                        </span>
+                                                    </div>
                                                 ) : (
-                                                    <span style={{ color: 'var(--chakra-colors-gray-400)' }}>—</span>
+                                                    <span className="text-gray-400">—</span>
                                                 )}
-                                            </Table.Cell>
+                                            </td>
                                         )}
 
                                         {columns.triggeredBy && (
-                                            <Table.Cell fontSize="2xs">
+                                            <td className="px-2 py-1 text-[10px]">
                                                 {event.triggered_by_transaction_id ? (
                                                     <TransactionTooltip
                                                         txId={event.triggered_by_transaction_id}
@@ -1111,41 +1077,42 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                                         onTransactionClick={onTransactionClick}
                                                     >
                                                         <Button
-                                                            size="xs"
+                                                            size="sm"
                                                             variant="ghost"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 onTransactionClick?.(event.triggered_by_transaction_id!);
                                                             }}
+                                                            className="h-5 px-1 text-[10px]"
                                                         >
                                                             #{event.triggered_by_transaction_id}
                                                         </Button>
                                                     </TransactionTooltip>
                                                 ) : (
-                                                    <span style={{ color: 'var(--chakra-colors-gray-400)' }}>—</span>
+                                                    <span className="text-gray-400">—</span>
                                                 )}
-                                            </Table.Cell>
+                                            </td>
                                         )}
 
                                         {columns.chain && (
-                                            <Table.Cell textAlign="center">
+                                            <td className="px-2 py-1 text-center">
                                                 <CostBasisChainTooltip
                                                     eventId={event.event_id}
                                                     versionId={versionId}
                                                     baseCurrency={baseCurrency}
                                                     onTransactionClick={onTransactionClick}
                                                 >
-                                                    <Text fontSize="2xs" color="blue.400" cursor="help" _hover={{ textDecoration: 'underline' }}>🔗</Text>
+                                                    <span className="cursor-help text-[10px] text-blue-400 hover:underline">🔗</span>
                                                 </CostBasisChainTooltip>
-                                            </Table.Cell>
+                                            </td>
                                         )}
-                                    </Table.Row>
+                                    </tr>
                                 );
                             })}
-                        </Table.Body>
-                    </Table.Root>
-                </Box>
-            </Box>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
             {/* Pagination */}
             {!hidePagination && enabledFeatures.pagination && total > 0 && (() => {
@@ -1153,44 +1120,44 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                 const pageCount = Math.max(1, Math.ceil(total / pagination.pageSize));
                 const safePage = pagination.page;
                 return (
-                    <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
-                        <Flex align="center" gap={2}>
-                            <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                            <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                    <div className="flex w-full items-center justify-between px-3 py-2">
+                        <div className="flex items-center gap-2">
+                            <div className="text-[10px] text-gray-500">Rows:</div>
+                            <div className="inline-flex overflow-hidden border border-gray-200">
                                 {PAGE_SIZE_OPTIONS.map(size => (
-                                    <Button key={size} size="2xs"
+                                    <Button key={size}
+                                        size="sm"
                                         variant={pagination.pageSize === size ? 'subtle' : 'ghost'}
-                                        colorPalette={pagination.pageSize === size ? 'blue' : 'gray'}
-                                        borderRadius="0"
+                                        colorScheme={pagination.pageSize === size ? 'blue' : 'gray'}
                                         onClick={() => { pagination.setPageSize(size); pagination.setPage(1); }}
-                                        px={2} fontSize="xs">
+                                        className="h-6 px-2 text-xs">
                                         {size}
                                     </Button>
                                 ))}
-                            </Flex>
-                        </Flex>
-                        <Text fontSize="2xs" color="gray.500">
+                            </div>
+                        </div>
+                        <div className="text-[10px] text-gray-500">
                             {(safePage - 1) * pagination.pageSize + 1}–{Math.min(safePage * pagination.pageSize, total)} of {total}
-                        </Text>
-                        <Flex align="center" gap={1}>
-                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(1)} disabled={safePage <= 1} px={1}>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <Button size="sm" variant="ghost" onClick={() => pagination.setPage(1)} disabled={safePage <= 1} className="h-6 px-1">
                                 <FiChevronsLeft size={12} />
                             </Button>
-                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(safePage - 1)} disabled={safePage <= 1} px={1}>
+                            <Button size="sm" variant="ghost" onClick={() => pagination.setPage(safePage - 1)} disabled={safePage <= 1} className="h-6 px-1">
                                 <FiChevronLeft size={14} />
                             </Button>
-                            <Text fontSize="xs" color="gray.600" mx={1}>{safePage} / {pageCount}</Text>
-                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(safePage + 1)} disabled={safePage >= pageCount} px={1}>
+                            <div className="mx-1 text-xs text-gray-600">{safePage} / {pageCount}</div>
+                            <Button size="sm" variant="ghost" onClick={() => pagination.setPage(safePage + 1)} disabled={safePage >= pageCount} className="h-6 px-1">
                                 <FiChevronRight size={14} />
                             </Button>
-                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(pageCount)} disabled={safePage >= pageCount} px={1}>
+                            <Button size="sm" variant="ghost" onClick={() => pagination.setPage(pageCount)} disabled={safePage >= pageCount} className="h-6 px-1">
                                 <FiChevronsRight size={12} />
                             </Button>
-                        </Flex>
-                    </Flex>
+                        </div>
+                    </div>
                 );
             })()}
-        </Box>
+        </div>
     );
 };
 

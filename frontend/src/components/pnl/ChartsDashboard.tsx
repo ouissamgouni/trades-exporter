@@ -11,8 +11,8 @@
  *   Row 3: Accordion — Cost Basis vs Market Value | Performance Comparison (one at a time)
  */
 import React, { useMemo, useState, useCallback } from 'react';
-import { Badge, Box, Collapsible, Flex, Spinner, Text } from '@chakra-ui/react';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
+import { Badge, Spinner } from '../ui/primitives';
 import { usePortfolioTimeline, type ChartFilterParams, type VersionMetricsResponse, type RangeKey, type GroupBy } from '../../hooks/useChartData';
 import { DimensionWithCategories, Account } from '../../types';
 import type { AssetPnLRow, AccountBalanceBreakdown } from './types';
@@ -127,27 +127,27 @@ export const ChartsDashboard: React.FC<ChartsDashboardProps> = ({
 
     if (!versionId) {
         return (
-            <Box p={8} textAlign="center">
-                <Text color="gray.400">No P&L version selected. Calculate P&L first to see charts.</Text>
-            </Box>
+            <div className="p-8 text-center">
+                <span className="text-slate-400">No P&L version selected. Calculate P&L first to see charts.</span>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {/* Loading state */}
             {timeline.isLoading && (
-                <Flex justify="center" align="center" py={4} gap={2}>
-                    <Spinner size="sm" color="blue.500" />
-                    <Text fontSize="sm" color="gray.500">Loading chart data...</Text>
-                </Flex>
+                <div className="flex items-center justify-center gap-2 py-4">
+                    <Spinner size="sm" className="text-blue-500" />
+                    <span className="text-sm text-slate-500">Loading chart data...</span>
+                </div>
             )}
 
             {/* Error state */}
             {timeline.error && (
-                <Box bg="red.50" border="1px solid" borderColor="red.200" borderRadius="md" p={3} mb={4}>
-                    <Text fontSize="sm" color="red.600">{timeline.error}</Text>
-                </Box>
+                <div className="mb-4 border border-red-200 bg-red-50 p-3">
+                    <span className="text-sm text-red-600">{timeline.error}</span>
+                </div>
             )}
 
             {/* Row 1: TimeframeIndicators — period metrics + best/worst performers */}
@@ -168,137 +168,109 @@ export const ChartsDashboard: React.FC<ChartsDashboardProps> = ({
             />
 
             {/* Row 2: Treemap / Pie — collapsible accordion */}
-            <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden" mb={2} mt={4}>
-                <Flex
-                    align="center"
-                    gap={2}
-                    px={3}
-                    py={2}
-                    bg={treemapOpen ? 'blue.50' : 'gray.50'}
-                    cursor="pointer"
-                    _hover={{ bg: treemapOpen ? 'blue.100' : 'gray.100' }}
-                    transition="all 0.15s"
+            <div className="mb-2 mt-4 overflow-hidden border border-slate-200">
+                <div
+                    className={`flex select-none items-center gap-2 px-3 py-2 transition-colors cursor-pointer ${treemapOpen ? 'bg-blue-50 hover:bg-blue-100' : 'bg-slate-50 hover:bg-slate-100'
+                        }`}
                     onClick={() => setTreemapOpen(prev => !prev)}
-                    userSelect="none"
                 >
                     {treemapOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                    <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+                    <span className="text-sm font-semibold text-slate-700">
                         Allocation
-                    </Text>
+                    </span>
                     {/* Viz mode toggle inside header */}
-                    <Flex gap={1} ml="auto" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                    <div className="ml-auto flex gap-1" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                         {(['treemap', 'pie'] as const).map(mode => (
                             <Badge
                                 key={mode}
-                                cursor="pointer"
-                                variant={vizMode === mode ? 'solid' : 'outline'}
-                                colorPalette={vizMode === mode ? 'blue' : 'gray'}
+                                className={`cursor-pointer px-2 ${vizMode === mode
+                                    ? 'bg-blue-500 text-white'
+                                    : 'border border-slate-300 bg-white text-slate-700'
+                                    }`}
                                 onClick={() => setVizMode(mode)}
-                                size="sm"
-                                px={2}
                             >
                                 {mode === 'treemap' ? 'Treemap' : 'Pie Chart'}
                             </Badge>
                         ))}
-                    </Flex>
-                </Flex>
-                <Collapsible.Root open={treemapOpen}>
-                    <Collapsible.Content>
-                        <Box>
-                            {vizMode === 'treemap' ? (
-                                <AllocationTreemap
-                                    points={points}
-                                    dimensions={dimensions}
-                                    assetCategoryMaps={assetCategoryMaps}
-                                    accounts={accounts}
-                                    assets={assets}
-                                    baseCurrency={baseCurrency}
-                                    isLoading={timeline.isLoading}
-                                    accountBalances={accountBalances}
-                                />
-                            ) : dimensions.length > 0 ? (
-                                <MarketValuePieChart
-                                    assets={assets}
-                                    dimensions={dimensions}
-                                    baseCurrency={baseCurrency}
-                                />
-                            ) : (
-                                <Box p={4} textAlign="center">
-                                    <Text fontSize="sm" color="gray.400">No dimensions configured for pie chart.</Text>
-                                </Box>
-                            )}
-                        </Box>
-                    </Collapsible.Content>
-                </Collapsible.Root>
-            </Box>
+                    </div>
+                </div>
+                {treemapOpen && (
+                    <div>
+                        {vizMode === 'treemap' ? (
+                            <AllocationTreemap
+                                points={points}
+                                dimensions={dimensions}
+                                assetCategoryMaps={assetCategoryMaps}
+                                accounts={accounts}
+                                assets={assets}
+                                baseCurrency={baseCurrency}
+                                isLoading={timeline.isLoading}
+                                accountBalances={accountBalances}
+                            />
+                        ) : dimensions.length > 0 ? (
+                            <MarketValuePieChart
+                                assets={assets}
+                                dimensions={dimensions}
+                                baseCurrency={baseCurrency}
+                            />
+                        ) : (
+                            <div className="p-4 text-center">
+                                <span className="text-sm text-slate-400">No dimensions configured for pie chart.</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
 
             {/* Row 3: Independent horizontal accordions for each chart */}
-            <Flex direction="column" gap={2}>
+            <div className="flex flex-col gap-2">
                 {/* Cost Basis vs Market Value */}
-                <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
-                    <Flex
-                        align="center"
-                        gap={2}
-                        px={3}
-                        py={2}
-                        bg={costBasisOpen ? 'blue.50' : 'gray.50'}
-                        cursor="pointer"
-                        _hover={{ bg: costBasisOpen ? 'blue.100' : 'gray.100' }}
-                        transition="all 0.15s"
+                <div className="overflow-hidden border border-slate-200">
+                    <div
+                        className={`flex select-none items-center gap-2 px-3 py-2 transition-colors cursor-pointer ${costBasisOpen ? 'bg-blue-50 hover:bg-blue-100' : 'bg-slate-50 hover:bg-slate-100'
+                            }`}
                         onClick={() => setCostBasisOpen(prev => !prev)}
-                        userSelect="none"
                     >
                         {costBasisOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                        <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+                        <span className="text-sm font-semibold text-slate-700">
                             Cost Basis vs Market Value
-                        </Text>
-                    </Flex>
-                    <Collapsible.Root open={costBasisOpen}>
-                        <Collapsible.Content>
-                            <Box>
-                                <CostBasisVsMarketValueChart
-                                    points={points}
-                                    baseCurrency={baseCurrency}
-                                    isLoading={timeline.isLoading}
-                                />
-                            </Box>
-                        </Collapsible.Content>
-                    </Collapsible.Root>
-                </Box>
+                        </span>
+                    </div>
+                    {costBasisOpen && (
+                        <div>
+                            <CostBasisVsMarketValueChart
+                                points={points}
+                                baseCurrency={baseCurrency}
+                                isLoading={timeline.isLoading}
+                            />
+                        </div>
+                    )}
+                </div>
 
                 {/* Performance Comparison */}
-                <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
-                    <Flex
-                        align="center"
-                        gap={2}
-                        px={3}
-                        py={2}
-                        bg={benchmarkOpen ? 'blue.50' : 'gray.50'}
-                        cursor="pointer"
-                        _hover={{ bg: benchmarkOpen ? 'blue.100' : 'gray.100' }}
-                        transition="all 0.15s"
+                <div className="overflow-hidden border border-slate-200">
+                    <div
+                        className={`flex select-none items-center gap-2 px-3 py-2 transition-colors cursor-pointer ${benchmarkOpen ? 'bg-blue-50 hover:bg-blue-100' : 'bg-slate-50 hover:bg-slate-100'
+                            }`}
                         onClick={() => setBenchmarkOpen(prev => !prev)}
-                        userSelect="none"
                     >
                         {benchmarkOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                        <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+                        <span className="text-sm font-semibold text-slate-700">
                             Performance Comparison
-                        </Text>
-                    </Flex>
-                    <Collapsible.Root open={benchmarkOpen}>
-                        <Collapsible.Content>
-                            <Box>
-                                <AssetPerformanceComparison
-                                    versionId={versionId}
-                                    baseCurrency={baseCurrency}
-                                    assets={assets}
-                                    sharedTimeline={sharedTimeline}
-                                />
-                            </Box>
-                        </Collapsible.Content>
-                    </Collapsible.Root>
-                </Box>
-            </Flex>
-        </Box>
+                        </span>
+                    </div>
+                    {benchmarkOpen && (
+                        <div>
+                            <AssetPerformanceComparison
+                                versionId={versionId}
+                                baseCurrency={baseCurrency}
+                                assets={assets}
+                                sharedTimeline={sharedTimeline}
+                            />
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
     );
 };

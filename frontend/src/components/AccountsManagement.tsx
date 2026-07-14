@@ -1,8 +1,6 @@
 import {
-    Badge, Box,
-    Button, Card, Collapsible, Flex, Heading, HStack, IconButton, Input,
-    SimpleGrid, Switch, Text, useDisclosure, VStack, Wrap
-} from '@chakra-ui/react';
+    Badge, Button, Heading, Input, Text,
+} from './ui/primitives';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FiChevronDown, FiChevronRight, FiPieChart, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
 import { LuEraser } from 'react-icons/lu';
@@ -14,6 +12,31 @@ import { DeleteAccountDialog } from './DeleteAccountDialog';
 import { CleanupDialog } from './CleanupDialog';
 import { toaster } from './ui/toaster';
 
+const ToggleSwitch: React.FC<{ checked: boolean; onChange: () => void; title?: string }> = ({ checked, onChange, title }) => (
+    <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        title={title}
+        onClick={onChange}
+        className={`relative h-3 w-[22px] shrink-0 transition-colors ${checked ? 'bg-blue-500' : 'bg-gray-300'}`}
+    >
+        <span
+            className={`absolute top-0.5 h-2.5 w-2.5 bg-white transition-transform ${checked ? 'translate-x-[10px]' : 'translate-x-0.5'}`}
+        />
+    </button>
+);
+
+const FILTER_CHIP_COLORS: Record<string, { active: string; inactive: string }> = {
+    blue: { active: 'bg-blue-600 text-white', inactive: 'border border-blue-300 text-blue-700' },
+    cyan: { active: 'bg-cyan-600 text-white', inactive: 'border border-cyan-300 text-cyan-700' },
+    purple: { active: 'bg-purple-600 text-white', inactive: 'border border-purple-300 text-purple-700' },
+    green: { active: 'bg-green-600 text-white', inactive: 'border border-green-300 text-green-700' },
+    teal: { active: 'bg-teal-600 text-white', inactive: 'border border-teal-300 text-teal-700' },
+    orange: { active: 'bg-orange-600 text-white', inactive: 'border border-orange-300 text-orange-700' },
+    gray: { active: 'bg-gray-600 text-white', inactive: 'border border-gray-300 text-gray-700' },
+};
+
 const AccountsManagement: React.FC = () => {
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [filteredAccounts, setFilteredAccounts] = useState<Account[]>([]);
@@ -21,7 +44,9 @@ const AccountsManagement: React.FC = () => {
     const [searchText, setSearchText] = useState('');
     const [editingAccount, setEditingAccount] = useState<Account | null>(null);
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
-    const { open: isDialogOpen, onOpen: openDialog, onClose: closeDialog } = useDisclosure();
+    const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const openDialog = () => setIsDialogOpen(true);
+    const closeDialog = () => setIsDialogOpen(false);
 
     // Delete dialog state
     const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
@@ -121,12 +146,22 @@ const AccountsManagement: React.FC = () => {
 
     // Type metadata for badges and colors
     const TYPE_META: Record<string, { label: string; color: string; borderColor: string }> = {
-        cex: { label: 'CEX', color: 'blue', borderColor: 'blue.400' },
-        dex: { label: 'DEX', color: 'cyan', borderColor: 'cyan.400' },
-        wallet: { label: 'Wallet', color: 'purple', borderColor: 'purple.400' },
-        broker: { label: 'Broker', color: 'green', borderColor: 'green.400' },
-        bank: { label: 'Bank', color: 'teal', borderColor: 'teal.400' },
-        investment: { label: 'Invest', color: 'orange', borderColor: 'orange.400' },
+        cex: { label: 'CEX', color: 'blue', borderColor: 'border-l-blue-400' },
+        dex: { label: 'DEX', color: 'cyan', borderColor: 'border-l-cyan-400' },
+        wallet: { label: 'Wallet', color: 'purple', borderColor: 'border-l-purple-400' },
+        broker: { label: 'Broker', color: 'green', borderColor: 'border-l-green-400' },
+        bank: { label: 'Bank', color: 'teal', borderColor: 'border-l-teal-400' },
+        investment: { label: 'Invest', color: 'orange', borderColor: 'border-l-orange-400' },
+    };
+
+    const TYPE_TEXT_400: Record<string, string> = {
+        blue: 'text-blue-400',
+        cyan: 'text-cyan-400',
+        purple: 'text-purple-400',
+        green: 'text-green-400',
+        teal: 'text-teal-400',
+        orange: 'text-orange-400',
+        gray: 'text-gray-400',
     };
 
     // Filter chip state
@@ -232,17 +267,17 @@ const AccountsManagement: React.FC = () => {
     };
 
     return (
-        <Box p={6}>
-            <VStack align="stretch" gap={4}>
+        <div className="p-6">
+            <div className="flex flex-col gap-4">
                 {/* Header */}
-                <HStack justify="space-between">
-                    <Box>
-                        <Heading size="lg">Accounts & Connectors</Heading>
-                        <Text fontSize="sm" color="gray.600" mt={1}>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <Heading className="text-lg">Accounts & Connectors</Heading>
+                        <Text className="mt-1 block text-sm text-gray-600">
                             Manage accounts with their data connectors inline. Click an account to configure connectors.
                         </Text>
-                    </Box>
-                    <HStack gap={2}>
+                    </div>
+                    <div className="flex items-center gap-2">
                         <Button size="sm" variant="ghost" onClick={handleGlobalBalanceClick}>
                             <FiPieChart /> Balance
                         </Button>
@@ -258,241 +293,209 @@ const AccountsManagement: React.FC = () => {
                         >
                             <FiPlus /> Add Account
                         </Button>
-                    </HStack>
-                </HStack>
+                    </div>
+                </div>
 
                 {/* Search + Filter Chips */}
-                <VStack align="stretch" gap={2}>
+                <div className="flex flex-col gap-2">
                     <Input
                         placeholder="Search by name or identifier..."
                         value={searchText}
                         onChange={(e) => setSearchText(e.target.value)}
-                        maxW="400px"
-                        size="sm"
+                        className="max-w-[400px]"
                     />
                     {(availableTypes.length > 1 || availableGroups.length > 0) && (
-                        <Wrap gap={1.5}>
+                        <div className="flex flex-wrap gap-1.5">
                             {availableTypes.map(type => {
                                 const meta = TYPE_META[type];
                                 const isActive = activeTypeFilters.has(type);
                                 const count = filteredAccounts.filter(a => a.account_type === type).length;
+                                const chipColors = FILTER_CHIP_COLORS[meta?.color || 'gray'];
                                 return (
-                                    <Badge
+                                    <button
                                         key={type}
-                                        size="sm"
-                                        variant={isActive ? 'solid' : 'outline'}
-                                        colorPalette={meta?.color || 'gray'}
-                                        cursor="pointer"
+                                        type="button"
                                         onClick={() => toggleTypeFilter(type)}
-                                        _hover={{ opacity: 0.8 }}
-                                        userSelect="none"
+                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium hover:opacity-80 ${isActive ? chipColors.active : chipColors.inactive}`}
                                     >
                                         {meta?.label || type} ({count})
-                                    </Badge>
+                                    </button>
                                 );
                             })}
                             {availableGroups.length > 0 && (
-                                <Box borderLeftWidth="1px" borderColor="gray.300" h="20px" mx={1} />
+                                <div className="mx-1 h-[20px] border-l border-gray-300" />
                             )}
                             {availableGroups.map(group => {
                                 const isActive = activeGroupFilters.has(group);
                                 const count = filteredAccounts.filter(a => a.group === group).length;
+                                const chipColors = FILTER_CHIP_COLORS.gray;
                                 return (
-                                    <Badge
+                                    <button
                                         key={group}
-                                        size="sm"
-                                        variant={isActive ? 'solid' : 'outline'}
-                                        colorPalette="gray"
-                                        cursor="pointer"
+                                        type="button"
                                         onClick={() => toggleGroupFilter(group)}
-                                        _hover={{ opacity: 0.8 }}
-                                        userSelect="none"
+                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium hover:opacity-80 ${isActive ? chipColors.active : chipColors.inactive}`}
                                     >
                                         {group} ({count})
-                                    </Badge>
+                                    </button>
                                 );
                             })}
-                        </Wrap>
+                        </div>
                     )}
-                </VStack>
+                </div>
 
                 {/* Account Cards */}
                 {loading ? (
-                    <Box textAlign="center" py={8}>
+                    <div className="py-8 text-center">
                         <Text>Loading accounts...</Text>
-                    </Box>
+                    </div>
                 ) : filteredAccounts.length === 0 ? (
-                    <Box textAlign="center" py={8} bg="gray.50" borderRadius="lg">
-                        <Text color="gray.600" mb={4}>No accounts found</Text>
+                    <div className="bg-gray-50 py-8 text-center">
+                        <Text className="mb-4 block text-gray-600">No accounts found</Text>
                         <Button colorScheme="blue" onClick={handleCreate}>
                             <FiPlus /> Create Your First Account
                         </Button>
-                    </Box>
+                    </div>
                 ) : displayedAccounts.length === 0 ? (
-                    <Box textAlign="center" py={6}>
-                        <Text color="gray.500" fontSize="sm">No accounts match the selected filters</Text>
-                    </Box>
+                    <div className="py-6 text-center">
+                        <Text className="text-sm text-gray-500">No accounts match the selected filters</Text>
+                    </div>
                 ) : (
-                    <SimpleGrid columns={{ base: 1, md: 2, lg: 3, xl: 4 }} gap={1.5}>
+                    <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {displayedAccounts.map((account) => {
                             const isExpanded = expandedAccountIds.has(account.id);
                             const isEnabled = account.enabled !== false;
                             const meta = TYPE_META[account.account_type];
 
                             return (
-                                <Card.Root
+                                <div
                                     key={account.id}
-                                    variant="outline"
-                                    opacity={isEnabled ? 1 : 0.6}
-                                    size="sm"
-                                    borderLeftWidth="3px"
-                                    borderLeftColor={meta?.borderColor || 'gray.300'}
-                                    gridColumn={isExpanded ? '1 / -1' : undefined}
+                                    className={`border border-gray-200 border-l-[3px] ${meta?.borderColor || 'border-l-gray-300'} ${isEnabled ? 'opacity-100' : 'opacity-60'} ${isExpanded ? 'col-span-full' : ''}`}
                                 >
-                                    <Card.Body p={0}>
-                                        <Box
-                                            py={0.5}
-                                            px={1.5}
-                                            cursor="pointer"
-                                            bg={isEnabled ? 'white' : 'gray.50'}
-                                            borderBottomWidth={isExpanded ? 1 : 0}
-                                            borderColor="gray.200"
-                                            onClick={() => toggleExpand(account.id)}
-                                            _hover={{ bg: 'gray.50' }}
-                                            transition="all 0.1s"
-                                        >
-                                            {/* Type / Group header line */}
-                                            <Flex align="center" gap={1} mb={-0.5}>
-                                                <Text fontSize="2xs" color={`${meta?.color || 'gray'}.400`} fontWeight="medium" textTransform="uppercase" letterSpacing="wider">
-                                                    {meta?.label || account.account_type}
-                                                </Text>
-                                                {account.envelope && (
-                                                    <Badge
-                                                        size="xs"
-                                                        variant="subtle"
-                                                        fontSize="2xs"
-                                                        colorPalette={account.envelope === 'pea' ? 'green' : account.envelope === 'av' ? 'blue' : 'gray'}
-                                                    >
-                                                        {account.envelope.toUpperCase()}
-                                                    </Badge>
-                                                )}
-                                                {account.group && (
-                                                    <>
-                                                        <Text fontSize="2xs" color="gray.300">/</Text>
-                                                        <Text fontSize="2xs" color="gray.400">
-                                                            {account.group}
-                                                        </Text>
-                                                    </>
-                                                )}
-                                            </Flex>
-                                            <Flex justify="space-between" align="center">
-                                                <Flex align="center" gap={1} minW={0} flex={1}>
-                                                    <Box color="gray.400" flexShrink={0}>
-                                                        {isExpanded ? <FiChevronDown size={10} /> : <FiChevronRight size={10} />}
-                                                    </Box>
-                                                    {account.color && (
-                                                        <Box w="7px" h="7px" borderRadius="full" bg={account.color} flexShrink={0} />
-                                                    )}
-                                                    <Text fontWeight="semibold" fontSize="xs" truncate>
-                                                        {account.name}
+                                    <div
+                                        className={`cursor-pointer px-1.5 py-0.5 transition-all duration-100 hover:bg-gray-50 ${isEnabled ? 'bg-white' : 'bg-gray-50'} ${isExpanded ? 'border-b border-gray-200' : ''}`}
+                                        onClick={() => toggleExpand(account.id)}
+                                    >
+                                        {/* Type / Group header line */}
+                                        <div className="mb-[-2px] flex items-center gap-1">
+                                            <Text className={`text-[10px] font-medium uppercase tracking-wider ${TYPE_TEXT_400[meta?.color || 'gray']}`}>
+                                                {meta?.label || account.account_type}
+                                            </Text>
+                                            {account.envelope && (
+                                                <Badge
+                                                    colorScheme={account.envelope === 'pea' ? 'green' : account.envelope === 'av' ? 'blue' : 'gray'}
+                                                    className="text-[10px]"
+                                                >
+                                                    {account.envelope.toUpperCase()}
+                                                </Badge>
+                                            )}
+                                            {account.group && (
+                                                <>
+                                                    <Text className="text-[10px] text-gray-300">/</Text>
+                                                    <Text className="text-[10px] text-gray-400">
+                                                        {account.group}
                                                     </Text>
-                                                </Flex>
-                                                <Flex align="center" gap={0} flexShrink={0} onClick={(e) => e.stopPropagation()}>
-                                                    <Switch.Root
-                                                        size="sm"
-                                                        checked={isEnabled}
-                                                        onCheckedChange={() => toggleAccountEnabled(account.id, isEnabled)}
-                                                        title={isEnabled ? 'Disable syncing' : 'Enable syncing'}
-                                                    >
-                                                        <Switch.HiddenInput />
-                                                        <Switch.Control w="22px" h="12px">
-                                                            <Switch.Thumb w="10px" h="10px" />
-                                                        </Switch.Control>
-                                                    </Switch.Root>
-                                                    <IconButton
-                                                        aria-label="View balance"
-                                                        size="2xs"
-                                                        variant="ghost"
-                                                        onClick={() => handleBalanceClick(account)}
-                                                        title="View live balance"
-                                                        p={0} minW="18px" h="18px"
-                                                    >
-                                                        <FiPieChart size={10} />
-                                                    </IconButton>
-                                                    <IconButton
-                                                        aria-label="Purge data"
-                                                        size="2xs"
-                                                        variant="ghost"
-                                                        onClick={() => handlePurgeAccount(account)}
-                                                        title="Purge all account data"
-                                                        p={0} minW="18px" h="18px"
-                                                    >
-                                                        <LuEraser size={10} />
-                                                    </IconButton>
-                                                    <IconButton
-                                                        aria-label="Edit"
-                                                        size="2xs"
-                                                        variant="ghost"
-                                                        onClick={() => handleEdit(account)}
-                                                        p={0} minW="18px" h="18px"
-                                                    >
-                                                        <FiEdit2 size={10} />
-                                                    </IconButton>
-                                                    <IconButton
-                                                        aria-label="Delete"
-                                                        size="2xs"
-                                                        variant="ghost"
-                                                        colorScheme="red"
-                                                        onClick={() => handleDelete(account)}
-                                                        p={0} minW="18px" h="18px"
-                                                    >
-                                                        <FiTrash2 size={10} />
-                                                    </IconButton>
-                                                </Flex>
-                                            </Flex>
-                                        </Box>
+                                                </>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex min-w-0 flex-1 items-center gap-1">
+                                                <span className="shrink-0 text-gray-400">
+                                                    {isExpanded ? <FiChevronDown size={10} /> : <FiChevronRight size={10} />}
+                                                </span>
+                                                {account.color && (
+                                                    <span
+                                                        className="inline-block h-[7px] w-[7px] shrink-0 rounded-full"
+                                                        style={{ backgroundColor: account.color }}
+                                                    />
+                                                )}
+                                                <Text className="truncate text-xs font-semibold">
+                                                    {account.name}
+                                                </Text>
+                                            </div>
+                                            <div className="flex shrink-0 items-center gap-0" onClick={(e) => e.stopPropagation()}>
+                                                <ToggleSwitch
+                                                    checked={isEnabled}
+                                                    onChange={() => toggleAccountEnabled(account.id, isEnabled)}
+                                                    title={isEnabled ? 'Disable syncing' : 'Enable syncing'}
+                                                />
+                                                <Button
+                                                    aria-label="View balance"
+                                                    variant="ghost"
+                                                    onClick={() => handleBalanceClick(account)}
+                                                    title="View live balance"
+                                                    className="h-[18px] min-w-[18px] p-0"
+                                                >
+                                                    <FiPieChart size={10} />
+                                                </Button>
+                                                <Button
+                                                    aria-label="Purge data"
+                                                    variant="ghost"
+                                                    onClick={() => handlePurgeAccount(account)}
+                                                    title="Purge all account data"
+                                                    className="h-[18px] min-w-[18px] p-0"
+                                                >
+                                                    <LuEraser size={10} />
+                                                </Button>
+                                                <Button
+                                                    aria-label="Edit"
+                                                    variant="ghost"
+                                                    onClick={() => handleEdit(account)}
+                                                    className="h-[18px] min-w-[18px] p-0"
+                                                >
+                                                    <FiEdit2 size={10} />
+                                                </Button>
+                                                <Button
+                                                    aria-label="Delete"
+                                                    variant="ghost"
+                                                    colorScheme="red"
+                                                    onClick={() => handleDelete(account)}
+                                                    className="h-[18px] min-w-[18px] p-0"
+                                                >
+                                                    <FiTrash2 size={10} />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                                        <Collapsible.Root open={isExpanded}>
-                                            <Collapsible.Content>
-                                                <Box p={3} bg="white" overflowX="auto" position="relative">
-                                                    {/* ID + address + tags */}
-                                                    <Flex justify="space-between" align="center" mb={2}>
-                                                        <HStack gap={1.5}>
-                                                            <Text fontSize="2xs" color="gray.400" fontFamily="mono">
-                                                                #{account.id}
-                                                            </Text>
-                                                            {account.address_or_identifier && (
-                                                                <Text fontSize="2xs" color="gray.400" fontFamily="mono" truncate maxW="160px">
-                                                                    {account.address_or_identifier.length > 24
-                                                                        ? `${account.address_or_identifier.slice(0, 8)}...${account.address_or_identifier.slice(-6)}`
-                                                                        : account.address_or_identifier}
-                                                                </Text>
-                                                            )}
-                                                        </HStack>
-                                                        {account.tags && account.tags.length > 0 && (
-                                                            <Flex gap={0.5} flexWrap="wrap" justify="flex-end">
-                                                                {account.tags.map((tagObj, idx) => {
-                                                                    const tagKey = typeof tagObj === 'string' ? tagObj : Object.keys(tagObj)[0];
-                                                                    return tagKey ? (
-                                                                        <Badge key={idx} size="xs" variant="subtle" fontSize="2xs" colorPalette="gray">
-                                                                            {tagKey}
-                                                                        </Badge>
-                                                                    ) : null;
-                                                                })}
-                                                            </Flex>
-                                                        )}
-                                                    </Flex>
-                                                    <AccountConnectors account={account} />
-                                                </Box>
-                                            </Collapsible.Content>
-                                        </Collapsible.Root>
-                                    </Card.Body>
-                                </Card.Root>
+                                    {isExpanded && (
+                                        <div className="relative overflow-x-auto bg-white p-3">
+                                            {/* ID + address + tags */}
+                                            <div className="mb-2 flex items-center justify-between">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Text className="font-mono text-[10px] text-gray-400">
+                                                        #{account.id}
+                                                    </Text>
+                                                    {account.address_or_identifier && (
+                                                        <Text className="max-w-[160px] truncate font-mono text-[10px] text-gray-400">
+                                                            {account.address_or_identifier.length > 24
+                                                                ? `${account.address_or_identifier.slice(0, 8)}...${account.address_or_identifier.slice(-6)}`
+                                                                : account.address_or_identifier}
+                                                        </Text>
+                                                    )}
+                                                </div>
+                                                {account.tags && account.tags.length > 0 && (
+                                                    <div className="flex flex-wrap justify-end gap-0.5">
+                                                        {account.tags.map((tagObj, idx) => {
+                                                            const tagKey = typeof tagObj === 'string' ? tagObj : Object.keys(tagObj)[0];
+                                                            return tagKey ? (
+                                                                <Badge key={idx} colorScheme="gray" className="text-[10px]">
+                                                                    {tagKey}
+                                                                </Badge>
+                                                            ) : null;
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <AccountConnectors account={account} />
+                                        </div>
+                                    )}
+                                </div>
                             );
                         })}
-                    </SimpleGrid>
+                    </div>
                 )}
-            </VStack>
+            </div>
 
             {/* Dialog */}
             <AccountFormDialog
@@ -527,7 +530,7 @@ const AccountsManagement: React.FC = () => {
                 title={cleanupTarget?.title ?? ''}
                 onCompleted={handleCleanupCompleted}
             />
-        </Box>
+        </div>
     );
 };
 

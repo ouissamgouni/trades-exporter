@@ -7,10 +7,11 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Badge, Box, Flex, Portal, Popover as ChakraPopover, Text } from '@chakra-ui/react';
+import * as RadixPopover from '@radix-ui/react-popover';
 import { FiLink } from 'react-icons/fi';
 import { ValueDisplay } from '../ValueDisplay';
 import { API_URL } from '../../types';
+import { Badge, type BadgeColorScheme } from '../ui/primitives';
 import type { CostBasisChainNode, CostBasisChainResponse } from './types';
 
 // Re-export for consumers
@@ -35,8 +36,8 @@ const TX_TYPE_ICON: Record<string, string> = {
     internal_transfer: '🔄',
 };
 
-const COST_SOURCE_PALETTE: Record<string, string> = {
-    fmv: 'cyan',
+const COST_SOURCE_PALETTE: Record<string, BadgeColorScheme> = {
+    fmv: 'blue',
     inherited: 'blue',
     proceeds: 'green',
     provisional: 'orange',
@@ -79,56 +80,44 @@ const FlatRow: React.FC<FlatRowProps> = ({ node, isOrigin, baseCurrency, onTrans
     const date = node.timestamp ? new Date(node.timestamp).toLocaleDateString() : '—';
 
     return (
-        <Flex
-            align="center"
-            gap={1.5}
-            py={1}
-            px={2}
-            borderBottom="1px solid"
-            borderColor="gray.100"
-            _hover={{ bg: 'gray.50' }}
-        >
-            <Text fontSize="2xs" minW="16px" textAlign="center">{icon}</Text>
-            <Text fontSize="2xs" color="gray.500" minW="62px">{date}</Text>
+        <div className="flex items-center gap-1.5 border-b border-slate-100 px-2 py-1 hover:bg-slate-50">
+            <span className="min-w-[16px] text-center text-[10px]">{icon}</span>
+            <span className="min-w-[62px] text-[10px] text-slate-500">{date}</span>
             {node.asset_symbol && (
-                <Badge size="xs" colorPalette="gray" fontFamily="mono">{node.asset_symbol}</Badge>
+                <Badge colorScheme="gray" className="font-mono">{node.asset_symbol}</Badge>
             )}
-            <Text fontSize="2xs" color="gray.700" fontFamily="mono" minW="58px" textAlign="right">
+            <span className="min-w-[58px] text-right font-mono text-[10px] text-slate-700">
                 {Number(node.qty).toFixed(4)}
-            </Text>
-            <Text fontSize="2xs" color="gray.400" mx={0.5}>@</Text>
-            <Text fontSize="2xs" color="gray.700" minW="48px" textAlign="right">
+            </span>
+            <span className="mx-0.5 text-[10px] text-slate-400">@</span>
+            <span className="min-w-[48px] text-right text-[10px] text-slate-700">
                 <ValueDisplay value={node.unit_cost} currency={baseCurrency} />
-            </Text>
+            </span>
             {node.account_name && (
-                <Text fontSize="2xs" color="gray.500" ml={1} truncate maxW="80px">
+                <span className="ml-1 max-w-[80px] truncate text-[10px] text-slate-500">
                     {node.account_name}
-                </Text>
+                </span>
             )}
             {node.cost_source && (
-                <Badge size="xs" colorPalette={COST_SOURCE_PALETTE[node.cost_source] ?? 'gray'} ml={0.5}>
+                <Badge colorScheme={COST_SOURCE_PALETTE[node.cost_source] ?? 'gray'} className="ml-0.5">
                     {node.cost_source}
                 </Badge>
             )}
             {isOrigin && (
-                <Badge size="xs" colorPalette="green" variant="solid" ml={0.5}>origin</Badge>
+                <Badge colorScheme="green" className="ml-0.5 bg-green-600 text-white">origin</Badge>
             )}
             {node.transaction_id && onTransactionClick && (
-                <Text
-                    fontSize="2xs"
-                    color="blue.500"
-                    cursor="pointer"
-                    ml="auto"
+                <span
+                    className="ml-auto cursor-pointer text-[10px] text-blue-500 hover:underline"
                     onClick={(e) => {
                         e.stopPropagation();
                         onTransactionClick(node.transaction_id!);
                     }}
-                    _hover={{ textDecoration: 'underline' }}
                 >
                     #{node.transaction_id}
-                </Text>
+                </span>
             )}
-        </Flex>
+        </div>
     );
 };
 
@@ -191,71 +180,53 @@ export const CostBasisChainTooltip: React.FC<CostBasisChainTooltipProps> = ({
     const flatRows = data ? flattenChain(data.chain) : [];
 
     return (
-        <ChakraPopover.Root open={open} onOpenChange={(e) => setOpen(e.open)}>
-            <ChakraPopover.Trigger asChild>
-                <Box display="inline-block" cursor="pointer">
+        <RadixPopover.Root open={open} onOpenChange={setOpen}>
+            <RadixPopover.Trigger asChild>
+                <div className="inline-block cursor-pointer">
                     {children}
-                </Box>
-            </ChakraPopover.Trigger>
-            <Portal>
-                <ChakraPopover.Positioner>
-                    <ChakraPopover.Content
-                        bg="white"
-                        borderRadius="lg"
-                        shadow="xl"
-                        border="1px solid"
-                        borderColor="gray.200"
-                        w="580px"
-                        maxH="420px"
-                        overflow="hidden"
-                    >
-                        <ChakraPopover.Body p={0}>
-                            {/* Header */}
-                            <Flex
-                                justify="space-between"
-                                align="center"
-                                px={3}
-                                py={2}
-                                borderBottom="1px solid"
-                                borderColor="gray.100"
-                                bg="gray.50"
-                            >
-                                <Flex align="center" gap={1}>
-                                    <FiLink size={12} color="var(--chakra-colors-gray-500)" />
-                                    <Text fontSize="xs" fontWeight="semibold" color="gray.700">
-                                        Cost Basis Chain
-                                    </Text>
-                                </Flex>
-                                {data && (
-                                    <Text fontSize="2xs" color="gray.400">
-                                        {totalNodes} step{totalNodes !== 1 ? 's' : ''} · depth {data.depth}
-                                    </Text>
-                                )}
-                            </Flex>
-                            {/* Body */}
-                            <Box overflowY="auto" maxH="360px">
-                                {loading ? (
-                                    <Text fontSize="xs" color="gray.400" p={3}>Loading chain…</Text>
-                                ) : error ? (
-                                    <Text fontSize="xs" color="red.500" p={3}>Error: {error}</Text>
-                                ) : flatRows.length > 0 ? (
-                                    flatRows.map((node) => (
-                                        <FlatRow
-                                            key={node.lot_id}
-                                            node={node}
-                                            isOrigin={node.children.length === 0}
-                                            baseCurrency={baseCurrency}
-                                            onTransactionClick={onTransactionClick}
-                                        />
-                                    ))
-                                ) : data ? (
-                                    <Text fontSize="xs" color="gray.400" p={3}>No chain data</Text>
-                                ) : null}
-                            </Box>
-                        </ChakraPopover.Body>
-                    </ChakraPopover.Content>
-                </ChakraPopover.Positioner>
-            </Portal>
-        </ChakraPopover.Root>
+                </div>
+            </RadixPopover.Trigger>
+            <RadixPopover.Portal>
+                <RadixPopover.Content
+                    sideOffset={4}
+                    className="z-50 w-[580px] max-h-[420px] overflow-hidden border border-slate-200 bg-white shadow-xl"
+                >
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="flex items-center gap-1">
+                            <span className="text-slate-500"><FiLink size={12} /></span>
+                            <span className="text-xs font-semibold text-slate-700">
+                                Cost Basis Chain
+                            </span>
+                        </div>
+                        {data && (
+                            <span className="text-[10px] text-slate-400">
+                                {totalNodes} step{totalNodes !== 1 ? 's' : ''} · depth {data.depth}
+                            </span>
+                        )}
+                    </div>
+                    {/* Body */}
+                    <div className="max-h-[360px] overflow-y-auto">
+                        {loading ? (
+                            <span className="block p-3 text-xs text-slate-400">Loading chain…</span>
+                        ) : error ? (
+                            <span className="block p-3 text-xs text-red-500">Error: {error}</span>
+                        ) : flatRows.length > 0 ? (
+                            flatRows.map((node) => (
+                                <FlatRow
+                                    key={node.lot_id}
+                                    node={node}
+                                    isOrigin={node.children.length === 0}
+                                    baseCurrency={baseCurrency}
+                                    onTransactionClick={onTransactionClick}
+                                />
+                            ))
+                        ) : data ? (
+                            <span className="block p-3 text-xs text-slate-400">No chain data</span>
+                        ) : null}
+                    </div>
+                </RadixPopover.Content>
+            </RadixPopover.Portal>
+        </RadixPopover.Root>
     );
 };

@@ -6,9 +6,9 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Badge, Box, Button, Flex, Text } from '@chakra-ui/react';
 import { LuCheck, LuChevronDown, LuSearch, LuX } from 'react-icons/lu';
 import { LuArrowDown, LuArrowUp, LuArrowUpDown } from 'react-icons/lu';
+import { Button } from '../ui/primitives';
 
 /* ─── Types ─── */
 
@@ -38,6 +38,71 @@ export const DATE_PRESETS = [
 export const TH: React.CSSProperties = { padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600 };
 export const TD: React.CSSProperties = { padding: '3px 6px', fontSize: 11 };
 
+/* ─── Dynamic color support ───
+ * `color` is a free-form string prop passed by callers (still-Chakra files
+ * like FrenchTaxPanel.tsx included). Tailwind's JIT scanner cannot resolve
+ * `bg-${color}-100`-style interpolation, so every shade actually used across
+ * this file is pre-declared here as a literal class string and looked up at
+ * render time — never synthesized via string concatenation. */
+type FilterColorName = 'red' | 'blue' | 'green' | 'gray' | 'purple' | 'teal';
+
+interface FilterColorClasses {
+    border200: string;
+    bg100: string;
+    text700: string;
+    border300: string;
+    hoverBg200: string;
+    hoverBorder400: string;
+    text500: string;
+    bg50: string;
+    hoverBorder300: string;
+    hoverBg100: string;
+    border500: string;
+    bg500: string;
+}
+
+const FILTER_COLORS: Record<FilterColorName, FilterColorClasses> = {
+    red: {
+        border200: 'border-red-200', bg100: 'bg-red-100', text700: 'text-red-700', border300: 'border-red-300',
+        hoverBg200: 'hover:bg-red-200', hoverBorder400: 'hover:border-red-400', text500: 'text-red-500',
+        bg50: 'bg-red-50', hoverBorder300: 'hover:border-red-300', hoverBg100: 'hover:bg-red-100',
+        border500: 'border-red-500', bg500: 'bg-red-500',
+    },
+    blue: {
+        border200: 'border-blue-200', bg100: 'bg-blue-100', text700: 'text-blue-700', border300: 'border-blue-300',
+        hoverBg200: 'hover:bg-blue-200', hoverBorder400: 'hover:border-blue-400', text500: 'text-blue-500',
+        bg50: 'bg-blue-50', hoverBorder300: 'hover:border-blue-300', hoverBg100: 'hover:bg-blue-100',
+        border500: 'border-blue-500', bg500: 'bg-blue-500',
+    },
+    green: {
+        border200: 'border-green-200', bg100: 'bg-green-100', text700: 'text-green-700', border300: 'border-green-300',
+        hoverBg200: 'hover:bg-green-200', hoverBorder400: 'hover:border-green-400', text500: 'text-green-500',
+        bg50: 'bg-green-50', hoverBorder300: 'hover:border-green-300', hoverBg100: 'hover:bg-green-100',
+        border500: 'border-green-500', bg500: 'bg-green-500',
+    },
+    gray: {
+        border200: 'border-slate-200', bg100: 'bg-slate-100', text700: 'text-slate-700', border300: 'border-slate-300',
+        hoverBg200: 'hover:bg-slate-200', hoverBorder400: 'hover:border-slate-400', text500: 'text-slate-500',
+        bg50: 'bg-slate-50', hoverBorder300: 'hover:border-slate-300', hoverBg100: 'hover:bg-slate-100',
+        border500: 'border-slate-500', bg500: 'bg-slate-500',
+    },
+    purple: {
+        border200: 'border-purple-200', bg100: 'bg-purple-100', text700: 'text-purple-700', border300: 'border-purple-300',
+        hoverBg200: 'hover:bg-purple-200', hoverBorder400: 'hover:border-purple-400', text500: 'text-purple-500',
+        bg50: 'bg-purple-50', hoverBorder300: 'hover:border-purple-300', hoverBg100: 'hover:bg-purple-100',
+        border500: 'border-purple-500', bg500: 'bg-purple-500',
+    },
+    teal: {
+        border200: 'border-teal-200', bg100: 'bg-teal-100', text700: 'text-teal-700', border300: 'border-teal-300',
+        hoverBg200: 'hover:bg-teal-200', hoverBorder400: 'hover:border-teal-400', text500: 'text-teal-500',
+        bg50: 'bg-teal-50', hoverBorder300: 'hover:border-teal-300', hoverBg100: 'hover:bg-teal-100',
+        border500: 'border-teal-500', bg500: 'bg-teal-500',
+    },
+};
+
+const getFilterColor = (color: string): FilterColorClasses =>
+    FILTER_COLORS[color as FilterColorName] ?? FILTER_COLORS.gray;
+
 /* ─── SortHeader ─── */
 
 export const SortHeader: React.FC<{
@@ -46,12 +111,12 @@ export const SortHeader: React.FC<{
 }> = ({ label, field, current, order, align = 'left', onSort }) => (
     <th style={{ ...TH, textAlign: align as any, cursor: 'pointer', userSelect: 'none' }}
         onClick={() => onSort(field)}>
-        <Flex gap={0.5} align="center" justify={align === 'right' ? 'flex-end' : 'flex-start'}>
+        <div className={`flex items-center gap-0.5 ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
             {label}
             {current === field
                 ? (order === 'desc' ? <LuArrowDown size={10} /> : <LuArrowUp size={10} />)
-                : <LuArrowUpDown size={9} color="var(--chakra-colors-gray-400)" />}
-        </Flex>
+                : <span className="text-slate-400"><LuArrowUpDown size={9} /></span>}
+        </div>
     </th>
 );
 
@@ -63,6 +128,7 @@ export const RFilterCard: React.FC<{
     searchable?: boolean;
 }> = ({ label, icon, options, selected, onChange, color, searchable }) => {
     const [search, setSearch] = useState('');
+    const c = getFilterColor(color);
     const handleToggle = (value: string) => {
         onChange(selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value]);
     };
@@ -72,46 +138,48 @@ export const RFilterCard: React.FC<{
     const needsScroll = displayOptions.length > 6;
 
     return (
-        <Box bg="white" border="1px solid" borderColor={selected.length > 0 ? `${color}.200` : 'gray.200'}
-            borderRadius="md" p={2} minH="70px">
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
-                    <Text fontSize="xs">{icon}</Text>
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">{label}</Text>
-                </Flex>
-                {selected.length > 0 && <Badge size="xs" colorPalette={color} borderRadius="full">{selected.length}</Badge>}
-            </Flex>
+        <div className={`min-h-[70px] border bg-white p-2 ${selected.length > 0 ? c.border200 : 'border-slate-200'}`}>
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs">{icon}</span>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">{label}</span>
+                </div>
+                {selected.length > 0 && (
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${c.bg100} ${c.text700}`}>
+                        {selected.length}
+                    </span>
+                )}
+            </div>
             {searchable && (
-                <Flex align="center" gap={1} mb={1.5} px={1} py={1} bg="gray.50" borderRadius="sm">
+                <div className="mb-1.5 flex items-center gap-1 bg-slate-50 px-1 py-1">
                     <LuSearch size={10} color="#A0AEC0" />
                     <input type="text" placeholder="Search..." value={search}
                         onChange={e => setSearch(e.target.value)}
                         style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '10px', width: '100%', color: '#4A5568' }} />
-                </Flex>
+                </div>
             )}
-            <Box maxH={needsScroll ? '110px' : 'auto'} overflowY={needsScroll ? 'auto' : 'visible'}
-                css={{ '&::-webkit-scrollbar': { width: '4px' }, '&::-webkit-scrollbar-thumb': { background: '#CBD5E0', borderRadius: '2px' } }}>
-                <Flex flexWrap="wrap" gap={1}>
+            <div className={needsScroll ? 'thin-scrollbar max-h-[110px] overflow-y-auto' : ''}>
+                <div className="flex flex-wrap gap-1">
                     {displayOptions.map(option => {
                         const isSelected = selected.includes(option.value);
                         return (
-                            <Box key={option.value} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs"
-                                fontWeight="medium" cursor="pointer" transition="all 0.15s"
-                                bg={isSelected ? `${color}.100` : 'gray.50'} color={isSelected ? `${color}.700` : 'gray.600'}
-                                border="1px solid" borderColor={isSelected ? `${color}.300` : 'gray.200'}
-                                _hover={{ bg: isSelected ? `${color}.200` : 'gray.100', borderColor: isSelected ? `${color}.400` : 'gray.300' }}
-                                onClick={() => handleToggle(option.value)} display="inline-flex" alignItems="center" gap={0.5}>
+                            <button key={option.value} type="button"
+                                className={`inline-flex items-center gap-0.5 border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${isSelected
+                                    ? `${c.bg100} ${c.text700} ${c.border300} ${c.hoverBg200} ${c.hoverBorder400}`
+                                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:border-slate-300'
+                                    }`}
+                                onClick={() => handleToggle(option.value)}>
                                 {isSelected && <LuCheck size={8} />}
                                 {option.label || option.value}
                                 {option.count !== undefined && (
-                                    <Text as="span" fontSize="2xs" color={isSelected ? `${color}.500` : 'gray.400'}>({option.count})</Text>
+                                    <span className={isSelected ? c.text500 : 'text-slate-400'}>({option.count})</span>
                                 )}
-                            </Box>
+                            </button>
                         );
                     })}
-                </Flex>
-            </Box>
-        </Box>
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -123,6 +191,7 @@ export const RDropdownCard: React.FC<{
     isOpen: boolean; onToggle: () => void; onClose: () => void;
 }> = ({ label, icon, options, selected, onChange, color, isOpen, onToggle, onClose }) => {
     const [search, setSearch] = useState('');
+    const c = getFilterColor(color);
     const cardRef = useRef<HTMLDivElement>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
     const filteredOptions = options.filter(o => (o.label || o.value).toLowerCase().includes(search.toLowerCase()));
@@ -152,69 +221,66 @@ export const RDropdownCard: React.FC<{
     };
 
     return (
-        <Box ref={cardRef} bg="white" border="1px solid"
-            borderColor={selected.length > 0 ? `${color}.200` : 'gray.200'}
-            borderRadius="md" p={2} minH="70px" position="relative">
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
-                    <Text fontSize="xs">{icon}</Text>
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">{label}</Text>
-                </Flex>
-                {selected.length > 0 && <Badge size="xs" colorPalette={color} borderRadius="full">{selected.length}</Badge>}
-            </Flex>
-            <Button size="xs" variant="outline" width="100%" justifyContent="space-between"
-                onClick={onToggle} borderColor={isOpen ? `${color}.300` : 'gray.200'}
-                bg={selected.length > 0 ? `${color}.50` : 'white'} _hover={{ borderColor: `${color}.300` }}>
-                <Text fontSize="2xs" color={selected.length > 0 ? `${color}.700` : 'gray.600'} truncate>
+        <div ref={cardRef} className={`relative min-h-[70px] border bg-white p-2 ${selected.length > 0 ? c.border200 : 'border-slate-200'}`}>
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs">{icon}</span>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">{label}</span>
+                </div>
+                {selected.length > 0 && (
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${c.bg100} ${c.text700}`}>
+                        {selected.length}
+                    </span>
+                )}
+            </div>
+            <button type="button"
+                className={`flex w-full items-center justify-between border px-1.5 py-1 transition-colors ${isOpen ? c.border300 : 'border-slate-200'} ${selected.length > 0 ? c.bg50 : 'bg-white'} ${c.hoverBorder300}`}
+                onClick={onToggle}>
+                <span className={`truncate text-[10px] ${selected.length > 0 ? c.text700 : 'text-slate-600'}`}>
                     {getSelectedDisplay()}
-                </Text>
+                </span>
                 <LuChevronDown size={10} style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }} />
-            </Button>
+            </button>
             {isOpen && (
-                <Box ref={popoverRef} position="absolute" top="100%" left={0} right={0} mt={1}
-                    bg="white" border="1px solid" borderColor="gray.200" borderRadius="md" boxShadow="lg" zIndex={1000} overflow="hidden">
-                    <Box p={1.5} borderBottom="1px solid" borderColor="gray.100">
-                        <Flex align="center" bg="gray.50" borderRadius="sm" px={1.5} gap={1}>
+                <div ref={popoverRef} className="absolute inset-x-0 top-full z-[1000] mt-1 overflow-hidden border border-slate-200 bg-white shadow-lg">
+                    <div className="border-b border-slate-100 p-1.5">
+                        <div className="flex items-center gap-1 bg-slate-50 px-1.5">
                             <LuSearch size={10} color="#A0AEC0" />
                             <input type="text" placeholder="Search..." value={search}
                                 onChange={e => setSearch(e.target.value)}
                                 style={{ flex: 1, border: 'none', background: 'transparent', padding: '6px 0', fontSize: '10px', outline: 'none' }} />
-                        </Flex>
-                    </Box>
-                    <Flex p={1.5} gap={1} borderBottom="1px solid" borderColor="gray.100">
-                        <Button size="xs" variant="ghost" onClick={() => onChange(filteredOptions.map(o => o.value))}>
-                            <Text fontSize="2xs">All</Text>
+                        </div>
+                    </div>
+                    <div className="flex gap-1 border-b border-slate-100 p-1.5">
+                        <Button size="sm" variant="ghost" className="text-[10px]" onClick={() => onChange(filteredOptions.map(o => o.value))}>
+                            All
                         </Button>
-                        <Button size="xs" variant="ghost" onClick={() => onChange([])}>
-                            <Text fontSize="2xs">None</Text>
+                        <Button size="sm" variant="ghost" className="text-[10px]" onClick={() => onChange([])}>
+                            None
                         </Button>
-                    </Flex>
-                    <Box maxH="160px" overflowY="auto" p={1}>
+                    </div>
+                    <div className="max-h-[160px] overflow-y-auto p-1">
                         {filteredOptions.map(option => {
                             const isSelected = selected.includes(option.value);
                             return (
-                                <Box key={option.value} px={1.5} py={1} cursor="pointer" borderRadius="sm"
-                                    bg={isSelected ? `${color}.50` : undefined}
-                                    _hover={{ bg: isSelected ? `${color}.100` : 'gray.50' }}
-                                    onClick={() => handleToggle(option.value)} display="flex" alignItems="center" gap={1.5}>
-                                    <Box w="12px" h="12px" borderRadius="sm" border="1px solid"
-                                        borderColor={isSelected ? `${color}.500` : 'gray.300'}
-                                        bg={isSelected ? `${color}.500` : 'white'}
-                                        display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
+                                <div key={option.value}
+                                    className={`flex cursor-pointer items-center gap-1.5 px-1.5 py-1 ${isSelected ? `${c.bg50} ${c.hoverBg100}` : 'hover:bg-slate-50'}`}
+                                    onClick={() => handleToggle(option.value)}>
+                                    <div className={`flex h-3 w-3 shrink-0 items-center justify-center border ${isSelected ? `${c.border500} ${c.bg500}` : 'border-slate-300 bg-white'}`}>
                                         {isSelected && <LuCheck size={8} color="white" />}
-                                    </Box>
-                                    <Text fontSize="2xs" flex={1}>{option.label || option.value}</Text>
-                                    {option.count !== undefined && <Text fontSize="2xs" color="gray.400">({option.count})</Text>}
-                                </Box>
+                                    </div>
+                                    <span className="flex-1 text-[10px]">{option.label || option.value}</span>
+                                    {option.count !== undefined && <span className="text-[10px] text-slate-400">({option.count})</span>}
+                                </div>
                             );
                         })}
                         {filteredOptions.length === 0 && (
-                            <Text fontSize="2xs" color="gray.400" p={1.5} textAlign="center">No results</Text>
+                            <span className="block p-1.5 text-center text-[10px] text-slate-400">No results</span>
                         )}
-                    </Box>
-                </Box>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -247,59 +313,61 @@ export const RDateCard: React.FC<{
     const activePreset = getActivePreset();
 
     return (
-        <Box bg="white" border="1px solid" borderColor={hasValue ? 'purple.200' : 'gray.200'}
-            borderRadius="md" p={2} minH="70px" overflow="hidden">
-            <Flex align="center" justify="space-between" mb={1.5}>
-                <Flex align="center" gap={1}>
-                    <Text fontSize="xs">📅</Text>
-                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Date Range</Text>
-                </Flex>
+        <div className={`min-h-[70px] overflow-hidden border bg-white p-2 ${hasValue ? 'border-purple-200' : 'border-slate-200'}`}>
+            <div className="mb-1.5 flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                    <span className="text-xs">📅</span>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">Date Range</span>
+                </div>
                 {hasValue && (
-                    <Box as="button" onClick={onClear} color="gray.400" _hover={{ color: 'gray.600' }} cursor="pointer" p={0.5}>
+                    <button type="button" onClick={onClear} className="cursor-pointer p-0.5 text-slate-400 hover:text-slate-600">
                         <LuX size={10} />
-                    </Box>
+                    </button>
                 )}
-            </Flex>
-            <Flex gap={1} mb={1.5} flexWrap="wrap">
+            </div>
+            <div className="mb-1.5 flex flex-wrap gap-1">
                 {DATE_PRESETS.map(preset => {
                     const isActive = activePreset === preset.label;
                     return (
-                        <Box key={preset.label} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs"
-                            fontWeight="medium" cursor="pointer" transition="all 0.15s"
-                            bg={isActive ? 'purple.100' : 'gray.50'} color={isActive ? 'purple.700' : 'gray.600'}
-                            border="1px solid" borderColor={isActive ? 'purple.300' : 'gray.200'}
-                            _hover={{ bg: isActive ? 'purple.200' : 'gray.100', borderColor: isActive ? 'purple.400' : 'gray.300' }}
+                        <button key={preset.label} type="button"
+                            className={`border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${isActive
+                                ? 'border-purple-300 bg-purple-100 text-purple-700 hover:bg-purple-200 hover:border-purple-400'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:border-slate-300'
+                                }`}
                             onClick={() => applyPreset(preset.months)}>
                             {preset.label}
-                        </Box>
+                        </button>
                     );
                 })}
-            </Flex>
-            <Flex direction="column" gap={1}>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500" mb={0.5}>From</Text>
+            </div>
+            <div className="flex flex-col gap-1">
+                <div>
+                    <span className="mb-0.5 block text-[10px] text-slate-500">From</span>
                     <input type="date" value={dateFrom ? dateFrom.split('T')[0] : ''}
                         onChange={e => onChangeFrom(e.target.value ? `${e.target.value}T00:00` : '')}
                         style={{ width: '100%', height: '22px', padding: '0 4px', fontSize: '10px', border: '1px solid #E2E8F0', borderRadius: '4px', backgroundColor: 'white' }} />
-                </Box>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500" mb={0.5}>To</Text>
+                </div>
+                <div>
+                    <span className="mb-0.5 block text-[10px] text-slate-500">To</span>
                     <input type="date" value={dateTo ? dateTo.split('T')[0] : ''}
                         onChange={e => onChangeTo(e.target.value ? `${e.target.value}T23:59` : '')}
                         style={{ width: '100%', height: '22px', padding: '0 4px', fontSize: '10px', border: '1px solid #E2E8F0', borderRadius: '4px', backgroundColor: 'white' }} />
-                </Box>
-            </Flex>
-        </Box>
+                </div>
+            </div>
+        </div>
     );
 };
 
 /* ─── FilterChip (removable badge) ─── */
 
-export const FilterChip: React.FC<{ chip: FilterChipData }> = ({ chip }) => (
-    <Badge size="sm" colorPalette={chip.color} display="inline-flex" alignItems="center" gap={1}
-        px={2} py={0.5} borderRadius="md" cursor="pointer" transition="all 0.15s"
-        _hover={{ transform: 'scale(0.95)', opacity: 0.8 }} onClick={e => { e.stopPropagation(); chip.onClear(); }}>
-        <Text fontSize="xs">{chip.label}</Text>
-        <LuX size={12} />
-    </Badge>
-);
+export const FilterChip: React.FC<{ chip: FilterChipData }> = ({ chip }) => {
+    const c = getFilterColor(chip.color);
+    return (
+        <span
+            className={`inline-flex cursor-pointer items-center gap-1 px-2 py-0.5 text-xs font-medium transition-transform hover:scale-95 hover:opacity-80 ${c.bg100} ${c.text700}`}
+            onClick={e => { e.stopPropagation(); chip.onClear(); }}>
+            <span className="text-xs">{chip.label}</span>
+            <LuX size={12} />
+        </span>
+    );
+};

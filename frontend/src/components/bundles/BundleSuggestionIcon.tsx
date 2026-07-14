@@ -7,7 +7,6 @@
  */
 
 import React from 'react';
-import { Box } from '@chakra-ui/react';
 import { LuLightbulb, LuPackage2 } from 'react-icons/lu';
 
 interface BundleSuggestionIconProps {
@@ -24,10 +23,10 @@ export const BundleSuggestionIcon: React.FC<BundleSuggestionIconProps> = ({
     const lampSize = Math.round(size * 0.6);
 
     return (
-        <Box display="inline-flex" alignItems="center" gap="1px" color={color}>
+        <span className="inline-flex items-center gap-px" style={{ color }}>
             <LuLightbulb size={lampSize} style={{ flexShrink: 0 }} />
             <LuPackage2 size={size} style={{ flexShrink: 0 }} />
-        </Box>
+        </span>
     );
 };
 

@@ -14,23 +14,13 @@
  */
 
 import React, { useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    NativeSelect,
-    Popover,
-    Portal,
-    Spinner,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import * as RadixPopover from '@radix-ui/react-popover';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, BundleSuggestion, TaxabilityStatus } from '../../types';
 import { TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../../enums';
 import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
+import { Button, Spinner } from '../ui/primitives';
 
 interface SuggestionPopoverProps {
     /** The suggestion to display */
@@ -141,155 +131,139 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
     };
 
     return (
-        <Popover.Root
-            open={open}
-            onOpenChange={(e) => onOpenChange(e.open)}
-            positioning={{ placement: 'right-start' }}
-            lazyMount
-            unmountOnExit
-        >
-            <Popover.Trigger asChild>
+        <RadixPopover.Root open={open} onOpenChange={onOpenChange}>
+            <RadixPopover.Trigger asChild>
                 {children}
-            </Popover.Trigger>
-            <Portal>
-                <Popover.Positioner>
-                    <Popover.Content
-                        width="680px"
-                        shadow="lg"
-                        borderWidth={1}
-                        borderColor="teal.200"
-                        bg="white"
-                        p={0}
-                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                    >
-                        <Popover.Arrow>
-                            <Popover.ArrowTip />
-                        </Popover.Arrow>
+            </RadixPopover.Trigger>
+            <RadixPopover.Portal>
+                <RadixPopover.Content
+                    side="right"
+                    align="start"
+                    sideOffset={4}
+                    className="w-[680px] border border-teal-200 bg-white p-0 shadow-lg"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
+                    <RadixPopover.Arrow className="fill-white" />
 
-                        {/* Header */}
-                        <Box p={3} bg="teal.50" borderBottomWidth={1} borderColor="teal.100">
-                            <Flex justify="space-between" align="center" mb={1}>
-                                <NativeSelect.Root size="sm" width="120px">
-                                    <NativeSelect.Field
-                                        value={selectedPattern}
-                                        onChange={(e) => setSelectedPattern(e.target.value)}
-                                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                        style={{
-                                            fontSize: '11px',
-                                            padding: '2px 6px',
-                                            fontWeight: 600,
-                                            backgroundColor: {
-                                                [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
-                                                [UnitPattern.SWAP]: '#FEEBC8',
-                                                [UnitPattern.SPLIT]: '#E9D8FD',
-                                                [UnitPattern.FLOW]: '#C6F6D5',
-                                                [UnitPattern.SPINOFF]: '#FED7E2',
-                                                [UnitPattern.CUSTOM]: '#E2E8F0',
-                                                [UnitPattern.UNKNOWN]: '#EDF2F7',
-                                            }[selectedPattern] || '#EDF2F7',
-                                            borderRadius: '4px',
-                                        }}
-                                    >
-                                        <option value={UnitPattern.SWAP}>Swap</option>
-                                        <option value={UnitPattern.INTERNAL_TRANSFER}>Internal Transfer</option>
-                                        <option value={UnitPattern.SPLIT}>Split</option>
-                                        <option value={UnitPattern.FLOW}>Flow</option>
-                                        <option value={UnitPattern.SPINOFF}>Spin-Off</option>
-                                        <option value={UnitPattern.CUSTOM}>Custom</option>
-                                        <option value={UnitPattern.UNKNOWN}>Unknown</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                                <Text fontSize="xs" color="gray.500" fontWeight="medium">
-                                    {Math.round(suggestion.confidence * 100)}% confidence
-                                </Text>
-                            </Flex>
-                            <Text fontWeight="bold" fontSize="sm" color="teal.800">
-                                {suggestion.label}
-                            </Text>
-                            <Text fontSize="xs" color="gray.600" mt={0.5}>
-                                {suggestion.reason}
-                            </Text>
-                            {suggestion.total_quantity != null && (
-                                <Text fontSize="xs" color="teal.700" mt={0.5} fontFamily="mono">
-                                    {suggestion.total_quantity} {suggestion.asset_symbol}
-                                </Text>
-                            )}
-                        </Box>
+                    {/* Header */}
+                    <div className="border-b border-teal-100 bg-teal-50 p-3">
+                        <div className="mb-1 flex items-center justify-between">
+                            <select
+                                value={selectedPattern}
+                                onChange={(e) => setSelectedPattern(e.target.value)}
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                style={{
+                                    fontSize: '11px',
+                                    padding: '2px 6px',
+                                    fontWeight: 600,
+                                    backgroundColor: {
+                                        [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
+                                        [UnitPattern.SWAP]: '#FEEBC8',
+                                        [UnitPattern.SPLIT]: '#E9D8FD',
+                                        [UnitPattern.FLOW]: '#C6F6D5',
+                                        [UnitPattern.SPINOFF]: '#FED7E2',
+                                        [UnitPattern.CUSTOM]: '#E2E8F0',
+                                        [UnitPattern.UNKNOWN]: '#EDF2F7',
+                                    }[selectedPattern] || '#EDF2F7',
+                                    borderRadius: '4px',
+                                }}
+                            >
+                                <option value={UnitPattern.SWAP}>Swap</option>
+                                <option value={UnitPattern.INTERNAL_TRANSFER}>Internal Transfer</option>
+                                <option value={UnitPattern.SPLIT}>Split</option>
+                                <option value={UnitPattern.FLOW}>Flow</option>
+                                <option value={UnitPattern.SPINOFF}>Spin-Off</option>
+                                <option value={UnitPattern.CUSTOM}>Custom</option>
+                                <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                            </select>
+                            <span className="text-xs font-medium text-slate-500">
+                                {Math.round(suggestion.confidence * 100)}% confidence
+                            </span>
+                        </div>
+                        <span className="block text-sm font-bold text-teal-800">
+                            {suggestion.label}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-600">
+                            {suggestion.reason}
+                        </span>
+                        {suggestion.total_quantity != null && (
+                            <span className="mt-0.5 block font-mono text-xs text-teal-700">
+                                {suggestion.total_quantity} {suggestion.asset_symbol}
+                            </span>
+                        )}
+                    </div>
 
-                        {/* Transactions */}
-                        <Box p={3}>
-                            <Text fontSize="xs" color="gray.500" mb={1} fontWeight="medium">
-                                {suggestion.transactions.length} transaction
-                                {suggestion.transactions.length !== 1 ? 's' : ''}
-                            </Text>
-                            <BundleMemberTransactionsTable
-                                transactionIds={suggestion.transactions.map(t => t.id)}
-                                onTransactionClick={onTransactionClick}
-                            />
-                        </Box>
+                    {/* Transactions */}
+                    <div className="p-3">
+                        <span className="mb-1 block text-xs font-medium text-slate-500">
+                            {suggestion.transactions.length} transaction
+                            {suggestion.transactions.length !== 1 ? 's' : ''}
+                        </span>
+                        <BundleMemberTransactionsTable
+                            transactionIds={suggestion.transactions.map(t => t.id)}
+                            onTransactionClick={onTransactionClick}
+                        />
+                    </div>
 
-                        {/* Taxability + Actions */}
-                        <Box p={3} pt={0}>
-                            <Flex align="center" gap={2} mb={3}>
-                                <Text fontSize="xs" color="gray.500">
-                                    Taxability:
-                                </Text>
-                                <NativeSelect.Root size="sm" width="110px">
-                                    <NativeSelect.Field
-                                        value={taxability}
-                                        onChange={(e) =>
-                                            setTaxability(e.target.value as TaxabilityStatus)
-                                        }
-                                        onClick={(e) => e.stopPropagation()}
-                                        style={{
-                                            fontSize: '11px',
-                                            padding: '2px 6px',
-                                            backgroundColor:
-                                                taxability === TaxabilityStatusEnum.TAXABLE
-                                                    ? '#FED7AA'
-                                                    : taxability === TaxabilityStatusEnum.NON_TAXABLE
-                                                        ? '#C6F6D5'
-                                                        : '#FEFCBF',
-                                            borderRadius: '4px',
-                                        }}
-                                    >
-                                        <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
-                                        <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
-                                        <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Flex>
+                    {/* Taxability + Actions */}
+                    <div className="p-3 pt-0">
+                        <div className="mb-3 flex items-center gap-2">
+                            <span className="text-xs text-slate-500">
+                                Taxability:
+                            </span>
+                            <select
+                                value={taxability}
+                                onChange={(e) =>
+                                    setTaxability(e.target.value as TaxabilityStatus)
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                    fontSize: '11px',
+                                    padding: '2px 6px',
+                                    backgroundColor:
+                                        taxability === TaxabilityStatusEnum.TAXABLE
+                                            ? '#FED7AA'
+                                            : taxability === TaxabilityStatusEnum.NON_TAXABLE
+                                                ? '#C6F6D5'
+                                                : '#FEFCBF',
+                                    borderRadius: '4px',
+                                }}
+                            >
+                                <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
+                                <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
+                                <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
+                            </select>
+                        </div>
 
-                            <Flex gap={2}>
-                                <Button
-                                    size="xs"
-                                    colorPalette="green"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        acceptSuggestion();
-                                    }}
-                                    disabled={accepting}
-                                    flex={1}
-                                >
-                                    {accepting ? <Spinner size="xs" /> : '✓ Create Bundle'}
-                                </Button>
-                                <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        dismissSuggestion();
-                                    }}
-                                    disabled={accepting}
-                                >
-                                    Dismiss
-                                </Button>
-                            </Flex>
-                        </Box>
-                    </Popover.Content>
-                </Popover.Positioner>
-            </Portal>
-        </Popover.Root>
+                        <div className="flex gap-2">
+                            <Button
+                                size="sm"
+                                colorScheme="green"
+                                className="flex-1"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    acceptSuggestion();
+                                }}
+                                disabled={accepting}
+                            >
+                                {accepting ? <Spinner size="xs" /> : '✓ Create Bundle'}
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    dismissSuggestion();
+                                }}
+                                disabled={accepting}
+                            >
+                                Dismiss
+                            </Button>
+                        </div>
+                    </div>
+                </RadixPopover.Content>
+            </RadixPopover.Portal>
+        </RadixPopover.Root>
     );
 };
 

@@ -65,8 +65,8 @@ tasks:
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
         # Try unified compose first (full Docker mode), then scenario-DB-only
-        if docker ps --filter "name=$QA_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$QA_BACKEND_CONTAINER"; then
-          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT logs -f --tail 50
+        if docker ps --filter "name=$SC_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$SC_BACKEND_CONTAINER"; then
+          docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME logs -f --tail 50
         else
-          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $QA_PROJECT logs -f --tail 50
+          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $SC_PROJECT_NAME logs -f --tail 50
         fi

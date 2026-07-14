@@ -11,19 +11,8 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Flex,
-    Input,
-    Table,
-    Tabs,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Input, type BadgeColorScheme } from '../ui/primitives';
 import { FiSearch, FiChevronDown, FiChevronRight, FiAlertTriangle, FiLayers, FiDatabase, FiDollarSign, FiLoader, FiLink, FiActivity, FiPlus, FiFileText } from 'react-icons/fi';
-import { SlidePanel } from './SlidePanel';
 import { CalculationUnit, CostLot, RealizedPnLRow, PnLWarningItem, OriginTransactionDetail, Settlement, ConsumedSliceDetail, CostLotEventEntry, FeeEntry } from './types';
 import { API_URL, AssetRef } from '../../types';
 import { Tooltip } from '../ui/tooltip';
@@ -55,6 +44,22 @@ import {
 export { getPersistedPageSize } from '../../hooks/usePagination';
 
 // Using formatDateLocale from utils/dateUtils for consistent date formatting
+
+// Maps getWarningTypeConfig()'s free-form colorPalette string to a static Tailwind
+// bg-*-50 class (Tailwind JIT requires literal class names, not interpolated ones).
+const WARNING_BG: Record<string, string> = {
+    orange: 'bg-orange-50',
+    purple: 'bg-purple-50',
+    red: 'bg-red-50',
+    yellow: 'bg-yellow-50',
+    gray: 'bg-gray-50',
+    blue: 'bg-blue-50',
+    green: 'bg-green-50',
+};
+
+const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toBadgeColor = (c: string): BadgeColorScheme =>
+    (VALID_BADGE_COLORS as string[]).includes(c) ? (c as BadgeColorScheme) : 'gray';
 
 // ============================================================================
 // Transaction Tooltip - On-hover transaction details
@@ -124,63 +129,60 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
     };
 
     const tooltipContent = (
-        <Box
-            p={2}
-            bg="gray.800"
-            borderRadius="md"
-            minW="250px"
+        <div
+            className="min-w-[250px] rounded-md bg-gray-800 p-2"
             onMouseEnter={fetchTransaction}
         >
             {loading ? (
-                <Flex align="center" gap={2}>
+                <div className="flex items-center gap-2">
                     <FiLoader className="animate-spin" />
-                    <Text fontSize="xs" color="gray.300">Loading...</Text>
-                </Flex>
+                    <span className="text-xs text-gray-300">Loading...</span>
+                </div>
             ) : error ? (
-                <Text fontSize="xs" color="red.300">Error: {error}</Text>
+                <span className="text-xs text-red-300">Error: {error}</span>
             ) : txData ? (
-                <Box fontSize="xs">
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Date</Text>
-                        <Text color="white">{txData.date_time ? formatDateTimeLocale(txData.date_time) : '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Account</Text>
-                        <Text color="white">{txData.account_name || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Type</Text>
-                        <Text color="white">{txData.transaction_type || txData.source_transaction_type || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Source</Text>
-                        <Text color="white">{txData.source || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1} align="center">
-                        <Text color="gray.400">Asset</Text>
+                <div className="text-xs">
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Date</span>
+                        <span className="text-white">{txData.date_time ? formatDateTimeLocale(txData.date_time) : '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Account</span>
+                        <span className="text-white">{txData.account_name || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Type</span>
+                        <span className="text-white">{txData.transaction_type || txData.source_transaction_type || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Source</span>
+                        <span className="text-white">{txData.source || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex items-center justify-between">
+                        <span className="text-gray-400">Asset</span>
                         <AssetBadge
                             asset={txData.linked_asset}
                             sourceSymbol={txData.source_asset_symbol}
                             size="xs"
                             maxLength={18}
                         />
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Quantity</Text>
-                        <Text color="white" fontFamily="mono"><ValueDisplay value={txData.quantity} /></Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Unit Price</Text>
-                        <Text color="white"><ValueDisplay value={txData.price} /></Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Total</Text>
-                        <Text color="white">
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Quantity</span>
+                        <span className="font-mono text-white"><ValueDisplay value={txData.quantity} /></span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Unit Price</span>
+                        <span className="text-white"><ValueDisplay value={txData.price} /></span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Total</span>
+                        <span className="text-white">
                             {txData.total ? <ValueDisplay value={txData.total} currency={baseCurrency} /> : '-'}
-                        </Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1} align="center">
-                        <Text color="gray.400">Quote Asset</Text>
+                        </span>
+                    </div>
+                    <div className="mb-1 flex items-center justify-between">
+                        <span className="text-gray-400">Quote Asset</span>
                         <AssetBadge
                             asset={txData.price_quote_asset}
                             sourceSymbol={txData.source_price_quote_asset_symbol}
@@ -188,13 +190,13 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                             colorPalette="cyan"
                             maxLength={15}
                         />
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Fee</Text>
-                        <Text color="white"><ValueDisplay value={txData.fee} /></Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1} align="center">
-                        <Text color="gray.400">Fee Quote</Text>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">Fee</span>
+                        <span className="text-white"><ValueDisplay value={txData.fee} /></span>
+                    </div>
+                    <div className="mb-1 flex items-center justify-between">
+                        <span className="text-gray-400">Fee Quote</span>
                         <AssetBadge
                             asset={txData.fee_quote_asset}
                             sourceSymbol={txData.source_fee_quote_asset_symbol}
@@ -202,10 +204,10 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                             colorPalette="orange"
                             maxLength={15}
                         />
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">From/To Account</Text>
-                        <Text color="white">
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-gray-400">From/To Account</span>
+                        <span className="text-white">
                             {txData.direction === 'inflow'
                                 ? (txData.from_account_name
                                     ? `${txData.from_account_name}${txData.source_from_account && txData.source_from_account !== txData.from_account_name ? ` (${txData.source_from_account})` : ''}`
@@ -213,13 +215,13 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                                 : (txData.to_account_name
                                     ? `${txData.to_account_name}${txData.source_to_account && txData.source_to_account !== txData.to_account_name ? ` (${txData.source_to_account})` : ''}`
                                     : (txData.source_to_account || '-'))}
-                        </Text>
-                    </Flex>
-                </Box>
+                        </span>
+                    </div>
+                </div>
             ) : (
-                <Text fontSize="xs" color="gray.400">Hover to load details</Text>
+                <span className="text-xs text-gray-400">Hover to load details</span>
             )}
-        </Box>
+        </div>
     );
 
     return (
@@ -228,9 +230,9 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
             openDelay={200}
             closeDelay={100}
         >
-            <Box onMouseEnter={fetchTransaction} display="inline-block">
+            <div className="inline-block" onMouseEnter={fetchTransaction}>
                 {children}
-            </Box>
+            </div>
         </Tooltip>
     );
 };
@@ -259,8 +261,9 @@ const TransactionCell: React.FC<TransactionCellProps> = ({
     return (
         <TransactionTooltip txId={txId} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
             <Button
-                size={size}
+                size={size === 'xs' ? undefined : size}
                 variant={variant}
+                className={size === 'xs' ? 'h-6 px-2 text-xs' : undefined}
                 onClick={(e) => {
                     e.stopPropagation();
                     onTransactionClick?.(txId);
@@ -336,23 +339,23 @@ const CompactTxInfo: React.FC<CompactTxInfoProps> = ({
 
     if (loading) {
         return (
-            <Flex align="center" gap={1}>
+            <div className="flex items-center gap-1">
                 <Button
-                    size="xs"
+                    className="h-6 px-2 text-xs"
                     variant="ghost"
                     onClick={(e) => { e.stopPropagation(); onTransactionClick?.(txId); }}
                 >
                     TX #{txId}
                 </Button>
                 <FiLoader size={10} className="animate-spin" />
-            </Flex>
+            </div>
         );
     }
 
     if (!txData) {
         return (
             <Button
-                size="xs"
+                className="h-6 px-2 text-xs"
                 variant="ghost"
                 onClick={(e) => { e.stopPropagation(); onTransactionClick?.(txId); }}
             >
@@ -362,51 +365,46 @@ const CompactTxInfo: React.FC<CompactTxInfoProps> = ({
     }
 
     return (
-        <Flex direction="column" gap={0} fontSize="2xs">
-            <Flex align="center" gap={1} wrap="wrap">
+        <div className="flex flex-col gap-0 text-[10px]">
+            <div className="flex flex-wrap items-center gap-1">
                 <Button
-                    size="xs"
                     variant="ghost"
-                    p={0}
-                    h="auto"
-                    minW="auto"
-                    fontWeight="medium"
-                    color="blue.600"
+                    className="h-auto min-w-0 p-0 text-xs font-medium text-blue-600"
                     onClick={(e) => { e.stopPropagation(); onTransactionClick?.(txId); }}
                 >
                     #{txId}
                 </Button>
                 {showType && txData.source_transaction_type && (
-                    <Badge size="xs" colorPalette="gray" variant="subtle">
+                    <Badge colorScheme="gray" className="text-[10px]">
                         {txData.source_transaction_type}
                     </Badge>
                 )}
                 {showAsset && txData.asset_symbol && (
                     <Badge
-                        size="xs"
-                        colorPalette={txData.direction === 'inflow' ? 'green' : txData.direction === 'outflow' ? 'red' : 'gray'}
+                        colorScheme={txData.direction === 'inflow' ? 'green' : txData.direction === 'outflow' ? 'red' : 'gray'}
+                        className="text-[10px]"
                     >
                         {txData.direction === 'inflow' ? '+' : txData.direction === 'outflow' ? '−' : ''}{txData.asset_symbol}
                     </Badge>
                 )}
                 {showQty && txData.quantity != null && (
-                    <Text fontFamily="mono" color="gray.600">
+                    <span className="font-mono text-gray-600">
                         {formatQty(txData.quantity)}
-                    </Text>
+                    </span>
                 )}
-            </Flex>
-            <Flex align="center" gap={1} color="gray.500" wrap="wrap">
+            </div>
+            <div className="flex flex-wrap items-center gap-1 text-gray-500">
                 {showDate && txData.date_time && (
-                    <Text>{formatDateLocale(txData.date_time)}</Text>
+                    <span>{formatDateLocale(txData.date_time)}</span>
                 )}
                 {showAccount && txData.account_name && (
-                    <Text>• {txData.account_name}</Text>
+                    <span>• {txData.account_name}</span>
                 )}
                 {txData.total != null && txData.total > 0 && (
-                    <Text>• <ValueDisplay value={txData.total} currency={baseCurrency} /></Text>
+                    <span>• <ValueDisplay value={txData.total} currency={baseCurrency} /></span>
                 )}
-            </Flex>
-        </Flex>
+            </div>
+        </div>
     );
 };
 
@@ -444,14 +442,14 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
     }, [costLots]);
 
     return (
-        <Box bg="gray.50" p={4} borderRadius="md">
-            <Flex direction="column" gap={4}>
+        <div className="rounded-md bg-gray-50 p-4">
+            <div className="flex flex-col gap-4">
                 {/* Origin Transactions - Full Width - Uses TransactionsTable in embedded mode */}
-                <Card.Root size="sm" variant="outline">
-                    <Card.Body p={3}>
-                        <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
+                <div className="border border-gray-200 bg-white">
+                    <div className="p-3">
+                        <div className="mb-2 text-xs font-bold text-gray-600">
                             📄 Origin Transactions ({allTxIds.length})
-                        </Text>
+                        </div>
                         {allTxIds.length > 0 ? (
                             <TransactionsTable
                                 filters={txFilters}
@@ -462,19 +460,19 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                 tableId={`unit-detail-${unit.unit_id}`}
                             />
                         ) : (
-                            <Text fontSize="xs" color="gray.400">No transactions</Text>
+                            <span className="text-xs text-gray-400">No transactions</span>
                         )}
-                    </Card.Body>
-                </Card.Root>
+                    </div>
+                </div>
 
                 {/* Realized P&L - Full Width */}
-                <Card.Root size="sm" variant="outline" overflow="hidden">
-                    <Card.Body p={3} overflow="auto">
-                        <Text fontSize="xs" fontWeight="bold" color="green.600" mb={2}>
+                <div className="overflow-hidden border border-gray-200 bg-white">
+                    <div className="overflow-auto p-3">
+                        <div className="mb-2 text-xs font-bold text-green-600">
                             💰 Realized P&L ({unit.realized_entries?.length || 0})
-                        </Text>
+                        </div>
                         {unit.realized_entries && unit.realized_entries.length > 0 ? (
-                            <Box overflowX="auto">
+                            <div className="overflow-x-auto">
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                                     <thead>
                                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -494,7 +492,7 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                         {unit.realized_entries.map((entry, i) => (
                                             <tr key={i} style={{ borderBottom: '1px solid #f1f3f5', background: entry.is_fee ? '#FFFAF0' : undefined }}>
                                                 <td style={{ padding: '3px 6px' }}>
-                                                    <Badge size="xs">{entry.asset.symbol || `#${entry.asset.id}`}</Badge>
+                                                    <Badge className="text-[10px]">{entry.asset.symbol || `#${entry.asset.id}`}</Badge>
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'right' }}>
                                                     <ValueDisplay value={entry.qty} />
@@ -505,41 +503,41 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                                 <td style={{ padding: '3px 6px', textAlign: 'right' }}>
                                                     {entry.proceeds_price != null
                                                         ? <ValueDisplay value={entry.proceeds_price} currency={baseCurrency} />
-                                                        : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                        : <span className="text-[10px] text-gray-400">-</span>}
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'center' }}>
                                                     {entry.proceeds_price_source ? (
-                                                        <Badge size="xs" variant="subtle"
-                                                            colorPalette={
-                                                                entry.proceeds_source === 'fmv' || entry.proceeds_source === 'fmv_lookup' ? 'cyan'
+                                                        <Badge className="text-[10px]"
+                                                            colorScheme={
+                                                                entry.proceeds_source === 'fmv' || entry.proceeds_source === 'fmv_lookup' ? 'yellow'
                                                                     : entry.proceeds_source === 'provisional' ? 'orange'
                                                                         : 'gray'
                                                             }>
                                                             {entry.proceeds_price_source}
                                                         </Badge>
-                                                    ) : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                    ) : <span className="text-[10px] text-gray-400">-</span>}
                                                 </td>
                                                 <td style={{ padding: '3px 6px' }}>
-                                                    <Text fontSize="2xs" color="gray.500" whiteSpace="nowrap">
+                                                    <span className="whitespace-nowrap text-[10px] text-gray-500">
                                                         {entry.proceeds_price_timestamp ? formatDateLocale(entry.proceeds_price_timestamp) : '-'}
-                                                    </Text>
+                                                    </span>
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'right' }}>
                                                     <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'right' }}>
-                                                    <Text color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'} fontWeight="medium" fontSize="2xs">
+                                                    <span className={`text-[10px] font-medium ${entry.pnl_in_base >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                         <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
-                                                    </Text>
+                                                    </span>
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'center' }}>
-                                                    <Badge size="xs" variant="subtle"
-                                                        colorPalette={entry.disposal_taxable ? 'red' : 'green'}>
+                                                    <Badge className="text-[10px]"
+                                                        colorScheme={entry.disposal_taxable ? 'red' : 'green'}>
                                                         {entry.disposal_taxable ? 'Taxable' : 'Non-Taxable'}
                                                     </Badge>
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'center' }}>
-                                                    <Badge size="xs" colorPalette={entry.is_fee ? 'orange' : 'blue'} variant="subtle">
+                                                    <Badge colorScheme={entry.is_fee ? 'orange' : 'blue'} className="text-[10px]">
                                                         {entry.is_fee ? 'Fee' : 'Disposal'}
                                                     </Badge>
                                                 </td>
@@ -547,19 +545,19 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                         ))}
                                     </tbody>
                                 </table>
-                            </Box>
+                            </div>
                         ) : (
-                            <Text fontSize="xs" color="gray.400">No realized P&L</Text>
+                            <span className="text-xs text-gray-400">No realized P&L</span>
                         )}
-                    </Card.Body>
-                </Card.Root>
+                    </div>
+                </div>
 
                 {/* Cost Lot Events - Full Width */}
-                <Card.Root size="sm" variant="outline" overflow="hidden">
-                    <Card.Body p={3} overflow="auto">
-                        <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
+                <div className="overflow-hidden border border-gray-200 bg-white">
+                    <div className="overflow-auto p-3">
+                        <div className="mb-2 text-xs font-bold text-gray-600">
                             📦 Cost Lot Events
-                        </Text>
+                        </div>
                         {versionId && (
                             <CostLotEventsTable
                                 {...EVENT_TABLE_PRESETS.UNIT_DETAIL}
@@ -571,21 +569,21 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                 hidePagination={true}
                             />
                         )}
-                    </Card.Body>
-                </Card.Root>
+                    </div>
+                </div>
 
                 {/* Warnings Card - Full Width */}
                 {(unit.warnings && unit.warnings.length > 0) && (
-                    <Card.Root size="sm" variant="outline" borderColor="orange.200" bg="orange.50">
-                        <Card.Body p={3}>
-                            <Text fontSize="xs" fontWeight="bold" color="orange.600" mb={2}>
+                    <div className="border border-orange-200 bg-orange-50">
+                        <div className="p-3">
+                            <div className="mb-2 text-xs font-bold text-orange-600">
                                 <FiAlertTriangle style={{ display: 'inline', marginRight: 4 }} />
                                 Warnings ({unit.warnings.length})
-                            </Text>
+                            </div>
                             {unit.warnings.map((w, i) => (
-                                <Box key={i} bg="white" p={2} borderRadius="sm" mb={1} borderLeft="3px solid" borderColor="orange.400">
-                                    <Text fontSize="xs" color="orange.800" fontWeight="medium">{w.warning_type}</Text>
-                                    <Text fontSize="xs" color="gray.700">{w.message}</Text>
+                                <div key={i} className="mb-1 border-l-[3px] border-orange-400 bg-white p-2">
+                                    <div className="text-xs font-medium text-orange-800">{w.warning_type}</div>
+                                    <div className="text-xs text-gray-700">{w.message}</div>
                                     {w.transaction_id && (
                                         <TransactionCell
                                             txId={w.transaction_id}
@@ -594,13 +592,13 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                             prefix="View TX"
                                         />
                                     )}
-                                </Box>
+                                </div>
                             ))}
-                        </Card.Body>
-                    </Card.Root>
+                        </div>
+                    </div>
                 )}
-            </Flex>
-        </Box>
+            </div>
+        </div>
     );
 };
 
@@ -657,23 +655,21 @@ export const UnitsTab: React.FC<{
     };
 
     return (
-        <Box>
+        <div>
             {/* Filters only - no stats cards */}
-            <Flex gap={2} mb={4} wrap="wrap">
-                <Flex align="center" bg="gray.50" px={2} borderRadius="md" flex="1" maxW="300px">
+            <div className="mb-4 flex flex-wrap gap-2">
+                <div className="flex max-w-[300px] flex-1 items-center gap-1 rounded-md bg-gray-50 px-2">
                     <FiSearch color="gray" />
                     <Input
                         placeholder="Search asset, label..."
-                        size="sm"
+                        className="h-8 border-none text-sm focus:shadow-none"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        border="none"
-                        _focus={{ boxShadow: 'none' }}
                     />
-                </Flex>
-                <Flex gap={1}>
+                </div>
+                <div className="flex gap-1">
                     <Button
-                        size="xs"
+                        className="h-6 px-2 text-xs"
                         variant={typeFilter === 'all' ? 'solid' : 'outline'}
                         onClick={() => setTypeFilter('all')}
                     >
@@ -682,31 +678,30 @@ export const UnitsTab: React.FC<{
                     {types.map(type => (
                         <Button
                             key={type}
-                            size="xs"
+                            className="h-6 px-2 text-xs capitalize"
                             variant={typeFilter === type ? 'solid' : 'outline'}
                             onClick={() => setTypeFilter(type)}
-                            textTransform="capitalize"
                         >
                             {type}
                         </Button>
                     ))}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
-            <Box overflowX="auto" style={{ fontSize: '8px' }}>
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader width="70px">Type</Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px">Date</Table.ColumnHeader>
-                            <Table.ColumnHeader>Operation</Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px">Events</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right" width="90px">P&L</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right" width="80px">Fees</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="center" width="40px">⚠</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto" style={{ fontSize: '8px' }}>
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th className="w-[70px] text-left">Type</th>
+                            <th className="w-[80px] text-left">Date</th>
+                            <th className="text-left">Operation</th>
+                            <th className="w-[80px] text-left">Events</th>
+                            <th className="w-[90px] text-right">P&L</th>
+                            <th className="w-[80px] text-right">Fees</th>
+                            <th className="w-[40px] text-center">⚠</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {paginatedUnits.map((unit: CalculationUnit) => {
                             // Generate operation label from unit_label or compose compact preview
                             // For transfers: "Account A → Account B: BTC"
@@ -724,103 +719,103 @@ export const UnitsTab: React.FC<{
 
                                 if (hasLegs) {
                                     const inflow = inflowLegs.map((leg, idx) => (
-                                        <Flex key={`inflow-${idx}`} align="center" gap={0.5} as="span">
-                                            <Text fontSize="xs" color="green.500" fontWeight="bold">↓</Text>
-                                            <Text fontSize="xs" color="green.600">{formatQty(leg.qty)}</Text>
+                                        <span key={`inflow-${idx}`} className="inline-flex items-center gap-0.5">
+                                            <span className="text-xs font-bold text-green-500">↓</span>
+                                            <span className="text-xs text-green-600">{formatQty(leg.qty)}</span>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="xs" color="green.600">{leg.asset?.symbol || '?'}</Text>
+                                                <span className="text-xs text-green-600">{leg.asset?.symbol || '?'}</span>
                                             )}
-                                        </Flex>
+                                        </span>
                                     ));
                                     const outflow = outflowLegs.map((leg, idx) => (
-                                        <Flex key={`outflow-${idx}`} align="center" gap={0.5} as="span">
-                                            <Text fontSize="xs" color="red.500" fontWeight="bold">↑</Text>
-                                            <Text fontSize="xs" color="red.600">{formatQty(leg.qty)}</Text>
+                                        <span key={`outflow-${idx}`} className="inline-flex items-center gap-0.5">
+                                            <span className="text-xs font-bold text-red-500">↑</span>
+                                            <span className="text-xs text-red-600">{formatQty(leg.qty)}</span>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="xs" color="red.600">{leg.asset?.symbol || '?'}</Text>
+                                                <span className="text-xs text-red-600">{leg.asset?.symbol || '?'}</span>
                                             )}
-                                        </Flex>
+                                        </span>
                                     ));
                                     const fee = feeLegs.map((leg, idx) => (
-                                        <Flex key={`fee-${idx}`} align="center" gap={0.5} as="span">
-                                            <Text fontSize="xs" color="orange.500" fontWeight="bold">💸</Text>
-                                            <Text fontSize="xs" color="orange.600">{formatQty(leg.qty)}</Text>
+                                        <span key={`fee-${idx}`} className="inline-flex items-center gap-0.5">
+                                            <span className="text-xs font-bold text-orange-500">💸</span>
+                                            <span className="text-xs text-orange-600">{formatQty(leg.qty)}</span>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="xs" color="orange.600">{leg.asset?.symbol || '?'}</Text>
+                                                <span className="text-xs text-orange-600">{leg.asset?.symbol || '?'}</span>
                                             )}
-                                        </Flex>
+                                        </span>
                                     ));
                                     return (
-                                        <Flex align="center" gap={0.5} flexWrap="wrap" ml={2}>
+                                        <div className="ml-2 flex flex-wrap items-center gap-0.5">
                                             {/* Inflow legs */}
                                             {inflow.length > 0 && inflow}
                                             {/* Separator if both inflow and outflow */}
                                             {inflow.length > 0 && outflow.length > 0 && (
-                                                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
+                                                <span className="px-0.5 text-xs text-gray-400">|</span>
                                             )}
                                             {/* Outflow legs */}
                                             {outflow.length > 0 && outflow}
                                             {/* Separator if any fee legs */}
                                             {(inflow.length > 0 || outflow.length > 0) && fee.length > 0 && (
-                                                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
+                                                <span className="px-0.5 text-xs text-gray-400">|</span>
                                             )}
                                             {/* Fee legs */}
                                             {fee.length > 0 && fee}
-                                        </Flex>
+                                        </div>
                                     );
                                 }
                                 // Legacy format fallback
                                 const inflow = (inflowLegs || []).map((leg, idx) => (
-                                    <Flex key={`inflow-legacy-${idx}`} align="center" gap={1} as="span">
-                                        <Text fontSize="xs" color="green.500" fontWeight="bold">↓</Text>
-                                        <Text fontSize="xs" color="green.600">{leg.qty.toFixed(8)}</Text>
+                                    <span key={`inflow-legacy-${idx}`} className="inline-flex items-center gap-1">
+                                        <span className="text-xs font-bold text-green-500">↓</span>
+                                        <span className="text-xs text-green-600">{leg.qty.toFixed(8)}</span>
                                         {leg.asset?.id ? (
                                             <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                         ) : (
-                                            <Text fontSize="xs" color="green.600">{leg.asset?.symbol || '?'}</Text>
+                                            <span className="text-xs text-green-600">{leg.asset?.symbol || '?'}</span>
                                         )}
-                                    </Flex>
+                                    </span>
                                 ));
                                 const outflow = (outflowLegs || []).map((leg, idx) => (
-                                    <Flex key={`outflow-legacy-${idx}`} align="center" gap={1} as="span">
-                                        <Text fontSize="xs" color="red.500" fontWeight="bold">↑</Text>
-                                        <Text fontSize="xs" color="red.600">{leg.qty.toFixed(8)}</Text>
+                                    <span key={`outflow-legacy-${idx}`} className="inline-flex items-center gap-1">
+                                        <span className="text-xs font-bold text-red-500">↑</span>
+                                        <span className="text-xs text-red-600">{leg.qty.toFixed(8)}</span>
                                         {leg.asset?.id ? (
                                             <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                         ) : (
-                                            <Text fontSize="xs" color="red.600">{leg.asset?.symbol || '?'}</Text>
+                                            <span className="text-xs text-red-600">{leg.asset?.symbol || '?'}</span>
                                         )}
-                                    </Flex>
+                                    </span>
                                 ));
                                 const fee = (feeLegs || []).map((leg, idx) => (
-                                    <Flex key={`fee-legacy-${idx}`} align="center" gap={1} as="span">
-                                        <Text fontSize="xs" color="orange.500" fontWeight="bold">💸</Text>
-                                        <Text fontSize="xs" color="orange.600">{leg.qty.toFixed(8)}</Text>
+                                    <span key={`fee-legacy-${idx}`} className="inline-flex items-center gap-1">
+                                        <span className="text-xs font-bold text-orange-500">💸</span>
+                                        <span className="text-xs text-orange-600">{leg.qty.toFixed(8)}</span>
                                         {leg.asset?.id ? (
                                             <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                         ) : (
-                                            <Text fontSize="xs" color="orange.600">{leg.asset?.symbol || '?'}</Text>
+                                            <span className="text-xs text-orange-600">{leg.asset?.symbol || '?'}</span>
                                         )}
-                                    </Flex>
+                                    </span>
                                 ));
                                 return (
-                                    <Flex align="center" gap={1} flexWrap="wrap" ml={2}>
+                                    <div className="ml-2 flex flex-wrap items-center gap-1">
                                         {inflow.length > 0 && inflow}
                                         {inflow.length > 0 && outflow.length > 0 && (
-                                            <Text fontSize="xs" color="gray.400" px={1}>|</Text>
+                                            <span className="px-1 text-xs text-gray-400">|</span>
                                         )}
                                         {outflow.length > 0 && outflow}
                                         {(inflow.length > 0 || outflow.length > 0) && fee.length > 0 && (
-                                            <Text fontSize="xs" color="gray.400" px={1}>|</Text>
+                                            <span className="px-1 text-xs text-gray-400">|</span>
                                         )}
                                         {fee.length > 0 && fee}
-                                    </Flex>
+                                    </div>
                                 );
                             };
 
@@ -831,32 +826,32 @@ export const UnitsTab: React.FC<{
 
                             return (
                                 <React.Fragment key={unit.unit_id}>
-                                    <Table.Row onClick={() => toggleExpand(unit.unit_id)} style={{ cursor: 'pointer' }} _hover={{ bg: 'gray.50' }}>
-                                        <Table.Cell>
+                                    <tr onClick={() => toggleExpand(unit.unit_id)} className="cursor-pointer hover:bg-gray-50">
+                                        <td>
                                             <Badge
-                                                size="xs"
-                                                colorPalette={
+                                                className="text-[10px]"
+                                                colorScheme={
                                                     unit.pattern === 'swap' ? 'orange' :
                                                         unit.pattern === 'transfer' ? 'blue' : 'gray'
                                                 }
                                             >
                                                 {unit.pattern || 'unknown'}
                                             </Badge>
-                                        </Table.Cell>
-                                        <Table.Cell fontSize="2xs">{formatDateLocale(unit.date)}</Table.Cell>
+                                        </td>
+                                        <td className="text-[10px]">{formatDateLocale(unit.date)}</td>
                                         {/* Operation Column: Icon + Label + Sub-label + Transactions */}
-                                        <Table.Cell>
-                                            <Flex direction="column" gap={0.5}>
-                                                <Flex align="center" gap={1}>
-                                                    <Text fontSize="xs" fontWeight="medium">
+                                        <td>
+                                            <div className="flex flex-col gap-0.5">
+                                                <div className="flex items-center gap-1">
+                                                    <span className="text-xs font-medium">
                                                         {mainLabel}
-                                                    </Text>
-                                                </Flex>
+                                                    </span>
+                                                </div>
                                                 {/* Display transactions with truncated account/source badges */}
                                                 {(() => {
                                                     if (unit.transactions.length > 0) {
                                                         return (
-                                                            <Flex direction="column" gap={0.5} mt={0.5} bg="gray.100">
+                                                            <div className="mt-0.5 flex flex-col gap-0.5 bg-gray-100">
                                                                 {unit.transactions.slice(0, 3).map((tx: any) => (
                                                                     <TransactionRow
                                                                         key={tx.id}
@@ -865,67 +860,67 @@ export const UnitsTab: React.FC<{
                                                                         transaction={tx} />
                                                                 ))}
                                                                 {txCount > 3 && (
-                                                                    <Text fontSize="2xs" color="gray.500" pl={1}>+{txCount - 3} more transactions</Text>
+                                                                    <span className="pl-1 text-[10px] text-gray-500">+{txCount - 3} more transactions</span>
                                                                 )}
-                                                            </Flex>
+                                                            </div>
                                                         );
                                                     }
                                                     return null;
                                                 })()}
-                                            </Flex>
-                                        </Table.Cell>
+                                            </div>
+                                        </td>
                                         {/* Events count cell - uses event_ids from API (simple total count) */}
-                                        <Table.Cell>
+                                        <td>
                                             {(() => {
                                                 const eventCount = unit.event_ids?.length ?? 0;
 
                                                 if (eventCount === 0) {
-                                                    return <Text fontSize="2xs" color="gray.400">—</Text>;
+                                                    return <span className="text-[10px] text-gray-400">—</span>;
                                                 }
 
                                                 return (
-                                                    <Badge size="xs" colorPalette="blue">{eventCount}</Badge>
+                                                    <Badge className="text-[10px]" colorScheme="blue">{eventCount}</Badge>
                                                 );
                                             })()}
-                                        </Table.Cell>
-                                        <Table.Cell textAlign="right">
-                                            <Text fontSize="xs" color={(unit.realized_pnl_in_base || 0) >= 0 ? 'green.600' : 'red.600'} fontWeight="medium">
+                                        </td>
+                                        <td className="text-right">
+                                            <span className={`text-xs font-medium ${(unit.realized_pnl_in_base || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                 <ValueDisplay value={unit.realized_pnl_in_base || 0} currency={baseCurrency} />
-                                            </Text>
-                                        </Table.Cell>
-                                        <Table.Cell textAlign="right">
+                                            </span>
+                                        </td>
+                                        <td className="text-right">
                                             {unit.has_fees && unit.total_fees_in_base ? (
-                                                <Text fontSize="xs" color="orange.600">
+                                                <span className="text-xs text-orange-600">
                                                     <ValueDisplay value={unit.total_fees_in_base} currency={baseCurrency} />
-                                                </Text>
+                                                </span>
                                             ) : (
-                                                <Text fontSize="2xs" color="gray.400">-</Text>
+                                                <span className="text-[10px] text-gray-400">-</span>
                                             )}
-                                        </Table.Cell>
-                                        <Table.Cell textAlign="center">
+                                        </td>
+                                        <td className="text-center">
                                             {warningCount > 0 ? (
-                                                <Badge size="xs" colorPalette="orange">
+                                                <Badge className="text-[10px]" colorScheme="orange">
                                                     <FiAlertTriangle style={{ marginRight: 2 }} />
                                                     {warningCount}
                                                 </Badge>
                                             ) : (
-                                                <Text fontSize="2xs" color="gray.400">-</Text>
+                                                <span className="text-[10px] text-gray-400">-</span>
                                             )}
-                                        </Table.Cell>
-                                    </Table.Row>
+                                        </td>
+                                    </tr>
                                     {expandedUnits.has(unit.unit_id) && (
-                                        <Table.Row>
-                                            <Table.Cell colSpan={7} style={{ background: '#f9fafb', padding: 0 }}>
+                                        <tr>
+                                            <td colSpan={7} style={{ background: '#f9fafb', padding: 0 }}>
                                                 <UnitDetailRow unit={unit} baseCurrency={baseCurrency} costLots={costLots} versionId={versionId} onTransactionClick={onTransactionClick} />
-                                            </Table.Cell>
-                                        </Table.Row>
+                                            </td>
+                                        </tr>
                                     )}
                                 </React.Fragment>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
             {!hidePagination && (
                 <TablePagination
                     page={pagination.page}
@@ -935,7 +930,7 @@ export const UnitsTab: React.FC<{
                     onPageSizeChange={pagination.setPageSize}
                 />
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -1014,20 +1009,18 @@ const CostLotsTab: React.FC<{
     }, [lots]);
 
     return (
-        <Box>
+        <div>
             {/* Filters */}
-            <Flex gap={2} mb={4} wrap="wrap" align="center">
-                <Flex align="center" bg="gray.50" px={2} borderRadius="md" flex="1" maxW="250px">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="flex max-w-[250px] flex-1 items-center gap-1 rounded-md bg-gray-50 px-2">
                     <FiSearch color="gray" />
                     <Input
                         placeholder="Search asset, lot ID, account..."
-                        size="sm"
+                        className="h-8 border-none text-sm focus:shadow-none"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        border="none"
-                        _focus={{ boxShadow: 'none' }}
                     />
-                </Flex>
+                </div>
 
                 {/* Asset Filter */}
                 {uniqueAssets.length > 1 && (
@@ -1050,187 +1043,187 @@ const CostLotsTab: React.FC<{
                         ))}
                     </select>
                 )}
-            </Flex>
+            </div>
 
             {/* Status Filter Buttons */}
-            <Flex gap={1} mb={3} wrap="wrap">
+            <div className="mb-3 flex flex-wrap gap-1">
                 <Button
-                    size="xs"
+                    className="h-6 px-2 text-xs"
                     variant={statusFilter === 'all' ? 'solid' : 'outline'}
                     onClick={() => setStatusFilter('all')}
                 >
                     All ({stats.total})
                 </Button>
                 <Button
-                    size="xs"
+                    className="h-6 px-2 text-xs"
                     variant={statusFilter === 'open' ? 'solid' : 'outline'}
-                    colorPalette="green"
+                    colorScheme="green"
                     onClick={() => setStatusFilter('open')}
                 >
                     Open ({stats.open})
                 </Button>
                 <Button
-                    size="xs"
+                    className="h-6 px-2 text-xs"
                     variant={statusFilter === 'exhausted' ? 'solid' : 'outline'}
-                    colorPalette="gray"
+                    colorScheme="gray"
                     onClick={() => setStatusFilter('exhausted')}
                 >
                     Exhausted ({stats.exhausted})
                 </Button>
                 {stats.negative > 0 && (
                     <Button
-                        size="xs"
+                        className="h-6 px-2 text-xs"
                         variant={statusFilter === 'negative' ? 'solid' : 'outline'}
-                        colorPalette="red"
+                        colorScheme="red"
                         onClick={() => setStatusFilter('negative')}
                     >
                         Negative ({stats.negative})
                     </Button>
                 )}
-            </Flex>
+            </div>
 
             {/* Summary */}
-            <Flex gap={4} mb={3} fontSize="sm" color="gray.600">
-                <Text>
-                    <Badge size="sm" colorPalette="green" mr={1}>Open</Badge>
+            <div className="mb-3 flex gap-4 text-sm text-gray-600">
+                <span>
+                    <Badge colorScheme="green" className="mr-1">Open</Badge>
                     <ValueDisplay value={stats.totalCostBasis} currency={baseCurrency} /> total cost basis
-                </Text>
-            </Flex>
+                </span>
+            </div>
 
             {/* Table */}
-            <Box overflowX="auto" style={{ fontSize: '8px' }}>
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader width="80px">Status</Table.ColumnHeader>
-                            <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                            <Table.ColumnHeader width="100px">Acquired</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Qty Original</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Qty Remaining</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Unit Cost</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Total Cost</Table.ColumnHeader>
-                            <Table.ColumnHeader>Source</Table.ColumnHeader>
-                            <Table.ColumnHeader>Account</Table.ColumnHeader>
-                            <Table.ColumnHeader>Origin TX</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto" style={{ fontSize: '8px' }}>
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th className="w-[80px] text-left">Status</th>
+                            <th className="text-left">Asset</th>
+                            <th className="w-[100px] text-left">Acquired</th>
+                            <th className="text-right">Qty Original</th>
+                            <th className="text-right">Qty Remaining</th>
+                            <th className="text-right">Unit Cost</th>
+                            <th className="text-right">Total Cost</th>
+                            <th className="text-left">Source</th>
+                            <th className="text-left">Account</th>
+                            <th className="text-left">Origin TX</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {sorted.map((lot) => {
                             const isNegative = lot.unit_cost_in_base < 0 || lot.total_cost_in_base < 0 || lot.qty_remaining < 0;
                             const isExhausted = lot.qty_remaining === 0;
                             const pctRemaining = lot.qty_original > 0 ? (lot.qty_remaining / lot.qty_original) * 100 : 0;
 
                             return (
-                                <Table.Row
+                                <tr
                                     key={lot.cost_lot_id}
-                                    bg={isNegative ? 'red.50' : isExhausted ? 'gray.50' : undefined}
+                                    className={isNegative ? 'bg-red-50' : isExhausted ? 'bg-gray-50' : undefined}
                                 >
-                                    <Table.Cell>
-                                        <Flex direction="column" gap={1}>
+                                    <td>
+                                        <div className="flex flex-col gap-1">
                                             <Badge
-                                                size="xs"
-                                                colorPalette={isNegative ? 'red' : isExhausted ? 'gray' : 'green'}
+                                                className="text-[10px]"
+                                                colorScheme={isNegative ? 'red' : isExhausted ? 'gray' : 'green'}
                                             >
                                                 {isNegative ? '⚠ Negative' : isExhausted ? 'Exhausted' : 'Open'}
                                             </Badge>
                                             {!isExhausted && !isNegative && pctRemaining < 100 && (
-                                                <Text fontSize="2xs" color="gray.500">{pctRemaining.toFixed(0)}% left</Text>
+                                                <span className="text-[10px] text-gray-500">{pctRemaining.toFixed(0)}% left</span>
                                             )}
-                                        </Flex>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Badge size="xs">{lot.asset?.symbol ?? lot.asset_symbol ?? `#${lot.asset_id}`}</Badge>
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs">{formatDateLocale(lot.acquired_at)}</Table.Cell>
-                                    <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <Badge className="text-[10px]">{lot.asset?.symbol ?? lot.asset_symbol ?? `#${lot.asset_id}`}</Badge>
+                                    </td>
+                                    <td className="text-xs">{formatDateLocale(lot.acquired_at)}</td>
+                                    <td className="text-right font-mono text-xs">
                                         <ValueDisplay value={lot.qty_original} />
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
-                                        <Text color={isExhausted ? 'gray.400' : undefined}>
+                                    </td>
+                                    <td className="text-right font-mono text-xs">
+                                        <span className={isExhausted ? 'text-gray-400' : undefined}>
                                             <ValueDisplay value={lot.qty_remaining} />
-                                        </Text>
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontSize="xs">
+                                        </span>
+                                    </td>
+                                    <td className="text-right text-xs">
                                         {lot.is_zero_cost ? (
-                                            <Badge size="xs" colorPalette="red" title="Zero cost — likely missing price">Zero</Badge>
+                                            <Badge colorScheme="red" className="text-[10px]" title="Zero cost — likely missing price">Zero</Badge>
                                         ) : lot.cost_source === 'provisional' ? (
                                             <Tooltip
                                                 content={
-                                                    <Box fontSize="xs">
-                                                        <Text fontWeight="semibold">Provisional Cost</Text>
-                                                        <Text>FMV-based estimate for negative lot.</Text>
-                                                        {lot.cost_fmv_price != null && <Text>FMV: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
-                                                        {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
-                                                        <Text mt={1} color="orange.300">Will be settled when acquisition arrives.</Text>
-                                                    </Box>
+                                                    <div className="text-xs">
+                                                        <div className="font-semibold">Provisional Cost</div>
+                                                        <div>FMV-based estimate for negative lot.</div>
+                                                        {lot.cost_fmv_price != null && <div>FMV: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</div>}
+                                                        {lot.cost_fmv_source && <div>Source: {lot.cost_fmv_source}</div>}
+                                                        <div className="mt-1 text-orange-300">Will be settled when acquisition arrives.</div>
+                                                    </div>
                                                 }
                                                 openDelay={200}
                                             >
-                                                <Badge size="xs" colorPalette="orange" cursor="help">
+                                                <Badge colorScheme="orange" className="cursor-help text-[10px]">
                                                     <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
                                                 </Badge>
                                             </Tooltip>
                                         ) : lot.cost_source === 'fmv' && lot.cost_fmv_stale ? (
                                             <Tooltip
                                                 content={
-                                                    <Box fontSize="xs">
-                                                        <Text fontWeight="semibold">Stale FMV Price</Text>
-                                                        {lot.cost_fmv_price != null && <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
-                                                        {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
-                                                        {lot.cost_fmv_timestamp && <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>}
-                                                        <Text mt={1} color="orange.300">⚠ Price exceeds staleness window</Text>
-                                                    </Box>
+                                                    <div className="text-xs">
+                                                        <div className="font-semibold">Stale FMV Price</div>
+                                                        {lot.cost_fmv_price != null && <div>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</div>}
+                                                        {lot.cost_fmv_source && <div>Source: {lot.cost_fmv_source}</div>}
+                                                        {lot.cost_fmv_timestamp && <div>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</div>}
+                                                        <div className="mt-1 text-orange-300">⚠ Price exceeds staleness window</div>
+                                                    </div>
                                                 }
                                                 openDelay={200}
                                             >
-                                                <Badge size="xs" colorPalette="yellow" cursor="help">
+                                                <Badge colorScheme="yellow" className="cursor-help text-[10px]">
                                                     <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
                                                 </Badge>
                                             </Tooltip>
                                         ) : (
-                                            <Text color={isNegative ? 'red.600' : undefined}>
+                                            <span className={isNegative ? 'text-red-600' : undefined}>
                                                 <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
-                                            </Text>
+                                            </span>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontSize="xs">
+                                    </td>
+                                    <td className="text-right text-xs">
                                         {lot.is_zero_cost ? (
-                                            <Badge size="xs" colorPalette="red" title="Zero cost — likely missing price">Zero</Badge>
+                                            <Badge colorScheme="red" className="text-[10px]" title="Zero cost — likely missing price">Zero</Badge>
                                         ) : (
-                                            <Text color={isNegative ? 'red.600' : undefined}>
+                                            <span className={isNegative ? 'text-red-600' : undefined}>
                                                 <ValueDisplay value={lot.total_cost_in_base} currency={baseCurrency} />
-                                            </Text>
+                                            </span>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs">
+                                    </td>
+                                    <td className="text-xs">
                                         {lot.cost_source ? (
                                             (lot.cost_fmv_price || lot.cost_fmv_source || lot.cost_fmv_timestamp) ? (
                                                 <Tooltip
                                                     content={
-                                                        <Box fontSize="xs" lineHeight="tall">
-                                                            <Text fontWeight="semibold" mb={1}>FMV Details</Text>
+                                                        <div className="text-xs leading-relaxed">
+                                                            <div className="mb-1 font-semibold">FMV Details</div>
                                                             {lot.cost_fmv_price != null && (
-                                                                <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>
+                                                                <div>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</div>
                                                             )}
                                                             {lot.cost_fmv_source && (
-                                                                <Text>Source: {lot.cost_fmv_source}</Text>
+                                                                <div>Source: {lot.cost_fmv_source}</div>
                                                             )}
                                                             {lot.cost_fmv_timestamp && (
-                                                                <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>
+                                                                <div>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</div>
                                                             )}
                                                             {lot.cost_fmv_stale && (
-                                                                <Text color="orange.300">⚠ Stale price</Text>
+                                                                <div className="text-orange-300">⚠ Stale price</div>
                                                             )}
-                                                        </Box>
+                                                        </div>
                                                     }
                                                     openDelay={200}
                                                     closeDelay={100}
                                                 >
-                                                    <Badge size="xs" cursor="help" colorPalette={
+                                                    <Badge className="cursor-help text-[10px]" colorScheme={
                                                         lot.cost_source === 'base_currency' ? 'gray' :
                                                             lot.cost_source === 'proceeds' ? 'green' :
                                                                 lot.cost_source === 'inherited' ? 'blue' :
-                                                                    lot.cost_source === 'fmv' ? 'cyan' :
+                                                                    lot.cost_source === 'fmv' ? 'yellow' :
                                                                         lot.cost_source === 'provisional' ? 'orange' :
                                                                             'gray'
                                                     }>
@@ -1238,11 +1231,11 @@ const CostLotsTab: React.FC<{
                                                     </Badge>
                                                 </Tooltip>
                                             ) : (
-                                                <Badge size="xs" colorPalette={
+                                                <Badge className="text-[10px]" colorScheme={
                                                     lot.cost_source === 'base_currency' ? 'gray' :
                                                         lot.cost_source === 'proceeds' ? 'green' :
                                                             lot.cost_source === 'inherited' ? 'blue' :
-                                                                lot.cost_source === 'fmv' ? 'cyan' :
+                                                                lot.cost_source === 'fmv' ? 'yellow' :
                                                                     lot.cost_source === 'provisional' ? 'orange' :
                                                                         'gray'
                                                 }>
@@ -1250,9 +1243,9 @@ const CostLotsTab: React.FC<{
                                                 </Badge>
                                             )
                                         ) : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs">{lot.account_name || '-'}</Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td className="text-xs">{lot.account_name || '-'}</td>
+                                    <td>
                                         {lot.origin_transaction_id ? (
                                             <TransactionCell
                                                 txId={lot.origin_transaction_id}
@@ -1262,21 +1255,21 @@ const CostLotsTab: React.FC<{
                                                 size="xs"
                                             />
                                         ) : (
-                                            <Text fontSize="xs" color="gray.400">-</Text>
+                                            <span className="text-xs text-gray-400">-</span>
                                         )}
-                                    </Table.Cell>
-                                </Table.Row>
+                                    </td>
+                                </tr>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
             {sorted.length > 300 && (
-                <Text fontSize="sm" color="gray.500" mt={2} textAlign="center">
+                <div className="mt-2 text-center text-sm text-gray-500">
                     Showing first 300 of {sorted.length} lots
-                </Text>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -1352,76 +1345,74 @@ const RealizedPnLTab: React.FC<{
     }, [entries]);
 
     return (
-        <Box>
+        <div>
             {/* Filters */}
-            <Flex gap={2} mb={4} wrap="wrap" align="center">
-                <Flex align="center" bg="gray.50" px={2} borderRadius="md" flex="1" maxW="300px">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="flex max-w-[300px] flex-1 items-center gap-1 rounded-md bg-gray-50 px-2">
                     <FiSearch color="gray" />
                     <Input
                         placeholder="Search asset..."
-                        size="sm"
+                        className="h-8 border-none text-sm focus:shadow-none"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        border="none"
-                        _focus={{ boxShadow: 'none' }}
                     />
-                </Flex>
-                <Flex gap={1}>
+                </div>
+                <div className="flex gap-1">
                     <Button
-                        size="xs"
+                        className="h-6 px-2 text-xs"
                         variant={taxableFilter === 'all' ? 'solid' : 'outline'}
                         onClick={() => setTaxableFilter('all')}
                     >
                         All ({entries.length})
                     </Button>
                     <Button
-                        size="xs"
+                        className="h-6 px-2 text-xs"
                         variant={taxableFilter === 'taxable' ? 'solid' : 'outline'}
-                        colorPalette="red"
+                        colorScheme="red"
                         onClick={() => setTaxableFilter('taxable')}
                     >
                         Taxable ({stats.taxableCount})
                     </Button>
                     <Button
-                        size="xs"
+                        className="h-6 px-2 text-xs"
                         variant={taxableFilter === 'non-taxable' ? 'solid' : 'outline'}
-                        colorPalette="green"
+                        colorScheme="green"
                         onClick={() => setTaxableFilter('non-taxable')}
                     >
                         Non-taxable ({stats.nonTaxableCount})
                     </Button>
-                </Flex>
-                <Flex gap={4} ml="auto">
-                    <Text fontSize="sm" color="gray.500">
+                </div>
+                <div className="ml-auto flex gap-4">
+                    <span className="text-sm text-gray-500">
                         Total P&L: <strong style={{ color: stats.totalPnL >= 0 ? 'green' : 'red' }}>
                             <ValueDisplay value={stats.totalPnL} currency={baseCurrency} />
                         </strong>
-                    </Text>
-                    <Text fontSize="sm" color="gray.500">
+                    </span>
+                    <span className="text-sm text-gray-500">
                         Taxable: <strong style={{ color: stats.taxablePnL >= 0 ? 'green' : 'red' }}>
                             <ValueDisplay value={stats.taxablePnL} currency={baseCurrency} />
                         </strong>
-                    </Text>
-                </Flex>
-            </Flex>
+                    </span>
+                </div>
+            </div>
 
-            <Box overflowX="auto">
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader>Date</Table.ColumnHeader>
-                            <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Qty</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">FMV Price</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Proceeds</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Cost Basis</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">P&L</Table.ColumnHeader>
-                            <Table.ColumnHeader>Taxable</Table.ColumnHeader>
-                            <Table.ColumnHeader>Origin TX</Table.ColumnHeader>
-                            <Table.ColumnHeader>⚠</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th className="text-left">Date</th>
+                            <th className="text-left">Asset</th>
+                            <th className="text-right">Qty</th>
+                            <th className="text-right">FMV Price</th>
+                            <th className="text-right">Proceeds</th>
+                            <th className="text-right">Cost Basis</th>
+                            <th className="text-right">P&L</th>
+                            <th className="text-left">Taxable</th>
+                            <th className="text-left">Origin TX</th>
+                            <th className="text-left">⚠</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {sorted.map((entry) => {
                             // Compute FMV price and source display
                             const fmvPrice = entry.proceeds_price != null
@@ -1440,92 +1431,90 @@ const RealizedPnLTab: React.FC<{
                                         ? 'transfer'
                                         : null;
 
-                            const sourceColor = entry.proceeds_source === 'fmv_lookup'
+                            const sourceColor: BadgeColorScheme = entry.proceeds_source === 'fmv_lookup'
                                 ? 'blue'
                                 : entry.proceeds_source === 'base_currency'
                                     ? 'green'
                                     : 'gray';
 
                             return (
-                                <Table.Row
+                                <tr
                                     key={entry.id}
-                                    bg={entry.warnings && entry.warnings.length > 0 ? 'orange.50' : undefined}
+                                    className={entry.warnings && entry.warnings.length > 0 ? 'bg-orange-50' : undefined}
                                 >
-                                    <Table.Cell fontSize="sm">{formatDateLocale(entry.realized_at)}</Table.Cell>
-                                    <Table.Cell>
-                                        <Badge size="sm">{entry.asset.symbol}</Badge>
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontFamily="mono" fontSize="sm">
+                                    <td className="text-sm">{formatDateLocale(entry.realized_at)}</td>
+                                    <td>
+                                        <Badge>{entry.asset.symbol}</Badge>
+                                    </td>
+                                    <td className="text-right font-mono text-sm">
                                         {formatQty(entry.qty)}
-                                    </Table.Cell>
+                                    </td>
                                     {/* Combined FMV Price & Source column */}
-                                    <Table.Cell textAlign="right" fontSize="sm">
-                                        <Flex direction="column" align="flex-end" gap={0}>
-                                            <Text>
+                                    <td className="text-right text-sm">
+                                        <div className="flex flex-col items-end gap-0">
+                                            <span>
                                                 {fmvPrice != null ? <ValueDisplay value={fmvPrice} currency={baseCurrency} /> : '-'}
-                                            </Text>
+                                            </span>
                                             {sourceLabel && (
-                                                <Badge size="xs" colorPalette={sourceColor} variant="subtle">
+                                                <Badge className="text-[10px]" colorScheme={sourceColor}>
                                                     {sourceLabel}
                                                 </Badge>
                                             )}
-                                        </Flex>
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontSize="sm">
+                                        </div>
+                                    </td>
+                                    <td className="text-right text-sm">
                                         <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontSize="sm">
+                                    </td>
+                                    <td className="text-right text-sm">
                                         <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
-                                    </Table.Cell>
-                                    <Table.Cell
-                                        textAlign="right"
-                                        fontWeight="bold"
-                                        color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
+                                    </td>
+                                    <td
+                                        className={`text-right font-bold ${entry.pnl_in_base >= 0 ? 'text-green-600' : 'text-red-600'}`}
                                     >
                                         <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Badge colorPalette={entry.disposal_taxable ? 'red' : 'green'} size="sm">
+                                    </td>
+                                    <td>
+                                        <Badge colorScheme={entry.disposal_taxable ? 'red' : 'green'}>
                                             {entry.disposal_taxable ? 'Yes' : 'No'}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td>
                                         {entry.transaction_id ? (
-                                            <Flex direction="column" gap={0}>
+                                            <div className="flex flex-col gap-0">
                                                 <TransactionCell
                                                     txId={entry.transaction_id}
                                                     baseCurrency={baseCurrency}
                                                     onTransactionClick={onTransactionClick}
                                                 />
                                                 {(entry.origin_tx_type || entry.origin_tx_source) && (
-                                                    <Text fontSize="xs" color="gray.500" pl={1}>
+                                                    <span className="pl-1 text-xs text-gray-500">
                                                         {entry.origin_tx_type}{entry.origin_tx_source ? ` • ${entry.origin_tx_source}` : ''}
-                                                    </Text>
+                                                    </span>
                                                 )}
-                                            </Flex>
+                                            </div>
                                         ) : (
-                                            <Text fontSize="xs" color="gray.400">-</Text>
+                                            <span className="text-xs text-gray-400">-</span>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td>
                                         {entry.warnings && entry.warnings.length > 0 && (
-                                            <Badge colorPalette="orange" size="sm" title={entry.warnings.map(w => w.message).join(', ')}>
+                                            <Badge colorScheme="orange" title={entry.warnings.map(w => w.message).join(', ')}>
                                                 {entry.warnings.length}
                                             </Badge>
                                         )}
-                                    </Table.Cell>
-                                </Table.Row>
+                                    </td>
+                                </tr>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
             {sorted.length > 200 && (
-                <Text fontSize="sm" color="gray.500" mt={2} textAlign="center">
+                <div className="mt-2 text-center text-sm text-gray-500">
                     Showing first 200 of {sorted.length} entries
-                </Text>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -1584,51 +1573,50 @@ const FeesTab: React.FC<{
 
     if (fees.length === 0) {
         return (
-            <Box textAlign="center" py={8}>
-                <Text color="gray.500" fontWeight="bold">No fees recorded</Text>
-                <Text fontSize="sm" color="gray.400">Fee entries will appear here after calculation</Text>
-            </Box>
+            <div className="py-8 text-center">
+                <div className="font-bold text-gray-500">No fees recorded</div>
+                <div className="text-sm text-gray-400">Fee entries will appear here after calculation</div>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {/* Summary */}
-            <Flex gap={4} mb={4} wrap="wrap">
-                <Card.Root flex="1" minW="150px">
-                    <Card.Body py={2}>
-                        <Text fontSize="xs" color="gray.500">Total Fees</Text>
-                        <Text fontSize="lg" fontWeight="bold">
+            <div className="mb-4 flex flex-wrap gap-4">
+                <div className="min-w-[150px] flex-1 border border-gray-200 bg-white">
+                    <div className="px-3 py-2">
+                        <div className="text-xs text-gray-500">Total Fees</div>
+                        <div className="text-lg font-bold">
                             <ValueDisplay value={totalFees} currency={baseCurrency} />
-                        </Text>
-                    </Card.Body>
-                </Card.Root>
-                <Card.Root flex="1" minW="150px">
-                    <Card.Body py={2}>
-                        <Text fontSize="xs" color="gray.500">Fee Entries</Text>
-                        <Text fontSize="lg" fontWeight="bold">{fees.length}</Text>
-                    </Card.Body>
-                </Card.Root>
-            </Flex>
+                        </div>
+                    </div>
+                </div>
+                <div className="min-w-[150px] flex-1 border border-gray-200 bg-white">
+                    <div className="px-3 py-2">
+                        <div className="text-xs text-gray-500">Fee Entries</div>
+                        <div className="text-lg font-bold">{fees.length}</div>
+                    </div>
+                </div>
+            </div>
 
             {/* Filters */}
-            <Flex gap={2} mb={4} wrap="wrap" align="center">
-                <Box position="relative" flex="1" maxW="200px">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="relative max-w-[200px] flex-1">
                     <Input
                         placeholder="Search asset..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        size="sm"
-                        pl={8}
+                        className="h-8 pl-8"
                     />
-                    <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
+                    <div className="absolute left-2 top-1/2 -translate-y-1/2">
                         <FiSearch size={14} color="gray" />
-                    </Box>
-                </Box>
+                    </div>
+                </div>
                 <Button
-                    size="xs"
+                    className={sourceFilter === 'all' ? 'h-6 bg-purple-600 px-2 text-xs text-white hover:bg-purple-700' : 'h-6 border-purple-300 px-2 text-xs text-purple-700 hover:bg-purple-50'}
                     variant={sourceFilter === 'all' ? 'solid' : 'outline'}
-                    colorPalette="purple"
+                    colorScheme="gray"
                     onClick={() => setSourceFilter('all')}
                 >
                     All ({fees.length})
@@ -1636,76 +1624,75 @@ const FeesTab: React.FC<{
                 {sources.map(src => (
                     <Button
                         key={src}
-                        size="xs"
+                        className={sourceFilter === src ? 'h-6 bg-purple-600 px-2 text-xs text-white hover:bg-purple-700' : 'h-6 border-purple-300 px-2 text-xs text-purple-700 hover:bg-purple-50'}
                         variant={sourceFilter === src ? 'solid' : 'outline'}
-                        colorPalette="purple"
+                        colorScheme="gray"
                         onClick={() => setSourceFilter(src)}
                     >
                         {src} ({sourceCounts[src]})
                     </Button>
                 ))}
-            </Flex>
+            </div>
 
             {/* Table */}
-            <Box overflowX="auto">
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader width="100px">Date</Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px">Source</Table.ColumnHeader>
-                            <Table.ColumnHeader width="70px">Asset</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Fee Qty</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Fee Value</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Cost Basis</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Realized P&L</Table.ColumnHeader>
-                            <Table.ColumnHeader>Transaction</Table.ColumnHeader>
-                            <Table.ColumnHeader width="60px">Unit</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th className="w-[100px] text-left">Date</th>
+                            <th className="w-[80px] text-left">Source</th>
+                            <th className="w-[70px] text-left">Asset</th>
+                            <th className="text-right">Fee Qty</th>
+                            <th className="text-right">Fee Value</th>
+                            <th className="text-right">Cost Basis</th>
+                            <th className="text-right">Realized P&L</th>
+                            <th className="text-left">Transaction</th>
+                            <th className="w-[60px] text-left">Unit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {filtered.map((fee) => (
-                            <Table.Row key={fee.id}>
-                                <Table.Cell>
-                                    <Text fontSize="2xs" color="gray.600">
+                            <tr key={fee.id}>
+                                <td>
+                                    <span className="text-[10px] text-gray-600">
                                         {fee.date ? formatDateLocale(fee.date) : '-'}
-                                    </Text>
-                                </Table.Cell>
-                                <Table.Cell>
-                                    <Badge size="xs" variant="subtle">{fee.source}</Badge>
-                                </Table.Cell>
-                                <Table.Cell>
-                                    <Badge size="xs">{fee.asset_symbol}</Badge>
-                                </Table.Cell>
-                                <Table.Cell textAlign="right">
-                                    <Text fontSize="xs" fontFamily="mono">
+                                    </span>
+                                </td>
+                                <td>
+                                    <Badge className="text-[10px]">{fee.source}</Badge>
+                                </td>
+                                <td>
+                                    <Badge className="text-[10px]">{fee.asset_symbol}</Badge>
+                                </td>
+                                <td className="text-right">
+                                    <span className="font-mono text-xs">
                                         {formatQty(fee.fee_amount)}
-                                    </Text>
-                                </Table.Cell>
-                                <Table.Cell textAlign="right">
-                                    <Text fontSize="xs">
+                                    </span>
+                                </td>
+                                <td className="text-right">
+                                    <span className="text-xs">
                                         <ValueDisplay value={fee.fee_in_base} currency={baseCurrency} />
-                                    </Text>
-                                </Table.Cell>
-                                <Table.Cell textAlign="right">
-                                    <Text fontSize="xs" color="gray.600">
+                                    </span>
+                                </td>
+                                <td className="text-right">
+                                    <span className="text-xs text-gray-600">
                                         {fee.cost_basis_consumed != null
                                             ? <ValueDisplay value={fee.cost_basis_consumed} currency={baseCurrency} />
                                             : '-'}
-                                    </Text>
-                                </Table.Cell>
-                                <Table.Cell textAlign="right">
+                                    </span>
+                                </td>
+                                <td className="text-right">
                                     {fee.realized_pnl != null ? (
-                                        <Text
-                                            fontSize="xs"
-                                            color={fee.realized_pnl >= 0 ? 'green.600' : 'red.600'}
+                                        <span
+                                            className={`text-xs ${fee.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}
                                         >
                                             <ValueDisplay value={fee.realized_pnl} currency={baseCurrency} />
-                                        </Text>
+                                        </span>
                                     ) : (
-                                        <Text fontSize="xs" color="gray.400">-</Text>
+                                        <span className="text-xs text-gray-400">-</span>
                                     )}
-                                </Table.Cell>
-                                <Table.Cell>
+                                </td>
+                                <td>
                                     {fee.transaction_id ? (
                                         <TransactionCell
                                             txId={fee.transaction_id}
@@ -1715,35 +1702,32 @@ const FeesTab: React.FC<{
                                             size="xs"
                                         />
                                     ) : (
-                                        <Text fontSize="xs" color="gray.400">-</Text>
+                                        <span className="text-xs text-gray-400">-</span>
                                     )}
-                                </Table.Cell>
-                                <Table.Cell>
+                                </td>
+                                <td>
                                     {fee.unit_id ? (
-                                        <Text
-                                            fontSize="xs"
-                                            color="blue.600"
-                                            cursor="pointer"
-                                            _hover={{ textDecoration: 'underline' }}
+                                        <span
+                                            className="cursor-pointer text-xs text-blue-600 hover:underline"
                                             onClick={() => onUnitClick?.(fee.unit_id!)}
                                         >
                                             #{fee.unit_id}
-                                        </Text>
+                                        </span>
                                     ) : (
-                                        <Text fontSize="xs" color="gray.400">-</Text>
+                                        <span className="text-xs text-gray-400">-</span>
                                     )}
-                                </Table.Cell>
-                            </Table.Row>
+                                </td>
+                            </tr>
                         ))}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
             {filtered.length > 200 && (
-                <Text fontSize="xs" color="gray.500" mt={2} textAlign="center">
+                <div className="mt-2 text-center text-xs text-gray-500">
                     Showing first 200 of {filtered.length} entries
-                </Text>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -1827,20 +1811,19 @@ const WarningsTab: React.FC<{
 
     if (warnings.length === 0) {
         return (
-            <Box textAlign="center" py={8}>
-                <Text color="green.600" fontWeight="bold">✓ No warnings</Text>
-                <Text fontSize="sm" color="gray.500">All calculations completed without issues</Text>
-            </Box>
+            <div className="py-8 text-center">
+                <div className="font-bold text-green-600">✓ No warnings</div>
+                <div className="text-sm text-gray-500">All calculations completed without issues</div>
+            </div>
         );
     }
 
     return (
-        <Box>
-            <Flex gap={2} mb={4} wrap="wrap">
+        <div>
+            <div className="mb-4 flex flex-wrap gap-2">
                 <Button
-                    size="xs"
+                    className={typeFilter === 'all' ? 'h-6 bg-orange-600 px-2 text-xs text-white hover:bg-orange-700' : 'h-6 border-orange-300 px-2 text-xs text-orange-700 hover:bg-orange-50'}
                     variant={typeFilter === 'all' ? 'solid' : 'outline'}
-                    colorPalette="orange"
                     onClick={() => setTypeFilter('all')}
                 >
                     All ({warnings.length})
@@ -1848,49 +1831,48 @@ const WarningsTab: React.FC<{
                 {types.map(type => (
                     <Button
                         key={type}
-                        size="xs"
+                        className={typeFilter === type ? 'h-6 bg-orange-600 px-2 text-xs text-white hover:bg-orange-700' : 'h-6 border-orange-300 px-2 text-xs text-orange-700 hover:bg-orange-50'}
                         variant={typeFilter === type ? 'solid' : 'outline'}
-                        colorPalette="orange"
                         onClick={() => setTypeFilter(type)}
                     >
                         {type} ({typeCounts[type]})
                     </Button>
                 ))}
-            </Flex>
+            </div>
 
-            <Box overflowX="auto" style={{ fontSize: '8px' }}>
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader width="100px">Date</Table.ColumnHeader>
-                            <Table.ColumnHeader width="90px">Type</Table.ColumnHeader>
-                            <Table.ColumnHeader>Message</Table.ColumnHeader>
-                            <Table.ColumnHeader width="180px">Transaction</Table.ColumnHeader>
-                            {quoteAssetId && <Table.ColumnHeader width="80px">Action</Table.ColumnHeader>}
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto" style={{ fontSize: '8px' }}>
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th className="w-[100px] text-left">Date</th>
+                            <th className="w-[90px] text-left">Type</th>
+                            <th className="text-left">Message</th>
+                            <th className="w-[180px] text-left">Transaction</th>
+                            {quoteAssetId && <th className="w-[80px] text-left">Action</th>}
+                        </tr>
+                    </thead>
+                    <tbody>
                         {filtered.map((warning, i) => {
                             const typeConfig = getWarningTypeConfig(warning.warning_type);
                             return (
-                                <Table.Row key={i} bg={`${typeConfig.colorPalette}.50`}>
-                                    <Table.Cell>
-                                        <Text fontSize="2xs" color="gray.600">
+                                <tr key={i} className={WARNING_BG[typeConfig.colorPalette] ?? 'bg-gray-50'}>
+                                    <td>
+                                        <span className="text-[10px] text-gray-600">
                                             {warning.timestamp
                                                 ? formatDateTimeLocale(warning.timestamp)
                                                 : '-'
                                             }
-                                        </Text>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Badge colorPalette={typeConfig.colorPalette} size="xs">
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <Badge colorScheme={toBadgeColor(typeConfig.colorPalette)} className="text-[10px]">
                                             {typeConfig.icon} {warning.warning_type}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Text fontSize="xs">{warning.message}</Text>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td>
+                                        <span className="text-xs">{warning.message}</span>
+                                    </td>
+                                    <td>
                                         {warning.transaction_id ? (
                                             <TransactionCell
                                                 txId={warning.transaction_id}
@@ -1898,28 +1880,28 @@ const WarningsTab: React.FC<{
                                                 onTransactionClick={onTransactionClick}
                                             />
                                         ) : (
-                                            <Text fontSize="xs" color="gray.400">-</Text>
+                                            <span className="text-xs text-gray-400">-</span>
                                         )}
-                                    </Table.Cell>
+                                    </td>
                                     {quoteAssetId && (
-                                        <Table.Cell>
+                                        <td>
                                             {isPriceWarning(warning) && (
                                                 <Button
-                                                    size="xs"
-                                                    colorPalette="green"
+                                                    className="h-6 px-2 text-xs"
+                                                    colorScheme="green"
                                                     onClick={() => handleAddPriceClick(warning)}
                                                 >
                                                     <FiPlus size={10} />
                                                 </Button>
                                             )}
-                                        </Table.Cell>
+                                        </td>
                                     )}
-                                </Table.Row>
+                                </tr>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
 
             {/* Manual Price Dialog */}
             {selectedWarning && selectedWarning.asset_id && quoteAssetId && (
@@ -1937,7 +1919,7 @@ const WarningsTab: React.FC<{
                     quoteAssetName={baseCurrency}
                 />
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -1994,101 +1976,93 @@ const SettlementsTab: React.FC<{
 
     if (settlements.length === 0) {
         return (
-            <Box textAlign="center" py={8}>
-                <Text color="gray.600" fontWeight="bold">No settlements</Text>
-                <Text fontSize="sm" color="gray.500">No negative lots have been settled yet</Text>
-            </Box>
+            <div className="py-8 text-center">
+                <div className="font-bold text-gray-600">No settlements</div>
+                <div className="text-sm text-gray-500">No negative lots have been settled yet</div>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {/* Search */}
-            <Flex gap={2} mb={4} wrap="wrap" align="center">
-                <Flex align="center" bg="gray.50" px={2} borderRadius="md" flex="1" maxW="300px">
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="flex max-w-[300px] flex-1 items-center gap-1 rounded-md bg-gray-50 px-2">
                     <FiSearch color="gray" />
                     <Input
                         placeholder="Search lot UUID, asset..."
-                        size="sm"
+                        className="h-8 border-none text-sm focus:shadow-none"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        border="none"
-                        _focus={{ boxShadow: 'none' }}
                     />
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {/* Stats */}
-            <Flex gap={4} mb={3} fontSize="sm" color="gray.600" wrap="wrap">
-                <Text>
-                    <Badge size="sm" colorPalette="blue" mr={1}>{settlements.length}</Badge>
+            <div className="mb-3 flex flex-wrap gap-4 text-sm text-gray-600">
+                <span>
+                    <Badge colorScheme="blue" className="mr-1">{settlements.length}</Badge>
                     Settlements
-                </Text>
-                <Text>
-                    <Badge size="sm" colorPalette="red" mr={1}>{stats.uniqueNegativeLots}</Badge>
+                </span>
+                <span>
+                    <Badge colorScheme="red" className="mr-1">{stats.uniqueNegativeLots}</Badge>
                     Negative lots settled
-                </Text>
-                <Text>
-                    <Badge size="sm" colorPalette="green" mr={1}>{stats.uniqueSettlingLots}</Badge>
+                </span>
+                <span>
+                    <Badge colorScheme="green" className="mr-1">{stats.uniqueSettlingLots}</Badge>
                     Settling lots used
-                </Text>
+                </span>
                 {stats.totalCostApplied > 0 && (
-                    <Text>
-                        <Badge size="sm" colorPalette="purple" mr={1}>
+                    <span>
+                        <Badge colorScheme="purple" className="mr-1">
                             <ValueDisplay value={stats.totalCostApplied} currency={baseCurrency} />
                         </Badge>
                         Cost basis applied
-                    </Text>
+                    </span>
                 )}
-            </Flex>
+            </div>
 
-            <Box overflowX="auto" style={{ fontSize: '8px' }}>
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader>Date</Table.ColumnHeader>
-                            <Table.ColumnHeader>Negative Lot</Table.ColumnHeader>
-                            <Table.ColumnHeader>→</Table.ColumnHeader>
-                            <Table.ColumnHeader>Settling Lot</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Qty Settled</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right">Cost Basis</Table.ColumnHeader>
-                            <Table.ColumnHeader>Transaction</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto" style={{ fontSize: '8px' }}>
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th className="text-left">Date</th>
+                            <th className="text-left">Negative Lot</th>
+                            <th className="text-left">→</th>
+                            <th className="text-left">Settling Lot</th>
+                            <th className="text-right">Qty Settled</th>
+                            <th className="text-right">Cost Basis</th>
+                            <th className="text-left">Transaction</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {sorted.map((settlement) => {
                             const negativeLot = lotMap.get(settlement.negative_lot_id);
                             const settlingLot = lotMap.get(settlement.settling_lot_id);
                             return (
-                                <Table.Row key={settlement.settlement_id}>
-                                    <Table.Cell fontSize="xs">
+                                <tr key={settlement.settlement_id}>
+                                    <td className="text-xs">
                                         {formatDateLocale(settlement.settled_at)}
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Flex direction="column" gap={0}>
-                                            <Flex align="center" gap={1}>
-                                                <Badge size="xs" colorPalette="red">⚠</Badge>
+                                    </td>
+                                    <td>
+                                        <div className="flex flex-col gap-0">
+                                            <div className="flex items-center gap-1">
+                                                <Badge colorScheme="red" className="text-[10px]">⚠</Badge>
                                                 {negativeLot && (
-                                                    <Badge size="xs">{negativeLot.asset_symbol}</Badge>
+                                                    <Badge className="text-[10px]">{negativeLot.asset_symbol}</Badge>
                                                 )}
-                                            </Flex>
-                                            <Text fontSize="2xs" fontFamily="mono" color="gray.500">
+                                            </div>
+                                            <span className="font-mono text-[10px] text-gray-500">
                                                 #{settlement.negative_lot_id}
-                                            </Text>
+                                            </span>
                                             {negativeLot && (
-                                                <Flex direction="column" gap={0} fontSize="2xs" color="gray.600">
-                                                    <Text>Orig: {formatQty(Math.abs(negativeLot.qty_original))}</Text>
+                                                <div className="flex flex-col gap-0 text-[10px] text-gray-600">
+                                                    <span>Orig: {formatQty(Math.abs(negativeLot.qty_original))}</span>
                                                     {negativeLot.origin_transaction_id && (
                                                         <TransactionTooltip txId={negativeLot.origin_transaction_id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
                                                             <Button
-                                                                size="xs"
                                                                 variant="ghost"
-                                                                p={0}
-                                                                h="auto"
-                                                                minW="auto"
-                                                                fontWeight="normal"
-                                                                color="blue.600"
-                                                                fontSize="2xs"
+                                                                className="h-auto min-w-0 p-0 text-[10px] font-normal text-blue-600"
                                                                 onClick={(e) => { e.stopPropagation(); onTransactionClick?.(negativeLot.origin_transaction_id!); }}
                                                             >
                                                                 TX #{negativeLot.origin_transaction_id}
@@ -2096,58 +2070,52 @@ const SettlementsTab: React.FC<{
                                                         </TransactionTooltip>
                                                     )}
                                                     {negativeLot.is_fully_settled ? (
-                                                        <Badge size="xs" colorPalette="green">✓ Settled</Badge>
+                                                        <Badge colorScheme="green" className="text-[10px]">✓ Settled</Badge>
                                                     ) : (
-                                                        <Badge size="xs" colorPalette="orange">⏳ Pending</Badge>
+                                                        <Badge colorScheme="orange" className="text-[10px]">⏳ Pending</Badge>
                                                     )}
-                                                </Flex>
+                                                </div>
                                             )}
-                                        </Flex>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                        </div>
+                                    </td>
+                                    <td>
                                         <FiLink size={12} color="gray" />
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Flex direction="column" gap={0}>
-                                            <Flex align="center" gap={1}>
-                                                <Badge size="xs" colorPalette="green">+</Badge>
+                                    </td>
+                                    <td>
+                                        <div className="flex flex-col gap-0">
+                                            <div className="flex items-center gap-1">
+                                                <Badge colorScheme="green" className="text-[10px]">+</Badge>
                                                 {settlingLot && (
-                                                    <Badge size="xs">{settlingLot.asset_symbol}</Badge>
+                                                    <Badge className="text-[10px]">{settlingLot.asset_symbol}</Badge>
                                                 )}
-                                            </Flex>
-                                            <Text fontSize="2xs" fontFamily="mono" color="gray.500">
+                                            </div>
+                                            <span className="font-mono text-[10px] text-gray-500">
                                                 #{settlement.settling_lot_id}
-                                            </Text>
+                                            </span>
                                             {settlingLot && settlingLot.origin_transaction_id && (
                                                 <TransactionTooltip txId={settlingLot.origin_transaction_id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
                                                     <Button
-                                                        size="xs"
                                                         variant="ghost"
-                                                        p={0}
-                                                        h="auto"
-                                                        minW="auto"
-                                                        fontWeight="normal"
-                                                        color="blue.600"
-                                                        fontSize="2xs"
+                                                        className="h-auto min-w-0 p-0 text-[10px] font-normal text-blue-600"
                                                         onClick={(e) => { e.stopPropagation(); onTransactionClick?.(settlingLot.origin_transaction_id!); }}
                                                     >
                                                         TX #{settlingLot.origin_transaction_id}
                                                     </Button>
                                                 </TransactionTooltip>
                                             )}
-                                        </Flex>
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
+                                        </div>
+                                    </td>
+                                    <td className="text-right font-mono text-xs">
                                         {formatQty(settlement.qty_settled)}
-                                    </Table.Cell>
-                                    <Table.Cell textAlign="right" fontSize="xs">
+                                    </td>
+                                    <td className="text-right text-xs">
                                         {settlement.cost_basis_applied != null ? (
                                             <ValueDisplay value={settlement.cost_basis_applied} currency={baseCurrency} />
                                         ) : (
-                                            <Text fontSize="xs" color="gray.400">-</Text>
+                                            <span className="text-xs text-gray-400">-</span>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td>
                                         {settlement.settling_transaction_id ? (
                                             <TransactionCell
                                                 txId={settlement.settling_transaction_id}
@@ -2156,21 +2124,21 @@ const SettlementsTab: React.FC<{
                                                 prefix=""
                                             />
                                         ) : (
-                                            <Text fontSize="xs" color="gray.400">-</Text>
+                                            <span className="text-xs text-gray-400">-</span>
                                         )}
-                                    </Table.Cell>
-                                </Table.Row>
+                                    </td>
+                                </tr>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
             {sorted.length > 200 && (
-                <Text fontSize="sm" color="gray.500" mt={2} textAlign="center">
+                <div className="mt-2 text-center text-sm text-gray-500">
                     Showing first 200 of {sorted.length} settlements
-                </Text>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -2301,13 +2269,13 @@ const TransactionsTab: React.FC<{
     }), [versionId, view]);
 
     return (
-        <Box>
+        <div>
             {/* Toggle between included/excluded */}
-            <Flex mb={4} justify="center" gap={2}>
+            <div className="mb-4 flex justify-center gap-2">
                 <Button
                     size="sm"
                     variant={view === 'included' ? 'solid' : 'outline'}
-                    colorPalette={view === 'included' ? 'blue' : 'gray'}
+                    colorScheme={view === 'included' ? 'blue' : 'gray'}
                     onClick={() => setView('included')}
                 >
                     Included {includedCount !== null && `(${includedCount})`}
@@ -2315,12 +2283,12 @@ const TransactionsTab: React.FC<{
                 <Button
                     size="sm"
                     variant={view === 'excluded' ? 'solid' : 'outline'}
-                    colorPalette={view === 'excluded' ? 'blue' : 'gray'}
+                    colorScheme={view === 'excluded' ? 'blue' : 'gray'}
                     onClick={() => setView('excluded')}
                 >
                     Excluded {excludedCount !== null && `(${excludedCount})`}
                 </Button>
-            </Flex>
+            </div>
 
             {/* Controlled transactions table */}
             <TransactionsTable
@@ -2335,6 +2303,6 @@ const TransactionsTab: React.FC<{
                 showSuggestions={false}
                 compact={true}
             />
-        </Box>
+        </div>
     );
 };

@@ -1,15 +1,15 @@
 import {
     Badge,
-    Box,
+    type BadgeColorScheme,
     Button,
-    Flex,
     Heading,
-    HStack,
     Spinner,
     Tabs,
+    TabsList,
+    TabsTrigger,
+    TabsContent,
     Text,
-    VStack,
-} from '@chakra-ui/react';
+} from './ui/primitives';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     API_URL,
@@ -29,7 +29,7 @@ interface ConnectorRunDetailPanelProps {
     enablePolling?: boolean;  // Enable real-time polling for running connectors
 }
 
-const statusColorMap: Record<ConnectorSyncStatus, string> = {
+const statusColorMap: Record<ConnectorSyncStatus, BadgeColorScheme> = {
     pending: 'yellow',
     queued: 'gray',
     running: 'blue',
@@ -73,6 +73,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
     const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [activeTab, setActiveTab] = useState<'logs' | 'synced' | 'updated' | 'skipped' | 'errors' | 'duplicates'>('logs');
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
     const fetchDetail = useCallback(async () => {
@@ -152,66 +153,61 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
     if (loading) {
         return (
-            <Flex justify="center" py={8}>
+            <div className="flex justify-center py-8">
                 <Spinner />
-            </Flex>
+            </div>
         );
     }
 
     if (error || !detail) {
         return (
-            <Box>
+            <div>
                 {onBack && (
-                    <Button size="sm" variant="ghost" onClick={onBack} mb={4}>
+                    <Button size="sm" variant="ghost" onClick={onBack} className="mb-4">
                         ← Back
                     </Button>
                 )}
-                <Text color="red.600">Error: {error || 'Not found'}</Text>
-            </Box>
+                <Text className="text-red-600">Error: {error || 'Not found'}</Text>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {onBack && (
-                <Button size="sm" variant="ghost" onClick={onBack} mb={4}>
+                <Button size="sm" variant="ghost" onClick={onBack} className="mb-4">
                     ← Back
                 </Button>
             )}
 
-            <Flex justify="space-between" align="start" mb={4}>
-                <VStack align="start" gap={1}>
-                    <HStack gap={2}>
-                        <Heading size="md">
+            <div className="mb-4 flex items-start justify-between">
+                <div className="flex flex-col items-start gap-1">
+                    <div className="flex items-center gap-2">
+                        <Heading as="h2" className="text-base">
                             {detail.connector_type || `Connector #${detail.connector_id}`}
                         </Heading>
-                        <Badge colorPalette={statusColorMap[detail.status]}>
+                        <Badge colorScheme={statusColorMap[detail.status]}>
                             {detail.status}
                         </Badge>
                         {detail.test_mode && (
-                            <Badge colorPalette="purple">Test Mode</Badge>
+                            <Badge colorScheme="purple">Test Mode</Badge>
                         )}
-                    </HStack>
-                    <Text fontSize="sm" color="gray.500">
+                    </div>
+                    <Text className="text-sm text-gray-500">
                         {detail.account_name || '-'}
                     </Text>
-                </VStack>
-            </Flex>
+                </div>
+            </div>
 
             {/* Refresh Control Bar - Only show for running connectors when polling is enabled */}
             {enablePolling && detail.status === 'running' && (
-                <Box
-                    mb={4}
-                    p={3}
-                    bg={isPaused ? 'yellow.50' : 'blue.50'}
-                    borderRadius="md"
-                    _dark={{ bg: isPaused ? 'yellow.900' : 'blue.900' }}
-                >
-                    <Flex justify="space-between" align="center" gap={4}>
-                        <HStack gap={2}>
+                <div className={`mb-4 p-3 ${isPaused ? 'bg-yellow-50' : 'bg-blue-50'}`}>
+                    <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
                             <Button
                                 size="sm"
-                                colorPalette={isPaused ? 'green' : 'yellow'}
+                                colorScheme={isPaused ? 'green' : 'gray'}
+                                className={isPaused ? '' : 'bg-yellow-500 hover:bg-yellow-600'}
                                 onClick={togglePause}
                             >
                                 {isPaused ? '▶️ Resume' : '⏸️ Pause'}
@@ -224,106 +220,105 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                             >
                                 🔄 Refresh Now
                             </Button>
-                        </HStack>
-                        <Text fontSize="xs" color="gray.600" _dark={{ color: 'gray.400' }}>
+                        </div>
+                        <Text className="text-xs text-gray-600">
                             {isPaused ? (
                                 'Auto-refresh paused'
                             ) : (
                                 lastUpdated ? `Last updated: ${lastUpdated.toLocaleTimeString()}` : 'Auto-refreshing...'
                             )}
                         </Text>
-                    </Flex>
-                </Box>
+                    </div>
+                </div>
             )}
 
             {/* Metrics */}
-            <Box mb={6} p={4} bg="gray.50" borderRadius="md" _dark={{ bg: 'gray.800' }}>
-                <Flex gap={6} wrap="wrap">
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Duration</Text>
-                        <Text fontWeight="medium">
+            <div className="mb-6 bg-gray-50 p-4">
+                <div className="flex flex-wrap gap-6">
+                    <div className="flex flex-col items-start gap-0">
+                        <Text className="text-xs text-gray-500">Duration</Text>
+                        <Text className="font-medium">
                             {formatDuration(detail.started_at, detail.finished_at)}
                         </Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Processed</Text>
-                        <Text fontWeight="medium">{detail.processed_count}</Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">New</Text>
-                        <Text fontWeight="medium" color="green.600">
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <Text className="text-xs text-gray-500">Processed</Text>
+                        <Text className="font-medium">{detail.processed_count}</Text>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <Text className="text-xs text-gray-500">New</Text>
+                        <Text className="font-medium text-green-600">
                             +{detail.synced_count}
                         </Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Updated</Text>
-                        <Text fontWeight="medium" color="blue.600">
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <Text className="text-xs text-gray-500">Updated</Text>
+                        <Text className="font-medium text-blue-600">
                             {detail.updated_count}
                         </Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Skipped</Text>
-                        <Text fontWeight="medium">{detail.skipped_count}</Text>
-                    </VStack>
-                    <VStack align="start" gap={0}>
-                        <Text fontSize="xs" color="gray.500">Errors</Text>
-                        <Text fontWeight="medium" color={detail.error_count > 0 ? 'red.600' : undefined}>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <Text className="text-xs text-gray-500">Skipped</Text>
+                        <Text className="font-medium">{detail.skipped_count}</Text>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
+                        <Text className="text-xs text-gray-500">Errors</Text>
+                        <Text className={`font-medium ${detail.error_count > 0 ? 'text-red-600' : ''}`}>
                             {detail.error_count}
                         </Text>
-                    </VStack>
+                    </div>
                     {duplicateCount && duplicateCount.group_count > 0 && (
-                        <VStack align="start" gap={0}>
-                            <Text fontSize="xs" color="gray.500">Duplicates</Text>
-                            <HStack gap={1}>
-                                <Text fontWeight="medium" color="orange.600">
+                        <div className="flex flex-col items-start gap-0">
+                            <Text className="text-xs text-gray-500">Duplicates</Text>
+                            <div className="flex items-center gap-1">
+                                <Text className="font-medium text-orange-600">
                                     ⚠ {duplicateCount.group_count}
                                 </Text>
-                                <Text fontSize="xs" color="gray.400">
+                                <Text className="text-xs text-gray-400">
                                     ({duplicateCount.transaction_count} txs)
                                 </Text>
-                            </HStack>
-                        </VStack>
+                            </div>
+                        </div>
                     )}
-                </Flex>
-            </Box>
+                </div>
+            </div>
 
-            <Tabs.Root defaultValue="logs" variant="line" size="sm">
-                <Tabs.List>
-                    <Tabs.Trigger value="logs">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+                <TabsList>
+                    <TabsTrigger value="logs">
                         Logs ({detail.logs?.length || 0})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="synced">
+                    </TabsTrigger>
+                    <TabsTrigger value="synced">
                         Synced ({detail.synced_ids?.length || 0})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="updated">
+                    </TabsTrigger>
+                    <TabsTrigger value="updated">
                         Updated ({detail.updated_ids?.length || 0})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="skipped">
+                    </TabsTrigger>
+                    <TabsTrigger value="skipped">
                         Skipped ({detail.skipped_ids?.length || 0})
-                    </Tabs.Trigger>
+                    </TabsTrigger>
                     {detail.error_details && detail.error_details.length > 0 && (
-                        <Tabs.Trigger value="errors">
+                        <TabsTrigger value="errors">
                             Errors ({detail.error_details.length})
-                        </Tabs.Trigger>
+                        </TabsTrigger>
                     )}
-                    <Tabs.Trigger value="duplicates">
+                    <TabsTrigger value="duplicates">
                         Duplicates{duplicateCount && duplicateCount.group_count > 0 ? ` (${duplicateCount.group_count})` : ''}
-                    </Tabs.Trigger>
-                </Tabs.List>
+                    </TabsTrigger>
+                </TabsList>
 
-                <Tabs.Content value="logs">
-                    <Box maxH="300px" overflowY="auto" fontSize="xs" fontFamily="mono">
+                <TabsContent value="logs">
+                    <div className="max-h-[300px] overflow-y-auto font-mono text-xs">
                         {!detail.logs || detail.logs.length === 0 ? (
-                            <Text color="gray.500" py={4}>No logs available</Text>
+                            <Text className="block py-4 text-gray-500">No logs available</Text>
                         ) : (
                             detail.logs.map((log, idx) => (
-                                <Flex key={idx} gap={2} py={1} borderBottomWidth="1px">
-                                    <Text color="gray.400" flexShrink={0}>
+                                <div key={idx} className="flex gap-2 border-b py-1">
+                                    <Text className="shrink-0 text-gray-400">
                                         {new Date(log.timestamp).toLocaleTimeString()}
                                     </Text>
                                     <Badge
-                                        size="sm"
-                                        colorPalette={
+                                        colorScheme={
                                             log.level === 'ERROR'
                                                 ? 'red'
                                                 : log.level === 'WARNING'
@@ -334,13 +329,13 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                                         {log.level}
                                     </Badge>
                                     <Text>{log.message}</Text>
-                                </Flex>
+                                </div>
                             ))
                         )}
-                    </Box>
-                </Tabs.Content>
+                    </div>
+                </TabsContent>
 
-                <Tabs.Content value="synced">
+                <TabsContent value="synced">
                     <TransactionsTable
                         tableId="connectorRun-synced"
                         title=""
@@ -356,9 +351,9 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         }}
                         onDataChange={fetchDetail}
                     />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="updated">
+                <TabsContent value="updated">
                     <TransactionsTable
                         tableId="connectorRun-updated"
                         title=""
@@ -374,9 +369,9 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         }}
                         onDataChange={fetchDetail}
                     />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="skipped">
+                <TabsContent value="skipped">
                     <TransactionsTable
                         tableId="connectorRun-skipped"
                         title=""
@@ -392,43 +387,39 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         }}
                         onDataChange={fetchDetail}
                     />
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="errors">
-                    <Box maxH="300px" overflowY="auto">
+                <TabsContent value="errors">
+                    <div className="max-h-[300px] overflow-y-auto">
                         {!detail.error_details || detail.error_details.length === 0 ? (
-                            <Text color="gray.500" py={4}>No errors</Text>
+                            <Text className="block py-4 text-gray-500">No errors</Text>
                         ) : (
                             detail.error_details.map((err, idx) => (
-                                <Box
+                                <div
                                     key={idx}
-                                    p={2}
-                                    mb={2}
-                                    bg="red.50"
-                                    borderRadius="md"
-                                    _dark={{ bg: 'red.900' }}
+                                    className="mb-2 bg-red-50 p-2"
                                 >
-                                    <Text fontSize="xs" fontFamily="mono" fontWeight="medium">
+                                    <Text className="block font-mono text-xs font-medium">
                                         {err.source_transaction_id}
                                     </Text>
-                                    <Text fontSize="xs" color="red.600">
+                                    <Text className="block text-xs text-red-600">
                                         {err.error}
                                     </Text>
-                                </Box>
+                                </div>
                             ))
                         )}
-                    </Box>
-                </Tabs.Content>
+                    </div>
+                </TabsContent>
 
-                <Tabs.Content value="duplicates">
-                    <Box maxH="500px" overflowY="auto">
+                <TabsContent value="duplicates">
+                    <div className="max-h-[500px] overflow-y-auto">
                         <DuplicateResolutionPanel
                             connectorRunId={detail.id}
                             compactMode={true}
                         />
-                    </Box>
-                </Tabs.Content>
-            </Tabs.Root>
+                    </div>
+                </TabsContent>
+            </Tabs>
 
             {/* Transaction Detail Drawer */}
             {accounts.length > 0 && (
@@ -442,6 +433,6 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                     accounts={accounts}
                 />
             )}
-        </Box>
+        </div>
     );
 };

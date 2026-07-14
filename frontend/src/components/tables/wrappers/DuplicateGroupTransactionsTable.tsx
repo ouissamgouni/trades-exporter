@@ -11,7 +11,6 @@
  */
 
 import React, { useMemo } from 'react';
-import { Text } from '@chakra-ui/react';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
 import { TableConfig } from '../types';
@@ -62,9 +61,9 @@ export const DuplicateGroupTransactionsTable: React.FC<DuplicateGroupTransaction
 
     if (!transactionIds || transactionIds.length === 0) {
         return (
-            <Text fontSize="xs" color="gray.500" fontStyle="italic">
+            <span className="text-xs italic text-slate-500">
                 No transactions
-            </Text>
+            </span>
         );
     }
 

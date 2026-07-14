@@ -25,7 +25,7 @@ From the repository root:
 task install
 ```
 
-This installs backend Python dependencies and frontend npm dependencies. The backend task expects the backend virtual environment to exist at `backend/.venv`.
+This installs backend Python dependencies and frontend npm dependencies. The backend task expects the root-level virtual environment to exist at `.venv`.
 
 If you need to create it manually:
 

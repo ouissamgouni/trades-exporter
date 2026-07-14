@@ -13,14 +13,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Table,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button } from '../ui/primitives';
 import { FiAlertTriangle, FiRepeat, FiArrowRightCircle, FiScissors, FiTrendingUp, FiLink, FiEdit, FiHelpCircle, FiSearch } from 'react-icons/fi';
 import { useLazyPaginatedQuery } from '../../hooks/useLazyPaginatedQuery';
 import { usePagination } from '../../hooks/usePagination';
@@ -66,13 +59,13 @@ export interface ActivityFeedProps {
 // ─── Pattern icon mapping (matches UnitPattern enum values) ─────────────────
 
 const PATTERN_ICONS: Record<string, { icon: React.ReactNode; color: string }> = {
-    [UnitPattern.SWAP]: { icon: <FiRepeat size={14} />, color: 'orange.500' },
-    [UnitPattern.INTERNAL_TRANSFER]: { icon: <FiArrowRightCircle size={14} />, color: 'blue.500' },
-    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: { icon: <FiLink size={14} />, color: 'cyan.500' },
-    [UnitPattern.SPLIT]: { icon: <FiScissors size={14} />, color: 'purple.500' },
-    [UnitPattern.FLOW]: { icon: <FiTrendingUp size={14} />, color: 'green.500' },
-    [UnitPattern.CUSTOM]: { icon: <FiEdit size={14} />, color: 'teal.500' },
-    [UnitPattern.UNKNOWN]: { icon: <FiHelpCircle size={14} />, color: 'gray.400' },
+    [UnitPattern.SWAP]: { icon: <FiRepeat size={14} />, color: 'text-orange-500' },
+    [UnitPattern.INTERNAL_TRANSFER]: { icon: <FiArrowRightCircle size={14} />, color: 'text-blue-500' },
+    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: { icon: <FiLink size={14} />, color: 'text-cyan-500' },
+    [UnitPattern.SPLIT]: { icon: <FiScissors size={14} />, color: 'text-purple-500' },
+    [UnitPattern.FLOW]: { icon: <FiTrendingUp size={14} />, color: 'text-green-500' },
+    [UnitPattern.CUSTOM]: { icon: <FiEdit size={14} />, color: 'text-teal-500' },
+    [UnitPattern.UNKNOWN]: { icon: <FiHelpCircle size={14} />, color: 'text-gray-400' },
 };
 
 const getPatternIcon = (pattern: string | null | undefined) =>
@@ -88,30 +81,36 @@ const OperationLabel: React.FC<{ unit: CalculationUnit }> = ({ unit }) => {
     const outflowLegs = unit.legs.filter(l => l.leg_type === 'outflow');
     const feeLegs = unit.legs.filter(l => l.leg_type === 'fee');
 
-    const renderLeg = (leg: typeof unit.legs[0], color: string, icon: string, key: string) => (
-        <Flex key={key} align="center" gap={0.5} as="span">
-            <Text fontSize="xs" color={`${color}.500`} fontWeight="bold">{icon}</Text>
-            <Text fontSize="xs" color={`${color}.600`}>{fmtQty(leg.qty)}</Text>
+    const LEG_COLORS: Record<string, { icon: string; text: string }> = {
+        green: { icon: 'text-green-500', text: 'text-green-600' },
+        red: { icon: 'text-red-500', text: 'text-red-600' },
+        orange: { icon: 'text-orange-500', text: 'text-orange-600' },
+    };
+
+    const renderLeg = (leg: typeof unit.legs[0], color: 'green' | 'red' | 'orange', icon: string, key: string) => (
+        <span key={key} className="inline-flex items-center gap-0.5">
+            <span className={`text-xs font-bold ${LEG_COLORS[color].icon}`}>{icon}</span>
+            <span className={`text-xs ${LEG_COLORS[color].text}`}>{fmtQty(leg.qty)}</span>
             {leg.asset?.id ? (
                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
             ) : (
-                <Text fontSize="xs" color={`${color}.600`}>{leg.asset?.symbol || '?'}</Text>
+                <span className={`text-xs ${LEG_COLORS[color].text}`}>{leg.asset?.symbol || '?'}</span>
             )}
-        </Flex>
+        </span>
     );
 
     return (
-        <Flex align="center" gap={0.5} flexWrap="wrap">
+        <div className="flex flex-wrap items-center gap-0.5">
             {inflowLegs.map((leg, i) => renderLeg(leg, 'green', '↓', `in-${i}`))}
             {inflowLegs.length > 0 && outflowLegs.length > 0 && (
-                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
+                <span className="px-0.5 text-xs text-gray-400">|</span>
             )}
             {outflowLegs.map((leg, i) => renderLeg(leg, 'red', '↑', `out-${i}`))}
             {(inflowLegs.length > 0 || outflowLegs.length > 0) && feeLegs.length > 0 && (
-                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
+                <span className="px-0.5 text-xs text-gray-400">|</span>
             )}
             {feeLegs.map((leg, i) => renderLeg(leg, 'orange', '💸', `fee-${i}`))}
-        </Flex>
+        </div>
     );
 };
 
@@ -140,38 +139,35 @@ function computeDeltas(unit: CalculationUnit): Array<{ assetId: number; symbol: 
 const NetDeltaColumn: React.FC<{ unit: CalculationUnit; assetBalanceMap?: Map<string, number> }> = ({ unit, assetBalanceMap }) => {
     const deltas = computeDeltas(unit);
     if (deltas.length === 0) {
-        return <Text fontSize="2xs" color="gray.400">—</Text>;
+        return <span className="text-[10px] text-gray-400">—</span>;
     }
     const visible = deltas.slice(0, 3);
     const overflow = deltas.length - 3;
 
     return (
-        <Flex direction="column" gap={0.5}>
+        <div className="flex flex-col gap-0.5">
             {visible.map(d => {
                 const currentBal = assetBalanceMap?.get(d.symbol.toUpperCase());
                 return (
-                    <Flex key={d.assetId} align="center" gap={1}>
+                    <div key={d.assetId} className="flex items-center gap-1">
                         <AssetBadge asset={{ id: d.assetId, symbol: d.symbol }} size="xs" />
                         {currentBal != null && (
-                            <Text fontSize="2xs" color="gray.600" fontFamily="mono">
+                            <span className="font-mono text-[10px] text-gray-600">
                                 {fmtQty(currentBal)}
-                            </Text>
+                            </span>
                         )}
-                        <Text
-                            fontSize="2xs"
-                            color={d.delta >= 0 ? 'green.600' : 'red.600'}
-                            fontFamily="mono"
-                            fontWeight="semibold"
+                        <span
+                            className={`font-mono text-[10px] font-semibold ${d.delta >= 0 ? 'text-green-600' : 'text-red-600'}`}
                         >
                             ({d.delta >= 0 ? '+' : ''}{fmtQty(d.delta)})
-                        </Text>
-                    </Flex>
+                        </span>
+                    </div>
                 );
             })}
             {overflow > 0 && (
-                <Text fontSize="2xs" color="gray.400">+{overflow} more</Text>
+                <span className="text-[10px] text-gray-400">+{overflow} more</span>
             )}
-        </Flex>
+        </div>
     );
 };
 
@@ -181,26 +177,26 @@ const NetDeltaColumn: React.FC<{ unit: CalculationUnit; assetBalanceMap?: Map<st
 const WarningBadge: React.FC<{ unit: CalculationUnit }> = ({ unit }) => {
     const warningCount = unit.warnings?.length || 0;
     if (warningCount === 0) {
-        return <Text fontSize="2xs" color="gray.400">-</Text>;
+        return <span className="text-[10px] text-gray-400">-</span>;
     }
 
     const tooltipContent = (
-        <Flex direction="column" gap={1} p={1} maxW="300px">
+        <div className="flex max-w-[300px] flex-col gap-1 p-1">
             {unit.warnings!.slice(0, 5).map((w, i) => (
-                <Box key={i}>
-                    <Text fontSize="2xs" fontWeight="bold" color="orange.200">{w.warning_type}</Text>
-                    <Text fontSize="2xs" color="gray.200">{w.message}</Text>
-                </Box>
+                <div key={i}>
+                    <div className="text-[10px] font-bold text-orange-200">{w.warning_type}</div>
+                    <div className="text-[10px] text-gray-200">{w.message}</div>
+                </div>
             ))}
             {warningCount > 5 && (
-                <Text fontSize="2xs" color="gray.300">+{warningCount - 5} more…</Text>
+                <span className="text-[10px] text-gray-300">+{warningCount - 5} more…</span>
             )}
-        </Flex>
+        </div>
     );
 
     return (
         <Tooltip content={tooltipContent} showArrow>
-            <Badge size="xs" colorPalette="orange" cursor="default">
+            <Badge colorScheme="orange" className="cursor-default">
                 <FiAlertTriangle style={{ marginRight: 2 }} />
                 {warningCount}
             </Badge>
@@ -363,11 +359,11 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
     };
 
     return (
-        <Box>
+        <div>
             {/* ── Filter bar ────────────────────────────────────────────── */}
-            <Flex gap={2} mb={3} wrap="wrap" align="center">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
                 {/* Search */}
-                <Flex align="center" gap={1} bg="gray.50" borderRadius="md" px={2} py={0.5}>
+                <div className="flex items-center gap-1 bg-gray-50 px-2 py-0.5">
                     <FiSearch size={12} color="gray" />
                     <input
                         type="text"
@@ -376,11 +372,12 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                         onChange={(e) => setSearchInput(e.target.value)}
                         style={{ width: 100, fontSize: 11, background: 'transparent', border: 'none', outline: 'none' }}
                     />
-                </Flex>
+                </div>
                 {/* Type filter buttons */}
-                <Flex gap={1} align="center">
+                <div className="flex items-center gap-1">
                     <Button
-                        size="2xs"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
                         variant={typeFilter === 'all' ? 'solid' : 'outline'}
                         onClick={() => setTypeFilter('all')}
                     >
@@ -391,27 +388,29 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                         return (
                             <Tooltip key={type} content={`${getUnitPatternLabel(type)} (${count})`} showArrow>
                                 <Button
-                                    size="2xs"
+                                    size="sm"
+                                    className="h-6 px-2 text-[10px]"
                                     variant={typeFilter === type ? 'solid' : 'outline'}
                                     onClick={() => setTypeFilter(typeFilter === type ? 'all' : type)}
                                 >
-                                    <Box color={typeFilter === type ? undefined : pi.color}>{pi.icon}</Box>
+                                    <span className={typeFilter === type ? undefined : pi.color}>{pi.icon}</span>
                                 </Button>
                             </Tooltip>
                         );
                     })}
-                </Flex>
+                </div>
                 {/* Toggle filters */}
-                <Flex gap={1} align="center" ml={2}>
+                <div className="ml-2 flex items-center gap-1">
                     {/* Warning type toggle buttons */}
                     {(filterOptions?.warning_types ?? []).map(wt => {
                         const active = warningTypes.includes(wt.value);
                         return (
                             <Button
                                 key={wt.value}
-                                size="2xs"
+                                size="sm"
+                                className={`h-6 px-2 text-[10px] ${active ? 'bg-orange-500 text-white hover:bg-orange-600 border-orange-500' : ''}`}
                                 variant={active ? 'solid' : 'outline'}
-                                colorPalette={active ? 'orange' : 'gray'}
+                                colorScheme="gray"
                                 onClick={() => {
                                     setWarningTypes(prev =>
                                         prev.includes(wt.value)
@@ -421,67 +420,69 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                                 }}
                             >
                                 <FiAlertTriangle size={10} />
-                                <Text ml={1}>
+                                <span className="ml-1">
                                     {(wt.label || wt.value).replace(/_/g, ' ')} ({wt.count})
-                                </Text>
+                                </span>
                             </Button>
                         );
                     })}
                     {/* Fallback: show generic warnings button while filter options load */}
                     {!filterOptions && (
-                        <Button size="2xs" variant="outline" colorPalette="gray" disabled>
+                        <Button size="sm" className="h-6 px-2 text-[10px]" variant="outline" colorScheme="gray" disabled>
                             <FiAlertTriangle size={10} />
-                            <Text ml={1}>Warnings</Text>
+                            <span className="ml-1">Warnings</span>
                         </Button>
                     )}
                     <Button
-                        size="2xs"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
                         variant={hasRealizedPnl ? 'solid' : 'outline'}
-                        colorPalette={hasRealizedPnl ? 'green' : 'gray'}
+                        colorScheme={hasRealizedPnl ? 'green' : 'gray'}
                         onClick={() => setHasRealizedPnl(v => !v)}
                     >
                         💰
-                        <Text ml={1}>Has P&L{filterOptions ? ` (${filterOptions.has_realized_pnl_count})` : ''}</Text>
+                        <span className="ml-1">Has P&L{filterOptions ? ` (${filterOptions.has_realized_pnl_count})` : ''}</span>
                     </Button>
                     <Button
-                        size="2xs"
+                        size="sm"
+                        className={`h-6 px-2 text-[10px] ${hasFees ? 'bg-yellow-400 text-yellow-900 hover:bg-yellow-500 border-yellow-400' : ''}`}
                         variant={hasFees ? 'solid' : 'outline'}
-                        colorPalette={hasFees ? 'yellow' : 'gray'}
+                        colorScheme="gray"
                         onClick={() => setHasFees(v => !v)}
                     >
                         💸
-                        <Text ml={1}>Has Fees{filterOptions ? ` (${filterOptions.has_fees_count})` : ''}</Text>
+                        <span className="ml-1">Has Fees{filterOptions ? ` (${filterOptions.has_fees_count})` : ''}</span>
                     </Button>
-                </Flex>
+                </div>
                 {/* Active filter indicator */}
                 {hasAnyFilter && (
-                    <Flex align="center" gap={1} ml={2}>
-                        <Text fontSize="2xs" color="gray.500">
+                    <div className="ml-2 flex items-center gap-1">
+                        <span className="text-[10px] text-gray-500">
                             {total} result{total !== 1 ? 's' : ''}
-                        </Text>
-                        <Button size="2xs" variant="ghost" onClick={clearFilters}>
+                        </span>
+                        <Button size="sm" className="h-6 px-2 text-[10px]" variant="ghost" onClick={clearFilters}>
                             Clear
                         </Button>
-                    </Flex>
+                    </div>
                 )}
-            </Flex>
+            </div>
 
             {/* ── Table ─────────────────────────────────────────────────── */}
-            <Box overflowX="auto" style={{ fontSize: '8px' }}>
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader width="32px" textAlign="center" />
-                            <Table.ColumnHeader width="60px" textAlign="right">ID</Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px">Date</Table.ColumnHeader>
-                            <Table.ColumnHeader>Operation</Table.ColumnHeader>
-                            <Table.ColumnHeader width="160px">Balance</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right" width="90px">P&L</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="right" width="80px">Fees</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="center" width="40px">⚠</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+            <div className="overflow-x-auto" style={{ fontSize: '8px' }}>
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th className="w-8 text-center" />
+                            <th className="w-[60px] text-right">ID</th>
+                            <th className="w-20 text-left">Date</th>
+                            <th className="text-left">Operation</th>
+                            <th className="w-40 text-left">Balance</th>
+                            <th className="w-[90px] text-right">P&L</th>
+                            <th className="w-20 text-right">Fees</th>
+                            <th className="w-10 text-center">⚠</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {units.map((unit: CalculationUnit) => {
                             const txIds = txIdsByUnit.get(unit.unit_id) || [];
                             const isExpanded = expandedUnits.has(unit.unit_id);
@@ -489,43 +490,39 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
 
                             return (
                                 <React.Fragment key={unit.unit_id}>
-                                    <Table.Row
+                                    <tr
                                         onClick={() => toggleExpand(unit.unit_id)}
-                                        style={{ cursor: 'pointer' }}
-                                        _hover={{ bg: 'gray.50' }}
-                                        bg={isExpanded ? 'blue.50' : undefined}
+                                        className={`cursor-pointer hover:bg-gray-50 ${isExpanded ? 'bg-blue-50' : ''}`}
                                     >
                                         {/* Type icon */}
-                                        <Table.Cell textAlign="center">
+                                        <td className="text-center">
                                             <Tooltip content={`${getUnitPatternLabel(unit.pattern || 'unknown')}${unit.pattern && unit.pattern !== 'unknown' ? ` (${unit.pattern})` : ''}`} showArrow>
-                                                <Box as="span" color={pi.color}>{pi.icon}</Box>
+                                                <span className={pi.color}>{pi.icon}</span>
                                             </Tooltip>
-                                        </Table.Cell>
+                                        </td>
 
                                         {/* Unit ID */}
-                                        <Table.Cell textAlign="right">
-                                            <Text fontSize="2xs" fontFamily="mono" color="gray.500">{unit.unit_id}</Text>
-                                        </Table.Cell>
+                                        <td className="text-right">
+                                            <span className="font-mono text-[10px] text-gray-500">{unit.unit_id}</span>
+                                        </td>
 
                                         {/* Date */}
-                                        <Table.Cell fontSize="2xs">
+                                        <td className="text-[10px]">
                                             {formatDateLocale(unit.date)}
-                                        </Table.Cell>
+                                        </td>
 
                                         {/* Operation + compact tx IDs — single line, flex-wrap */}
-                                        <Table.Cell>
-                                            <Flex align="center" gap={1} flexWrap="wrap">
+                                        <td>
+                                            <div className="flex flex-wrap items-center gap-1">
                                                 <OperationLabel unit={unit} />
                                                 {txIds.length > 0 && (
                                                     <>
-                                                        <Text fontSize="2xs" color="gray.300">·</Text>
+                                                        <span className="text-[10px] text-gray-300">·</span>
                                                         {txIds.slice(0, 3).map(id => (
                                                             <Badge
                                                                 key={id}
-                                                                size="xs"
-                                                                variant="subtle"
-                                                                colorPalette="gray"
-                                                                cursor="pointer"
+                                                                colorScheme="gray"
+                                                                className="cursor-pointer"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     onTransactionClick?.(id);
@@ -535,52 +532,50 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                                                             </Badge>
                                                         ))}
                                                         {txIds.length > 3 && (
-                                                            <Text fontSize="2xs" color="gray.400">
+                                                            <span className="text-[10px] text-gray-400">
                                                                 +{txIds.length - 3}
-                                                            </Text>
+                                                            </span>
                                                         )}
                                                     </>
                                                 )}
-                                            </Flex>
-                                        </Table.Cell>
+                                            </div>
+                                        </td>
 
                                         {/* Net Δ — per-asset net change */}
-                                        <Table.Cell>
+                                        <td>
                                             <NetDeltaColumn unit={unit} assetBalanceMap={assetBalanceMap} />
-                                        </Table.Cell>
+                                        </td>
 
                                         {/* P&L */}
-                                        <Table.Cell textAlign="right">
-                                            <Text
-                                                fontSize="xs"
-                                                color={(unit.realized_pnl_in_base || 0) >= 0 ? 'green.600' : 'red.600'}
-                                                fontWeight="medium"
+                                        <td className="text-right">
+                                            <span
+                                                className={`text-xs font-medium ${(unit.realized_pnl_in_base || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}
                                             >
                                                 <ValueDisplay value={unit.realized_pnl_in_base || 0} currency={baseCurrency} />
-                                            </Text>
-                                        </Table.Cell>
+                                            </span>
+                                        </td>
 
                                         {/* Fees */}
-                                        <Table.Cell textAlign="right">
+                                        <td className="text-right">
                                             {unit.has_fees && unit.total_fees_in_base ? (
-                                                <Text fontSize="xs" color="orange.600">
+                                                <span className="text-xs text-orange-600">
                                                     <ValueDisplay value={unit.total_fees_in_base} currency={baseCurrency} />
-                                                </Text>
+                                                </span>
                                             ) : (
-                                                <Text fontSize="2xs" color="gray.400">-</Text>
+                                                <span className="text-[10px] text-gray-400">-</span>
                                             )}
-                                        </Table.Cell>
+                                        </td>
 
                                         {/* Warnings — tooltip on hover */}
-                                        <Table.Cell textAlign="center">
+                                        <td className="text-center">
                                             <WarningBadge unit={unit} />
-                                        </Table.Cell>
-                                    </Table.Row>
+                                        </td>
+                                    </tr>
 
                                     {/* Expanded detail row */}
                                     {isExpanded && (
-                                        <Table.Row>
-                                            <Table.Cell colSpan={COL_COUNT} style={{ background: '#f9fafb', padding: 0 }}>
+                                        <tr>
+                                            <td colSpan={COL_COUNT} style={{ background: '#f9fafb', padding: 0 }}>
                                                 <UnitDetailRow
                                                     unit={unit}
                                                     baseCurrency={baseCurrency}
@@ -588,15 +583,15 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                                                     versionId={versionId}
                                                     onTransactionClick={onTransactionClick}
                                                 />
-                                            </Table.Cell>
-                                        </Table.Row>
+                                            </td>
+                                        </tr>
                                     )}
                                 </React.Fragment>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                    </tbody>
+                </table>
+            </div>
 
             <TablePagination
                 page={pagination.page}
@@ -605,6 +600,6 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
             />
-        </Box>
+        </div>
     );
 };

@@ -1,12 +1,9 @@
-import {
-    Badge, Box, Button, Dialog, Flex, Heading, Input,
-    Portal, Spinner, Table, Text, HStack, Textarea, VStack
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Badge, Button, Input, Spinner, Textarea } from './ui/primitives';
 import React, { useEffect, useState, useMemo } from 'react';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { API_URL, Account, RawAccount } from '../types';
 import { AccountSelector } from './AccountSelector';
-import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
@@ -64,14 +61,14 @@ const TransactionFieldSections: React.FC<{ source: string; label: string; networ
 
     if (loading) {
         return (
-            <Flex justify="center" p={4}>
+            <div className="flex justify-center p-4">
                 <Spinner size="sm" />
-            </Flex>
+            </div>
         );
     }
 
     if (!counts) {
-        return <Text color="gray.500">Failed to load transaction counts</Text>;
+        return <span className="text-slate-500">Failed to load transaction counts</span>;
     }
 
     const sections = [
@@ -99,32 +96,31 @@ const TransactionFieldSections: React.FC<{ source: string; label: string; networ
     ];
 
     return (
-        <Flex direction="column" gap={3}>
+        <div className="flex flex-col gap-3">
             {sections.map((section) => {
                 const isOpen = openSections.has(section.id);
                 return (
-                    <Box key={section.id}>
+                    <div key={section.id}>
                         <Button
                             variant="outline"
-                            width="100%"
-                            justifyContent="space-between"
+                            className="w-full justify-between"
                             size="sm"
                             disabled={section.count === 0}
                             onClick={() => toggleSection(section.id)}
                         >
-                            <Flex align="center" gap={2}>
+                            <div className="flex items-center gap-2">
                                 {isOpen ? <FiChevronDown /> : <FiChevronRight />}
-                                <Text fontWeight="medium">{section.title}</Text>
-                                <Badge colorPalette={section.count > 0 ? 'blue' : 'gray'}>
+                                <span className="font-medium">{section.title}</span>
+                                <Badge colorScheme={section.count > 0 ? 'blue' : 'gray'}>
                                     {section.count}
                                 </Badge>
-                            </Flex>
-                            <Text fontSize="2xs" color="gray.500">
+                            </div>
+                            <span className="text-[10px] text-slate-500">
                                 {section.description}
-                            </Text>
+                            </span>
                         </Button>
                         {isOpen && section.count > 0 && (
-                            <Box mt={2} p={3} bg="white" borderRadius="md" borderWidth="1px">
+                            <div className="mt-2 border border-slate-200 bg-white p-3">
                                 <TransactionsTable
                                     tableId={`accountMapping-${section.fieldType}`}
                                     title=""
@@ -135,12 +131,12 @@ const TransactionFieldSections: React.FC<{ source: string; label: string; networ
                                     initialColumnVisibility={{ total: false, taxability: false, feeInBase: false, bundle: false }}
                                     customApiUrl={`${API_URL}/raw-accounts/${encodeURIComponent(source)}/${encodeURIComponent(label)}/transactions?field_type=${section.fieldType}${networkParam}`}
                                 />
-                            </Box>
+                            </div>
                         )}
-                    </Box>
+                    </div>
                 );
             })}
-        </Flex>
+        </div>
     );
 };
 
@@ -353,62 +349,57 @@ const SourceGroup: React.FC<{
     };
 
     return (
-        <Box>
+        <div>
             {/* Source header */}
             <Button
                 variant="ghost"
-                width="100%"
-                justifyContent="flex-start"
+                className="mb-2 w-full justify-start bg-slate-50 p-3 hover:bg-slate-100"
                 onClick={() => setIsExpanded(!isExpanded)}
-                p={3}
-                mb={2}
-                bg="gray.50"
-                _hover={{ bg: 'gray.100' }}
             >
-                <Flex align="center" gap={2} width="100%">
+                <div className="flex w-full items-center gap-2">
                     {isExpanded ? <FiChevronDown /> : <FiChevronRight />}
-                    <Text fontWeight="bold" fontSize="2xs">{source}</Text>
-                    <Badge colorPalette="blue">{rawAccounts.length} raw account(s)</Badge>
-                </Flex>
+                    <span className="text-[10px] font-bold">{source}</span>
+                    <Badge colorScheme="blue">{rawAccounts.length} raw account(s)</Badge>
+                </div>
             </Button>
 
             {/* Raw accounts table */}
             {isExpanded && (
-                <Table.Root size="sm" variant="outline">
-                    <Table.Body>
+                <table className="w-full border border-slate-200 text-sm">
+                    <tbody>
                         {rawAccounts.map((rawAccount) => {
                             const key = getEditKey(rawAccount);
                             const isEditing = editingKey === key;
-                            const isExpanded = expandedRawIds.has(key);
+                            const isRawExpanded = expandedRawIds.has(key);
                             const suggestions = suggestionsMap.get(key) || [];
                             const isDismissed = rawAccount.dismissed;
 
                             return (
                                 <React.Fragment key={key}>
-                                    <Table.Row bg={isDismissed ? 'gray.50' : 'white'} opacity={isDismissed ? 0.6 : 1}>
-                                        <Table.Cell width="40%">
-                                            <Flex align="center" gap={2}>
+                                    <tr className={`border-t border-slate-100 ${isDismissed ? 'bg-slate-50 opacity-60' : 'bg-white'}`}>
+                                        <td className="w-[40%] p-2 align-top">
+                                            <div className="flex items-center gap-2">
                                                 <Button
-                                                    size="xs"
+                                                    size="sm"
                                                     variant="ghost"
                                                     onClick={() => toggleRawAccountExpansion(key)}
                                                 >
-                                                    {isExpanded ? <FiChevronDown /> : <FiChevronRight />}
+                                                    {isRawExpanded ? <FiChevronDown /> : <FiChevronRight />}
                                                 </Button>
                                                 <Tooltip content={rawAccount.label}>
-                                                    <Text fontFamily="mono" fontSize="2xs">
+                                                    <span className="font-mono text-[10px]">
                                                         {truncateLabel(rawAccount.label)}
-                                                    </Text>
+                                                    </span>
                                                 </Tooltip>
                                                 {rawAccount.network && (
-                                                    <Badge colorPalette="purple" size="sm">{rawAccount.network}</Badge>
+                                                    <Badge colorScheme="purple">{rawAccount.network}</Badge>
                                                 )}
                                                 {isDismissed && (
-                                                    <Badge colorPalette="gray" size="sm">Dismissed</Badge>
+                                                    <Badge colorScheme="gray">Dismissed</Badge>
                                                 )}
-                                            </Flex>
-                                        </Table.Cell>
-                                        <Table.Cell>
+                                            </div>
+                                        </td>
+                                        <td className="p-2 align-top">
                                             {isEditing ? (
                                                 <AccountSelector
                                                     value={editAccountId}
@@ -418,38 +409,38 @@ const SourceGroup: React.FC<{
                                                     rawAccountNetwork={rawAccount.network || undefined}
                                                 />
                                             ) : rawAccount.account_id ? (
-                                                <Badge colorPalette="green">{getAccountName(rawAccount.account_id)}</Badge>
+                                                <Badge colorScheme="green">{getAccountName(rawAccount.account_id)}</Badge>
                                             ) : (
-                                                <Text color="gray.500" fontSize="2xs">Not linked</Text>
+                                                <span className="text-[10px] text-slate-500">Not linked</span>
                                             )}
-                                        </Table.Cell>
-                                        <Table.Cell>
+                                        </td>
+                                        <td className="p-2 align-top">
                                             {!isDismissed && suggestions.length > 0 && (
-                                                <HStack gap={1}>
+                                                <div className="flex items-center gap-1">
                                                     {suggestions.slice(0, 2).map((s, idx) => (
                                                         <Tooltip key={idx} content={`${(s.confidence * 100).toFixed(0)}% match`}>
                                                             <Button
-                                                                size="xs"
-                                                                fontSize="2xs"
+                                                                size="sm"
+                                                                className="text-[10px]"
                                                                 variant="outline"
-                                                                colorPalette={s.confidence >= 0.9 ? 'green' : 'blue'}
+                                                                colorScheme={s.confidence >= 0.9 ? 'green' : 'blue'}
                                                                 onClick={() => acceptSuggestion(rawAccount, s.id)}
                                                             >
                                                                 {s.name}
                                                             </Button>
                                                         </Tooltip>
                                                     ))}
-                                                </HStack>
+                                                </div>
                                             )}
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <HStack gap={1}>
+                                        </td>
+                                        <td className="p-2 align-top">
+                                            <div className="flex items-center gap-1">
                                                 {isEditing ? (
                                                     <>
-                                                        <Button size="xs" fontSize="2xs" colorPalette="blue" onClick={() => saveRawAccount(rawAccount)}>
+                                                        <Button size="sm" className="text-[10px]" colorScheme="blue" onClick={() => saveRawAccount(rawAccount)}>
                                                             Save
                                                         </Button>
-                                                        <Button size="xs" fontSize="2xs" variant="outline" onClick={() => setEditingKey(null)}>
+                                                        <Button size="sm" className="text-[10px]" variant="outline" onClick={() => setEditingKey(null)}>
                                                             Cancel
                                                         </Button>
                                                     </>
@@ -457,98 +448,95 @@ const SourceGroup: React.FC<{
                                                     <>
                                                         {!rawAccount.account_id && !isDismissed && (
                                                             <>
-                                                                <Button size="xs" fontSize="2xs" variant="outline" onClick={() => startEditing(rawAccount)}>
+                                                                <Button size="sm" className="text-[10px]" variant="outline" onClick={() => startEditing(rawAccount)}>
                                                                     Link
                                                                 </Button>
-                                                                <Button size="xs" fontSize="2xs" variant="outline" colorPalette="blue" onClick={() => createAccountFromRaw(rawAccount)}>
+                                                                <Button size="sm" className="text-[10px]" variant="outline" colorScheme="blue" onClick={() => createAccountFromRaw(rawAccount)}>
                                                                     Create
                                                                 </Button>
                                                             </>
                                                         )}
                                                         {rawAccount.account_id && !isDismissed && (
-                                                            <Button size="xs" fontSize="2xs" variant="outline" onClick={() => unlinkRawAccount(rawAccount)}>
+                                                            <Button size="sm" className="text-[10px]" variant="outline" onClick={() => unlinkRawAccount(rawAccount)}>
                                                                 Unlink
                                                             </Button>
                                                         )}
                                                         {!isDismissed ? (
-                                                            <Button size="xs" fontSize="2xs" variant="outline" colorPalette="orange" onClick={() => openDismissDialog(rawAccount)}>
+                                                            <Button size="sm" className="border-orange-300 text-[10px] text-orange-700 hover:bg-orange-50" variant="outline" onClick={() => openDismissDialog(rawAccount)}>
                                                                 Dismiss
                                                             </Button>
                                                         ) : (
-                                                            <Button size="xs" fontSize="2xs" variant="outline" colorPalette="green" onClick={() => undismissRawAccount(rawAccount)}>
+                                                            <Button size="sm" className="text-[10px]" variant="outline" colorScheme="green" onClick={() => undismissRawAccount(rawAccount)}>
                                                                 Un-dismiss
                                                             </Button>
                                                         )}
                                                     </>
                                                 )}
-                                            </HStack>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                    {isExpanded && (
-                                        <Table.Row>
-                                            <Table.Cell colSpan={4} p={4} bg="gray.50">
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {isRawExpanded && (
+                                        <tr>
+                                            <td colSpan={4} className="bg-slate-50 p-4">
                                                 <TransactionFieldSections source={rawAccount.source} label={rawAccount.label} network={rawAccount.network} />
-                                            </Table.Cell>
-                                        </Table.Row>
+                                            </td>
+                                        </tr>
                                     )}
                                 </React.Fragment>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
+                    </tbody>
+                </table>
             )}
 
             {/* Dismiss dialog */}
-            <Dialog.Root open={showDismissDialog} onOpenChange={(e) => setShowDismissDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Dismiss Raw Account Mapping</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <VStack align="stretch" gap={4}>
-                                    <Text fontSize="2xs" color="gray.600">
-                                        Dismissing will hide this raw account from default views. Select a reason:
-                                    </Text>
-                                    <Flex wrap="wrap" gap={2}>
-                                        {DISMISS_REASONS.map((reason) => (
-                                            <Button
-                                                key={reason}
-                                                size="sm"
-                                                variant="outline"
-                                                colorPalette={dismissReason === reason ? 'blue' : 'gray'}
-                                                onClick={() => setDismissReason(reason)}
-                                            >
-                                                {reason}
-                                            </Button>
-                                        ))}
-                                    </Flex>
-                                    <Textarea
-                                        value={dismissReason}
-                                        onChange={(e) => setDismissReason(e.target.value)}
-                                        placeholder="Edit reason or type custom reason..."
-                                        rows={3}
-                                    />
-                                </VStack>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Dialog.ActionTrigger asChild>
-                                    <Button variant="outline">Cancel</Button>
-                                </Dialog.ActionTrigger>
-                                <Button
-                                    colorPalette="orange"
-                                    onClick={executeDismiss}
-                                    disabled={!dismissReason.trim()}
-                                >
-                                    Dismiss
-                                </Button>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+            <RadixDialog.Root open={showDismissDialog} onOpenChange={(open) => setShowDismissDialog(open)}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 p-4">
+                            <RadixDialog.Title className="text-base font-semibold">Dismiss Raw Account Mapping</RadixDialog.Title>
+                        </div>
+                        <div className="p-4">
+                            <div className="flex flex-col items-stretch gap-4">
+                                <span className="text-[10px] text-slate-600">
+                                    Dismissing will hide this raw account from default views. Select a reason:
+                                </span>
+                                <div className="flex flex-wrap gap-2">
+                                    {DISMISS_REASONS.map((reason) => (
+                                        <Button
+                                            key={reason}
+                                            size="sm"
+                                            variant="outline"
+                                            colorScheme={dismissReason === reason ? 'blue' : 'gray'}
+                                            onClick={() => setDismissReason(reason)}
+                                        >
+                                            {reason}
+                                        </Button>
+                                    ))}
+                                </div>
+                                <Textarea
+                                    value={dismissReason}
+                                    onChange={(e) => setDismissReason(e.target.value)}
+                                    placeholder="Edit reason or type custom reason..."
+                                    rows={3}
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowDismissDialog(false)}>Cancel</Button>
+                            <Button
+                                colorScheme="gray"
+                                className="bg-orange-600 text-white hover:bg-orange-700"
+                                onClick={executeDismiss}
+                                disabled={!dismissReason.trim()}
+                            >
+                                Dismiss
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Account creation dialog */}
             <AccountFormDialog
@@ -557,7 +545,7 @@ const SourceGroup: React.FC<{
                 account={null}
                 prefill={accountPrefill}
             />
-        </Box>
+        </div>
     );
 };
 
@@ -678,42 +666,41 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
 
     if (loading) {
         return (
-            <Box textAlign="center" py={10}>
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading account mappings...</Text>
-            </Box>
+            <div className="py-10 text-center">
+                <Spinner size="lg" className="text-blue-500" />
+                <p className="mt-4">Loading account mappings...</p>
+            </div>
         );
     }
 
     if (error) {
         return (
-            <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                <Text color="red.600">Error: {error}</Text>
-            </Box>
+            <div className="border border-red-200 bg-red-50 py-10 text-center">
+                <span className="text-red-600">Error: {error}</span>
+            </div>
         );
     }
 
     if (rawAccounts.length === 0) {
         return (
-            <Box textAlign="center" py={10} bg="green.50" borderRadius="md">
-                <Text fontSize="2xs" fontWeight="medium" color="green.700">
+            <div className="bg-green-50 py-10 text-center">
+                <span className="text-[10px] font-medium text-green-700">
                     ✅ {mode === 'issues-only' ? 'All accounts mapped!' : 'No raw accounts found'}
-                </Text>
-            </Box>
+                </span>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {mode === 'full' && (
-                <Box mb={4}>
-                    <Flex gap={2} mb={3} align="center">
+                <div className="mb-4">
+                    <div className="mb-3 flex items-center gap-2">
                         <Input
-                            size="sm"
                             placeholder="Search sources..."
                             value={sourceSearch}
                             onChange={(e) => setSourceSearch(e.target.value)}
-                            maxW="250px"
+                            className="max-w-[250px]"
                         />
                         {sourceFilter && (
                             <Button size="sm" variant="outline" onClick={() => setSourceFilter('')}>
@@ -723,19 +710,19 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
                         {onDismissedChange && (
                             <Button
                                 size="sm"
-                                fontSize="2xs"
+                                className="text-[10px]"
                                 variant="outline"
                                 onClick={() => onDismissedChange(!includeDismissed)}
                             >
                                 {includeDismissed ? 'Hide' : 'Show'} Dismissed
                             </Button>
                         )}
-                    </Flex>
-                    <Flex gap={2} flexWrap="wrap">
+                    </div>
+                    <div className="flex flex-wrap gap-2">
                         <Button
-                            size="xs"
+                            size="sm"
                             variant={sourceFilter === '' ? 'solid' : 'outline'}
-                            colorPalette={sourceFilter === '' ? 'blue' : 'gray'}
+                            colorScheme={sourceFilter === '' ? 'blue' : 'gray'}
                             onClick={() => setSourceFilter('')}
                         >
                             All ({allSources.reduce((sum, s) => sum + s.count, 0)})
@@ -743,19 +730,22 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
                         {filteredSources.map(({ source, count }) => (
                             <Button
                                 key={source}
-                                size="xs"
+                                size="sm"
                                 variant={sourceFilter === source ? 'solid' : 'outline'}
-                                colorPalette={sourceFilter === source ? 'blue' : 'gray'}
+                                colorScheme={sourceFilter === source ? 'blue' : 'gray'}
                                 onClick={() => setSourceFilter(source)}
                             >
                                 {source}
-                                <Badge ml={1} size="sm" colorPalette={sourceFilter === source ? 'white' : 'gray'}>
+                                <Badge
+                                    colorScheme="gray"
+                                    className={sourceFilter === source ? 'ml-1 bg-blue-400 text-white' : 'ml-1'}
+                                >
                                     {count}
                                 </Badge>
                             </Button>
                         ))}
-                    </Flex>
-                </Box>
+                    </div>
+                </div>
             )}
 
             {groupedBySource.map(([source, sourceRawAccounts]) => (
@@ -768,6 +758,6 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
                     onRefresh={fetchData}
                 />
             ))}
-        </Box>
+        </div>
     );
 };

@@ -13,7 +13,7 @@
  * Clicking best/worst item or asset name updates scope for the whole view.
  */
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Box, Card, Flex, Text } from '@chakra-ui/react';
+import { Badge } from '../ui/primitives';
 import { FiChevronDown, FiChevronRight, FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import { LuInfo, LuReceipt } from 'react-icons/lu';
 import { usePnL } from './PnLContext';
@@ -365,21 +365,11 @@ export const ContextView: React.FC<ContextViewProps> = ({
     // ═══════════════════════════════════════════════════════════════════
 
     return (
-        <Box>
+        <div>
             {/* ─── 1. Breadcrumb + Period Cards row ─── */}
-            <Flex
-                align="center"
-                gap={2}
-                px={3}
-                py={2}
-                bg="gray.50"
-                borderRadius="lg"
-                border="1px solid"
-                borderColor="gray.200"
-                mb={0}
-            >
+            <div className="mb-0 flex items-center gap-2 border border-gray-200 bg-gray-50 px-3 py-2">
                 {/* Breadcrumb trail */}
-                <Flex align="center" gap={1.5} flexShrink={0} flexWrap="wrap">
+                <div className="flex flex-wrap items-center gap-1.5">
                     {breadcrumbs.map((crumb, idx) => {
                         const isLast = idx === breadcrumbs.length - 1;
                         const label = idx === 0 ? firstCrumbLabel : crumb.label;
@@ -388,98 +378,76 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 {idx > 0 && (
                                     <FiChevronRight
                                         size={14}
-                                        style={{ color: 'var(--chakra-colors-gray-400)', flexShrink: 0 }}
+                                        className="shrink-0"
+                                        color="#A0AEC0"
                                     />
                                 )}
                                 {isLast ? (
-                                    <Flex align="center" gap={1}>
-                                        <Badge colorPalette="blue" variant="subtle" size="sm" px={2} py={0.5} fontWeight="600">
+                                    <div className="flex items-center gap-1">
+                                        <Badge colorScheme="blue" className="px-2 py-0.5 font-semibold">
                                             {label}
                                         </Badge>
                                         {isAsset && scope.assetIds?.[0] != null && assetPanelCtx && (
-                                            <Box
-                                                as="button"
-                                                cursor="pointer"
-                                                color="gray.400"
-                                                _hover={{ color: 'blue.500' }}
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-gray-400 hover:text-blue-500"
                                                 onClick={() => assetPanelCtx.openAssetPanel(scope.assetIds![0], { pnlVersionId: currentVersionId ?? undefined })}
                                                 title="Asset details"
                                             >
                                                 <LuInfo size={14} />
-                                            </Box>
+                                            </button>
                                         )}
-                                    </Flex>
+                                    </div>
                                 ) : (
-                                    <Text
-                                        fontSize="sm"
-                                        fontWeight="500"
-                                        color="blue.600"
-                                        cursor="pointer"
-                                        _hover={{ textDecoration: 'underline' }}
+                                    <span
+                                        className="cursor-pointer whitespace-nowrap text-sm font-medium text-blue-600 hover:underline"
                                         onClick={() => dispatch({ type: 'DRILL_TO_BREADCRUMB', index: idx })}
-                                        whiteSpace="nowrap"
                                     >
                                         {label}
-                                    </Text>
+                                    </span>
                                 )}
                             </React.Fragment>
                         );
                     })}
-                </Flex>
+                </div>
 
                 {/* Period cards (scoped ROI%) — right-aligned */}
-                <Flex gap={1} ml="auto" overflowX="auto" flexShrink={0}>
+                <div className="ml-auto flex shrink-0 gap-1 overflow-x-auto">
                     {RANGES.map(r => {
                         const roi = allRangeRois[r.key];
                         const isActive = timeframeRange === r.key;
                         return (
-                            <Card.Root
+                            <div
                                 key={r.key}
-                                cursor="pointer"
                                 onClick={() => dispatch({ type: 'SET_TIMEFRAME_RANGE', range: r.key })}
-                                minW="52px"
-                                variant={isActive ? 'elevated' : 'outline'}
-                                borderWidth="2px"
-                                borderColor={isActive ? 'blue.500' : 'gray.200'}
-                                bg={isActive ? 'blue.50' : 'white'}
-                                _hover={{ borderColor: isActive ? 'blue.500' : 'gray.300', shadow: 'sm' }}
-                                transition="all 0.15s"
+                                className={`min-w-[52px] cursor-pointer border-2 px-1.5 py-1 text-center transition-colors ${isActive ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'}`}
                             >
-                                <Card.Body py={1} px={1.5} textAlign="center">
-                                    <Text fontSize="2xs" fontWeight="bold" color={isActive ? 'blue.700' : 'gray.500'}>
-                                        {r.label}
-                                    </Text>
-                                    {roi !== null ? (
-                                        <Text fontSize="2xs" fontWeight="bold" color={roi >= 0 ? 'green.600' : 'red.600'}>
-                                            {roi >= 0 ? '+' : ''}{roi.toFixed(1)}%
-                                        </Text>
-                                    ) : (
-                                        <Text fontSize="2xs" color="gray.300">—</Text>
-                                    )}
-                                </Card.Body>
-                            </Card.Root>
+                                <div className={`text-[10px] font-bold ${isActive ? 'text-blue-700' : 'text-gray-500'}`}>
+                                    {r.label}
+                                </div>
+                                {roi !== null ? (
+                                    <div className={`text-[10px] font-bold ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {roi >= 0 ? '+' : ''}{roi.toFixed(1)}%
+                                    </div>
+                                ) : (
+                                    <div className="text-[10px] text-gray-300">—</div>
+                                )}
+                            </div>
                         );
                     })}
-                </Flex>
+                </div>
 
                 {/* Separator + section nav pills */}
-                <Box w="1px" h={5} bg="gray.300" mx={2} flexShrink={0} />
-                <Flex gap={1} flexShrink={0}>
+                <div className="mx-2 h-5 w-px shrink-0 bg-gray-300" />
+                <div className="flex shrink-0 gap-1">
                     {([
                         { key: 'overview', label: 'Overview', open: overviewOpen, ref: overviewRef },
                         ...(isMultiAsset || currentVersionId ? [{ key: 'assets', label: 'Assets', open: assetsOpen, ref: assetsRef }] : []),
                         ...(currentVersionId ? [{ key: 'audit', label: 'Audit', open: auditOpen, ref: auditRef }] : []),
                     ] as { key: string; label: string; open: boolean; ref: React.RefObject<HTMLDivElement | null> }[]).map(s => (
-                        <Card.Root
+                        <div
                             key={s.key}
-                            cursor="pointer"
-                            minW="52px"
-                            variant={s.open ? 'elevated' : 'outline'}
-                            borderWidth="2px"
-                            borderColor={s.open ? 'blue.500' : 'gray.200'}
-                            bg={s.open ? 'blue.50' : 'white'}
-                            _hover={{ borderColor: s.open ? 'blue.500' : 'gray.300', shadow: 'sm' }}
-                            transition="all 0.15s"
+                            className={`min-w-[52px] cursor-pointer border-2 px-1.5 py-1 text-center transition-colors ${s.open ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'}`}
                             onClick={() => {
                                 setOverviewOpen(s.key === 'overview');
                                 setAssetsOpen(s.key === 'assets');
@@ -487,44 +455,33 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 setTimeout(() => s.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
                             }}
                         >
-                            <Card.Body py={1} px={1.5} textAlign="center">
-                                <Text fontSize="2xs" fontWeight="bold" color={s.open ? 'blue.700' : 'gray.500'}>
-                                    {s.label}
-                                </Text>
-                            </Card.Body>
-                        </Card.Root>
+                            <div className={`text-[10px] font-bold ${s.open ? 'text-blue-700' : 'text-gray-500'}`}>
+                                {s.label}
+                            </div>
+                        </div>
                     ))}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {/* ─── 2. Tree-style sections ─── */}
-            <Box
-                ml={4}
-                pl={3}
-                borderLeft="2px solid"
-                borderLeftColor="gray.200"
-                mt={0}
-            >
+            <div className="mt-0 ml-4 border-l-2 border-gray-200 pl-3">
                 {/* ── Overview Section ── */}
-                <Box ref={overviewRef}>
+                <div ref={overviewRef}>
                     <TreeSection
                         label="Overview"
                         open={overviewOpen}
                         onToggle={() => setOverviewOpen(v => !v)}
                         isLast={!isMultiAsset && !currentVersionId}
-                        sectionBg="blue.50"
+                        sectionBg="bg-blue-50"
                         headerRight={isAsset && scope.assetIds?.[0] != null && assetPanelCtx ? (
-                            <Box
-                                as="button"
+                            <button
+                                type="button"
                                 onClick={() => assetPanelCtx.openAssetPanel(scope.assetIds![0], { pnlVersionId: currentVersionId ?? undefined })}
-                                p={0.5}
-                                borderRadius="sm"
-                                color="gray.400"
-                                _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                                className="p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
                                 title="Asset details"
                             >
                                 <LuInfo size={12} />
-                            </Box>
+                            </button>
                         ) : undefined}
                         summary={!overviewOpen && effectiveSummary ? (() => {
                             // Use period-specific metrics when a period is selected
@@ -543,8 +500,8 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             const clr = totalReturn >= 0 ? 'green.600' : 'red.600';
                             const suffix = isPeriod ? ' Δ' : '';
                             return (
-                                <Box flex="1" minW={0}>
-                                    <Flex gap={1} align="center">
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1">
                                         <MetricItem label="ROI" value={`${fmtCurrencySigned(totalReturn, baseCurrency)} (${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%)`} color={clr} icon={totalReturn >= 0 ? <FiTrendingUp size={10} /> : <FiTrendingDown size={10} />} bg={totalReturn >= 0 ? 'green.50' : 'red.50'} compact />
                                         {!isPeriod && <MetricItem label="Value" value={fmtCurrency(valueVal, baseCurrency)} color="gray.800" icon={<FiDollarSign size={10} />} bg="blue.50" compact />}
                                         <MetricItem label={`Cost${suffix}`} value={isPeriod ? fmtCurrencySigned(costVal, baseCurrency) : fmtCurrency(costVal, baseCurrency)} color="gray.700" icon={<LuReceipt size={10} />} bg="gray.100" compact />
@@ -552,11 +509,11 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                         <MetricItem label={`Real.${suffix}`} value={fmtCurrencySigned(realizedVal, baseCurrency)} color={realizedVal >= 0 ? 'green.600' : 'red.600'} icon={null} bg={realizedVal >= 0 ? 'green.50' : 'red.50'} compact />
                                         <MetricItem label={`Fees${suffix}`} value={isPeriod ? fmtCurrencySigned(feesVal, baseCurrency) : fmtCurrency(feesVal, baseCurrency)} color="orange.700" icon={null} bg="orange.50" compact />
                                         <MiniSparkline points={effectiveTimeline.data?.points || []} />
-                                    </Flex>
-                                    <Box mt={0.5}>
+                                    </div>
+                                    <div className="mt-0.5">
                                         <PnLBreakdownBar costBasis={costBase} unrealizedPnl={unrealizedVal} realizedPnl={realizedVal} fees={feesVal} baseCurrency={baseCurrency} height={4} />
-                                    </Box>
-                                </Box>
+                                    </div>
+                                </div>
                             );
                         })() : undefined}
                     >
@@ -590,91 +547,74 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             hidePeriodCards
                             hidePerformers={isAsset}
                             performerSlot={isAsset && accountBreakdowns.length > 0 ? (
-                                <Box>
-                                    <Text fontSize="xs" fontWeight="semibold" color="gray.600" mb={1.5}>Balance by Account</Text>
-                                    <Flex gap={2} flexWrap="wrap" align="stretch">
+                                <div>
+                                    <div className="mb-1.5 text-xs font-semibold text-gray-600">Balance by Account</div>
+                                    <div className="flex flex-wrap items-stretch gap-2">
                                         {accountBreakdowns.map(b => {
                                             const urPnl = b.unrealized_pnl ?? 0;
                                             const assetSymbol = scopedAssets[0]?.asset?.symbol;
                                             const liveQty = assetSymbol ? liveAccountBalanceMap?.get(assetSymbol)?.get(b.account_id) : undefined;
                                             return (
-                                                <Box key={b.account_id} bg="gray.50" borderLeft="3px solid" borderLeftColor="blue.300" borderRadius="sm" px={2.5} py={1.5} minW="140px" flex="1">
+                                                <div key={b.account_id} className="min-w-[140px] flex-1 border-l-[3px] border-blue-300 bg-gray-50 px-2.5 py-1.5">
                                                     <AccountBadge accountId={b.account_id} accountName={b.account_name} size="xs" />
-                                                    <Flex align="center" gap={1} mt={1.5}>
-                                                        <Text fontSize="xs" fontWeight="semibold" color="gray.700">{formatQuantity(b.qty)}</Text>
+                                                    <div className="mt-1.5 flex items-center gap-1">
+                                                        <span className="text-xs font-semibold text-gray-700">{formatQuantity(b.qty)}</span>
                                                         {liveQty != null && (
-                                                            <Badge size="xs" variant="subtle" colorPalette={Math.abs(b.qty - liveQty) < 0.001 ? 'green' : 'orange'}>
+                                                            <Badge colorScheme={Math.abs(b.qty - liveQty) < 0.001 ? 'green' : 'orange'}>
                                                                 Live: {formatQuantity(liveQty)}
                                                             </Badge>
                                                         )}
-                                                    </Flex>
+                                                    </div>
                                                     {b.market_value != null && (
-                                                        <Text fontSize="xs" color="gray.600" mt={0.5}>{fmtCurrency(b.market_value, baseCurrency)}</Text>
+                                                        <div className="mt-0.5 text-xs text-gray-600">{fmtCurrency(b.market_value, baseCurrency)}</div>
                                                     )}
-                                                    <Text fontSize="xs" color={urPnl >= 0 ? 'green.600' : 'red.600'} mt={0.5}>
+                                                    <div className={`mt-0.5 text-xs ${urPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                                         {fmtCurrencySigned(urPnl, baseCurrency)}
                                                         {b.unrealized_pnl_pct != null && (
-                                                            <Text as="span" color="gray.500" ml={1}>({b.unrealized_pnl_pct >= 0 ? '+' : ''}{b.unrealized_pnl_pct.toFixed(1)}%)</Text>
+                                                            <span className="ml-1 text-gray-500">({b.unrealized_pnl_pct >= 0 ? '+' : ''}{b.unrealized_pnl_pct.toFixed(1)}%)</span>
                                                         )}
-                                                    </Text>
-                                                </Box>
+                                                    </div>
+                                                </div>
                                             );
                                         })}
-                                    </Flex>
-                                </Box>
+                                    </div>
+                                </div>
                             ) : undefined}
                         />
                     </TreeSection>
-                </Box>
+                </div>
 
                 {/* ── Assets Section (multi-asset only) ── */}
                 {isMultiAsset && (
-                    <Box ref={assetsRef}>
+                    <div ref={assetsRef}>
                         <TreeSection
                             label="Assets"
                             open={assetsOpen}
                             onToggle={() => setAssetsOpen(v => !v)}
                             isLast={!currentVersionId}
                             badge={`${scopedDisplayAssets.length}`}
-                            sectionBg="green.50"
+                            sectionBg="bg-green-50"
                         >
                             {/* View mode tabs inside section content */}
-                            <Flex gap={0} px={3} pt={2} pb={0} borderBottom="1px solid" borderColor="gray.200">
+                            <div className="flex gap-0 border-b border-gray-200 px-3 pt-2">
                                 {(['list', 'treemap', 'pie'] as AssetsViewMode[]).map(mode => {
                                     const active = assetsView === mode;
                                     const labels: Record<AssetsViewMode, string> = { list: '📋 List', treemap: '🗺️ Treemap', pie: '🥧 Pie' };
                                     return (
-                                        <Box
+                                        <div
                                             key={mode}
-                                            px={3}
-                                            py={1.5}
-                                            cursor="pointer"
-                                            fontWeight={active ? '600' : '400'}
-                                            fontSize="xs"
-                                            color={active ? 'blue.700' : 'gray.500'}
-                                            borderBottom="2px solid"
-                                            borderColor={active ? 'blue.500' : 'transparent'}
-                                            bg={active ? 'white' : 'transparent'}
-                                            borderTopRadius="md"
-                                            border={active ? '1px solid' : '1px solid transparent'}
-                                            borderBottomColor={active ? 'white' : 'transparent'}
-                                            borderLeftColor={active ? 'blue.200' : 'transparent'}
-                                            borderRightColor={active ? 'blue.200' : 'transparent'}
-                                            borderTopColor={active ? 'blue.400' : 'transparent'}
-                                            mb="-1px"
-                                            _hover={{ color: active ? 'blue.700' : 'gray.700', bg: active ? 'white' : 'gray.100' }}
-                                            transition="all 0.15s"
                                             onClick={() => setAssetsView(mode)}
+                                            className={`-mb-px cursor-pointer border px-3 py-1.5 text-xs transition-colors ${active ? 'border-blue-200 border-b-0 border-t-2 border-t-blue-500 bg-white font-semibold text-blue-700' : 'border-transparent font-normal text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
                                         >
                                             {labels[mode]}
-                                        </Box>
+                                        </div>
                                     );
                                 })}
-                            </Flex>
+                            </div>
 
                             {/* List view */}
                             {assetsView === 'list' && (
-                                <Box p={2}>
+                                <div className="p-2">
                                     <AssetPnLTable
                                         assets={scopedDisplayAssets}
                                         baseCurrency={baseCurrency}
@@ -715,12 +655,12 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                         periodLabel={timeframeRange !== 'all' ? timeframeRange.toUpperCase() : undefined}
                                         pnlVersionId={currentVersionId ?? undefined}
                                     />
-                                </Box>
+                                </div>
                             )}
 
                             {/* Treemap view */}
                             {assetsView === 'treemap' && (
-                                <Box p={2}>
+                                <div className="p-2">
                                     <AllocationTreemap
                                         points={effectiveTimeline.data?.points || []}
                                         assetCategoryMaps={assetCategoryMaps}
@@ -732,34 +672,34 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                         accountBalances={accountBalances}
                                         onAssetNavigate={onAssetNavigate}
                                     />
-                                </Box>
+                                </div>
                             )}
 
                             {/* Pie view */}
                             {assetsView === 'pie' && (
-                                <Box p={2}>
+                                <div className="p-2">
                                     <MarketValuePieChart
                                         assets={filteredTreemapAssets}
                                         dimensions={dimensions}
                                         baseCurrency={baseCurrency}
                                     />
-                                </Box>
+                                </div>
                             )}
                         </TreeSection>
-                    </Box>
+                    </div>
                 )}
 
                 {/* ── PnL Audit Section ── */}
                 {currentVersionId && (
-                    <Box ref={auditRef}>
+                    <div ref={auditRef}>
                         <TreeSection
                             label="PnL Audit"
                             open={auditOpen}
                             onToggle={() => setAuditOpen(v => !v)}
                             isLast
-                            sectionBg="orange.50"
+                            sectionBg="bg-orange-50"
                         >
-                            <Box p={3}>
+                            <div className="p-3">
                                 <InvestigationView
                                     versionId={currentVersionId}
                                     baseCurrency={baseCurrency}
@@ -777,12 +717,12 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                         label: a.asset.label ?? undefined,
                                     }))}
                                 />
-                            </Box>
+                            </div>
                         </TreeSection>
-                    </Box>
+                    </div>
                 )}
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 };
 
@@ -810,67 +750,42 @@ const TreeSection: React.FC<TreeSectionProps> = ({
     label, open, onToggle, isLast = false, badge, summary, headerRight, children, sectionBg,
 }) => {
     return (
-        <Box
-            position="relative"
-            _before={!isLast ? {
-                content: '""',
-                position: 'absolute',
-                left: '-15px',
-                top: '0',
-                bottom: '0',
-                width: '2px',
-                bg: 'gray.200',
-            } : undefined}
-        >
+        <div className="relative">
+            {/* Vertical connector to next sibling section */}
+            {!isLast && (
+                <div className="absolute bottom-0 left-[-15px] top-0 w-0.5 bg-gray-200" />
+            )}
+
             {/* Branch connector */}
-            <Box
-                position="absolute"
-                left="-15px"
-                top="12px"
-                w="14px"
-                h="2px"
-                bg="gray.200"
-            />
+            <div className="absolute left-[-15px] top-3 h-0.5 w-3.5 bg-gray-200" />
 
             {/* Section wrapper with highlighted border */}
-            <Box
-                border="1px solid"
-                borderColor={open ? 'blue.300' : 'gray.200'}
-                borderRadius="md"
-                bg={open ? (sectionBg ?? 'white') : 'transparent'}
-                transition="all 0.15s"
-                mb={1}
+            <div
+                className={`mb-1 border transition-colors ${open ? `border-blue-300 ${sectionBg ?? 'bg-white'}` : 'border-gray-200 bg-transparent'}`}
             >
                 {/* Header */}
-                <Flex
-                    align="center"
-                    gap={1.5}
-                    py={1.5}
-                    px={2}
-                    cursor="pointer"
-                    _hover={{ bg: 'gray.50' }}
-                    borderRadius="md"
-                    userSelect="none"
+                <div
+                    className="flex cursor-pointer select-none items-center gap-1.5 px-2 py-1.5 hover:bg-gray-50"
                     onClick={onToggle}
                 >
-                    {open ? <FiChevronDown size={14} color="var(--chakra-colors-blue-500)" /> : <FiChevronRight size={14} />}
-                    <Text fontSize="sm" fontWeight="semibold" color={open ? 'blue.700' : 'gray.700'}>{label}</Text>
-                    {badge && <Badge size="xs" variant="subtle" colorPalette="gray">{badge}</Badge>}
-                    {summary && <Box ml={1} flex="1" minW={0}>{summary}</Box>}
+                    {open ? <FiChevronDown size={14} color="#3182CE" /> : <FiChevronRight size={14} />}
+                    <span className={`text-sm font-semibold ${open ? 'text-blue-700' : 'text-gray-700'}`}>{label}</span>
+                    {badge && <Badge colorScheme="gray">{badge}</Badge>}
+                    {summary && <div className="ml-1 min-w-0 flex-1">{summary}</div>}
                     {headerRight && (
-                        <Box ml="auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="ml-auto" onClick={(e) => e.stopPropagation()}>
                             {headerRight}
-                        </Box>
+                        </div>
                     )}
-                </Flex>
+                </div>
 
                 {/* Content */}
                 {open && (
-                    <Box pt={1} pb={2} borderTop="1px solid" borderTopColor="gray.100">
+                    <div className="border-t border-gray-100 pt-1 pb-2">
                         {children}
-                    </Box>
+                    </div>
                 )}
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 };

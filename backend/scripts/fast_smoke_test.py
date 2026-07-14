@@ -9,11 +9,16 @@ Total runtime: ~30-60 seconds.
 Usage:
     cd backend
     ALPHAVANTAGE_API_KEY=xxx MARKETSTACK_API_KEY=xxx \
-      PYTHONPATH=/path/to/trades-exporter .venv/bin/python scripts/fast_smoke_test.py
+      PYTHONPATH=/path/to/trades-exporter ../.venv/bin/python scripts/fast_smoke_test.py
 """
+
 import sys, os, time
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+    TimeoutError as FuturesTimeout,
+)
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 import threading
@@ -22,11 +27,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # ── Minimal logging to avoid noise ──
 import logging
+
 logging.getLogger().setLevel(logging.WARNING)
 
 from backend.db.database import get_session
 from backend.db.models import Asset, AssetPriceGetter
-from backend.services.price_getters.registry import get_price_getter, _initialize_registry
+from backend.services.price_getters.registry import (
+    get_price_getter,
+    _initialize_registry,
+)
 from backend.services.price_getters.base import PriceGetterConfig, PriceResult
 from sqlmodel import select
 
@@ -37,14 +46,19 @@ HISTORICAL_DATE = datetime(2026, 1, 15, 12, 0, 0)
 GETTER_WORKERS = {
     "yahoo_direct": 5,
     "datareader": 3,
-    "coingecko": 1,      # strict rate limit
-    "alphavantage": 1,    # 25 req/day free, 75/min with key
+    "coingecko": 1,  # strict rate limit
+    "alphavantage": 1,  # 25 req/day free, 75/min with key
     "marketstack": 2,
     "forex": 2,
 }
 
-GREEN = "\033[92m"; RED = "\033[91m"; YELLOW = "\033[93m"
-CYAN = "\033[96m"; BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+CYAN = "\033[96m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
 
 
 @dataclass
@@ -62,7 +76,9 @@ class TestResult:
     historical_err: str = ""
 
 
-def test_one(asset: Asset, getter_name: str, ext_id: str, priority: int, params: dict) -> TestResult:
+def test_one(
+    asset: Asset, getter_name: str, ext_id: str, priority: int, params: dict
+) -> TestResult:
     """Test one (asset, getter) pair — current + historical, 1 attempt, hard timeout."""
     r = TestResult(
         symbol=asset.symbol,
@@ -125,11 +141,19 @@ def main():
         pairs = []
         for asset, apg in rows:
             # Detach from session
-            a = Asset(asset_id=asset.asset_id, symbol=asset.symbol,
-                      label=asset.label, price_type=asset.price_type)
-            pairs.append((a, apg.price_getter, apg.external_id, apg.priority, apg.params or {}))
+            a = Asset(
+                asset_id=asset.asset_id,
+                symbol=asset.symbol,
+                label=asset.label,
+                price_type=asset.price_type,
+            )
+            pairs.append(
+                (a, apg.price_getter, apg.external_id, apg.priority, apg.params or {})
+            )
 
-    print(f"{BOLD}Fast Smoke Test — {len(pairs)} getter assignments across {len(set(p[0].symbol for p in pairs))} assets{RESET}")
+    print(
+        f"{BOLD}Fast Smoke Test — {len(pairs)} getter assignments across {len(set(p[0].symbol for p in pairs))} assets{RESET}"
+    )
     print(f"Historical date: {HISTORICAL_DATE.strftime('%Y-%m-%d')}")
     print()
 
@@ -142,7 +166,11 @@ def main():
 
     for getter_name, getter_pairs in sorted(by_getter.items()):
         workers = GETTER_WORKERS.get(getter_name, 2)
-        print(f"  {CYAN}Testing {getter_name}{RESET} ({len(getter_pairs)} assets, {workers} workers)...", end=" ", flush=True)
+        print(
+            f"  {CYAN}Testing {getter_name}{RESET} ({len(getter_pairs)} assets, {workers} workers)...",
+            end=" ",
+            flush=True,
+        )
         gt0 = time.monotonic()
 
         # Sequential for single-worker getters (rate-limited), parallel otherwise
@@ -164,9 +192,15 @@ def main():
                         r = future.result(timeout=CALL_TIMEOUT * 2 + 5)
                     except Exception as e:
                         sym_name = futures[future]
-                        r = TestResult(symbol=sym_name, price_type="?", getter=getter_name,
-                                      ext_id="?", priority=99, current_err=str(e)[:80],
-                                      historical_err=str(e)[:80])
+                        r = TestResult(
+                            symbol=sym_name,
+                            price_type="?",
+                            getter=getter_name,
+                            ext_id="?",
+                            priority=99,
+                            current_err=str(e)[:80],
+                            historical_err=str(e)[:80],
+                        )
                     results.append(r)
                     sym = f"{GREEN}✓{RESET}" if r.current_ok else f"{RED}✗{RESET}"
                     print(sym, end="", flush=True)
@@ -178,37 +212,51 @@ def main():
 
     # ════════════════════════ SUMMARY ════════════════════════
     total_elapsed = time.monotonic() - t0
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"{BOLD}  RESULTS SUMMARY{RESET}")
-    print(f"{'='*80}\n")
+    print(f"{'=' * 80}\n")
 
     # 1. Success rates by getter
     print(f"  {BOLD}1. Success Rates by Getter{RESET}\n")
     print(f"  {'Getter':<18s} {'Overall':>13s}  {'Current':>13s}  {'Historical':>13s}")
-    print(f"  {'─'*62}")
+    print(f"  {'─' * 62}")
     getter_stats: Dict[str, dict] = {}
     for r in all_results:
-        s = getter_stats.setdefault(r.getter, {"cur_ok": 0, "cur_tot": 0, "hist_ok": 0, "hist_tot": 0})
-        s["cur_tot"] += 1; s["hist_tot"] += 1
-        if r.current_ok: s["cur_ok"] += 1
-        if r.historical_ok: s["hist_ok"] += 1
-    for gn, s in sorted(getter_stats.items(), key=lambda x: -(x[1]["cur_ok"]+x[1]["hist_ok"])):
-        total_ok = s["cur_ok"] + s["hist_ok"]; total_t = s["cur_tot"] + s["hist_tot"]
+        s = getter_stats.setdefault(
+            r.getter, {"cur_ok": 0, "cur_tot": 0, "hist_ok": 0, "hist_tot": 0}
+        )
+        s["cur_tot"] += 1
+        s["hist_tot"] += 1
+        if r.current_ok:
+            s["cur_ok"] += 1
+        if r.historical_ok:
+            s["hist_ok"] += 1
+    for gn, s in sorted(
+        getter_stats.items(), key=lambda x: -(x[1]["cur_ok"] + x[1]["hist_ok"])
+    ):
+        total_ok = s["cur_ok"] + s["hist_ok"]
+        total_t = s["cur_tot"] + s["hist_tot"]
         pct = total_ok / total_t * 100 if total_t else 0
         cpct = s["cur_ok"] / s["cur_tot"] * 100 if s["cur_tot"] else 0
         hpct = s["hist_ok"] / s["hist_tot"] * 100 if s["hist_tot"] else 0
-        print(f"  {gn:<18s} {total_ok:>3d}/{total_t:<3d} ({pct:>3.0f}%)  "
-              f"{s['cur_ok']:>3d}/{s['cur_tot']:<3d} ({cpct:>3.0f}%)  "
-              f"{s['hist_ok']:>3d}/{s['hist_tot']:<3d} ({hpct:>3.0f}%)")
+        print(
+            f"  {gn:<18s} {total_ok:>3d}/{total_t:<3d} ({pct:>3.0f}%)  "
+            f"{s['cur_ok']:>3d}/{s['cur_tot']:<3d} ({cpct:>3.0f}%)  "
+            f"{s['hist_ok']:>3d}/{s['hist_tot']:<3d} ({hpct:>3.0f}%)"
+        )
 
     # 2. Assets where ALL getters failed
     from collections import defaultdict
+
     by_asset = defaultdict(list)
     for r in all_results:
         by_asset[r.symbol].append(r)
 
-    all_failed = {sym: rs for sym, rs in by_asset.items()
-                  if not any(r.current_ok or r.historical_ok for r in rs)}
+    all_failed = {
+        sym: rs
+        for sym, rs in by_asset.items()
+        if not any(r.current_ok or r.historical_ok for r in rs)
+    }
     print(f"\n  {BOLD}2. Assets Where ALL Getters Failed ({len(all_failed)}){RESET}\n")
     for sym in sorted(all_failed):
         rs = all_failed[sym]
@@ -225,13 +273,15 @@ def main():
         rs_sorted = sorted(rs, key=lambda r: r.priority)
         for i, hi in enumerate(rs_sorted):
             if not hi.current_ok:
-                for lo in rs_sorted[i+1:]:
+                for lo in rs_sorted[i + 1 :]:
                     if lo.current_ok:
                         reorder.append((sym, hi, lo))
                         break
     if reorder:
         for sym, hi, lo in reorder:
-            print(f"  ↻ {sym:<22s} pri={hi.priority} {hi.getter} failed → pri={lo.priority} {lo.getter} works")
+            print(
+                f"  ↻ {sym:<22s} pri={hi.priority} {hi.getter} failed → pri={lo.priority} {lo.getter} works"
+            )
     else:
         print(f"  {GREEN}None — current priority ordering is optimal!{RESET}")
 
@@ -240,27 +290,37 @@ def main():
     partial = [r for r in all_results if r.current_ok and not r.historical_ok]
     if partial:
         for r in sorted(partial, key=lambda r: r.symbol):
-            print(f"  {YELLOW}⚠{RESET} {r.symbol:<22s} {r.getter:<15s} current={r.current_price:.4f}  hist_err={r.historical_err[:60]}")
+            print(
+                f"  {YELLOW}⚠{RESET} {r.symbol:<22s} {r.getter:<15s} current={r.current_price:.4f}  hist_err={r.historical_err[:60]}"
+            )
     else:
         print(f"  {GREEN}None{RESET}")
 
     # 5. Detailed failure list
     failures = [r for r in all_results if not r.current_ok or not r.historical_ok]
     print(f"\n  {BOLD}5. Detailed Failures ({len(failures)}){RESET}\n")
-    print(f"  {'Asset':<20s} {'Getter':<14s} {'ExtID':<22s} {'Cur':>4s} {'Hist':>5s}  Error")
-    print(f"  {'─'*100}")
+    print(
+        f"  {'Asset':<20s} {'Getter':<14s} {'ExtID':<22s} {'Cur':>4s} {'Hist':>5s}  Error"
+    )
+    print(f"  {'─' * 100}")
     for r in sorted(failures, key=lambda r: (r.symbol, r.getter)):
         cur_s = f"{GREEN}OK{RESET}" if r.current_ok else f"{RED}✗{RESET} "
         hist_s = f"{GREEN}OK{RESET}" if r.historical_ok else f"{RED}✗{RESET} "
         err = r.current_err if not r.current_ok else r.historical_err
-        print(f"  {r.symbol:<20s} {r.getter:<14s} {r.ext_id:<22s} {cur_s}  {hist_s}   {err[:55]}")
+        print(
+            f"  {r.symbol:<20s} {r.getter:<14s} {r.ext_id:<22s} {cur_s}  {hist_s}   {err[:55]}"
+        )
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     total_tests = len(all_results) * 2
-    total_ok = sum(1 for r in all_results if r.current_ok) + sum(1 for r in all_results if r.historical_ok)
-    print(f"  Total: {total_tests} tests, {total_ok} passed, {total_tests - total_ok} failed")
+    total_ok = sum(1 for r in all_results if r.current_ok) + sum(
+        1 for r in all_results if r.historical_ok
+    )
+    print(
+        f"  Total: {total_tests} tests, {total_ok} passed, {total_tests - total_ok} failed"
+    )
     print(f"  Runtime: {total_elapsed:.1f}s")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,6 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Badge, Box, Flex, Spinner, Text } from '@chakra-ui/react';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { SlidePanel } from './pnl/SlidePanel';
 import { useAsset } from '../hooks/useAsset';
@@ -23,6 +22,7 @@ import { AssetPnLAuditSection } from './AssetPnLAuditSection';
 import { AssetIncomeSection } from './pnl/AssetIncomeSection';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, type TransactionFilterState } from './TransactionFilters';
+import { Badge, Spinner } from './ui/primitives';
 
 /* ── Collapsible section (same pattern as TransactionSidePanel) ── */
 
@@ -35,35 +35,41 @@ interface SectionProps {
     colorScheme?: string;
 }
 
+/** Literal Tailwind classes per color — Tailwind's JIT scanner requires full class
+ * strings in source, so dynamic `bg-${colorScheme}-100` interpolation is unsafe. */
+const SECTION_COLORS: Record<string, { bg: string; hoverBg: string; text: string }> = {
+    gray: { bg: 'bg-gray-100', hoverBg: 'hover:bg-gray-200', text: 'text-gray-700' },
+    blue: { bg: 'bg-blue-100', hoverBg: 'hover:bg-blue-200', text: 'text-blue-700' },
+    teal: { bg: 'bg-teal-100', hoverBg: 'hover:bg-teal-200', text: 'text-teal-700' },
+    purple: { bg: 'bg-purple-100', hoverBg: 'hover:bg-purple-200', text: 'text-purple-700' },
+    cyan: { bg: 'bg-cyan-100', hoverBg: 'hover:bg-cyan-200', text: 'text-cyan-700' },
+    green: { bg: 'bg-green-100', hoverBg: 'hover:bg-green-200', text: 'text-green-700' },
+    orange: { bg: 'bg-orange-100', hoverBg: 'hover:bg-orange-200', text: 'text-orange-700' },
+};
+
 const Section: React.FC<SectionProps> = ({
     title, icon, badge, children, defaultOpen = true, colorScheme = 'gray',
 }) => {
     const [isOpen, setIsOpen] = useState(defaultOpen);
+    const colors = SECTION_COLORS[colorScheme] ?? SECTION_COLORS.gray;
     return (
-        <Box mb={2}>
-            <Flex
-                align="center"
-                gap={1}
-                py={1.5}
-                px={2}
-                bg={`${colorScheme}.100`}
-                borderRadius="sm"
-                cursor="pointer"
+        <div className="mb-2">
+            <div
+                className={`flex cursor-pointer items-center gap-1 px-2 py-1.5 ${colors.bg} ${colors.hoverBg}`}
                 onClick={() => setIsOpen(o => !o)}
-                _hover={{ bg: `${colorScheme}.200` }}
             >
                 {isOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                <Text fontSize="11px" fontWeight="bold" color={`${colorScheme}.700`} textTransform="uppercase">
+                <span className={`text-[11px] font-bold uppercase ${colors.text}`}>
                     {icon && `${icon} `}{title}
-                </Text>
+                </span>
                 {badge}
-            </Flex>
+            </div>
             {isOpen && (
-                <Box px={1} py={1}>
+                <div className="px-1 py-1">
                     {children}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -82,11 +88,7 @@ export const AssetDetailSlidePanel: React.FC = () => {
         : 'Asset Details';
 
     const titleIcon = asset ? (
-        <Badge
-            colorPalette={asset.status === 0 ? 'green' : 'gray'}
-            size="sm"
-            variant="subtle"
-        >
+        <Badge colorScheme={asset.status === 0 ? 'green' : 'gray'}>
             {asset.status === 0 ? 'Active' : 'Inactive'}
         </Badge>
     ) : undefined;
@@ -101,57 +103,57 @@ export const AssetDetailSlidePanel: React.FC = () => {
             zIndex={1500}
         >
             {isLoading && !asset && (
-                <Flex justify="center" align="center" py={10}>
+                <div className="flex items-center justify-center py-10">
                     <Spinner size="lg" />
-                </Flex>
+                </div>
             )}
 
             {!isLoading && !asset && assetId && (
-                <Box textAlign="center" py={10}>
-                    <Text color="red.500">Asset not found (ID: {assetId})</Text>
-                </Box>
+                <div className="py-10 text-center">
+                    <span className="text-red-500">Asset not found (ID: {assetId})</span>
+                </div>
             )}
 
             {asset && (
-                <Flex direction="column">
+                <div className="flex flex-col">
                     {/* Row 1: Details + Categories side by side */}
-                    <Flex gap={2} align="flex-start">
-                        <Box flex="1" minW={0}>
+                    <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
                             <Section title="Details" icon="📋" colorScheme="blue" defaultOpen={true}>
                                 <AssetDetailsForm asset={asset} onSaved={invalidate} />
                             </Section>
-                        </Box>
-                        <Box flex="1" minW={0}>
+                        </div>
+                        <div className="min-w-0 flex-1">
                             <Section
                                 title="Categories"
                                 icon="🏷️"
                                 colorScheme="teal"
                                 defaultOpen={false}
                                 badge={(asset.categories?.length ?? 0) > 0 ? (
-                                    <Badge colorPalette="blue" size="xs" ml={1}>{asset.categories!.length}</Badge>
+                                    <Badge colorScheme="blue" className="ml-1">{asset.categories!.length}</Badge>
                                 ) : undefined}
                             >
                                 <AssetCategoriesEditor asset={asset} onSaved={invalidate} />
                             </Section>
-                        </Box>
-                    </Flex>
+                        </div>
+                    </div>
 
                     {/* Row 2: Price Getters + Price Chart side by side */}
-                    <Flex gap={2} align="flex-start">
-                        <Box flex="1" minW={0}>
+                    <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
                             <Section
                                 title="Price Getters"
                                 icon="💲"
                                 colorScheme="purple"
                                 defaultOpen={false}
                                 badge={(asset.price_getters?.length ?? 0) > 0 ? (
-                                    <Badge colorPalette="purple" size="xs" ml={1}>{asset.price_getters!.length}</Badge>
+                                    <Badge colorScheme="purple" className="ml-1">{asset.price_getters!.length}</Badge>
                                 ) : undefined}
                             >
                                 <AssetPriceGettersEditor asset={asset} onChanged={invalidate} />
                             </Section>
-                        </Box>
-                        <Box flex="1" minW={0}>
+                        </div>
+                        <div className="min-w-0 flex-1">
                             <Section
                                 title="Price Chart"
                                 icon="📈"
@@ -160,15 +162,15 @@ export const AssetDetailSlidePanel: React.FC = () => {
                             >
                                 <PriceChartWithGaps assetId={asset.asset_id!} symbol={asset.symbol} />
                             </Section>
-                        </Box>
-                    </Flex>
+                        </div>
+                    </div>
 
                     <Section title="Related Transactions" icon="📝" colorScheme="cyan" defaultOpen={false}>
                         <RelatedTransactions assetId={asset.asset_id!} />
                     </Section>
 
                     <PnLSections assetId={asset.asset_id!} assetSymbol={asset.symbol} assetLabel={asset.label} pnlVersionId={panelState.pnlVersionId} />
-                </Flex>
+                </div>
             )}
         </SlidePanel>
     );

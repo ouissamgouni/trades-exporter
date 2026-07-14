@@ -1,15 +1,3 @@
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Heading,
-    HStack,
-    IconButton,
-    Spinner,
-    Table,
-    Text,
-} from '@chakra-ui/react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { LuChevronLeft, LuChevronRight, LuEye, LuRefreshCw } from 'react-icons/lu';
 import {
@@ -18,13 +6,14 @@ import {
     SyncJobSummary,
     SyncJobStatus,
 } from '../types';
+import { Badge, type BadgeColorScheme, Button, Heading, Spinner } from './ui/primitives';
 
 interface JobHistoryTableProps {
     onViewJob?: (jobId: number) => void;
     refreshTrigger?: number;
 }
 
-const statusColorMap: Record<SyncJobStatus, string> = {
+const statusColorMap: Record<SyncJobStatus, BadgeColorScheme> = {
     idle: 'gray',
     pending: 'yellow',
     running: 'blue',
@@ -99,39 +88,39 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
 
     if (loading && jobs.length === 0) {
         return (
-            <Flex justify="center" align="center" py={8}>
+            <div className="flex items-center justify-center py-8">
                 <Spinner size="lg" />
-            </Flex>
+            </div>
         );
     }
 
     if (error) {
         return (
-            <Box p={4} bg="red.50" borderRadius="md">
-                <Text color="red.600">Error: {error}</Text>
-                <Button size="sm" mt={2} onClick={fetchHistory}>
+            <div className="bg-red-50 p-4">
+                <span className="block text-red-600">Error: {error}</span>
+                <Button size="sm" className="mt-2" onClick={fetchHistory}>
                     Retry
                 </Button>
-            </Box>
+            </div>
         );
     }
 
     if (jobs.length === 0) {
         return (
-            <Box textAlign="center" py={8} color="gray.500">
-                <Text>No sync jobs found</Text>
-                <Text fontSize="sm" mt={1}>
+            <div className="py-8 text-center text-slate-500">
+                <span className="block">No sync jobs found</span>
+                <span className="mt-1 block text-sm">
                     Run a sync job to see history here
-                </Text>
-            </Box>
+                </span>
+            </div>
         );
     }
 
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={4}>
-                <Heading size="sm">Job History</Heading>
-                <IconButton
+        <div>
+            <div className="mb-4 flex items-center justify-between">
+                <Heading className="text-sm">Job History</Heading>
+                <Button
                     aria-label="Refresh"
                     size="sm"
                     variant="ghost"
@@ -139,66 +128,65 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                     disabled={loading}
                 >
                     <LuRefreshCw className={loading ? 'animate-spin' : ''} />
-                </IconButton>
-            </Flex>
+                </Button>
+            </div>
 
-            <Table.Root size="sm">
-                <Table.Header>
-                    <Table.Row>
-                        <Table.ColumnHeader>ID</Table.ColumnHeader>
-                        <Table.ColumnHeader>Config</Table.ColumnHeader>
-                        <Table.ColumnHeader>Status</Table.ColumnHeader>
-                        <Table.ColumnHeader>Started</Table.ColumnHeader>
-                        <Table.ColumnHeader>Duration</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right">Connectors</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right">Processed</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right">New</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right">Updated</Table.ColumnHeader>
-                        <Table.ColumnHeader textAlign="right">Errors</Table.ColumnHeader>
-                        <Table.ColumnHeader></Table.ColumnHeader>
-                    </Table.Row>
-                </Table.Header>
-                <Table.Body>
+            <table className="w-full text-sm">
+                <thead>
+                    <tr className="bg-slate-50 text-left">
+                        <th className="px-2 py-1">ID</th>
+                        <th className="px-2 py-1">Config</th>
+                        <th className="px-2 py-1">Status</th>
+                        <th className="px-2 py-1">Started</th>
+                        <th className="px-2 py-1">Duration</th>
+                        <th className="px-2 py-1 text-right">Connectors</th>
+                        <th className="px-2 py-1 text-right">Processed</th>
+                        <th className="px-2 py-1 text-right">New</th>
+                        <th className="px-2 py-1 text-right">Updated</th>
+                        <th className="px-2 py-1 text-right">Errors</th>
+                        <th className="px-2 py-1"></th>
+                    </tr>
+                </thead>
+                <tbody>
                     {jobs.map((job) => (
-                        <Table.Row key={job.id}>
-                            <Table.Cell fontFamily="mono" fontSize="xs">
+                        <tr key={job.id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="px-2 py-1 font-mono text-xs">
                                 #{job.id}
-                            </Table.Cell>
-                            <Table.Cell>
-                                <Flex gap={1} wrap="wrap">
-                                    <Badge colorPalette={job.renormalize ? 'purple' : 'blue'} size="xs">
+                            </td>
+                            <td className="px-2 py-1">
+                                <div className="flex flex-wrap gap-1">
+                                    <Badge colorScheme={job.renormalize ? 'purple' : 'blue'}>
                                         {job.renormalize ? 'Re-Normalize' : 'Sync'}
                                     </Badge>
                                     {job.connector_runs?.some(r => r.test_mode) && (
-                                        <Badge colorPalette="orange" size="xs">Test</Badge>
+                                        <Badge colorScheme="orange">Test</Badge>
                                     )}
-                                </Flex>
-                            </Table.Cell>
-                            <Table.Cell>
-                                <Badge colorPalette={statusColorMap[job.status]}>
+                                </div>
+                            </td>
+                            <td className="px-2 py-1">
+                                <Badge colorScheme={statusColorMap[job.status]}>
                                     {job.status}
                                 </Badge>
-                            </Table.Cell>
-                            <Table.Cell fontSize="xs">
+                            </td>
+                            <td className="px-2 py-1 text-xs">
                                 {formatDate(job.started_at)}
-                            </Table.Cell>
-                            <Table.Cell fontSize="xs">
+                            </td>
+                            <td className="px-2 py-1 text-xs">
                                 {formatDuration(job.started_at, job.finished_at)}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right">
+                            </td>
+                            <td className="px-2 py-1 text-right">
                                 {job.connector_runs && job.connector_runs.length > 0 ? (
-                                    <Flex gap={1} justify="flex-end" wrap="wrap">
+                                    <div className="flex flex-wrap justify-end gap-1">
                                         {job.connector_runs.map((run) => (
                                             <Badge
                                                 key={run.id}
-                                                colorPalette={
+                                                colorScheme={
                                                     run.status === 'completed' ? 'green' :
                                                         run.status === 'failed' ? 'red' :
                                                             run.status === 'running' ? 'blue' :
                                                                 run.status === 'queued' || run.status === 'pending' ? 'gray' :
                                                                     'orange'
                                                 }
-                                                size="xs"
                                                 title={`${run.connector_type || `ID:${run.connector_id}`} - ${run.status}${run.synced_count > 0 ? ` (+${run.synced_count})` : ''}`}
                                             >
                                                 {run.connector_type || `ID:${run.connector_id}`}
@@ -212,46 +200,46 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                                                 )}
                                             </Badge>
                                         ))}
-                                    </Flex>
+                                    </div>
                                 ) : (
                                     job.total_connectors
                                 )}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right">
+                            </td>
+                            <td className="px-2 py-1 text-right">
                                 {job.total_processed.toLocaleString()}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right" color="green.600">
+                            </td>
+                            <td className="px-2 py-1 text-right text-green-600">
                                 {job.total_new > 0 ? `+${job.total_new}` : '-'}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right" color="blue.600">
+                            </td>
+                            <td className="px-2 py-1 text-right text-blue-600">
                                 {job.total_updated > 0 ? job.total_updated : '-'}
-                            </Table.Cell>
-                            <Table.Cell textAlign="right" color={job.total_errors > 0 ? 'red.600' : undefined}>
+                            </td>
+                            <td className={`px-2 py-1 text-right ${job.total_errors > 0 ? 'text-red-600' : ''}`}>
                                 {job.total_errors > 0 ? job.total_errors : '-'}
-                            </Table.Cell>
-                            <Table.Cell>
-                                <IconButton
+                            </td>
+                            <td className="px-2 py-1">
+                                <Button
                                     aria-label="View details"
-                                    size="xs"
+                                    size="sm"
                                     variant="ghost"
                                     onClick={() => onViewJob?.(job.id)}
                                 >
                                     <LuEye />
-                                </IconButton>
-                            </Table.Cell>
-                        </Table.Row>
+                                </Button>
+                            </td>
+                        </tr>
                     ))}
-                </Table.Body>
-            </Table.Root>
+                </tbody>
+            </table>
 
             {/* Pagination */}
             {totalPages > 1 && (
-                <Flex justify="space-between" align="center" mt={4}>
-                    <Text fontSize="sm" color="gray.500">
+                <div className="mt-4 flex items-center justify-between">
+                    <span className="text-sm text-slate-500">
                         Showing {page * limit + 1}-{Math.min((page + 1) * limit, total)} of {total}
-                    </Text>
-                    <HStack gap={2}>
-                        <IconButton
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <Button
                             aria-label="Previous page"
                             size="sm"
                             variant="outline"
@@ -259,11 +247,11 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                             onClick={() => setPage(page - 1)}
                         >
                             <LuChevronLeft />
-                        </IconButton>
-                        <Text fontSize="sm">
+                        </Button>
+                        <span className="text-sm">
                             Page {page + 1} of {totalPages}
-                        </Text>
-                        <IconButton
+                        </span>
+                        <Button
                             aria-label="Next page"
                             size="sm"
                             variant="outline"
@@ -271,10 +259,10 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                             onClick={() => setPage(page + 1)}
                         >
                             <LuChevronRight />
-                        </IconButton>
-                    </HStack>
-                </Flex>
+                        </Button>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

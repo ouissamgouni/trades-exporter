@@ -1,7 +1,7 @@
 /**
  * TablePagination Component
  * 
- * Unified pagination UI for tables using Chakra UI v3 Pagination component.
+ * Unified pagination UI for tables (Tailwind-based).
  * Features:
  * - Page navigation (first, prev, page numbers, next, last)
  * - Page size selector
@@ -25,17 +25,43 @@
  */
 
 import React from 'react';
-import {
-    Box,
-    Button,
-    Flex,
-    HStack,
-    NativeSelect,
-    Pagination,
-    Text,
-} from '@chakra-ui/react';
 import { LuChevronLeft, LuChevronRight, LuChevronsLeft, LuChevronsRight } from 'react-icons/lu';
 import { PAGE_SIZE_OPTIONS, type UsePaginationReturn } from '../hooks/usePagination';
+import { Button } from './ui/primitives';
+
+/**
+ * Compute the list of page numbers (with 'ellipsis' markers) to display,
+ * mirroring the page-range algorithm previously provided by Chakra's Pagination.Context.
+ */
+const getPageItems = (current: number, total: number, siblingCount: number): (number | 'ellipsis')[] => {
+    const totalPageNumbers = siblingCount * 2 + 5;
+    if (total <= totalPageNumbers) {
+        return Array.from({ length: total }, (_, i) => i + 1);
+    }
+
+    const leftSibling = Math.max(current - siblingCount, 1);
+    const rightSibling = Math.min(current + siblingCount, total);
+    const showLeftEllipsis = leftSibling > 2;
+    const showRightEllipsis = rightSibling < total - 1;
+
+    const items: (number | 'ellipsis')[] = [1];
+    if (showLeftEllipsis) items.push('ellipsis');
+    for (let i = Math.max(leftSibling, 2); i <= Math.min(rightSibling, total - 1); i++) {
+        items.push(i);
+    }
+    if (showRightEllipsis) items.push('ellipsis');
+    if (total > 1) items.push(total);
+    return items;
+};
+
+/**
+ * Convert a Chakra-style spacing token (number, on the 0.25rem-per-unit scale)
+ * or raw CSS size string into a CSS length.
+ */
+const toCssSize = (value: number | string | undefined): string | undefined => {
+    if (value === undefined) return undefined;
+    return typeof value === 'number' ? `${value * 0.25}rem` : value;
+};
 
 export interface TablePaginationProps {
     /** Pagination state from usePagination hook */
@@ -93,14 +119,14 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
     const startItem = pagination?.startItem ?? (total === 0 ? 0 : (page - 1) * pageSize + 1);
     const endItem = pagination?.endItem ?? Math.min(page * pageSize, total);
 
-    const handlePageChange = (details: { page: number }) => {
-        console.log('[TablePagination] handlePageChange called with:', details.page, 'pagination:', !!pagination);
+    const handlePageChange = (newPage: number) => {
+        console.log('[TablePagination] handlePageChange called with:', newPage, 'pagination:', !!pagination);
         if (pagination) {
             console.log('[TablePagination] Calling pagination.setPage');
-            pagination.setPage(details.page);
+            pagination.setPage(newPage);
         } else if (controlledOnPageChange) {
             console.log('[TablePagination] Calling controlledOnPageChange');
-            controlledOnPageChange(details.page);
+            controlledOnPageChange(newPage);
         }
     };
 
@@ -125,121 +151,102 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
     }
 
     return (
-        <Box mt={mt} mb={mb} p={p} bg="gray.50" borderRadius="md" _dark={{ bg: 'gray.800' }}>
-            <Flex
-                justify="space-between"
-                align="center"
-                flexWrap="wrap"
-                gap={3}
-                direction={{ base: 'column', md: 'row' }}
-            >
+        <div style={{ marginTop: toCssSize(mt), marginBottom: toCssSize(mb), padding: toCssSize(p) }} className="bg-slate-50 dark:bg-slate-800">
+            <div className="flex flex-col flex-wrap items-center justify-between gap-3 md:flex-row">
                 {/* Left: Item count info */}
                 {showItemCount && (
-                    <Text fontSize="xs" color="gray.600" _dark={{ color: 'gray.400' }}>
+                    <span className="text-xs text-slate-600 dark:text-slate-400">
                         Showing {startItem}-{endItem} of <strong>{total}</strong> items
-                    </Text>
+                    </span>
                 )}
 
                 {/* Center: Page navigation */}
                 {totalPages > 1 && (
-                    <Pagination.Root
-                        count={total}
-                        pageSize={pageSize}
-                        page={page}
-                        onPageChange={handlePageChange}
-                        siblingCount={compact ? 0 : 1}
-                    >
-                        <HStack gap={1}>
-                            <Button
-                                size={size}
-                                variant="outline"
-                                aria-label="First page"
-                                onClick={() => handlePageChange({ page: 1 })}
-                                disabled={page === 1}
-                                px={2}
-                            >
-                                <LuChevronsLeft />
-                            </Button>
+                    <div className="flex items-center gap-1">
+                        <Button
+                            size={size === 'xs' ? 'sm' : size}
+                            variant="outline"
+                            aria-label="First page"
+                            onClick={() => handlePageChange(1)}
+                            disabled={page === 1}
+                            className="px-2"
+                        >
+                            <LuChevronsLeft />
+                        </Button>
 
-                            <Button
-                                size={size}
-                                variant="outline"
-                                aria-label="Previous page"
-                                px={2}
-                                disabled={page === 1}
-                                onClick={() => handlePageChange({ page: page - 1 })}
-                            >
-                                <LuChevronLeft />
-                            </Button>
+                        <Button
+                            size={size === 'xs' ? 'sm' : size}
+                            variant="outline"
+                            aria-label="Previous page"
+                            className="px-2"
+                            disabled={page === 1}
+                            onClick={() => handlePageChange(page - 1)}
+                        >
+                            <LuChevronLeft />
+                        </Button>
 
-                            <Pagination.Context>
-                                {({ pages }) =>
-                                    pages.map((pageItem, index) =>
-                                        pageItem.type === 'page' ? (
-                                            <Button
-                                                key={index}
-                                                size={size}
-                                                variant={pageItem.value === page ? 'solid' : 'outline'}
-                                                colorPalette={pageItem.value === page ? 'blue' : undefined}
-                                                onClick={() => handlePageChange({ page: pageItem.value })}
-                                            >
-                                                {pageItem.value}
-                                            </Button>
-                                        ) : (
-                                            <Text key={index}>…</Text>
-                                        )
-                                    )
-                                }
-                            </Pagination.Context>
+                        {getPageItems(page, totalPages, compact ? 0 : 1).map((pageItem, index) =>
+                            pageItem === 'ellipsis' ? (
+                                <span key={`ellipsis-${index}`}>…</span>
+                            ) : (
+                                <Button
+                                    key={pageItem}
+                                    size={size === 'xs' ? 'sm' : size}
+                                    variant={pageItem === page ? 'solid' : 'outline'}
+                                    colorScheme={pageItem === page ? 'blue' : undefined}
+                                    onClick={() => handlePageChange(pageItem)}
+                                >
+                                    {pageItem}
+                                </Button>
+                            )
+                        )}
 
-                            <Button
-                                size={size}
-                                variant="outline"
-                                aria-label="Next page"
-                                px={2}
-                                disabled={page === totalPages}
-                                onClick={() => handlePageChange({ page: page + 1 })}
-                            >
-                                <LuChevronRight />
-                            </Button>
+                        <Button
+                            size={size === 'xs' ? 'sm' : size}
+                            variant="outline"
+                            aria-label="Next page"
+                            className="px-2"
+                            disabled={page === totalPages}
+                            onClick={() => handlePageChange(page + 1)}
+                        >
+                            <LuChevronRight />
+                        </Button>
 
-                            <Button
-                                size={size}
-                                variant="outline"
-                                aria-label="Last page"
-                                onClick={() => handlePageChange({ page: totalPages })}
-                                disabled={page === totalPages}
-                                px={2}
-                            >
-                                <LuChevronsRight />
-                            </Button>
-                        </HStack>
-                    </Pagination.Root>
+                        <Button
+                            size={size === 'xs' ? 'sm' : size}
+                            variant="outline"
+                            aria-label="Last page"
+                            onClick={() => handlePageChange(totalPages)}
+                            disabled={page === totalPages}
+                            className="px-2"
+                        >
+                            <LuChevronsRight />
+                        </Button>
+                    </div>
                 )}
 
                 {/* Right: Page size selector */}
                 {showPageSizeSelector && (
-                    <Flex align="center" gap={2}>
-                        <Text fontSize="xs" color="gray.600" _dark={{ color: 'gray.400' }}>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-600 dark:text-slate-400">
                             Per page:
-                        </Text>
-                        <NativeSelect.Root size="sm" width="75px">
-                            <NativeSelect.Field
-                                value={pageSize}
-                                onChange={e => handlePageSizeChange(Number(e.target.value))}
-                                aria-label="Items per page"
-                            >
-                                {pageSizeOptions.map(option => (
-                                    <option key={option} value={option}>
-                                        {option}
-                                    </option>
-                                ))}
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
+                        </span>
+                        <select
+                            className="h-8 w-[75px] border border-slate-300 bg-white px-1 text-sm"
+                            value={pageSize}
+                            onChange={e => handlePageSizeChange(Number(e.target.value))}
+                            aria-label="Items per page"
+                        >
+                            {pageSizeOptions.map(option => (
+                                <option key={option} value={option}>
+                                    {option}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 )}
-            </Flex>
-        </Box>
+            </div>
+        </div>
     );
 };
 

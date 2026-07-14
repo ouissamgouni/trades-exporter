@@ -9,10 +9,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import {
-    Box, Button, Dialog, Flex, Input, NativeSelect,
-    Portal, Text, Textarea,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Button, Input, Textarea } from '../ui/primitives';
 import { TaxabilityStatus, UnitPattern } from '../../enums';
 import { API_URL } from '../../types';
 import { toaster } from '../ui/toaster';
@@ -198,157 +196,151 @@ export const BundleCreateDialog: React.FC<BundleCreateDialogProps> = ({
     };
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(); }}>
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content maxW="480px">
-                        <Dialog.Header>
-                            <Dialog.Title>Create Bundle</Dialog.Title>
-                        </Dialog.Header>
-                        <form onSubmit={handleSubmit}>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    {error && (
-                                        <Box bg="red.50" p={2} borderRadius="md" borderWidth={1} borderColor="red.200">
-                                            <Text color="red.600" fontSize="sm">{error}</Text>
-                                        </Box>
-                                    )}
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-100 px-5 py-4">
+                        <RadixDialog.Title className="text-base font-semibold text-slate-900">Create Bundle</RadixDialog.Title>
+                    </div>
+                    <form onSubmit={handleSubmit}>
+                        <div className="px-5 py-4">
+                            <div className="flex flex-col gap-4">
+                                {error && (
+                                    <div className="border border-red-200 bg-red-50 p-2">
+                                        <span className="text-sm text-red-600">{error}</span>
+                                    </div>
+                                )}
 
-                                    {/* Info */}
-                                    <Box bg="gray.50" p={2} borderRadius="md">
-                                        <Text fontSize="xs" color="gray.600">
-                                            Bundling {defaults.transactionIds.length} transaction{defaults.transactionIds.length !== 1 ? 's' : ''}
-                                        </Text>
-                                    </Box>
+                                {/* Info */}
+                                <div className="bg-slate-50 p-2">
+                                    <span className="text-xs text-slate-600">
+                                        Bundling {defaults.transactionIds.length} transaction{defaults.transactionIds.length !== 1 ? 's' : ''}
+                                    </span>
+                                </div>
 
-                                    {/* Pattern */}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1} fontSize="sm">Pattern</Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={pattern}
-                                                onChange={(e) => handlePatternChange(e.target.value)}
+                                {/* Pattern */}
+                                <div>
+                                    <span className="mb-1 block text-sm font-medium">Pattern</span>
+                                    <select
+                                        className="h-9 w-full border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={pattern}
+                                        onChange={(e) => handlePatternChange(e.target.value)}
+                                    >
+                                        {SELECTABLE_PATTERNS.map(p => (
+                                            <option key={p} value={p}>
+                                                {PATTERN_LABELS[p] || p}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Spinoff-specific fields */}
+                                {pattern === UnitPattern.SPINOFF && (
+                                    <>
+                                        <div>
+                                            <span className="mb-1 block text-sm font-medium">
+                                                Source (Parent) Asset <span className="text-red-400">*</span>
+                                            </span>
+                                            <span className="mb-1 block text-xs text-slate-500">
+                                                The parent company whose cost basis will be reallocated
+                                            </span>
+                                            <select
+                                                className="h-9 w-full border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                value={spinoffSourceAssetId}
+                                                onChange={(e) => setSpinoffSourceAssetId(e.target.value)}
                                             >
-                                                {SELECTABLE_PATTERNS.map(p => (
-                                                    <option key={p} value={p}>
-                                                        {PATTERN_LABELS[p] || p}
-                                                    </option>
-                                                ))}
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
+                                                <option value="">— Select parent asset —</option>
+                                                {assets
+                                                    .filter(a => a.asset_id != null && a.symbol)
+                                                    .sort((a, b) => (a.symbol || '').localeCompare(b.symbol || ''))
+                                                    .map(a => (
+                                                        <option key={a.asset_id} value={String(a.asset_id)}>
+                                                            {a.symbol}{a.label ? ` — ${a.label}` : ''}
+                                                        </option>
+                                                    ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <span className="mb-1 block text-sm font-medium">
+                                                Allocation % to New Company{' '}
+                                                <span className="font-normal text-slate-400">(optional)</span>
+                                            </span>
+                                            <span className="mb-1 block text-xs text-slate-500">
+                                                % of cost basis allocated to the spun-off company. Leave blank to auto-compute from FMV at spin-off date.
+                                            </span>
+                                            <Input
+                                                value={spinoffAllocationPct}
+                                                onChange={(e) => setSpinoffAllocationPct(e.target.value)}
+                                                placeholder="e.g., 15 (for 15%)"
+                                                type="number"
+                                                min={0}
+                                                max={100}
+                                                step={0.01}
+                                            />
+                                        </div>
+                                    </>
+                                )}
 
-                                    {/* Spinoff-specific fields */}
-                                    {pattern === UnitPattern.SPINOFF && (
-                                        <>
-                                            <Box>
-                                                <Text fontWeight="medium" mb={1} fontSize="sm">
-                                                    Source (Parent) Asset <Text as="span" color="red.400">*</Text>
-                                                </Text>
-                                                <Text fontSize="xs" color="gray.500" mb={1}>
-                                                    The parent company whose cost basis will be reallocated
-                                                </Text>
-                                                <NativeSelect.Root>
-                                                    <NativeSelect.Field
-                                                        value={spinoffSourceAssetId}
-                                                        onChange={(e) => setSpinoffSourceAssetId(e.target.value)}
-                                                    >
-                                                        <option value="">— Select parent asset —</option>
-                                                        {assets
-                                                            .filter(a => a.asset_id != null && a.symbol)
-                                                            .sort((a, b) => (a.symbol || '').localeCompare(b.symbol || ''))
-                                                            .map(a => (
-                                                                <option key={a.asset_id} value={String(a.asset_id)}>
-                                                                    {a.symbol}{a.label ? ` — ${a.label}` : ''}
-                                                                </option>
-                                                            ))}
-                                                    </NativeSelect.Field>
-                                                </NativeSelect.Root>
-                                            </Box>
-                                            <Box>
-                                                <Text fontWeight="medium" mb={1} fontSize="sm">
-                                                    Allocation % to New Company{' '}
-                                                    <Text as="span" color="gray.400" fontWeight="normal">(optional)</Text>
-                                                </Text>
-                                                <Text fontSize="xs" color="gray.500" mb={1}>
-                                                    % of cost basis allocated to the spun-off company. Leave blank to auto-compute from FMV at spin-off date.
-                                                </Text>
-                                                <Input
-                                                    value={spinoffAllocationPct}
-                                                    onChange={(e) => setSpinoffAllocationPct(e.target.value)}
-                                                    placeholder="e.g., 15 (for 15%)"
-                                                    size="sm"
-                                                    type="number"
-                                                    min={0}
-                                                    max={100}
-                                                    step={0.01}
-                                                />
-                                            </Box>
-                                        </>
-                                    )}
+                                {/* Label */}
+                                <div>
+                                    <span className="mb-1 block text-sm font-medium">Label</span>
+                                    <Input
+                                        value={label}
+                                        onChange={(e) => handleLabelChange(e.target.value)}
+                                        placeholder="e.g., BTC → ETH Swap"
+                                    />
+                                </div>
 
-                                    {/* Label */}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1} fontSize="sm">Label</Text>
-                                        <Input
-                                            value={label}
-                                            onChange={(e) => handleLabelChange(e.target.value)}
-                                            placeholder="e.g., BTC → ETH Swap"
-                                            size="sm"
-                                        />
-                                    </Box>
+                                {/* Notes */}
+                                <div>
+                                    <span className="mb-1 block text-sm font-medium">
+                                        Notes <span className="font-normal text-slate-400">(optional)</span>
+                                    </span>
+                                    <Textarea
+                                        value={notes}
+                                        onChange={(e) => setNotes(e.target.value)}
+                                        placeholder="Additional context or reason for this bundle..."
+                                        rows={2}
+                                    />
+                                </div>
 
-                                    {/* Notes */}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1} fontSize="sm">
-                                            Notes <Text as="span" color="gray.400" fontWeight="normal">(optional)</Text>
-                                        </Text>
-                                        <Textarea
-                                            value={notes}
-                                            onChange={(e) => setNotes(e.target.value)}
-                                            placeholder="Additional context or reason for this bundle..."
-                                            size="sm"
-                                            rows={2}
-                                        />
-                                    </Box>
-
-                                    {/* Taxability */}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1} fontSize="sm">Taxability Override</Text>
-                                        <NativeSelect.Root size="sm" width="160px">
-                                            <NativeSelect.Field
-                                                value={taxability}
-                                                onChange={(e) => setTaxability(e.target.value)}
-                                                style={{
-                                                    fontSize: '12px',
-                                                    padding: '4px 8px',
-                                                    backgroundColor: TAXABILITY_BG[taxability] || '#FEFCBF',
-                                                    borderRadius: '4px',
-                                                }}
-                                            >
-                                                <option value={TaxabilityStatus.UNKNOWN}>Unknown (auto-detect)</option>
-                                                <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
-                                                <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={3}>
-                                    <Button variant="outline" onClick={onClose} disabled={loading}>
-                                        Cancel
-                                    </Button>
-                                    <Button type="submit" colorPalette="purple" loading={loading}>
-                                        Create Bundle
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </form>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                                {/* Taxability */}
+                                <div>
+                                    <span className="mb-1 block text-sm font-medium">Taxability Override</span>
+                                    <select
+                                        className="h-9 w-[160px] border border-slate-200 text-sm"
+                                        value={taxability}
+                                        onChange={(e) => setTaxability(e.target.value)}
+                                        style={{
+                                            fontSize: '12px',
+                                            padding: '4px 8px',
+                                            backgroundColor: TAXABILITY_BG[taxability] || '#FEFCBF',
+                                        }}
+                                    >
+                                        <option value={TaxabilityStatus.UNKNOWN}>Unknown (auto-detect)</option>
+                                        <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
+                                        <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex gap-3 border-t border-slate-100 px-5 py-4">
+                            <Button variant="outline" onClick={onClose} disabled={loading}>
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                colorScheme="gray"
+                                className="bg-purple-600 text-white hover:bg-purple-700"
+                                loading={loading}
+                            >
+                                Create Bundle
+                            </Button>
+                        </div>
+                    </form>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };

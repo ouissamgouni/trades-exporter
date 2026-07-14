@@ -14,7 +14,7 @@ Strategy:
 Usage:
     PYTHONPATH=/path/to/trades-exporter \\
     ALPHAVANTAGE_API_KEY=xxx MARKETSTACK_API_KEY=xxx \\
-    .venv/bin/python scripts/backfill_prices.py [--dry-run] [--asset SYMBOL]
+    ../.venv/bin/python scripts/backfill_prices.py [--dry-run] [--asset SYMBOL]
 """
 
 import os
@@ -55,13 +55,15 @@ session.headers.update(YAHOO_HEADERS)
 def fetch_yahoo_range(ticker, start_date, end_date):
     """Fetch daily prices from Yahoo Chart API for a date range. Returns {date: price}."""
     period1 = int(datetime.combine(start_date, datetime.min.time()).timestamp())
-    period2 = int(datetime.combine(end_date + timedelta(days=1), datetime.min.time()).timestamp())
-    
+    period2 = int(
+        datetime.combine(end_date + timedelta(days=1), datetime.min.time()).timestamp()
+    )
+
     try:
         resp = session.get(
             f"{YAHOO_CHART_BASE}/{ticker}",
             params={"interval": "1d", "period1": period1, "period2": period2},
-            timeout=15
+            timeout=15,
         )
         if resp.status_code != 200:
             return {}
@@ -69,12 +71,12 @@ def fetch_yahoo_range(ticker, start_date, end_date):
         result = data.get("chart", {}).get("result", [])
         if not result:
             return {}
-        
+
         timestamps = result[0].get("timestamp", [])
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         closes = quotes.get("close", [])
         currency = result[0].get("meta", {}).get("currency", "USD")
-        
+
         prices = {}
         for ts, close in zip(timestamps, closes):
             if close is not None and close > 0:
@@ -88,10 +90,11 @@ def fetch_yahoo_range(ticker, start_date, end_date):
 
 coingecko_rate_limit_until = 0  # global timestamp
 
+
 def fetch_coingecko_range(coin_id, start_date, end_date, vs_currency="eur", _retries=0):
     """Fetch daily prices from CoinGecko market_chart/range. Returns {date: price}."""
     global coingecko_rate_limit_until
-    
+
     # Respect cooldown from prior rate limit
     now = time.time()
     if now < coingecko_rate_limit_until:
@@ -99,30 +102,36 @@ def fetch_coingecko_range(coin_id, start_date, end_date, vs_currency="eur", _ret
         if wait > 0:
             print(f"    CoinGecko cooldown: {wait:.0f}s remaining...")
             time.sleep(wait)
-    
+
     from_ts = int(datetime.combine(start_date, datetime.min.time()).timestamp())
-    to_ts = int(datetime.combine(end_date + timedelta(days=1), datetime.min.time()).timestamp())
-    
+    to_ts = int(
+        datetime.combine(end_date + timedelta(days=1), datetime.min.time()).timestamp()
+    )
+
     try:
         resp = session.get(
             f"{COINGECKO_BASE}/coins/{coin_id}/market_chart/range",
             params={"vs_currency": vs_currency, "from": from_ts, "to": to_ts},
-            timeout=15
+            timeout=15,
         )
         if resp.status_code == 429:
             if _retries >= 2:
                 print(f"    CoinGecko rate limited for {coin_id}, max retries reached")
                 return {}
             wait = 35
-            print(f"    CoinGecko rate limited for {coin_id}, waiting {wait}s (retry {_retries+1}/2)...")
+            print(
+                f"    CoinGecko rate limited for {coin_id}, waiting {wait}s (retry {_retries + 1}/2)..."
+            )
             coingecko_rate_limit_until = time.time() + wait
             time.sleep(wait)
-            return fetch_coingecko_range(coin_id, start_date, end_date, vs_currency, _retries + 1)
+            return fetch_coingecko_range(
+                coin_id, start_date, end_date, vs_currency, _retries + 1
+            )
         if resp.status_code != 200:
             return {}
         data = resp.json()
         price_points = data.get("prices", [])
-        
+
         # CoinGecko returns [timestamp_ms, price] pairs
         prices = {}
         for ts_ms, price in price_points:
@@ -147,12 +156,12 @@ def fetch_marketstack_range(ticker, start_date, end_date):
                 "date_to": end_date.isoformat(),
                 "limit": 1000,
             },
-            timeout=15
+            timeout=15,
         )
         if resp.status_code != 200:
             return {}
         data = resp.json()
-        
+
         prices = {}
         for item in data.get("data", []):
             d = datetime.strptime(item["date"][:10], "%Y-%m-%d").date()
@@ -176,12 +185,12 @@ def fetch_alphavantage_daily(ticker):
                 "outputsize": "full",
                 "apikey": ALPHAVANTAGE_KEY,
             },
-            timeout=15
+            timeout=15,
         )
         if resp.status_code != 200:
             return {}
         data = resp.json()
-        
+
         ts = data.get("Time Series (Daily)", {})
         prices = {}
         for date_str, vals in ts.items():
@@ -209,9 +218,10 @@ def main():
         asset_filter = ""
         if SINGLE_ASSET:
             asset_filter = f"AND a.symbol = '{SINGLE_ASSET}'"
-        
+
         # Get oldest tx per asset
-        oldest = conn.execute(text(f"""
+        oldest = conn.execute(
+            text(f"""
             SELECT a.asset_id, a.symbol, a.price_type,
                    MIN(nt.date_time)::date as oldest_tx
             FROM normalized_transactions nt
@@ -219,21 +229,25 @@ def main():
             {asset_filter}
             GROUP BY a.asset_id, a.symbol, a.price_type
             ORDER BY a.symbol
-        """)).fetchall()
+        """)
+        ).fetchall()
 
         print(f"\n  Assets with transactions: {len(oldest)}")
 
         # Get existing price dates per asset
-        existing = conn.execute(text("""
+        existing = conn.execute(
+            text("""
             SELECT asset_id, DATE(snapshot_time) as d
             FROM price_snapshots
-        """)).fetchall()
+        """)
+        ).fetchall()
         existing_dates = defaultdict(set)
         for row in existing:
             existing_dates[row[0]].add(row[1])
 
         # Get price getters per asset (ordered by priority)
-        getters = conn.execute(text(f"""
+        getters = conn.execute(
+            text(f"""
             SELECT a.asset_id, a.symbol, apg.price_getter, apg.external_id, 
                    apg.priority, apg.params
             FROM assets a
@@ -241,22 +255,29 @@ def main():
             WHERE apg.enabled = true
             {asset_filter}
             ORDER BY a.symbol, apg.priority
-        """)).fetchall()
-        
+        """)
+        ).fetchall()
+
         getter_map = defaultdict(list)
         for row in getters:
-            getter_map[row[0]].append({
-                "getter": row[2],
-                "external_id": row[3],
-                "priority": row[4],
-                "params": row[5],
-            })
+            getter_map[row[0]].append(
+                {
+                    "getter": row[2],
+                    "external_id": row[3],
+                    "priority": row[4],
+                    "params": row[5],
+                }
+            )
 
         # Get EUR asset_id for quote
-        eur_id = conn.execute(text("SELECT asset_id FROM assets WHERE symbol='EUR'")).scalar()
-        
+        eur_id = conn.execute(
+            text("SELECT asset_id FROM assets WHERE symbol='EUR'")
+        ).scalar()
+
         # Get USD asset_id if exists
-        usd_id = conn.execute(text("SELECT asset_id FROM assets WHERE symbol='USD'")).scalar()
+        usd_id = conn.execute(
+            text("SELECT asset_id FROM assets WHERE symbol='USD'")
+        ).scalar()
 
         print(f"  EUR asset_id: {eur_id}, USD asset_id: {usd_id}")
         print()
@@ -273,7 +294,7 @@ def main():
         for asset_id, symbol, price_type, oldest_tx in oldest:
             is_crypto = price_type == "crypto"
             is_fiat = price_type == "fiat"
-            
+
             if is_fiat:
                 print(f"  ⊘ {symbol}: fiat — skipping")
                 continue
@@ -297,23 +318,39 @@ def main():
                 asset_results.append((symbol, 0, 0, 0, "complete"))
                 continue
 
-            print(f"\n  → {symbol} ({price_type}): {len(missing)} missing days "
-                  f"({missing[0]} to {missing[-1]})")
+            print(
+                f"\n  → {symbol} ({price_type}): {len(missing)} missing days "
+                f"({missing[0]} to {missing[-1]})"
+            )
 
             # Get the best getter for this asset
             asset_getters = getter_map.get(asset_id, [])
             if not asset_getters:
                 print(f"    ✗ No price getters configured!")
-                asset_results.append((symbol, len(missing), 0, len(missing), "no_getter"))
+                asset_results.append(
+                    (symbol, len(missing), 0, len(missing), "no_getter")
+                )
                 total_failed += len(missing)
                 continue
 
             # Try each getter — prefer yahoo_direct first (fastest, no rate limit)
             # then coingecko, then marketstack, then alphavantage
-            GETTER_ORDER = ["yahoo_direct", "coingecko", "marketstack", "alphavantage", "forex", "datareader"]
-            sorted_getters = sorted(asset_getters, key=lambda g: (
-                GETTER_ORDER.index(g["getter"]) if g["getter"] in GETTER_ORDER else 99
-            ))
+            GETTER_ORDER = [
+                "yahoo_direct",
+                "coingecko",
+                "marketstack",
+                "alphavantage",
+                "forex",
+                "datareader",
+            ]
+            sorted_getters = sorted(
+                asset_getters,
+                key=lambda g: (
+                    GETTER_ORDER.index(g["getter"])
+                    if g["getter"] in GETTER_ORDER
+                    else 99
+                ),
+            )
             fetched_prices = {}
             getter_used = None
 
@@ -339,7 +376,9 @@ def main():
                 elif gname == "coingecko":
                     coin_id = ext_id or symbol.lower()
                     print(f"    Trying coingecko ({coin_id})...")
-                    fetched_prices = fetch_coingecko_range(coin_id, missing[0], missing[-1])
+                    fetched_prices = fetch_coingecko_range(
+                        coin_id, missing[0], missing[-1]
+                    )
                     coingecko_requests += 1
                     if fetched_prices:
                         getter_used = "coingecko"
@@ -348,7 +387,9 @@ def main():
                 elif gname == "marketstack":
                     ticker = ext_id or symbol
                     print(f"    Trying marketstack ({ticker})...")
-                    fetched_prices = fetch_marketstack_range(ticker, missing[0], missing[-1])
+                    fetched_prices = fetch_marketstack_range(
+                        ticker, missing[0], missing[-1]
+                    )
                     if fetched_prices:
                         getter_used = "marketstack"
                         break
@@ -370,14 +411,16 @@ def main():
                     # Forex usually just needs 1.0 for EUR/EUR
                     print(f"    Forex getter — skipping for backfill")
                     continue
-                    
+
                 elif gname == "datareader":
                     # Datareader (Stooq) is dead — skip
                     continue
 
             if not fetched_prices:
                 print(f"    ✗ All getters failed!")
-                asset_results.append((symbol, len(missing), 0, len(missing), "all_failed"))
+                asset_results.append(
+                    (symbol, len(missing), 0, len(missing), "all_failed")
+                )
                 total_failed += len(missing)
                 continue
 
@@ -387,47 +430,64 @@ def main():
                 if d in fetched_prices:
                     price, currency = fetched_prices[d]
                     # Determine quote_asset_id (EUR or USD based on source)
-                    quote_id = eur_id if currency == "EUR" else (usd_id if currency == "USD" else eur_id)
-                    insertable.append({
-                        "asset_id": asset_id,
-                        "quote_asset_id": quote_id or eur_id,
-                        "price": price,
-                        "snapshot_time": datetime.combine(d, datetime.min.time()),
-                        "source": f"backfill_{getter_used}",
-                    })
+                    quote_id = (
+                        eur_id
+                        if currency == "EUR"
+                        else (usd_id if currency == "USD" else eur_id)
+                    )
+                    insertable.append(
+                        {
+                            "asset_id": asset_id,
+                            "quote_asset_id": quote_id or eur_id,
+                            "price": price,
+                            "snapshot_time": datetime.combine(d, datetime.min.time()),
+                            "source": f"backfill_{getter_used}",
+                        }
+                    )
 
             filled = len(insertable)
             still_missing = len(missing) - filled
-            print(f"    ✓ {getter_used}: fetched {len(fetched_prices)} prices, "
-                  f"{filled} fill missing days, {still_missing} still missing")
+            print(
+                f"    ✓ {getter_used}: fetched {len(fetched_prices)} prices, "
+                f"{filled} fill missing days, {still_missing} still missing"
+            )
 
             if not DRY_RUN and insertable:
                 batch_size = 200
                 for i in range(0, len(insertable), batch_size):
-                    batch = insertable[i:i + batch_size]
+                    batch = insertable[i : i + batch_size]
                     for rec in batch:
                         try:
-                            conn.execute(text("""
+                            conn.execute(
+                                text("""
                                 INSERT INTO price_snapshots 
                                     (asset_id, quote_asset_id, price, snapshot_time, source, created_at)
                                 VALUES (:asset_id, :quote_asset_id, :price, :snapshot_time, :source, NOW())
                                 ON CONFLICT (asset_id, quote_asset_id, snapshot_time, source) DO NOTHING
-                            """), rec)
+                            """),
+                                rec,
+                            )
                         except Exception as e:
                             conn.rollback()
                             # Try without ON CONFLICT (check exists first)
                             try:
-                                exists = conn.execute(text("""
+                                exists = conn.execute(
+                                    text("""
                                     SELECT 1 FROM price_snapshots 
                                     WHERE asset_id = :asset_id 
                                     AND DATE(snapshot_time) = DATE(:snapshot_time)
-                                """), rec).fetchone()
+                                """),
+                                    rec,
+                                ).fetchone()
                                 if not exists:
-                                    conn.execute(text("""
+                                    conn.execute(
+                                        text("""
                                         INSERT INTO price_snapshots 
                                             (asset_id, quote_asset_id, price, snapshot_time, source, created_at)
                                         VALUES (:asset_id, :quote_asset_id, :price, :snapshot_time, :source, NOW())
-                                    """), rec)
+                                    """),
+                                        rec,
+                                    )
                             except Exception as e2:
                                 conn.rollback()
                                 still_missing += 1
@@ -436,26 +496,36 @@ def main():
 
             total_inserted += filled
             total_skipped += still_missing
-            asset_results.append((symbol, len(missing), filled, still_missing, getter_used))
+            asset_results.append(
+                (symbol, len(missing), filled, still_missing, getter_used)
+            )
 
         # 3. Summary
         print("\n" + "=" * 80)
         print("  BACKFILL SUMMARY")
         print("=" * 80)
-        print(f"\n  {'Asset':<20} {'Needed':>8} {'Filled':>8} {'Missing':>8} {'Getter':<15}")
+        print(
+            f"\n  {'Asset':<20} {'Needed':>8} {'Filled':>8} {'Missing':>8} {'Getter':<15}"
+        )
         print("  " + "─" * 70)
-        
-        for sym, needed, filled, still_miss, getter in sorted(asset_results, key=lambda x: -x[3]):
+
+        for sym, needed, filled, still_miss, getter in sorted(
+            asset_results, key=lambda x: -x[3]
+        ):
             indicator = "✓" if still_miss == 0 else ("⚠" if filled > 0 else "✗")
-            print(f"  {indicator} {sym:<18} {needed:>8} {filled:>8} {still_miss:>8} {getter:<15}")
+            print(
+                f"  {indicator} {sym:<18} {needed:>8} {filled:>8} {still_miss:>8} {getter:<15}"
+            )
 
         print(f"\n  Total days filled:   {total_inserted:,}")
         print(f"  Total days missing:  {total_skipped + total_failed:,}")
-        
+
         if DRY_RUN:
             print("\n  *** DRY RUN — nothing was inserted ***")
         else:
-            final_count = conn.execute(text("SELECT COUNT(*) FROM price_snapshots")).scalar()
+            final_count = conn.execute(
+                text("SELECT COUNT(*) FROM price_snapshots")
+            ).scalar()
             print(f"  price_snapshots total: {final_count:,}")
 
 

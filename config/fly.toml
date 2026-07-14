@@ -1,11 +1,13 @@
 # Fly.io app configuration — production
 # https://fly.io/docs/reference/configuration/
+# Always pass -c config/fly.toml to flyctl commands.
 
 app = "trades-exporter"
 primary_region = "cdg"
 
 [build]
-  dockerfile = "backend/Dockerfile"
+  # Path is relative to this toml file (config/ → repo root → backend/Dockerfile)
+  dockerfile = "../backend/Dockerfile"
 
 [env]
   PYTHONPATH = "/app"

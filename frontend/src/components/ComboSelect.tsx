@@ -1,4 +1,3 @@
-import { Box, Input, Text } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 
 interface ComboSelectProps {
@@ -60,85 +59,56 @@ export const ComboSelect: React.FC<ComboSelectProps> = ({
     const displayValue = isOpen ? inputValue : value;
 
     return (
-        <Box position="relative" ref={containerRef} width={width}>
-            <Input
-                size={size}
+        <div className="relative" ref={containerRef} style={{ width }}>
+            <input
                 value={displayValue}
                 onChange={handleInputChange}
                 onFocus={handleFocus}
                 placeholder={placeholder}
-                bg="white"
+                className={`w-full border border-slate-300 bg-white px-2 outline-none focus:border-blue-500 ${size === 'xs' ? 'h-6 text-xs' : size === 'sm' ? 'h-8 text-sm' : 'h-9 text-sm'}`}
             />
 
             {isOpen && (
-                <Box
-                    position="absolute"
-                    top="100%"
-                    left={0}
-                    right={0}
-                    zIndex={1000}
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
-                    boxShadow="lg"
-                    maxH="200px"
-                    overflowY="auto"
-                    mt={1}
-                >
+                <div className="absolute left-0 right-0 top-full z-[1000] mt-1 max-h-[200px] overflow-y-auto border border-slate-200 bg-white shadow-lg">
                     {/* Show current value option if it exists and differs from input */}
                     {value && !filteredOptions.includes(value) && value.toLowerCase().includes(inputValue.toLowerCase()) && (
-                        <Box
-                            p={2}
-                            cursor="pointer"
-                            bg="blue.50"
-                            _hover={{ bg: 'blue.100' }}
+                        <div
+                            className="cursor-pointer border-b border-slate-100 bg-blue-50 p-2 text-xs hover:bg-blue-100"
                             onClick={() => handleSelect(value)}
-                            fontSize="xs"
-                            borderBottom="1px solid"
-                            borderColor="gray.100"
                         >
-                            <Text fontWeight="medium">{value}</Text>
-                            <Text fontSize="xs" color="gray.500">current value</Text>
-                        </Box>
+                            <div className="font-medium">{value}</div>
+                            <div className="text-xs text-slate-500">current value</div>
+                        </div>
                     )}
 
                     {filteredOptions.length > 0 ? (
                         filteredOptions.map(option => (
-                            <Box
+                            <div
                                 key={option}
-                                p={2}
-                                cursor="pointer"
-                                bg={value === option ? 'blue.50' : undefined}
-                                _hover={{ bg: 'blue.100' }}
+                                className={`cursor-pointer p-2 text-xs hover:bg-blue-100 ${value === option ? 'bg-blue-50' : ''}`}
                                 onClick={() => handleSelect(option)}
-                                fontSize="xs"
                             >
-                                <Text>{option}</Text>
-                            </Box>
+                                {option}
+                            </div>
                         ))
                     ) : inputValue ? (
-                        <Box p={2} color="gray.500" fontSize="xs">
-                            <Text>Using custom: "{inputValue}"</Text>
-                        </Box>
+                        <div className="p-2 text-xs text-slate-500">
+                            Using custom: "{inputValue}"
+                        </div>
                     ) : (
                         options.map(option => (
-                            <Box
+                            <div
                                 key={option}
-                                p={2}
-                                cursor="pointer"
-                                bg={value === option ? 'blue.50' : undefined}
-                                _hover={{ bg: 'blue.100' }}
+                                className={`cursor-pointer p-2 text-xs hover:bg-blue-100 ${value === option ? 'bg-blue-50' : ''}`}
                                 onClick={() => handleSelect(option)}
-                                fontSize="xs"
                             >
-                                <Text>{option}</Text>
-                            </Box>
+                                {option}
+                            </div>
                         ))
                     )}
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

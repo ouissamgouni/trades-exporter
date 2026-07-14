@@ -1,17 +1,6 @@
+import * as RadixDialog from '@radix-ui/react-dialog';
 import React, { useState, useEffect } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Dialog,
-    Flex,
-    Input,
-    NativeSelect,
-    Portal,
-    Text,
-    Textarea,
-} from '@chakra-ui/react';
-
+import { Badge, Button, Input, Textarea } from './ui/primitives';
 import { Account, AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
 import { ColorPaletteField } from './ColorPaletteField';
 import { getNextAvailableEntityColor } from '../hooks/useEntityColors';
@@ -299,34 +288,34 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             const isChainInherited = !!(isWalletAccount && detectedChain && detectedChain !== 'ethereum');
 
             fields.push(
-                <Box key="chain">
-                    <Text fontWeight="medium" mb={1}>
-                        Chain <Text as="span" color="red.500">*</Text>
-                    </Text>
-                    <NativeSelect.Root disabled={isChainInherited}>
-                        <NativeSelect.Field
-                            value={chainValue}
-                            onChange={(e) => updateConfig('chain', e.target.value)}
-                        >
-                            <option value="">Select chain...</option>
-                            {selectedTypeInfo.supported_chains.map(chain => (
-                                <option key={chain} value={chain}>
-                                    {chain.toUpperCase()}
-                                </option>
-                            ))}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
+                <div key="chain">
+                    <span className="mb-1 block font-medium">
+                        Chain <span className="text-red-500">*</span>
+                    </span>
+                    <select
+                        disabled={isChainInherited}
+                        value={chainValue}
+                        onChange={(e) => updateConfig('chain', e.target.value)}
+                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
+                    >
+                        <option value="">Select chain...</option>
+                        {selectedTypeInfo.supported_chains.map(chain => (
+                            <option key={chain} value={chain}>
+                                {chain.toUpperCase()}
+                            </option>
+                        ))}
+                    </select>
                     {isChainInherited && (
-                        <Text fontSize="xs" color="gray.500" mt={1}>
+                        <span className="mt-1 block text-xs text-slate-500">
                             Detected from account address
-                        </Text>
+                        </span>
                     )}
                     {isWalletAccount && detectedChain === 'ethereum' && (
-                        <Text fontSize="xs" color="gray.500" mt={1}>
+                        <span className="mt-1 block text-xs text-slate-500">
                             Pre-selected from address (EVM-compatible)
-                        </Text>
+                        </span>
                     )}
-                </Box>
+                </div>
             );
         }
 
@@ -337,10 +326,10 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             const addressValue = shouldInheritAddress ? accountAddress : (formData.config.address || '');
 
             fields.push(
-                <Box key="address">
-                    <Text fontWeight="medium" mb={1}>
-                        Wallet Address {isRequired && <Text as="span" color="red.500">*</Text>}
-                    </Text>
+                <div key="address">
+                    <span className="mb-1 block font-medium">
+                        Wallet Address {isRequired && <span className="text-red-500">*</span>}
+                    </span>
                     <Input
                         value={addressValue}
                         onChange={(e) => updateConfig('address', e.target.value)}
@@ -349,11 +338,11 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                         disabled={shouldInheritAddress}
                     />
                     {shouldInheritAddress && (
-                        <Text fontSize="xs" color="gray.500" mt={1}>
+                        <span className="mt-1 block text-xs text-slate-500">
                             Inherited from account
-                        </Text>
+                        </span>
                     )}
-                </Box>
+                </div>
             );
         }
 
@@ -362,10 +351,10 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             selectedTypeInfo.optional_config.includes('symbols')) {
             const isRequired = selectedTypeInfo.required_config.includes('symbols');
             fields.push(
-                <Box key="symbols">
-                    <Text fontWeight="medium" mb={1}>
-                        Trading Pairs {isRequired && <Text as="span" color="red.500">*</Text>}
-                    </Text>
+                <div key="symbols">
+                    <span className="mb-1 block font-medium">
+                        Trading Pairs {isRequired && <span className="text-red-500">*</span>}
+                    </span>
                     <Textarea
                         value={(formData.config.symbols || []).join(', ')}
                         onChange={(e) => {
@@ -378,10 +367,10 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                         placeholder="BTCEUR, ETHEUR, SOLUSDT"
                         rows={2}
                     />
-                    <Text fontSize="sm" color="gray.500" mt={1}>
+                    <span className="mt-1 block text-sm text-slate-500">
                         Comma-separated trading pairs
-                    </Text>
-                </Box>
+                    </span>
+                </div>
             );
         }
 
@@ -397,10 +386,10 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 : (formData.config.wallet_address || '');
 
             fields.push(
-                <Box key="wallet_address">
-                    <Text fontWeight="medium" mb={1}>
-                        Wallet Address {isRequired && <Text as="span" color="red.500">*</Text>}
-                    </Text>
+                <div key="wallet_address">
+                    <span className="mb-1 block font-medium">
+                        Wallet Address {isRequired && <span className="text-red-500">*</span>}
+                    </span>
                     <Input
                         value={walletValue}
                         onChange={(e) => updateConfig('wallet_address', e.target.value)}
@@ -409,28 +398,28 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                         disabled={!!inheritAddress}
                     />
                     {inheritAddress && (
-                        <Text fontSize="xs" color="gray.500" mt={1}>
+                        <span className="mt-1 block text-xs text-slate-500">
                             Inherited from account
-                        </Text>
+                        </span>
                     )}
-                </Box>
+                </div>
             );
         }
 
         // Start datetime for configuring default sync start
         if (selectedTypeInfo.optional_config.includes('start_datetime')) {
             fields.push(
-                <Box key="start_datetime">
-                    <Text fontWeight="medium" mb={1}>Start Date</Text>
+                <div key="start_datetime">
+                    <span className="mb-1 block font-medium">Start Date</span>
                     <Input
                         type="datetime-local"
                         value={formData.config.start_datetime || ''}
                         onChange={(e) => updateConfig('start_datetime', e.target.value || null)}
                     />
-                    <Text fontSize="xs" color="gray.500" mt={1}>
+                    <span className="mt-1 block text-xs text-slate-500">
                         Default start date for incremental sync
-                    </Text>
-                </Box>
+                    </span>
+                </div>
             );
         }
 
@@ -447,76 +436,75 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             }
 
             fields.push(
-                <Box key="timezone">
-                    <Text fontWeight="medium" mb={1}>
+                <div key="timezone">
+                    <span className="mb-1 block font-medium">
                         File Timezone
-                    </Text>
-                    <NativeSelect.Root>
-                        <NativeSelect.Field
-                            value={currentValue}
-                            onChange={(e) => updateConfig('timezone', e.target.value)}
-                        >
-                            {(() => {
-                                // Build a curated list of common IANA timezones
-                                const commonTimezones = [
-                                    'UTC',
-                                    'Europe/London',
-                                    'Europe/Paris',
-                                    'Europe/Berlin',
-                                    'Europe/Amsterdam',
-                                    'Europe/Brussels',
-                                    'Europe/Zurich',
-                                    'Europe/Rome',
-                                    'Europe/Madrid',
-                                    'Europe/Lisbon',
-                                    'Europe/Vienna',
-                                    'Europe/Warsaw',
-                                    'Europe/Prague',
-                                    'Europe/Budapest',
-                                    'Europe/Bucharest',
-                                    'Europe/Athens',
-                                    'Europe/Helsinki',
-                                    'Europe/Stockholm',
-                                    'Europe/Oslo',
-                                    'Europe/Copenhagen',
-                                    'Europe/Dublin',
-                                    'Europe/Istanbul',
-                                    'Europe/Moscow',
-                                    'Asia/Dubai',
-                                    'Asia/Kolkata',
-                                    'Asia/Bangkok',
-                                    'Asia/Singapore',
-                                    'Asia/Hong_Kong',
-                                    'Asia/Shanghai',
-                                    'Asia/Seoul',
-                                    'Asia/Tokyo',
-                                    'Australia/Sydney',
-                                    'Australia/Melbourne',
-                                    'Pacific/Auckland',
-                                    'America/New_York',
-                                    'America/Chicago',
-                                    'America/Denver',
-                                    'America/Los_Angeles',
-                                    'America/Toronto',
-                                    'America/Sao_Paulo',
-                                    'America/Argentina/Buenos_Aires',
-                                ];
-                                // Ensure browser timezone is in the list
-                                const allTimezones = commonTimezones.includes(browserTz)
-                                    ? commonTimezones
-                                    : [browserTz, ...commonTimezones];
-                                return allTimezones.map(tz => (
-                                    <option key={tz} value={tz}>
-                                        {tz.replace(/_/g, ' ')}{tz === browserTz ? ' (detected)' : ''}
-                                    </option>
-                                ));
-                            })()}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                    <Text fontSize="xs" color="gray.500" mt={1}>
+                    </span>
+                    <select
+                        value={currentValue}
+                        onChange={(e) => updateConfig('timezone', e.target.value)}
+                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
+                    >
+                        {(() => {
+                            // Build a curated list of common IANA timezones
+                            const commonTimezones = [
+                                'UTC',
+                                'Europe/London',
+                                'Europe/Paris',
+                                'Europe/Berlin',
+                                'Europe/Amsterdam',
+                                'Europe/Brussels',
+                                'Europe/Zurich',
+                                'Europe/Rome',
+                                'Europe/Madrid',
+                                'Europe/Lisbon',
+                                'Europe/Vienna',
+                                'Europe/Warsaw',
+                                'Europe/Prague',
+                                'Europe/Budapest',
+                                'Europe/Bucharest',
+                                'Europe/Athens',
+                                'Europe/Helsinki',
+                                'Europe/Stockholm',
+                                'Europe/Oslo',
+                                'Europe/Copenhagen',
+                                'Europe/Dublin',
+                                'Europe/Istanbul',
+                                'Europe/Moscow',
+                                'Asia/Dubai',
+                                'Asia/Kolkata',
+                                'Asia/Bangkok',
+                                'Asia/Singapore',
+                                'Asia/Hong_Kong',
+                                'Asia/Shanghai',
+                                'Asia/Seoul',
+                                'Asia/Tokyo',
+                                'Australia/Sydney',
+                                'Australia/Melbourne',
+                                'Pacific/Auckland',
+                                'America/New_York',
+                                'America/Chicago',
+                                'America/Denver',
+                                'America/Los_Angeles',
+                                'America/Toronto',
+                                'America/Sao_Paulo',
+                                'America/Argentina/Buenos_Aires',
+                            ];
+                            // Ensure browser timezone is in the list
+                            const allTimezones = commonTimezones.includes(browserTz)
+                                ? commonTimezones
+                                : [browserTz, ...commonTimezones];
+                            return allTimezones.map(tz => (
+                                <option key={tz} value={tz}>
+                                    {tz.replace(/_/g, ' ')}{tz === browserTz ? ' (detected)' : ''}
+                                </option>
+                            ));
+                        })()}
+                    </select>
+                    <span className="mt-1 block text-xs text-slate-500">
                         Timezone of timestamps in the exported CSV file (usually your browser timezone when you exported from OKX)
-                    </Text>
-                </Box>
+                    </span>
+                </div>
             );
         }
 
@@ -524,233 +512,224 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     };
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(); }}>
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content>
-                        <Dialog.Header>
-                            <Dialog.Title>
-                                {connector ? 'Edit Connector' : 'Add Connector'}
-                            </Dialog.Title>
-                        </Dialog.Header>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-200 px-5 py-4">
+                        <RadixDialog.Title className="text-base font-semibold">
+                            {connector ? 'Edit Connector' : 'Add Connector'}
+                        </RadixDialog.Title>
+                    </div>
 
-                        <form onSubmit={handleSubmit}>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    {error && (
-                                        <Box p={3} bg="red.50" borderRadius="md">
-                                            <Text color="red.600" fontSize="sm">{error}</Text>
-                                        </Box>
-                                    )}
+                    <form onSubmit={handleSubmit}>
+                        <div className="px-5 py-4">
+                            <div className="flex flex-col gap-4">
+                                {error && (
+                                    <div className="bg-red-50 p-3">
+                                        <span className="text-sm text-red-600">{error}</span>
+                                    </div>
+                                )}
 
-                                    {/* Connector Type */}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>
-                                            Connector Type <Text as="span" color="red.500">*</Text>
-                                        </Text>
-                                        <NativeSelect.Root disabled={!!connector}>
-                                            <NativeSelect.Field
-                                                value={formData.connector_type}
-                                                onChange={(e) => {
-                                                    setFormData(prev => ({
-                                                        ...prev,
-                                                        connector_type: e.target.value,
-                                                        config: {}, // Reset config when type changes
-                                                    }));
-                                                }}
-                                            >
-                                                {!connector && <option value="">Select connector...</option>}
-                                                {(connector ? connectorTypes : availableTypes).map(type => (
-                                                    <option key={type.type} value={type.type}>
-                                                        {type.display_name} ({type.category})
-                                                    </option>
-                                                ))}
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
-
-                                    {/* Dynamic Config Fields */}
-                                    {renderConfigFields()}
-
-                                    {/* Credentials Reference */}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>API Key Reference</Text>
-                                        <Input
-                                            value={formData.credentials_ref}
-                                            onChange={(e) =>
-                                                setFormData(prev => ({ ...prev, credentials_ref: e.target.value }))
-                                            }
-                                            placeholder="env:BINANCE_API_KEY"
-                                        />
-                                        <Text fontSize="sm" color="gray.500" mt={1}>
-                                            Use env:VAR_NAME to reference environment variable
-                                        </Text>
-                                    </Box>
-
-                                    {/* Sync Priority */}
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Sync Priority</Text>
-                                        <Input
-                                            type="number"
-                                            value={formData.sync_priority}
-                                            onChange={(e) =>
-                                                setFormData(prev => ({
-                                                    ...prev,
-                                                    sync_priority: parseInt(e.target.value) || 100,
-                                                }))
-                                            }
-                                            min={1}
-                                            max={1000}
-                                        />
-                                        <Text fontSize="sm" color="gray.500" mt={1}>
-                                            Lower number = higher priority (synced first)
-                                        </Text>
-                                    </Box>
-
-                                    {/* Color */}
-                                    <ColorPaletteField
-                                        value={formData.color}
-                                        onChange={(color) => setFormData(prev => ({ ...prev, color }))}
-                                        usedColors={usedColors}
-                                    />
-
-                                    {/* Default File for file connectors */}
-                                    {selectedTypeInfo?.is_file_connector && (
-                                        <Box
-                                            p={4}
-                                            borderWidth="1px"
-                                            borderRadius="md"
-                                            borderColor={defaultFile || defaultFileName ? 'blue.200' : 'gray.200'}
-                                            bg={defaultFile || defaultFileName ? 'blue.50' : 'transparent'}
-                                        >
-                                            <Text fontWeight="medium" mb={2}>📁 Default File</Text>
-                                            <Text fontSize="sm" color="gray.500" mb={3}>
-                                                Set a default file to auto-use when syncing this connector.
-                                            </Text>
-                                            {defaultFileName && !defaultFile && (
-                                                <Flex align="center" gap={2} mb={2}>
-                                                    <Text fontSize="sm" color="blue.600">
-                                                        Current: {defaultFileName}
-                                                    </Text>
-                                                    <Button
-                                                        size="xs"
-                                                        variant="ghost"
-                                                        colorPalette="red"
-                                                        onClick={() => setDefaultFileName(null)}
-                                                    >
-                                                        Remove
-                                                    </Button>
-                                                </Flex>
-                                            )}
-                                            <Input
-                                                type="file"
-                                                accept={(selectedTypeInfo.type.includes('okx') || selectedTypeInfo.type.includes('degiro')) ? '.csv' : '.xlsx,.xls'}
-                                                onChange={(e) => {
-                                                    const file = e.target.files?.[0] || null;
-                                                    setDefaultFile(file);
-                                                }}
-                                                disabled={uploadingDefault}
-                                                size="sm"
-                                            />
-                                            {defaultFile && (
-                                                <Text fontSize="xs" color="blue.600" mt={1}>
-                                                    Will upload: {defaultFile.name}
-                                                </Text>
-                                            )}
-                                            {!connector && (
-                                                <Text fontSize="xs" color="gray.500" mt={1}>
-                                                    File will be uploaded after the connector is created.
-                                                </Text>
-                                            )}
-                                        </Box>
-                                    )}
-
-                                    {/* Test Fixture (edit mode only) */}
-                                    {connector && (
-                                        <Box
-                                            p={4}
-                                            borderWidth="1px"
-                                            borderRadius="md"
-                                            borderColor={testFixtureStatus?.test_mode ? 'orange.300' : 'gray.200'}
-                                            bg={testFixtureStatus?.test_mode ? 'orange.50' : 'transparent'}
-                                        >
-                                            <Text fontWeight="medium" mb={2}>🧪 Test Fixture</Text>
-                                            <Text fontSize="sm" color="gray.500" mb={3}>
-                                                Upload a JSON fixture to use during sync instead of the real API.
-                                            </Text>
-                                            {testFixtureStatus?.has_fixture && (
-                                                <Flex align="center" gap={2} mb={2}>
-                                                    <Badge colorPalette="orange" size="sm">
-                                                        Test Mode Active — {testFixtureStatus.item_count} items
-                                                    </Badge>
-                                                    <Button
-                                                        size="xs"
-                                                        variant="ghost"
-                                                        colorPalette="red"
-                                                        onClick={handleRemoveFixture}
-                                                        disabled={uploadingFixture}
-                                                    >
-                                                        Remove
-                                                    </Button>
-                                                </Flex>
-                                            )}
-                                            {!testFixtureStatus?.has_fixture && (
-                                                <>
-                                                    <Input
-                                                        type="file"
-                                                        accept=".json"
-                                                        onChange={(e) => {
-                                                            const file = e.target.files?.[0] || null;
-                                                            setTestFixtureFile(file);
-                                                        }}
-                                                        disabled={uploadingFixture}
-                                                        size="sm"
-                                                    />
-                                                    {testFixtureFile && (
-                                                        <Flex align="center" gap={2} mt={2}>
-                                                            <Text fontSize="xs" color="orange.600">
-                                                                Selected: {testFixtureFile.name}
-                                                            </Text>
-                                                            <Button
-                                                                size="xs"
-                                                                colorPalette="orange"
-                                                                onClick={handleUploadFixture}
-                                                                loading={uploadingFixture}
-                                                            >
-                                                                Upload
-                                                            </Button>
-                                                        </Flex>
-                                                    )}
-                                                </>
-                                            )}
-                                        </Box>
-                                    )}
-
-
-                                </Flex>
-                            </Dialog.Body>
-
-                            <Dialog.Footer>
-                                <Flex gap={3}>
-                                    <Button variant="outline" onClick={onClose} disabled={loading}>
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        type="submit"
-                                        colorPalette="blue"
-                                        loading={loading}
-                                        disabled={!formData.connector_type}
+                                {/* Connector Type */}
+                                <div>
+                                    <span className="mb-1 block font-medium">
+                                        Connector Type <span className="text-red-500">*</span>
+                                    </span>
+                                    <select
+                                        disabled={!!connector}
+                                        value={formData.connector_type}
+                                        onChange={(e) => {
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                connector_type: e.target.value,
+                                                config: {}, // Reset config when type changes
+                                            }));
+                                        }}
+                                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
                                     >
-                                        {connector ? 'Update' : 'Create'}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </form>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                                        {!connector && <option value="">Select connector...</option>}
+                                        {(connector ? connectorTypes : availableTypes).map(type => (
+                                            <option key={type.type} value={type.type}>
+                                                {type.display_name} ({type.category})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Dynamic Config Fields */}
+                                {renderConfigFields()}
+
+                                {/* Credentials Reference */}
+                                <div>
+                                    <span className="mb-1 block font-medium">API Key Reference</span>
+                                    <Input
+                                        value={formData.credentials_ref}
+                                        onChange={(e) =>
+                                            setFormData(prev => ({ ...prev, credentials_ref: e.target.value }))
+                                        }
+                                        placeholder="env:BINANCE_API_KEY"
+                                    />
+                                    <span className="mt-1 block text-sm text-slate-500">
+                                        Use env:VAR_NAME to reference environment variable
+                                    </span>
+                                </div>
+
+                                {/* Sync Priority */}
+                                <div>
+                                    <span className="mb-1 block font-medium">Sync Priority</span>
+                                    <Input
+                                        type="number"
+                                        value={formData.sync_priority}
+                                        onChange={(e) =>
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                sync_priority: parseInt(e.target.value) || 100,
+                                            }))
+                                        }
+                                        min={1}
+                                        max={1000}
+                                    />
+                                    <span className="mt-1 block text-sm text-slate-500">
+                                        Lower number = higher priority (synced first)
+                                    </span>
+                                </div>
+
+                                {/* Color */}
+                                <ColorPaletteField
+                                    value={formData.color}
+                                    onChange={(color) => setFormData(prev => ({ ...prev, color }))}
+                                    usedColors={usedColors}
+                                />
+
+                                {/* Default File for file connectors */}
+                                {selectedTypeInfo?.is_file_connector && (
+                                    <div
+                                        className={`border p-4 ${defaultFile || defaultFileName ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-transparent'
+                                            }`}
+                                    >
+                                        <span className="mb-2 block font-medium">📁 Default File</span>
+                                        <span className="mb-3 block text-sm text-slate-500">
+                                            Set a default file to auto-use when syncing this connector.
+                                        </span>
+                                        {defaultFileName && !defaultFile && (
+                                            <div className="mb-2 flex items-center gap-2">
+                                                <span className="text-sm text-blue-600">
+                                                    Current: {defaultFileName}
+                                                </span>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    colorScheme="red"
+                                                    onClick={() => setDefaultFileName(null)}
+                                                >
+                                                    Remove
+                                                </Button>
+                                            </div>
+                                        )}
+                                        <input
+                                            type="file"
+                                            accept={(selectedTypeInfo.type.includes('okx') || selectedTypeInfo.type.includes('degiro')) ? '.csv' : '.xlsx,.xls'}
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0] || null;
+                                                setDefaultFile(file);
+                                            }}
+                                            disabled={uploadingDefault}
+                                            className="block w-full text-sm"
+                                        />
+                                        {defaultFile && (
+                                            <span className="mt-1 block text-xs text-blue-600">
+                                                Will upload: {defaultFile.name}
+                                            </span>
+                                        )}
+                                        {!connector && (
+                                            <span className="mt-1 block text-xs text-slate-500">
+                                                File will be uploaded after the connector is created.
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Test Fixture (edit mode only) */}
+                                {connector && (
+                                    <div
+                                        className={`border p-4 ${testFixtureStatus?.test_mode ? 'border-orange-300 bg-orange-50' : 'border-slate-200 bg-transparent'
+                                            }`}
+                                    >
+                                        <span className="mb-2 block font-medium">🧪 Test Fixture</span>
+                                        <span className="mb-3 block text-sm text-slate-500">
+                                            Upload a JSON fixture to use during sync instead of the real API.
+                                        </span>
+                                        {testFixtureStatus?.has_fixture && (
+                                            <div className="mb-2 flex items-center gap-2">
+                                                <Badge colorScheme="orange">
+                                                    Test Mode Active — {testFixtureStatus.item_count} items
+                                                </Badge>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    colorScheme="red"
+                                                    onClick={handleRemoveFixture}
+                                                    disabled={uploadingFixture}
+                                                >
+                                                    Remove
+                                                </Button>
+                                            </div>
+                                        )}
+                                        {!testFixtureStatus?.has_fixture && (
+                                            <>
+                                                <input
+                                                    type="file"
+                                                    accept=".json"
+                                                    onChange={(e) => {
+                                                        const file = e.target.files?.[0] || null;
+                                                        setTestFixtureFile(file);
+                                                    }}
+                                                    disabled={uploadingFixture}
+                                                    className="block w-full text-sm"
+                                                />
+                                                {testFixtureFile && (
+                                                    <div className="mt-2 flex items-center gap-2">
+                                                        <span className="text-xs text-orange-600">
+                                                            Selected: {testFixtureFile.name}
+                                                        </span>
+                                                        <Button
+                                                            size="sm"
+                                                            colorScheme="gray"
+                                                            className="bg-orange-600 text-white hover:bg-orange-700"
+                                                            onClick={handleUploadFixture}
+                                                            loading={uploadingFixture}
+                                                        >
+                                                            Upload
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+
+
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 border-t border-slate-100 px-5 py-4">
+                            <Button variant="outline" onClick={onClose} disabled={loading}>
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                colorScheme="blue"
+                                loading={loading}
+                                disabled={!formData.connector_type}
+                            >
+                                {connector ? 'Update' : 'Create'}
+                            </Button>
+                        </div>
+                    </form>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

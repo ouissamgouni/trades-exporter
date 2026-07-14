@@ -36,6 +36,7 @@ from backend.db.models import (
     AssetCategory,
     AssetPriceGetter,
     Category,
+    DerivativePosition,
     Dimension,
     FileImport,
     FileImportStatus,
@@ -73,7 +74,9 @@ class DatabaseSeeder:
         """
         self.session = session
 
-    def _validate_tags(self, tags: Any, entity_name: str) -> Optional[List[Dict[str, Any]]]:
+    def _validate_tags(
+        self, tags: Any, entity_name: str
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Validate tags format: must be array of dictionaries [{key: val}, ...].
         Reject dictionary format {key: val} and string arrays ["tag1", "tag2"].
@@ -244,9 +247,7 @@ class DatabaseSeeder:
         self.session.flush()  # Get ID assigned
         return account
 
-    def _upsert_connector(
-        self, account_id: int, data: Dict[str, Any]
-    ) -> Optional[str]:
+    def _upsert_connector(self, account_id: int, data: Dict[str, Any]) -> Optional[str]:
         """
         Create or update a connector (idempotent).
 
@@ -284,9 +285,7 @@ class DatabaseSeeder:
         if chain:
             # For multi-chain connectors, also match by chain inside the
             # JSON config column so each chain is a distinct row.
-            query = query.where(
-                AccountConnector.config["chain"].as_string() == chain
-            )
+            query = query.where(AccountConnector.config["chain"].as_string() == chain)
 
         existing = self.session.exec(query).first()
 
@@ -525,9 +524,7 @@ class DatabaseSeeder:
     # Deterministic mock prices from YAML
     # ------------------------------------------------------------------
 
-    def seed_prices_from_yaml(
-        self, prices_path: Optional[Path] = None
-    ) -> int:
+    def seed_prices_from_yaml(self, prices_path: Optional[Path] = None) -> int:
         """
         Seed deterministic mock prices from prices.yaml.
 
@@ -626,9 +623,7 @@ class DatabaseSeeder:
     # Categories from YAML
     # ------------------------------------------------------------------
 
-    def seed_categories_from_yaml(
-        self, categories_path: Optional[Path] = None
-    ) -> int:
+    def seed_categories_from_yaml(self, categories_path: Optional[Path] = None) -> int:
         """
         Seed dimensions, categories, and asset↔category links from categories.yaml.
 
@@ -698,7 +693,9 @@ class DatabaseSeeder:
                     )
                     self.session.add(category)
                     self.session.flush()
-                    log.info(f"   ➕ Created category: {cat_label} (dimension={dim_label})")
+                    log.info(
+                        f"   ➕ Created category: {cat_label} (dimension={dim_label})"
+                    )
 
                 # Link assets
                 for symbol in cat_data.get("assets", []):
@@ -724,9 +721,7 @@ class DatabaseSeeder:
             log.info(f"✅ Seeded {links_created} asset↔category links")
         return links_created
 
-    def seed_assets_from_yaml(
-        self, assets_path: Optional[Path] = None
-    ) -> int:
+    def seed_assets_from_yaml(self, assets_path: Optional[Path] = None) -> int:
         """
         Seed assets from YAML file.
 
@@ -784,7 +779,9 @@ class DatabaseSeeder:
                 existing.confidence = bundle_data.get("confidence", existing.confidence)
                 existing.reason = bundle_data.get("reason", existing.reason)
                 if "bundle_data" in bundle_data:
-                    existing.bundle_data = self._resolve_bundle_data(bundle_data.get("bundle_data"))
+                    existing.bundle_data = self._resolve_bundle_data(
+                        bundle_data.get("bundle_data")
+                    )
                 self.session.add(existing)
                 log.debug(f"📝 Updated bundle: {bundle_id} - {existing.label}")
             else:
@@ -797,7 +794,9 @@ class DatabaseSeeder:
                     taxability_override=bundle_data.get("taxability_override"),
                     confidence=bundle_data.get("confidence"),
                     reason=bundle_data.get("reason"),
-                    bundle_data=self._resolve_bundle_data(bundle_data.get("bundle_data")),
+                    bundle_data=self._resolve_bundle_data(
+                        bundle_data.get("bundle_data")
+                    ),
                 )
                 self.session.add(bundle)
                 log.debug(f"➕ Created bundle: {bundle_id} - {bundle.label}")
@@ -808,15 +807,15 @@ class DatabaseSeeder:
         # Reset the sequence so the next auto-generated ID won't collide
         if processed > 0:
             self.session.execute(
-                text("SELECT setval('bundles_id_seq', COALESCE((SELECT MAX(id) FROM bundles), 0))")
+                text(
+                    "SELECT setval('bundles_id_seq', COALESCE((SELECT MAX(id) FROM bundles), 0))"
+                )
             )
             self.session.commit()
             log.info(f"✅ Seeded {processed} bundles (sequence reset)")
         return processed
 
-    def seed_bundles_from_yaml(
-        self, bundles_path: Optional[Path] = None
-    ) -> int:
+    def seed_bundles_from_yaml(self, bundles_path: Optional[Path] = None) -> int:
         """
         Seed bundles from YAML file.
 
@@ -844,9 +843,7 @@ class DatabaseSeeder:
         """Resolve asset symbol to asset_id."""
         if not symbol:
             return None
-        asset = self.session.exec(
-            select(Asset).where(Asset.symbol == symbol)
-        ).first()
+        asset = self.session.exec(select(Asset).where(Asset.symbol == symbol)).first()
         if asset:
             return asset.asset_id
         log.warning(f"⚠️ Asset not found: {symbol}")
@@ -856,9 +853,7 @@ class DatabaseSeeder:
         """Resolve account name to account_id."""
         if not name:
             return None
-        account = self.session.exec(
-            select(Account).where(Account.name == name)
-        ).first()
+        account = self.session.exec(select(Account).where(Account.name == name)).first()
         if account:
             return account.id
         log.warning(f"⚠️ Account not found: {name}")
@@ -879,9 +874,7 @@ class DatabaseSeeder:
                 log.warning(f"⚠️ Cannot resolve spinoff source asset: {symbol}")
         return resolved
 
-    def seed_transactions(
-        self, transactions_config: List[Dict[str, Any]]
-    ) -> int:
+    def seed_transactions(self, transactions_config: List[Dict[str, Any]]) -> int:
         """
         Seed transactions from configuration (idempotent upsert).
 
@@ -904,7 +897,9 @@ class DatabaseSeeder:
 
             # Require either explicit id or source_transaction_id
             if explicit_id is None and not source_tx_id:
-                log.warning("⚠️ Transaction missing both 'id' and 'source_transaction_id', skipping")
+                log.warning(
+                    "⚠️ Transaction missing both 'id' and 'source_transaction_id', skipping"
+                )
                 continue
 
             # Resolve foreign keys
@@ -916,7 +911,9 @@ class DatabaseSeeder:
             fee_quote_asset_id = self._resolve_asset_id(
                 tx_data.get("fee_quote_asset_symbol")
             )
-            from_account_id = self._resolve_account_id(tx_data.get("source_from_account"))
+            from_account_id = self._resolve_account_id(
+                tx_data.get("source_from_account")
+            )
             to_account_id = self._resolve_account_id(tx_data.get("source_to_account"))
             attributed_asset_id = self._resolve_asset_id(
                 tx_data.get("source_attributed_asset_symbol")
@@ -946,8 +943,12 @@ class DatabaseSeeder:
                 total = Decimal(str(tx_data["total"]))
 
             # Validate tags format
-            tx_identifier = f"id={explicit_id}" if explicit_id else f"{source}/{source_tx_id}"
-            tags = self._validate_tags(tx_data.get("tags"), f"Transaction {tx_identifier}")
+            tx_identifier = (
+                f"id={explicit_id}" if explicit_id else f"{source}/{source_tx_id}"
+            )
+            tags = self._validate_tags(
+                tx_data.get("tags"), f"Transaction {tx_identifier}"
+            )
 
             # Check for existing transaction - first by explicit id, then by source + source_tx_id
             existing = None
@@ -1021,7 +1022,9 @@ class DatabaseSeeder:
                 )
                 existing.updated_at = datetime.now(timezone.utc)
                 self.session.add(existing)
-                tx_identifier = f"id={existing.id}" if explicit_id else f"{source}/{source_tx_id}"
+                tx_identifier = (
+                    f"id={existing.id}" if explicit_id else f"{source}/{source_tx_id}"
+                )
                 log.debug(f"📝 Updated transaction: {tx_identifier}")
             else:
                 # Create new transaction with explicit id if provided
@@ -1062,7 +1065,9 @@ class DatabaseSeeder:
                     # raw_transaction_id is intentionally left null for seeded data
                 )
                 self.session.add(tx)
-                tx_identifier = f"id={explicit_id}" if explicit_id else f"{source}/{source_tx_id}"
+                tx_identifier = (
+                    f"id={explicit_id}" if explicit_id else f"{source}/{source_tx_id}"
+                )
                 log.debug(f"➕ Created transaction: {tx_identifier}")
             processed += 1
 
@@ -1097,6 +1102,126 @@ class DatabaseSeeder:
         transactions = config.get("transactions", [])
         return self.seed_transactions(transactions)
 
+    def seed_positions(self, positions_config: List[Dict[str, Any]]) -> int:
+        """
+        Seed derivative positions from configuration (idempotent upsert).
+
+        DerivativePosition rows are normally created live by
+        DerivativesSyncService during connector sync, but scenarios (e.g.
+        demos) can seed fake open/closed positions declaratively here.
+
+        Idempotency is ensured by:
+        1. Explicit 'id' field (preferred) - matches by primary key
+        2. Fallback to (account_name, coin, side, opened_at) combination
+
+        Args:
+            positions_config: List of position configurations
+
+        Returns:
+            Number of positions created or updated
+        """
+        processed = 0
+        for pos_data in positions_config:
+            explicit_id = pos_data.get("id")
+            account_name = pos_data.get("account_name")
+            coin = pos_data.get("coin")
+            side = pos_data.get("side", "long")
+
+            account_id = self._resolve_account_id(account_name)
+            if account_id is None:
+                log.warning(f"⚠️ Position skipped, unknown account: {account_name}")
+                continue
+            if not coin:
+                log.warning("⚠️ Position missing 'coin', skipping")
+                continue
+
+            opened_at_str = pos_data.get("opened_at")
+            opened_at = None
+            if opened_at_str:
+                opened_at = datetime.fromisoformat(
+                    str(opened_at_str).replace("Z", "+00:00")
+                )
+            closed_at_str = pos_data.get("closed_at")
+            closed_at = None
+            if closed_at_str:
+                closed_at = datetime.fromisoformat(
+                    str(closed_at_str).replace("Z", "+00:00")
+                )
+
+            existing = None
+            if explicit_id is not None:
+                existing = self.session.get(DerivativePosition, explicit_id)
+            if existing is None:
+                existing = self.session.exec(
+                    select(DerivativePosition).where(
+                        DerivativePosition.account_id == account_id,
+                        DerivativePosition.coin == coin,
+                        DerivativePosition.side == side,
+                        DerivativePosition.opened_at == opened_at,
+                    )
+                ).first()
+
+            fields = dict(
+                account_id=account_id,
+                exchange=pos_data.get("exchange", "hyperliquid"),
+                coin=coin,
+                side=side,
+                status=pos_data.get("status", "open"),
+                entry_price=Decimal(str(pos_data.get("entry_price", "0"))),
+                exit_price=(
+                    Decimal(str(pos_data["exit_price"]))
+                    if pos_data.get("exit_price") is not None
+                    else None
+                ),
+                size=Decimal(str(pos_data.get("size", "0"))),
+                remaining_size=Decimal(
+                    str(pos_data.get("remaining_size", pos_data.get("size", "0")))
+                ),
+                margin_currency=pos_data.get("margin_currency", "USDC"),
+                realized_pnl=Decimal(str(pos_data.get("realized_pnl", "0"))),
+                total_fees=Decimal(str(pos_data.get("total_fees", "0"))),
+                opened_at=opened_at,
+                closed_at=closed_at,
+            )
+
+            if existing:
+                for key, value in fields.items():
+                    setattr(existing, key, value)
+                self.session.add(existing)
+                log.debug(f"📝 Updated position: {account_name}/{coin}/{side}")
+            else:
+                position = DerivativePosition(id=explicit_id, **fields)
+                self.session.add(position)
+                log.debug(f"➕ Created position: {account_name}/{coin}/{side}")
+            processed += 1
+
+        self.session.commit()
+        if processed > 0:
+            log.info(f"✅ Seeded {processed} derivative positions")
+        return processed
+
+    def seed_positions_from_yaml(self, positions_path: Optional[Path] = None) -> int:
+        """
+        Seed derivative positions from YAML file.
+
+        Args:
+            positions_path: Path to positions.yaml. Uses default if not provided.
+
+        Returns:
+            Number of positions processed
+        """
+        if positions_path is None or not positions_path.exists():
+            log.debug(f"ℹ️ Positions config not found: {positions_path}")
+            return 0
+
+        log.info(f"📖 Loading positions from: {positions_path}")
+
+        with open(positions_path) as f:
+            config = yaml.safe_load(f) or {}
+
+        positions = config.get("positions", [])
+        return self.seed_positions(positions)
+
     def seed_all(
         self,
         config_path: Optional[Path] = None,
@@ -1111,14 +1236,16 @@ class DatabaseSeeder:
         3. Accounts and connectors from accounts.yaml
         4. Bundles from bundles.yaml
         5. Transactions from transactions.yaml
+        6. Derivative positions from positions.yaml (optional)
 
         Args:
             config_path: Optional path to accounts.yaml
             seed_data_dir: Optional directory containing YAML seed files.
                            When provided, assets.yaml / accounts.yaml / bundles.yaml /
-                           transactions.yaml are resolved from this directory instead
-                           of the default seed_data/ directory. Files that don't exist
-                           in the custom directory are silently skipped.
+                           transactions.yaml / positions.yaml are resolved from this
+                           directory instead of the default seed_data/ directory.
+                           Files that don't exist in the custom directory are
+                           silently skipped.
 
         Returns:
             Dict with counts of all seeded entities
@@ -1129,15 +1256,21 @@ class DatabaseSeeder:
             "connectors": 0,
             "bundles": 0,
             "transactions": 0,
+            "positions": 0,
             "prices": 0,
             "categories": 0,
         }
 
         # Resolve paths from custom directory if provided
         assets_path = (seed_data_dir / "assets.yaml") if seed_data_dir else None
-        accounts_path = (seed_data_dir / "accounts.yaml") if seed_data_dir else config_path
+        accounts_path = (
+            (seed_data_dir / "accounts.yaml") if seed_data_dir else config_path
+        )
         bundles_path = (seed_data_dir / "bundles.yaml") if seed_data_dir else None
-        transactions_path = (seed_data_dir / "transactions.yaml") if seed_data_dir else None
+        transactions_path = (
+            (seed_data_dir / "transactions.yaml") if seed_data_dir else None
+        )
+        positions_path = (seed_data_dir / "positions.yaml") if seed_data_dir else None
         prices_path = (seed_data_dir / "prices.yaml") if seed_data_dir else None
         categories_path = (seed_data_dir / "categories.yaml") if seed_data_dir else None
 
@@ -1165,7 +1298,10 @@ class DatabaseSeeder:
         # 6. Seed transactions from transactions.yaml
         results["transactions"] = self.seed_transactions_from_yaml(transactions_path)
 
-        # 7. Ingest QA test plans from SEED_DIR into AppSettings
+        # 7. Seed derivative positions from positions.yaml (optional)
+        results["positions"] = self.seed_positions_from_yaml(positions_path)
+
+        # 8. Ingest QA test plans from SEED_DIR into AppSettings
         self._ingest_test_plans(seed_data_dir)
 
         return results
@@ -1265,7 +1401,13 @@ class DatabaseSeeder:
         assets_data = self._export_assets(asset_ids)
         assets_path = output_dir / "assets.yaml"
         with open(assets_path, "w") as f:
-            yaml.dump({"assets": assets_data}, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            yaml.dump(
+                {"assets": assets_data},
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
         results["assets"] = len(assets_data)
         log.info(f"📤 Exported {len(assets_data)} assets to {assets_path}")
 
@@ -1273,7 +1415,13 @@ class DatabaseSeeder:
         bundles_data = self._export_bundles(bundle_ids)
         bundles_path = output_dir / "bundles.yaml"
         with open(bundles_path, "w") as f:
-            yaml.dump({"bundles": bundles_data}, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            yaml.dump(
+                {"bundles": bundles_data},
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
         results["bundles"] = len(bundles_data)
         log.info(f"📤 Exported {len(bundles_data)} bundles to {bundles_path}")
 
@@ -1283,15 +1431,25 @@ class DatabaseSeeder:
         # Note: Not overwriting accounts.yaml automatically to preserve connectors config
         # Just log the accounts that need to be added
         if accounts_data:
-            log.info(f"📋 Found {len(accounts_data)} accounts referenced by transactions")
+            log.info(
+                f"📋 Found {len(accounts_data)} accounts referenced by transactions"
+            )
 
         # Export transactions
         transactions_data = self._export_transactions(transactions)
         transactions_path = output_dir / "transactions.yaml"
         with open(transactions_path, "w") as f:
-            yaml.dump({"transactions": transactions_data}, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            yaml.dump(
+                {"transactions": transactions_data},
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
         results["transactions"] = len(transactions_data)
-        log.info(f"📤 Exported {len(transactions_data)} transactions to {transactions_path}")
+        log.info(
+            f"📤 Exported {len(transactions_data)} transactions to {transactions_path}"
+        )
 
         return results
 
@@ -1323,7 +1481,9 @@ class DatabaseSeeder:
             return []
 
         bundles = self.session.exec(
-            select(UserCalculationBundle).where(UserCalculationBundle.id.in_(bundle_ids))
+            select(UserCalculationBundle).where(
+                UserCalculationBundle.id.in_(bundle_ids)
+            )
         ).all()
 
         bundles_data = []
@@ -1513,7 +1673,8 @@ def seed_database(
         # Use seed_all to seed everything: assets, accounts, bundles, and transactions
         results = seeder.seed_all(config_path, seed_data_dir=seed_data_dir)
 
-        prices_count = results.get('prices', 0)
+        prices_count = results.get("prices", 0)
+        positions_count = results.get("positions", 0)
         log.info(
             f"🎉 Seeding complete: {results.get('assets', 0)} assets, "
             f"{results.get('accounts', 0)} accounts, "
@@ -1521,6 +1682,7 @@ def seed_database(
             f"{results.get('bundles', 0)} bundles, "
             f"{results.get('transactions', 0)} transactions"
             + (f", {prices_count} prices" if prices_count else "")
+            + (f", {positions_count} positions" if positions_count else "")
         )
 
         return results
@@ -1583,6 +1745,7 @@ if __name__ == "__main__":
             f"Transactions: {results['transactions']}"
         )
         import sys
+
         sys.exit(0)
 
     # Resolve config path

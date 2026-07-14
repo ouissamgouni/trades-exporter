@@ -6,12 +6,13 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Box, Button, Flex, Text, Checkbox, HStack, VStack } from '@chakra-ui/react';
 import { LuColumns2, LuRefreshCw, LuChevronDown } from 'react-icons/lu';
 import { Table as TanStackTable } from '@tanstack/react-table';
 import { Transaction } from '../../types';
 import { COLUMN_META } from './columnPresets';
 import { TransactionColumnKey } from './types';
+import { Button } from '../ui/primitives';
+import type { ButtonProps } from '../ui/primitives';
 
 // ============================================================================
 // Column Groups for organized display
@@ -50,16 +51,16 @@ interface ColumnVisibilityPopoverProps<T extends Transaction = Transaction> {
      * TanStack Table instance
      */
     table: TanStackTable<T>;
-    
+
     /**
      * Callback to reset columns to defaults
      */
     onReset?: () => void;
-    
+
     /**
      * Button size
      */
-    size?: 'xs' | 'sm' | 'md';
+    size?: NonNullable<ButtonProps['size']>;
 }
 
 // ============================================================================
@@ -69,16 +70,16 @@ interface ColumnVisibilityPopoverProps<T extends Transaction = Transaction> {
 export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
     table,
     onReset,
-    size = 'xs',
+    size = 'sm',
 }: ColumnVisibilityPopoverProps<T>) => {
     const [isOpen, setIsOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
     const allColumns = table.getAllLeafColumns();
-    
+
     // Count visible columns
     const visibleCount = allColumns.filter(col => col.getIsVisible()).length;
     const totalCount = allColumns.filter(col => col.getCanHide()).length;
-    
+
     // Close on outside click
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -89,15 +90,15 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
                 setIsOpen(false);
             }
         };
-        
+
         if (isOpen) {
             document.addEventListener('mousedown', handleClickOutside);
         }
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isOpen]);
-    
+
     return (
-        <Box position="relative" ref={popoverRef}>
+        <div className="relative" ref={popoverRef}>
             <Button
                 size={size}
                 variant="outline"
@@ -105,54 +106,39 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
                 title="Toggle column visibility"
             >
                 <LuColumns2 />
-                <Text ml={1}>Columns ({visibleCount})</Text>
+                <span className="ml-1">Columns ({visibleCount})</span>
                 <LuChevronDown style={{ marginLeft: 4 }} />
             </Button>
-            
+
             {isOpen && (
-                <Box
-                    position="absolute"
-                    top="100%"
-                    right={0}
-                    mt={1}
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
-                    boxShadow="lg"
-                    zIndex={1000}
-                    width="280px"
-                    maxH="400px"
-                    overflowY="auto"
-                    p={3}
-                >
-                    <Flex justify="space-between" align="center" mb={3}>
-                        <Text fontWeight="medium" fontSize="sm">
+                <div className="absolute right-0 top-full z-[1000] mt-1 max-h-[400px] w-[280px] overflow-y-auto border border-slate-200 bg-white p-3 shadow-lg">
+                    <div className="mb-3 flex items-center justify-between">
+                        <span className="text-sm font-medium">
                             Visible Columns
-                        </Text>
+                        </span>
                         {onReset && (
                             <Button
-                                size="xs"
+                                size="sm"
                                 variant="ghost"
                                 onClick={onReset}
                             >
                                 <LuRefreshCw size={12} />
-                                <Text ml={1}>Reset</Text>
+                                <span className="ml-1">Reset</span>
                             </Button>
                         )}
-                    </Flex>
-                    
+                    </div>
+
                     {/* Quick Actions */}
-                    <HStack gap={2} mb={3}>
+                    <div className="mb-3 flex gap-2">
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={() => table.toggleAllColumnsVisible(true)}
                         >
                             Show All
                         </Button>
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={() => {
                                 // Hide all except essential
@@ -164,74 +150,63 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
                         >
                             Minimal
                         </Button>
-                    </HStack>
-                    
+                    </div>
+
                     {/* Grouped Columns */}
-                    <VStack gap={3} align="stretch">
+                    <div className="flex flex-col items-stretch gap-3">
                         {COLUMN_GROUPS.map(group => {
-                            const groupColumns = allColumns.filter(col => 
+                            const groupColumns = allColumns.filter(col =>
                                 group.columns.includes(col.id as TransactionColumnKey)
                             );
-                            
+
                             if (groupColumns.length === 0) return null;
-                            
+
                             return (
-                                <Box key={group.label}>
-                                    <Text 
-                                        fontSize="xs" 
-                                        color="gray.500" 
-                                        fontWeight="medium"
-                                        mb={1}
-                                        textTransform="uppercase"
-                                        letterSpacing="wide"
-                                    >
+                                <div key={group.label}>
+                                    <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
                                         {group.label}
-                                    </Text>
-                                    <VStack gap={1} align="stretch" pl={2}>
+                                    </span>
+                                    <div className="flex flex-col items-stretch gap-1 pl-2">
                                         {groupColumns.map(column => {
                                             const meta = COLUMN_META[column.id as TransactionColumnKey];
                                             const canHide = column.getCanHide();
-                                            
+
                                             return (
-                                                <Flex
+                                                <div
                                                     key={column.id}
-                                                    align="center"
-                                                    justify="space-between"
-                                                    py={0.5}
-                                                    opacity={canHide ? 1 : 0.5}
+                                                    className="flex items-center justify-between py-0.5"
+                                                    style={{ opacity: canHide ? 1 : 0.5 }}
                                                 >
-                                                    <Checkbox.Root
-                                                        checked={column.getIsVisible()}
-                                                        onCheckedChange={(checked) => {
-                                                            column.toggleVisibility(!!checked.checked);
-                                                        }}
-                                                        disabled={!canHide}
-                                                    >
-                                                        <Checkbox.HiddenInput />
-                                                        <Checkbox.Control />
-                                                        <Checkbox.Label>
-                                                            <Text fontSize="sm">
-                                                                {meta?.header || column.id}
-                                                            </Text>
-                                                        </Checkbox.Label>
-                                                    </Checkbox.Root>
-                                                </Flex>
+                                                    <label className="flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={column.getIsVisible()}
+                                                            onChange={(e) => {
+                                                                column.toggleVisibility(e.target.checked);
+                                                            }}
+                                                            disabled={!canHide}
+                                                        />
+                                                        <span className="text-sm">
+                                                            {meta?.header || column.id}
+                                                        </span>
+                                                    </label>
+                                                </div>
                                             );
                                         })}
-                                    </VStack>
-                                </Box>
+                                    </div>
+                                </div>
                             );
                         })}
-                    </VStack>
-                    
+                    </div>
+
                     {/* Footer */}
-                    <Box mt={3} pt={2} borderTop="1px solid" borderColor="gray.200">
-                        <Text fontSize="xs" color="gray.500">
+                    <div className="mt-3 border-t border-slate-200 pt-2">
+                        <span className="text-xs text-slate-500">
                             {visibleCount} of {totalCount} columns visible
-                        </Text>
-                    </Box>
-                </Box>
+                        </span>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

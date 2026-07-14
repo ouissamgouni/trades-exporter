@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { Badge, Flex, Spinner, Text } from '@chakra-ui/react';
+import { Badge, Spinner, type BadgeColorScheme } from '../ui/primitives';
 import { Tooltip } from '../ui/tooltip';
 import { PnLCalcStatus } from './types';
 import { parseApiDate, formatDateTimeLocale } from '../../utils/dateUtils';
@@ -25,14 +25,14 @@ interface PnLStatusBadgeProps {
 
 const STATUS_CONFIG: Record<PnLCalcStatus, {
     label: string;
-    colorPalette: string;
+    colorScheme: BadgeColorScheme;
     icon?: string;
 }> = {
-    idle: { label: 'No calculation', colorPalette: 'gray' },
-    stale: { label: 'P&L outdated', colorPalette: 'orange', icon: '⚠️' },
-    calculating: { label: 'Calculating…', colorPalette: 'blue' },
-    completed: { label: 'Up to date', colorPalette: 'green', icon: '✓' },
-    error: { label: 'Calculation error', colorPalette: 'red', icon: '✗' },
+    idle: { label: 'No calculation', colorScheme: 'gray' },
+    stale: { label: 'P&L outdated', colorScheme: 'orange', icon: '⚠️' },
+    calculating: { label: 'Calculating…', colorScheme: 'blue' },
+    completed: { label: 'Up to date', colorScheme: 'green', icon: '✓' },
+    error: { label: 'Calculation error', colorScheme: 'red', icon: '✗' },
 };
 
 /** Format a datetime string to a compact relative or absolute form */
@@ -79,24 +79,20 @@ export const PnLStatusBadge: React.FC<PnLStatusBadgeProps> = ({
                 : undefined;
 
     const badge = (
-        <Badge
-            colorPalette={config.colorPalette}
-            size={size}
-            variant="subtle"
-        >
-            <Flex align="center" gap={1}>
+        <Badge colorScheme={config.colorScheme}>
+            <div className="flex items-center gap-1">
                 {status === 'calculating' ? (
                     <Spinner size="xs" />
                 ) : config.icon ? (
-                    <Text as="span" fontSize="xs">{config.icon}</Text>
+                    <span className="text-xs">{config.icon}</span>
                 ) : null}
                 {!(compactWhenCompleted && status === 'completed') && (
-                    <Text as="span">{config.label}</Text>
+                    <span>{config.label}</span>
                 )}
                 {inlineDetail && (
-                    <Text as="span" fontSize="2xs" opacity={0.7}>· {inlineDetail}</Text>
+                    <span className="text-[10px] opacity-70">· {inlineDetail}</span>
                 )}
-            </Flex>
+            </div>
         </Badge>
     );
 

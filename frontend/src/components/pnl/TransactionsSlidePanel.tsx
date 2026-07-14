@@ -4,8 +4,8 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Button, Flex, Spinner, Text } from '@chakra-ui/react';
 import { FiCheck, FiX } from 'react-icons/fi';
+import { Button, Spinner } from '../ui/primitives';
 import { SlidePanel } from './SlidePanel';
 import { TransactionsTable } from '../TransactionsTable';
 import { TransactionFilterState, defaultFilterState } from '../TransactionFilters';
@@ -88,33 +88,33 @@ export const TransactionsSlidePanel: React.FC<TransactionsSlidePanelProps> = ({
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Transactions" width="1000px">
             {/* Included / Excluded toggle */}
-            <Flex gap={2} mb={3} align="center">
+            <div className="mb-3 flex items-center gap-2">
                 <Button
-                    size="xs"
+                    size="sm"
                     variant={view === 'included' ? 'solid' : 'outline'}
-                    colorPalette="green"
+                    colorScheme="green"
                     onClick={() => setView('included')}
                 >
                     <FiCheck />
                     Included {includedCount !== null ? `(${includedCount})` : ''}
                 </Button>
                 <Button
-                    size="xs"
+                    size="sm"
                     variant={view === 'excluded' ? 'solid' : 'outline'}
-                    colorPalette="red"
+                    colorScheme="red"
                     onClick={() => setView('excluded')}
                 >
                     <FiX />
                     Excluded {excludedCount !== null ? `(${excludedCount})` : ''}
                 </Button>
                 {(includedCount === null || excludedCount === null) && (
-                    <Spinner size="xs" color="gray.400" />
+                    <Spinner size="xs" className="text-slate-400" />
                 )}
-            </Flex>
+            </div>
 
             {/* TransactionsTable */}
             {isOpen && (
-                <Box maxH="calc(100vh - 160px)" overflow="auto">
+                <div className="max-h-[calc(100vh-160px)] overflow-auto">
                     <TransactionsTable
                         tableId={`pnl-audit-tx-${view}`}
                         filters={effectiveFilters}
@@ -126,7 +126,7 @@ export const TransactionsSlidePanel: React.FC<TransactionsSlidePanelProps> = ({
                         showSuggestions={false}
                         compact={true}
                     />
-                </Box>
+                </div>
             )}
         </SlidePanel>
     );

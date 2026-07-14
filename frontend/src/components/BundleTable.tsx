@@ -11,19 +11,7 @@
  */
 
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Checkbox,
-    Flex,
-    Input,
-    NativeSelect,
-    SimpleGrid,
-    Table,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Input } from './ui/primitives';
 import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
@@ -134,22 +122,22 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleC
     const hasActiveFilters = filters.search || filters.pattern || filters.taxability;
 
     return (
-        <Box mb={3}>
-            <Flex justify="space-between" align="center" mb={2}>
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="bold" fontSize="sm">
+        <div className="mb-3">
+            <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold">
                         📦 Bundles ({filteredCount}{filteredCount !== bundleCount && ` / ${bundleCount}`})
-                    </Text>
-                </Flex>
-                <Flex gap={2}>
+                    </span>
+                </div>
+                <div className="flex gap-2">
                     <Tooltip content="To create a bundle, select transactions in the Transactions tab and use the Bundle action" openDelay={100}>
-                        <Button size="xs" variant="outline" colorPalette="purple" disabled>
+                        <Button size="sm" variant="outline" colorScheme="gray" className="border-purple-300 text-purple-700 hover:bg-purple-50" disabled>
                             ➕ Create
                         </Button>
                     </Tooltip>
                     {onRefresh && (
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={onRefresh}
                         >
@@ -157,75 +145,72 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleC
                         </Button>
                     )}
                     <Button
-                        size="xs"
+                        size="sm"
                         variant={showFilters ? 'solid' : 'outline'}
-                        colorPalette={hasActiveFilters ? 'blue' : 'gray'}
+                        colorScheme={hasActiveFilters ? 'blue' : 'gray'}
                         onClick={() => setShowFilters(!showFilters)}
                     >
                         <FiFilter size={12} />
-                        <Text ml={1}>Filter</Text>
-                        {hasActiveFilters && <Badge ml={1} size="xs" colorPalette="blue">●</Badge>}
+                        <span className="ml-1">Filter</span>
+                        {hasActiveFilters && <Badge colorScheme="blue" className="ml-1">●</Badge>}
                     </Button>
                     {hasActiveFilters && (
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="ghost"
                             onClick={() => onFiltersChange({ search: '', pattern: '', taxability: '' })}
                         >
                             <FiX size={12} />
-                            <Text ml={1}>Clear</Text>
+                            <span className="ml-1">Clear</span>
                         </Button>
                     )}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {showFilters && (
-                <Flex gap={3} p={2} bg="gray.50" borderRadius="md" flexWrap="wrap" align="center">
-                    <Flex align="center" gap={1}>
+                <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-2">
+                    <div className="flex items-center gap-1">
                         <FiSearch size={12} color="gray" />
                         <Input
-                            size="xs"
                             placeholder="Search label..."
                             value={filters.search}
                             onChange={e => onFiltersChange({ ...filters, search: e.target.value })}
-                            width="140px"
+                            className="w-[140px]"
                         />
-                    </Flex>
-                    <Flex align="center" gap={1}>
-                        <Text fontSize="xs" color="gray.600">Pattern:</Text>
-                        <NativeSelect.Root size="sm" width="100px">
-                            <NativeSelect.Field
-                                value={filters.pattern}
-                                onChange={e => onFiltersChange({ ...filters, pattern: e.target.value })}
-                                style={{ fontSize: '11px', padding: '2px 4px' }}
-                            >
-                                <option value="">All</option>
-                                <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
-                                <option value={UnitPattern.SWAP}>Swap</option>
-                                <option value={UnitPattern.SPLIT}>Split</option>
-                                <option value={UnitPattern.SPINOFF}>Spin-Off</option>
-                                <option value={UnitPattern.UNKNOWN}>Unknown</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-                    <Flex align="center" gap={1}>
-                        <Text fontSize="xs" color="gray.600">Tax:</Text>
-                        <NativeSelect.Root size="sm" width="100px">
-                            <NativeSelect.Field
-                                value={filters.taxability}
-                                onChange={e => onFiltersChange({ ...filters, taxability: e.target.value })}
-                                style={{ fontSize: '11px', padding: '2px 4px' }}
-                            >
-                                <option value="">All</option>
-                                <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
-                                <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
-                                <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-                </Flex>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <span className="text-xs text-slate-600">Pattern:</span>
+                        <select
+                            title="Pattern"
+                            value={filters.pattern}
+                            onChange={e => onFiltersChange({ ...filters, pattern: e.target.value })}
+                            className="w-[100px] rounded-none border border-slate-200 px-1 py-0.5 text-[11px]"
+                        >
+                            <option value="">All</option>
+                            <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
+                            <option value={UnitPattern.SWAP}>Swap</option>
+                            <option value={UnitPattern.SPLIT}>Split</option>
+                            <option value={UnitPattern.SPINOFF}>Spin-Off</option>
+                            <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <span className="text-xs text-slate-600">Tax:</span>
+                        <select
+                            title="Taxability"
+                            value={filters.taxability}
+                            onChange={e => onFiltersChange({ ...filters, taxability: e.target.value })}
+                            className="w-[100px] rounded-none border border-slate-200 px-1 py-0.5 text-[11px]"
+                        >
+                            <option value="">All</option>
+                            <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
+                            <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
+                            <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
+                        </select>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -247,31 +232,25 @@ const TransactionBadges: React.FC<TransactionBadgesProps> = ({
     onTransactionClick,
 }) => {
     if (!transactions || transactions.length === 0) {
-        return <Text fontSize="2xs" color="gray.400">-</Text>;
+        return <span className="text-xs text-slate-400">-</span>;
     }
 
     const visibleTxs = transactions.slice(0, maxVisible);
     const hiddenCount = transactions.length - maxVisible;
 
     return (
-        <Flex gap={1} flexWrap="wrap" align="center">
+        <div className="flex flex-wrap items-center gap-1">
             {visibleTxs.map(tx => (
                 <TransactionTooltip key={tx.id} txId={tx.id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
-                    <Badge
-                        size="xs"
-                        colorPalette="gray"
-                        variant="subtle"
-                        cursor="pointer"
-                        fontSize="9px"
-                    >
+                    <Badge colorScheme="gray" className="cursor-pointer text-[9px]">
                         #{tx.id}
                     </Badge>
                 </TransactionTooltip>
             ))}
             {hiddenCount > 0 && (
-                <Text fontSize="2xs" color="gray.500">+{hiddenCount}</Text>
+                <span className="text-xs text-slate-500">+{hiddenCount}</span>
             )}
-        </Flex>
+        </div>
     );
 };
 
@@ -371,46 +350,46 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
 
     if (loading) {
         return (
-            <Flex align="center" gap={2} py={3}>
+            <div className="flex items-center gap-2 py-3">
                 <FiLoader className="animate-spin" />
-                <Text fontSize="xs" color="gray.500">Loading transaction details...</Text>
-            </Flex>
+                <span className="text-xs text-slate-500">Loading transaction details...</span>
+            </div>
         );
     }
 
     if (error) {
-        return <Text fontSize="xs" color="red.500">Error: {error}</Text>;
+        return <span className="text-xs text-red-500">Error: {error}</span>;
     }
 
     if (txDetails.length === 0) {
-        return <Text fontSize="xs" color="gray.500" fontStyle="italic">No transactions</Text>;
+        return <span className="text-xs italic text-slate-500">No transactions</span>;
     }
 
     return (
-        <Card.Root size="sm" variant="outline">
-            <Card.Body p={3}>
-                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
+        <div className="border border-slate-200 bg-white">
+            <div className="p-3">
+                <p className="mb-2 text-xs font-bold text-slate-600">
                     📄 Transactions ({txDetails.length})
-                </Text>
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader fontSize="2xs" width="50px">TX ID</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="50px">Dir</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="60px">Asset</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="80px">Qty</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="70px">Price</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="70px">Total</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="60px">Fee</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="70px">Account</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="60px">Type</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="70px">From/To</Table.ColumnHeader>
+                </p>
+                <table className="w-full text-left">
+                    <thead>
+                        <tr>
+                            <th className="w-[50px] text-[10px] font-medium text-slate-500">TX ID</th>
+                            <th className="w-[50px] text-[10px] font-medium text-slate-500">Dir</th>
+                            <th className="w-[60px] text-[10px] font-medium text-slate-500">Asset</th>
+                            <th className="w-[80px] text-right text-[10px] font-medium text-slate-500">Qty</th>
+                            <th className="w-[70px] text-right text-[10px] font-medium text-slate-500">Price</th>
+                            <th className="w-[70px] text-right text-[10px] font-medium text-slate-500">Total</th>
+                            <th className="w-[60px] text-right text-[10px] font-medium text-slate-500">Fee</th>
+                            <th className="w-[70px] text-[10px] font-medium text-slate-500">Account</th>
+                            <th className="w-[60px] text-[10px] font-medium text-slate-500">Type</th>
+                            <th className="w-[70px] text-[10px] font-medium text-slate-500">From/To</th>
                             {onRemoveTransaction && (
-                                <Table.ColumnHeader fontSize="2xs" width="40px"></Table.ColumnHeader>
+                                <th className="w-[40px]"></th>
                             )}
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {txDetails.map((tx) => {
                             const txType = tx.transaction_type || tx.source_transaction_type || '-';
                             const fromAccount = tx.from_account_name || tx.source_from_account;
@@ -422,45 +401,44 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                                 : (tx.to_account_name && tx.source_to_account && tx.source_to_account !== tx.to_account_name ? `Source: ${tx.source_to_account}` : undefined);
 
                             return (
-                                <Table.Row key={tx.transaction_id}>
-                                    <Table.Cell>
+                                <tr key={tx.transaction_id}>
+                                    <td className="py-1">
                                         <TransactionTooltip txId={tx.transaction_id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
-                                            <Badge size="xs" colorPalette="gray" variant="subtle" cursor="pointer">
+                                            <Badge colorScheme="gray" className="cursor-pointer">
                                                 #{tx.transaction_id}
                                             </Badge>
                                         </TransactionTooltip>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td className="py-1">
                                         <Badge
-                                            size="xs"
-                                            colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
+                                            colorScheme={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
                                         >
                                             {tx.direction === 'inflow' ? '↓' : tx.direction === 'outflow' ? '↑' : '↔'}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td className="py-1">
                                         <AssetBadge
                                             asset={tx.linked_asset}
                                             sourceSymbol={tx.source_asset_symbol || tx.asset_symbol}
                                             size="xs"
                                             maxLength={15}
                                         />
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right" fontFamily="mono">
+                                    </td>
+                                    <td className="py-1 text-right font-mono text-[10px]">
                                         <ValueDisplay value={tx.quantity} />
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right">
+                                    </td>
+                                    <td className="py-1 text-right text-[10px]">
                                         {tx.price ? <ValueDisplay value={tx.price} currency={baseCurrency} /> : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right">
+                                    </td>
+                                    <td className="py-1 text-right text-[10px]">
                                         {tx.total ? <ValueDisplay value={tx.total} currency={baseCurrency} /> : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right">
+                                    </td>
+                                    <td className="py-1 text-right text-[10px]">
                                         {tx.fee ? (
-                                            <Flex align="center" gap={1} justify="flex-end">
-                                                <Text color="orange.600">
+                                            <div className="flex items-center justify-end gap-1">
+                                                <span className="text-orange-600">
                                                     <ValueDisplay value={tx.fee} />
-                                                </Text>
+                                                </span>
                                                 <AssetBadge
                                                     asset={tx.fee_quote_asset}
                                                     sourceSymbol={tx.source_fee_quote_asset_symbol || tx.fee_quote_asset_symbol}
@@ -468,42 +446,39 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                                                     colorPalette="orange"
                                                     maxLength={10}
                                                 />
-                                            </Flex>
+                                            </div>
                                         ) : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs">{tx.account_name || '-'}</Table.Cell>
-                                    <Table.Cell fontSize="2xs">
-                                        <Badge size="xs" colorPalette={txType === 'transfer' ? 'blue' : 'gray'}>
+                                    </td>
+                                    <td className="py-1 text-[10px]">{tx.account_name || '-'}</td>
+                                    <td className="py-1 text-[10px]">
+                                        <Badge colorScheme={txType === 'transfer' ? 'blue' : 'gray'}>
                                             {txType}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" color="gray.600" title={fromToSource}>
+                                    </td>
+                                    <td className="py-1 text-[10px] text-slate-600" title={fromToSource}>
                                         {fromToAccount || '-'}
-                                    </Table.Cell>
+                                    </td>
                                     {onRemoveTransaction && (
-                                        <Table.Cell>
+                                        <td className="py-1">
                                             <Button
-                                                size="xs"
                                                 variant="ghost"
-                                                colorPalette="red"
-                                                p={0}
-                                                minW="20px"
-                                                h="20px"
+                                                colorScheme="red"
+                                                className="h-5 min-w-[20px] p-0"
                                                 onClick={() => handleRemove(tx.transaction_id)}
                                                 loading={removingId === tx.transaction_id}
                                                 title="Remove from bundle"
                                             >
                                                 <FiX size={10} />
                                             </Button>
-                                        </Table.Cell>
+                                        </td>
                                     )}
-                                </Table.Row>
+                                </tr>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Card.Body>
-        </Card.Root>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     );
 };
 
@@ -548,38 +523,33 @@ const InlineEditLabel: React.FC<InlineEditLabelProps> = ({ value, onSave, placeh
 
     if (editing) {
         return (
-            <Flex gap={1} align="center">
+            <div className="flex items-center gap-1">
                 <Input
-                    size="xs"
                     value={editValue}
                     onChange={e => setEditValue(e.target.value)}
                     onKeyDown={handleKeyDown}
                     onBlur={handleSave}
                     autoFocus
-                    width="140px"
-                    fontSize="11px"
+                    className="w-[140px] text-[11px]"
                 />
-                <Button size="xs" variant="ghost" colorPalette="green" onClick={handleSave} loading={saving} p={1} minW="20px" h="20px">
+                <Button variant="ghost" colorScheme="green" onClick={handleSave} loading={saving} className="h-5 min-w-[20px] p-1">
                     <FiCheck size={10} />
                 </Button>
-                <Button size="xs" variant="ghost" onClick={() => { setEditValue(value); setEditing(false); }} p={1} minW="20px" h="20px">
+                <Button variant="ghost" onClick={() => { setEditValue(value); setEditing(false); }} className="h-5 min-w-[20px] p-1">
                     <FiX size={10} />
                 </Button>
-            </Flex>
+            </div>
         );
     }
 
     return (
-        <Text
-            fontSize="11px"
-            fontWeight="medium"
-            cursor="pointer"
-            _hover={{ color: 'blue.600', textDecoration: 'underline' }}
+        <span
+            className="cursor-pointer text-[11px] font-medium hover:text-blue-600 hover:underline"
             onClick={() => setEditing(true)}
             title="Click to edit"
         >
-            {value || <Text as="span" color="gray.400" fontStyle="italic">{placeholder}</Text>}
-        </Text>
+            {value || <span className="italic text-slate-400">{placeholder}</span>}
+        </span>
     );
 };
 
@@ -661,39 +631,33 @@ const BundleRow: React.FC<BundleRowProps> = ({
 
     return (
         <>
-            <Card.Root
-                size="sm"
-                variant="outline"
-                bg={isSelected ? 'blue.50' : 'white'}
-                borderColor={isExpanded ? 'purple.300' : isSelected ? 'blue.200' : undefined}
-                _hover={{ shadow: 'md', borderColor: isExpanded ? 'purple.400' : 'blue.200' }}
-                transition="all 0.15s"
+            <div
+                className={`border p-3 shadow-sm transition-colors hover:shadow-md ${isSelected ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white'} ${isExpanded ? 'border-purple-300 hover:border-purple-400' : 'hover:border-blue-200'}`}
             >
-                <Card.Body p={3}>
-                    {/* Top row: checkbox + pattern icon + taxability icon + delete */}
-                    <Flex align="center" gap={1.5} mb={1}>
-                        <Checkbox.Root checked={isSelected} onCheckedChange={onToggleSelect}>
-                            <Checkbox.HiddenInput />
-                            <Checkbox.Control />
-                        </Checkbox.Root>
-                        <Tooltip content={{
-                            [UnitPattern.SWAP]: 'Swap',
-                            [UnitPattern.INTERNAL_TRANSFER]: 'Transfer',
-                            [UnitPattern.SPLIT]: 'Split',
-                            [UnitPattern.FLOW]: 'Flow',
-                            [UnitPattern.SPINOFF]: 'Spin-Off',
-                            [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Transfer',
-                            [UnitPattern.CUSTOM]: 'Custom',
-                            [UnitPattern.UNKNOWN]: 'Unknown',
-                        }[bundle.pattern || UnitPattern.UNKNOWN] || 'Unknown'} openDelay={200}>
-                            <Box position="relative" display="inline-flex">
-                                <Box
-                                    display="flex"
-                                    alignItems="center"
-                                    justifyContent="center"
-                                    w="22px" h="22px"
-                                    borderRadius="4px"
-                                    bg={{
+                {/* Top row: checkbox + pattern icon + taxability icon + delete */}
+                <div className="mb-1 flex items-center gap-1.5">
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={onToggleSelect}
+                        title="Select bundle"
+                        className="h-4 w-4 cursor-pointer accent-blue-500"
+                    />
+                    <Tooltip content={{
+                        [UnitPattern.SWAP]: 'Swap',
+                        [UnitPattern.INTERNAL_TRANSFER]: 'Transfer',
+                        [UnitPattern.SPLIT]: 'Split',
+                        [UnitPattern.FLOW]: 'Flow',
+                        [UnitPattern.SPINOFF]: 'Spin-Off',
+                        [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Transfer',
+                        [UnitPattern.CUSTOM]: 'Custom',
+                        [UnitPattern.UNKNOWN]: 'Unknown',
+                    }[bundle.pattern || UnitPattern.UNKNOWN] || 'Unknown'} openDelay={200}>
+                        <span className="relative inline-flex">
+                            <span
+                                className="pointer-events-none flex h-[22px] w-[22px] items-center justify-center text-slate-700"
+                                style={{
+                                    backgroundColor: {
                                         [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
                                         [UnitPattern.SWAP]: '#FEEBC8',
                                         [UnitPattern.SPLIT]: '#E9D8FD',
@@ -702,178 +666,162 @@ const BundleRow: React.FC<BundleRowProps> = ({
                                         [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: '#FEFCBF',
                                         [UnitPattern.CUSTOM]: '#E2E8F0',
                                         [UnitPattern.UNKNOWN]: '#EDF2F7',
-                                    }[bundle.pattern || UnitPattern.UNKNOWN] || '#EDF2F7'}
-                                    color="gray.700"
-                                    pointerEvents="none"
-                                >
-                                    {{
-                                        [UnitPattern.SWAP]: <FiRepeat size={11} />,
-                                        [UnitPattern.INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
-                                        [UnitPattern.SPLIT]: <FiGitBranch size={11} />,
-                                        [UnitPattern.FLOW]: <FiTrendingUp size={11} />,
-                                        [UnitPattern.SPINOFF]: <FiShare2 size={11} />,
-                                        [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
-                                        [UnitPattern.CUSTOM]: <FiTool size={11} />,
-                                        [UnitPattern.UNKNOWN]: <FiHelpCircle size={11} />,
-                                    }[bundle.pattern || UnitPattern.UNKNOWN] || <FiHelpCircle size={11} />}
-                                </Box>
-                                <select
-                                    style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
-                                    value={bundle.pattern || UnitPattern.UNKNOWN}
-                                    onChange={(e) => handlePatternChange(e.target.value)}
-                                >
-                                    <option value={UnitPattern.SWAP}>Swap</option>
-                                    <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
-                                    <option value={UnitPattern.SPLIT}>Split</option>
-                                    <option value={UnitPattern.FLOW}>Flow</option>
-                                    <option value={UnitPattern.SPINOFF}>Spin-Off</option>
-                                    <option value={UnitPattern.CUSTOM}>Custom</option>
-                                    <option value={UnitPattern.UNKNOWN}>Unknown</option>
-                                </select>
-                            </Box>
-                        </Tooltip>
-                        <Tooltip content={{
-                            [TaxabilityEnum.TAXABLE]: 'Taxable',
-                            [TaxabilityEnum.NON_TAXABLE]: 'Non-Taxable',
-                            [TaxabilityEnum.UNKNOWN]: 'Taxability Unknown',
-                        }[bundle.taxability_override || TaxabilityEnum.UNKNOWN] || 'Taxability Unknown'} openDelay={200}>
-                            <Box position="relative" display="inline-flex">
-                                <Box
-                                    display="flex"
-                                    alignItems="center"
-                                    justifyContent="center"
-                                    w="22px" h="22px"
-                                    borderRadius="4px"
-                                    bg={bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
-                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF'}
-                                    color="gray.700"
-                                    pointerEvents="none"
-                                >
-                                    {bundle.taxability_override === TaxabilityEnum.TAXABLE ? <FiDollarSign size={11} /> :
-                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? <FiShield size={11} /> :
-                                            <FiHelpCircle size={11} />}
-                                </Box>
-                                <select
-                                    style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
-                                    value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
-                                    onChange={(e) => handleTaxabilityChange(e.target.value)}
-                                >
-                                    <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
-                                    <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
-                                    <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
-                                </select>
-                            </Box>
-                        </Tooltip>
-                        <Box flex={1} />
-                        <Button
-                            size="xs"
-                            variant="ghost"
-                            colorPalette="red"
-                            onClick={openDeleteConfirm}
-                            loading={deleting}
-                            title="Delete bundle"
-                            p={1}
-                            minW="20px"
-                            h="20px"
+                                    }[bundle.pattern || UnitPattern.UNKNOWN] || '#EDF2F7',
+                                }}
+                            >
+                                {{
+                                    [UnitPattern.SWAP]: <FiRepeat size={11} />,
+                                    [UnitPattern.INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
+                                    [UnitPattern.SPLIT]: <FiGitBranch size={11} />,
+                                    [UnitPattern.FLOW]: <FiTrendingUp size={11} />,
+                                    [UnitPattern.SPINOFF]: <FiShare2 size={11} />,
+                                    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
+                                    [UnitPattern.CUSTOM]: <FiTool size={11} />,
+                                    [UnitPattern.UNKNOWN]: <FiHelpCircle size={11} />,
+                                }[bundle.pattern || UnitPattern.UNKNOWN] || <FiHelpCircle size={11} />}
+                            </span>
+                            <select
+                                title="Pattern"
+                                className="absolute inset-0 cursor-pointer opacity-0"
+                                value={bundle.pattern || UnitPattern.UNKNOWN}
+                                onChange={(e) => handlePatternChange(e.target.value)}
+                            >
+                                <option value={UnitPattern.SWAP}>Swap</option>
+                                <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
+                                <option value={UnitPattern.SPLIT}>Split</option>
+                                <option value={UnitPattern.FLOW}>Flow</option>
+                                <option value={UnitPattern.SPINOFF}>Spin-Off</option>
+                                <option value={UnitPattern.CUSTOM}>Custom</option>
+                                <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                            </select>
+                        </span>
+                    </Tooltip>
+                    <Tooltip content={{
+                        [TaxabilityEnum.TAXABLE]: 'Taxable',
+                        [TaxabilityEnum.NON_TAXABLE]: 'Non-Taxable',
+                        [TaxabilityEnum.UNKNOWN]: 'Taxability Unknown',
+                    }[bundle.taxability_override || TaxabilityEnum.UNKNOWN] || 'Taxability Unknown'} openDelay={200}>
+                        <span className="relative inline-flex">
+                            <span
+                                className="pointer-events-none flex h-[22px] w-[22px] items-center justify-center text-slate-700"
+                                style={{
+                                    backgroundColor: bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
+                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
+                                }}
+                            >
+                                {bundle.taxability_override === TaxabilityEnum.TAXABLE ? <FiDollarSign size={11} /> :
+                                    bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? <FiShield size={11} /> :
+                                        <FiHelpCircle size={11} />}
+                            </span>
+                            <select
+                                title="Taxability"
+                                className="absolute inset-0 cursor-pointer opacity-0"
+                                value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
+                                onChange={(e) => handleTaxabilityChange(e.target.value)}
+                            >
+                                <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
+                                <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
+                                <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
+                            </select>
+                        </span>
+                    </Tooltip>
+                    <div className="flex-1" />
+                    <Button
+                        variant="ghost"
+                        colorScheme="red"
+                        onClick={openDeleteConfirm}
+                        loading={deleting}
+                        title="Delete bundle"
+                        className="h-5 min-w-[20px] p-1"
+                    >
+                        <FiTrash2 size={11} />
+                    </Button>
+                </div>
+
+                {/* Bundle name on its own line */}
+                <div className="mb-1.5">
+                    <InlineEditLabel
+                        value={bundle.label || ''}
+                        onSave={async (value) => onUpdate({ label: value })}
+                        placeholder={`Bundle #${bundle.id}`}
+                    />
+                </div>
+
+                {/* Assets + date + notes icon row */}
+                <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600">
+                    <div className="flex flex-wrap items-center gap-1">
+                        {assets.slice(0, 4).map((asset, idx) => (
+                            <AssetBadge
+                                key={asset.symbol || idx}
+                                asset={asset}
+                                size="xs"
+                                colorPalette="purple"
+                                maxLength={12}
+                            />
+                        ))}
+                        {assets.length > 4 && (
+                            <span className="text-[10px] text-slate-500">+{assets.length - 4}</span>
+                        )}
+                    </div>
+                    <span className="text-[10px] text-slate-500">{compactDateRange}</span>
+                    <Tooltip content={bundle.notes || 'No notes'} openDelay={200}>
+                        <span
+                            className={`cursor-pointer ${bundle.notes ? 'text-purple-500 hover:text-purple-600' : 'text-slate-300 hover:text-purple-600'}`}
                         >
-                            <FiTrash2 size={11} />
-                        </Button>
-                    </Flex>
+                            <FiFileText size={12} />
+                        </span>
+                    </Tooltip>
+                </div>
 
-                    {/* Bundle name on its own line */}
-                    <Box mb={1.5}>
-                        <InlineEditLabel
-                            value={bundle.label || ''}
-                            onSave={async (value) => onUpdate({ label: value })}
-                            placeholder={`Bundle #${bundle.id}`}
-                        />
-                    </Box>
-
-                    {/* Assets + date + notes icon row */}
-                    <Flex align="center" gap={2} fontSize="10px" color="gray.600" flexWrap="wrap">
-                        <Flex gap={1} align="center" flexWrap="wrap">
-                            {assets.slice(0, 4).map((asset, idx) => (
+                {/* Spinoff source info row */}
+                {isSpinoff && (spinoffSourceAsset || spinoffAccountName) && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                        {spinoffSourceAsset && (
+                            <div className="flex items-center gap-1">
+                                <span className="text-[10px] text-slate-400">Parent:</span>
                                 <AssetBadge
-                                    key={asset.symbol || idx}
-                                    asset={asset}
+                                    asset={{ id: spinoffSourceAsset.asset_id!, symbol: spinoffSourceAsset.symbol || '?', label: spinoffSourceAsset.label }}
                                     size="xs"
-                                    colorPalette="purple"
+                                    colorPalette="pink"
                                     maxLength={12}
                                 />
-                            ))}
-                            {assets.length > 4 && (
-                                <Text fontSize="10px" color="gray.500">+{assets.length - 4}</Text>
-                            )}
-                        </Flex>
-                        <Text fontSize="10px" color="gray.500">{compactDateRange}</Text>
-                        <Tooltip content={bundle.notes || 'No notes'} openDelay={200}>
-                            <Box
-                                as="span"
-                                cursor="pointer"
-                                color={bundle.notes ? 'purple.500' : 'gray.300'}
-                                _hover={{ color: 'purple.600' }}
-                            >
-                                <FiFileText size={12} />
-                            </Box>
-                        </Tooltip>
-                    </Flex>
+                            </div>
+                        )}
+                        {spinoffAccountName && (
+                            <Badge colorScheme="gray" className="border border-slate-300 bg-transparent text-slate-600">
+                                {spinoffAccountName}
+                            </Badge>
+                        )}
+                        {bundle.metadata?.spinoff_allocation_pct != null && (
+                            <span className="text-[10px] text-slate-400">
+                                {(bundle.metadata.spinoff_allocation_pct * 100).toFixed(0)}% alloc
+                            </span>
+                        )}
+                    </div>
+                )}
 
-                    {/* Spinoff source info row */}
-                    {isSpinoff && (spinoffSourceAsset || spinoffAccountName) && (
-                        <Flex align="center" gap={1.5} mt={1} fontSize="10px" color="gray.500" flexWrap="wrap">
-                            {spinoffSourceAsset && (
-                                <Flex align="center" gap={1}>
-                                    <Text fontSize="10px" color="gray.400">Parent:</Text>
-                                    <AssetBadge
-                                        asset={{ id: spinoffSourceAsset.asset_id!, symbol: spinoffSourceAsset.symbol || '?', label: spinoffSourceAsset.label }}
-                                        size="xs"
-                                        colorPalette="pink"
-                                        maxLength={12}
-                                    />
-                                </Flex>
-                            )}
-                            {spinoffAccountName && (
-                                <Badge size="xs" variant="outline" colorPalette="gray">
-                                    {spinoffAccountName}
-                                </Badge>
-                            )}
-                            {bundle.metadata?.spinoff_allocation_pct != null && (
-                                <Text fontSize="10px" color="gray.400">
-                                    {(bundle.metadata.spinoff_allocation_pct * 100).toFixed(0)}% alloc
-                                </Text>
-                            )}
-                        </Flex>
-                    )}
+                {/* Collapsible transaction list */}
+                <div
+                    className="mt-1.5 cursor-pointer border-t border-slate-100 pt-1 text-center hover:text-purple-600"
+                    onClick={onToggleExpand}
+                >
+                    <div className="flex items-center justify-center gap-1">
+                        {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                        <span className="text-xs text-slate-500">
+                            {bundle.transactions?.length || 0} transaction{(bundle.transactions?.length || 0) !== 1 ? 's' : ''}
+                        </span>
+                    </div>
+                </div>
 
-                    {/* Collapsible transaction list */}
-                    <Box
-                        mt={1.5}
-                        pt={1}
-                        borderTop="1px solid"
-                        borderColor="gray.100"
-                        cursor="pointer"
-                        onClick={onToggleExpand}
-                        _hover={{ color: 'purple.600' }}
-                        textAlign="center"
-                    >
-                        <Flex align="center" justify="center" gap={1}>
-                            {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                            <Text fontSize="2xs" color="gray.500">
-                                {bundle.transactions?.length || 0} transaction{(bundle.transactions?.length || 0) !== 1 ? 's' : ''}
-                            </Text>
-                        </Flex>
-                    </Box>
-
-                    {isExpanded && (
-                        <Box mt={1.5}>
-                            <BundleMemberTransactionsTable
-                                transactionIds={(bundle.transactions || []).map(t => t.id)}
-                                onTransactionClick={onTransactionClick}
-                            />
-                        </Box>
-                    )}
-                </Card.Body>
-            </Card.Root>
+                {isExpanded && (
+                    <div className="mt-1.5">
+                        <BundleMemberTransactionsTable
+                            transactionIds={(bundle.transactions || []).map(t => t.id)}
+                            onTransactionClick={onTransactionClick}
+                        />
+                    </div>
+                )}
+            </div>
 
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog
@@ -905,29 +853,28 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({ selectedCount, onDelete
     if (selectedCount === 0) return null;
 
     return (
-        <Box mb={3} p={2} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
-            <Flex justify="space-between" align="center">
-                <Text fontSize="sm" fontWeight="medium" color="blue.700">
+        <div className="mb-3 border border-blue-200 bg-blue-50 p-2">
+            <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-blue-700">
                     {selectedCount} bundle{selectedCount !== 1 ? 's' : ''} selected
-                </Text>
-                <Flex gap={2}>
+                </span>
+                <div className="flex gap-2">
                     <Button
-                        size="xs"
-                        colorPalette="red"
+                        colorScheme="red"
                         variant="outline"
                         onClick={onDelete}
                         loading={loading}
                     >
                         <FiTrash2 size={12} />
-                        <Text ml={1}>Delete Selected</Text>
+                        <span className="ml-1">Delete Selected</span>
                     </Button>
-                    <Button size="xs" variant="ghost" onClick={onClearSelection}>
+                    <Button variant="ghost" onClick={onClearSelection}>
                         <FiX size={12} />
-                        <Text ml={1}>Clear</Text>
+                        <span className="ml-1">Clear</span>
                     </Button>
-                </Flex>
-            </Flex>
-        </Box>
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -945,54 +892,49 @@ interface PaginationBarProps {
     totalPages: number;
     rangeStart: number;
     rangeEnd: number;
-    mt?: number | string;
-    mb?: number | string;
+    className?: string;
 }
 
 const PaginationBar: React.FC<PaginationBarProps> = ({
     page, setPage, pageSize, setPageSize, pageSizeOptions,
-    totalItems, totalPages, rangeStart, rangeEnd, mt, mb,
+    totalItems, totalPages, rangeStart, rangeEnd, className,
 }) => (
-    <Flex justify="space-between" align="center" px={1} mt={mt} mb={mb}>
-        <Flex align="center" gap={0}>
+    <div className={`flex items-center justify-between px-1 ${className || ''}`}>
+        <div className="flex items-center gap-0">
             {pageSizeOptions.map(size => (
                 <Button
                     key={size}
-                    size="2xs"
+                    size="sm"
                     variant={pageSize === size ? 'solid' : 'outline'}
-                    colorPalette={pageSize === size ? 'blue' : 'gray'}
-                    borderRadius={0}
+                    colorScheme={pageSize === size ? 'blue' : 'gray'}
                     onClick={() => setPageSize(size)}
-                    px={2}
-                    fontWeight="normal"
-                    _first={{ borderLeftRadius: 'md' }}
-                    _last={{ borderRightRadius: 'md' }}
+                    className="h-6 px-2 font-normal"
                 >
                     {size}
                 </Button>
             ))}
-        </Flex>
-        <Text fontSize="xs" color="gray.500">
+        </div>
+        <span className="text-xs text-slate-500">
             {rangeStart}–{rangeEnd} of {totalItems}
-        </Text>
-        <Flex align="center" gap={1}>
-            <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={page === 0}>
+        </span>
+        <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" onClick={() => setPage(0)} disabled={page === 0} className="h-6 px-1">
                 <FiChevronsLeft size={14} />
             </Button>
-            <Button size="2xs" variant="ghost" onClick={() => setPage((p: number) => Math.max(0, p - 1))} disabled={page === 0}>
+            <Button size="sm" variant="ghost" onClick={() => setPage((p: number) => Math.max(0, p - 1))} disabled={page === 0} className="h-6 px-1">
                 <FiChevronLeft size={14} />
             </Button>
-            <Text fontSize="xs" color="gray.600" px={1}>
+            <span className="px-1 text-xs text-slate-600">
                 {page + 1}/{totalPages}
-            </Text>
-            <Button size="2xs" variant="ghost" onClick={() => setPage((p: number) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setPage((p: number) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="h-6 px-1">
                 <FiChevronRight size={14} />
             </Button>
-            <Button size="2xs" variant="ghost" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>
+            <Button size="sm" variant="ghost" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1} className="h-6 px-1">
                 <FiChevronsRight size={14} />
             </Button>
-        </Flex>
-    </Flex>
+        </div>
+    </div>
 );
 
 // ============================================================================
@@ -1111,16 +1053,16 @@ export const BundleTable: React.FC<BundleTableProps> = ({
 
     if (bundles.length === 0) {
         return (
-            <Box textAlign="center" py={8} bg="gray.50" borderRadius="md">
-                <Text color="gray.500" fontSize="sm">
+            <div className="bg-slate-50 py-8 text-center">
+                <span className="text-sm text-slate-500">
                     No bundles yet. Accept suggestions or select transactions to create bundles.
-                </Text>
-            </Box>
+                </span>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             <FilterBar
                 filters={filters}
                 onFiltersChange={setFilters}
@@ -1137,9 +1079,9 @@ export const BundleTable: React.FC<BundleTableProps> = ({
             />
 
             {filteredBundles.length === 0 ? (
-                <Box textAlign="center" py={4} bg="gray.50" borderRadius="md">
-                    <Text color="gray.500" fontSize="sm">No bundles match the current filters</Text>
-                </Box>
+                <div className="bg-slate-50 py-4 text-center">
+                    <span className="text-sm text-slate-500">No bundles match the current filters</span>
+                </div>
             ) : (
                 <>
                     {/* Top pagination bar */}
@@ -1153,10 +1095,10 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                         totalPages={totalPages}
                         rangeStart={rangeStart}
                         rangeEnd={rangeEnd}
-                        mb={2}
+                        className="mb-2"
                     />
 
-                    <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={3}>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                         {pagedBundles.map(bundle => (
                             <BundleRow
                                 key={bundle.id}
@@ -1172,7 +1114,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                                 onTransactionClick={onTransactionClick}
                             />
                         ))}
-                    </SimpleGrid>
+                    </div>
 
                     {/* Bottom pagination bar */}
                     <PaginationBar
@@ -1185,7 +1127,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                         totalPages={totalPages}
                         rangeStart={rangeStart}
                         rangeEnd={rangeEnd}
-                        mt={3}
+                        className="mt-3"
                     />
                 </>
             )}
@@ -1201,7 +1143,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                 isDestructive
                 isLoading={bulkLoading}
             />
-        </Box>
+        </div>
     );
 };
 

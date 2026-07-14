@@ -9,21 +9,14 @@
  * Accounts and connectors are shown with colored dots from useEntityColors.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import {
     Badge,
-    Box,
     Button,
-    Card,
-    Checkbox,
-    Dialog,
-    Flex,
-    Grid,
     Input,
-    Portal,
     Text,
-    VStack,
-} from '@chakra-ui/react';
+} from './ui/primitives';
 import { LuSearch } from 'react-icons/lu';
 import { EnabledConnector, AccountSummary } from '../types';
 import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
@@ -57,22 +50,48 @@ const TYPE_META: { type: string; label: string; emoji: string; colorScheme: stri
     { type: 'investment', label: 'Investments', emoji: '📈', colorScheme: 'orange' },
 ];
 
+const SECTION_BG: Record<string, string> = {
+    blue: 'bg-blue-50',
+    cyan: 'bg-cyan-50',
+    purple: 'bg-purple-50',
+    green: 'bg-green-50',
+    teal: 'bg-teal-50',
+    orange: 'bg-orange-50',
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Colour dot rendered next to an entity name. */
 const ColorDot: React.FC<{ color: string; size?: number }> = ({ color, size = 8 }) => (
-    <Box
-        as="span"
-        display="inline-block"
-        w={`${size}px`}
-        h={`${size}px`}
-        borderRadius="full"
-        bg={color}
-        flexShrink={0}
+    <span
+        className="inline-block shrink-0 rounded-full"
+        style={{ width: `${size}px`, height: `${size}px`, backgroundColor: color }}
     />
 );
+
+interface TriCheckboxProps {
+    checked: boolean;
+    indeterminate: boolean;
+    onChange: () => void;
+}
+
+const TriCheckbox: React.FC<TriCheckboxProps> = ({ checked, indeterminate, onChange }) => {
+    const ref = useRef<HTMLInputElement>(null);
+    useEffect(() => {
+        if (ref.current) ref.current.indeterminate = indeterminate;
+    }, [indeterminate]);
+    return (
+        <input
+            ref={ref}
+            type="checkbox"
+            checked={checked}
+            onChange={onChange}
+            className="h-4 w-4 cursor-pointer accent-blue-500"
+        />
+    );
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -271,252 +290,199 @@ export const ConnectorPickerModal: React.FC<ConnectorPickerModalProps> = ({
     // ── Render ─────────────────────────────────────────────────────────
 
     return (
-        <Dialog.Root
+        <RadixDialog.Root
             open={isOpen}
-            onOpenChange={e => {
-                if (!e.open) onClose();
+            onOpenChange={open => {
+                if (!open) onClose();
             }}
-            size="xl"
         >
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content maxW="950px" maxH="85vh" display="flex" flexDirection="column">
-                        {/* ── Header ─────────────────────────────── */}
-                        <Dialog.Header pb={2}>
-                            <Flex justify="space-between" align="center" w="100%">
-                                <Dialog.Title fontSize="md">
-                                    Add Accounts & Connectors
-                                </Dialog.Title>
-                                <Badge colorPalette="blue" size="sm">
-                                    {selected.size} selected
-                                </Badge>
-                            </Flex>
-                        </Dialog.Header>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] flex max-h-[85vh] w-full max-w-[950px] -translate-x-1/2 -translate-y-1/2 flex-col bg-white shadow-xl">
+                    {/* ── Header ─────────────────────────────── */}
+                    <div className="flex items-center justify-between px-6 pb-2 pt-4">
+                        <RadixDialog.Title className="text-base font-semibold">
+                            Add Accounts & Connectors
+                        </RadixDialog.Title>
+                        <Badge colorScheme="blue" className="text-xs">
+                            {selected.size} selected
+                        </Badge>
+                    </div>
 
-                        {/* ── Search + Actions ───────────────────── */}
-                        <Box px={6} pb={3}>
-                            <Flex gap={2} align="center" mb={2}>
-                                <Box position="relative" flex={1}>
-                                    <Box position="absolute" left={2} top="50%" transform="translateY(-50%)" color="gray.400">
-                                        <LuSearch size={14} />
-                                    </Box>
-                                    <Input
-                                        size="sm"
-                                        pl={8}
-                                        placeholder="Search accounts, connectors, chains..."
-                                        value={search}
-                                        onChange={e => setSearch(e.target.value)}
-                                        autoFocus
-                                    />
-                                </Box>
-                            </Flex>
-                            <Flex gap={2} justify="flex-end">
-                                <Button size="xs" variant="ghost" onClick={selectAll}>
-                                    Select All
-                                </Button>
-                                <Button size="xs" variant="ghost" onClick={clearSelection}>
-                                    Clear Selection
-                                </Button>
-                            </Flex>
-                        </Box>
+                    {/* ── Search + Actions ───────────────────── */}
+                    <div className="px-6 pb-3">
+                        <div className="mb-2 flex items-center gap-2">
+                            <div className="relative flex-1">
+                                <div className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">
+                                    <LuSearch size={14} />
+                                </div>
+                                <Input
+                                    className="h-8 pl-8 text-sm"
+                                    placeholder="Search accounts, connectors, chains..."
+                                    value={search}
+                                    onChange={e => setSearch(e.target.value)}
+                                    autoFocus
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <Button variant="ghost" className="h-6 px-2 text-xs" onClick={selectAll}>
+                                Select All
+                            </Button>
+                            <Button variant="ghost" className="h-6 px-2 text-xs" onClick={clearSelection}>
+                                Clear Selection
+                            </Button>
+                        </div>
+                    </div>
 
-                        {/* ── Card grid body ─────────────────────── */}
-                        <Dialog.Body pt={0} flex={1} overflowY="auto" px={6}>
-                            {sections.length === 0 && (
-                                <Box py={8} textAlign="center">
-                                    <Text color="gray.500" fontSize="sm">
-                                        {searchLower ? 'No accounts or connectors match your search.' : 'No connectors available.'}
-                                    </Text>
-                                </Box>
-                            )}
+                    {/* ── Card grid body ─────────────────────── */}
+                    <div className="flex-1 overflow-y-auto px-6">
+                        {sections.length === 0 && (
+                            <div className="py-8 text-center">
+                                <Text className="text-sm text-gray-500">
+                                    {searchLower ? 'No accounts or connectors match your search.' : 'No connectors available.'}
+                                </Text>
+                            </div>
+                        )}
 
-                            <VStack align="stretch" gap={3}>
-                                {sections.map(section => {
-                                    const typeState = typeCheckState(section.type);
+                        <div className="flex flex-col gap-3">
+                            {sections.map(section => {
+                                const typeState = typeCheckState(section.type);
 
-                                    return (
-                                        <Box key={section.type}>
-                                            {/* ── Type header ──── */}
-                                            <Flex
-                                                align="center"
-                                                justify="space-between"
-                                                py={1.5}
-                                                px={2}
-                                                bg={`${section.colorScheme}.50`}
-                                                borderRadius="md"
-                                                mb={2}
-                                            >
-                                                <Flex align="center" gap={2}>
-                                                    <Text fontWeight="medium" fontSize="sm">
-                                                        {section.emoji} {section.label}
-                                                    </Text>
-                                                    <Badge colorPalette="gray" size="xs" variant="subtle">
-                                                        {section.accounts.length}
-                                                    </Badge>
-                                                </Flex>
-                                                <Checkbox.Root
-                                                    checked={typeState.indeterminate ? 'indeterminate' : typeState.checked}
-                                                    onCheckedChange={() => toggleType(section.type)}
-                                                    size="sm"
-                                                >
-                                                    <Checkbox.HiddenInput />
-                                                    <Checkbox.Control>
-                                                        <Checkbox.Indicator />
-                                                    </Checkbox.Control>
-                                                </Checkbox.Root>
-                                            </Flex>
+                                return (
+                                    <div key={section.type}>
+                                        {/* ── Type header ──── */}
+                                        <div
+                                            className={`mb-2 flex items-center justify-between px-2 py-1.5 ${SECTION_BG[section.colorScheme] || 'bg-gray-50'}`}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <Text className="text-sm font-medium">
+                                                    {section.emoji} {section.label}
+                                                </Text>
+                                                <Badge colorScheme="gray" className="text-[10px]">
+                                                    {section.accounts.length}
+                                                </Badge>
+                                            </div>
+                                            <TriCheckbox
+                                                checked={typeState.checked}
+                                                indeterminate={typeState.indeterminate}
+                                                onChange={() => toggleType(section.type)}
+                                            />
+                                        </div>
 
-                                            {/* ── Account cards grid ──── */}
-                                            <Grid
-                                                templateColumns="repeat(auto-fill, minmax(260px, 1fr))"
-                                                gap={2}
-                                                px={1}
-                                            >
-                                                {section.accounts.map(({ account, connectors, visibleConnectors }) => {
-                                                    const acctState = accountCheckState(account.id);
-                                                    const acctColor = getAccountColor(account.id, account.name);
-                                                    const selectedCount = connectors.filter(c => selected.has(c.connector_id)).length;
+                                        {/* ── Account cards grid ──── */}
+                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2 px-1">
+                                            {section.accounts.map(({ account, connectors, visibleConnectors }) => {
+                                                const acctState = accountCheckState(account.id);
+                                                const acctColor = getAccountColor(account.id, account.name);
+                                                const selectedCount = connectors.filter(c => selected.has(c.connector_id)).length;
 
-                                                    return (
-                                                        <Card.Root
-                                                            key={account.id}
-                                                            size="sm"
-                                                            variant="outline"
-                                                            borderColor={acctState.checked ? 'blue.300' : acctState.indeterminate ? 'blue.200' : 'gray.200'}
-                                                            bg={acctState.checked ? 'blue.50' : 'white'}
+                                                return (
+                                                    <div
+                                                        key={account.id}
+                                                        className={`border ${acctState.checked ? 'border-blue-300 bg-blue-50' : acctState.indeterminate ? 'border-blue-200 bg-white' : 'border-gray-200 bg-white'}`}
+                                                    >
+                                                        {/* Account header */}
+                                                        <div
+                                                            className="cursor-pointer px-3 py-2 hover:bg-gray-50"
+                                                            onClick={() => toggleAccount(account.id)}
                                                         >
-                                                            {/* Account header */}
-                                                            <Card.Header
-                                                                py={2}
-                                                                px={3}
-                                                                cursor="pointer"
-                                                                onClick={() => toggleAccount(account.id)}
-                                                                _hover={{ bg: 'gray.50' }}
-                                                            >
-                                                                <Flex justify="space-between" align="center">
-                                                                    <Flex align="center" gap={2} minW={0} flex={1}>
-                                                                        <ColorDot color={acctColor} />
-                                                                        <VStack align="flex-start" gap={0} minW={0}>
-                                                                            <Text
-                                                                                fontSize="sm"
-                                                                                fontWeight="semibold"
-                                                                                color="gray.700"
-                                                                                truncate
-                                                                            >
-                                                                                {account.name}
-                                                                            </Text>
-                                                                            {account.address_or_identifier && (
-                                                                                <Text fontSize="2xs" color="gray.400" fontFamily="mono" truncate>
-                                                                                    {formatAddress(account.address_or_identifier)}
-                                                                                </Text>
-                                                                            )}
-                                                                        </VStack>
-                                                                    </Flex>
-                                                                    <Flex align="center" gap={2} flexShrink={0}>
-                                                                        {account.group && (
-                                                                            <Badge size="xs" colorPalette="cyan" variant="outline">
-                                                                                {account.group}
-                                                                            </Badge>
-                                                                        )}
-                                                                        <Text fontSize="2xs" color="gray.400">
-                                                                            {selectedCount}/{connectors.length}
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                                                    <ColorDot color={acctColor} />
+                                                                    <div className="flex min-w-0 flex-col items-start gap-0">
+                                                                        <Text className="truncate text-sm font-semibold text-gray-700">
+                                                                            {account.name}
                                                                         </Text>
-                                                                        <Box onClick={e => e.stopPropagation()}>
-                                                                            <Checkbox.Root
-                                                                                checked={acctState.indeterminate ? 'indeterminate' : acctState.checked}
-                                                                                onCheckedChange={() => toggleAccount(account.id)}
-                                                                                size="sm"
+                                                                        {account.address_or_identifier && (
+                                                                            <Text className="truncate font-mono text-[10px] text-gray-400">
+                                                                                {formatAddress(account.address_or_identifier)}
+                                                                            </Text>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex shrink-0 items-center gap-2">
+                                                                    {account.group && (
+                                                                        <Badge colorScheme="blue" className="text-[10px]">
+                                                                            {account.group}
+                                                                        </Badge>
+                                                                    )}
+                                                                    <Text className="text-[10px] text-gray-400">
+                                                                        {selectedCount}/{connectors.length}
+                                                                    </Text>
+                                                                    <div onClick={e => e.stopPropagation()}>
+                                                                        <TriCheckbox
+                                                                            checked={acctState.checked}
+                                                                            indeterminate={acctState.indeterminate}
+                                                                            onChange={() => toggleAccount(account.id)}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Connector list */}
+                                                        <div className="px-3 pb-2 pt-0">
+                                                            <div className="flex flex-col gap-0">
+                                                                {visibleConnectors.map(c => {
+                                                                    const cColor = getConnectorColor(c.display_name || c.connector_type);
+                                                                    const isChecked = selected.has(c.connector_id);
+
+                                                                    return (
+                                                                        <div
+                                                                            key={c.connector_id}
+                                                                            className="flex cursor-pointer items-center gap-2 px-1 py-0.5 hover:bg-gray-50"
+                                                                            onClick={() => toggleConnector(c.connector_id)}
+                                                                        >
+                                                                            <TriCheckbox
+                                                                                checked={isChecked}
+                                                                                indeterminate={false}
+                                                                                onChange={() => toggleConnector(c.connector_id)}
+                                                                            />
+                                                                            <ColorDot color={cColor} size={6} />
+                                                                            <Text
+                                                                                className={`flex-1 truncate text-xs ${isChecked ? 'text-gray-700' : 'text-gray-400'}`}
                                                                             >
-                                                                                <Checkbox.HiddenInput />
-                                                                                <Checkbox.Control>
-                                                                                    <Checkbox.Indicator />
-                                                                                </Checkbox.Control>
-                                                                            </Checkbox.Root>
-                                                                        </Box>
-                                                                    </Flex>
-                                                                </Flex>
-                                                            </Card.Header>
+                                                                                {c.display_name || c.connector_type}
+                                                                            </Text>
+                                                                            {c.is_file_connector && (
+                                                                                <Badge colorScheme="blue" className="text-[10px]">📁</Badge>
+                                                                            )}
+                                                                            {c.chain_name && (
+                                                                                <Badge colorScheme="purple" className="text-[10px]">
+                                                                                    {formatChainName(c.chain_name)}
+                                                                                </Badge>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
 
-                                                            {/* Connector list */}
-                                                            <Card.Body pt={0} pb={2} px={3}>
-                                                                <VStack align="stretch" gap={0}>
-                                                                    {visibleConnectors.map(c => {
-                                                                        const cColor = getConnectorColor(c.display_name || c.connector_type);
-                                                                        const isChecked = selected.has(c.connector_id);
-
-                                                                        return (
-                                                                            <Flex
-                                                                                key={c.connector_id}
-                                                                                align="center"
-                                                                                gap={2}
-                                                                                py={0.5}
-                                                                                px={1}
-                                                                                _hover={{ bg: 'gray.50' }}
-                                                                                borderRadius="sm"
-                                                                                cursor="pointer"
-                                                                                onClick={() => toggleConnector(c.connector_id)}
-                                                                            >
-                                                                                <Checkbox.Root
-                                                                                    checked={isChecked}
-                                                                                    onCheckedChange={() => toggleConnector(c.connector_id)}
-                                                                                    size="sm"
-                                                                                >
-                                                                                    <Checkbox.HiddenInput />
-                                                                                    <Checkbox.Control>
-                                                                                        <Checkbox.Indicator />
-                                                                                    </Checkbox.Control>
-                                                                                </Checkbox.Root>
-                                                                                <ColorDot color={cColor} size={6} />
-                                                                                <Text
-                                                                                    fontSize="xs"
-                                                                                    color={isChecked ? 'gray.700' : 'gray.400'}
-                                                                                    truncate
-                                                                                    flex={1}
-                                                                                >
-                                                                                    {c.display_name || c.connector_type}
-                                                                                </Text>
-                                                                                {c.is_file_connector && (
-                                                                                    <Badge colorPalette="blue" size="xs" variant="subtle">📁</Badge>
-                                                                                )}
-                                                                                {c.chain_name && (
-                                                                                    <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                                                        {formatChainName(c.chain_name)}
-                                                                                    </Badge>
-                                                                                )}
-                                                                            </Flex>
-                                                                        );
-                                                                    })}
-                                                                </VStack>
-                                                            </Card.Body>
-                                                        </Card.Root>
-                                                    );
-                                                })}
-                                            </Grid>
-                                        </Box>
-                                    );
-                                })}
-                            </VStack>
-                        </Dialog.Body>
-
-                        {/* ── Footer ─────────────────────────────── */}
-                        <Dialog.Footer>
-                            <Flex gap={3}>
-                                <Button variant="outline" onClick={onClose}>
-                                    Cancel
-                                </Button>
-                                <Button
-                                    colorPalette="blue"
-                                    onClick={() => onConfirm(selected)}
-                                    disabled={selected.size === 0}
-                                >
-                                    Add Selected ({selected.size})
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                    {/* ── Footer ─────────────────────────────── */}
+                    <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-3">
+                        <Button variant="outline" onClick={onClose}>
+                            Cancel
+                        </Button>
+                        <Button
+                            colorScheme="blue"
+                            onClick={() => onConfirm(selected)}
+                            disabled={selected.size === 0}
+                        >
+                            Add Selected ({selected.size})
+                        </Button>
+                    </div>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };

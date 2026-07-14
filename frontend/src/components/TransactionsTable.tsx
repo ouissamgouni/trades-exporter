@@ -80,11 +80,12 @@ interface TradesImportResult {
     summary: { total_transactions: number; total_raw_accounts: number; total_raw_assets: number; total_errors: number };
 }
 
-// Direction color mapping for row backgrounds
-const directionRowColors: Record<string, string> = {
-    [Direction.INFLOW]: 'green.50',
-    [Direction.OUTFLOW]: 'red.50',
-    internal: 'gray.50',
+// Direction color mapping for row backgrounds (literal hex, consumed via inline style
+// by TransactionTableRow which no longer depends on Chakra design tokens)
+const DIRECTION_ROW_HEX: Record<string, string> = {
+    [Direction.INFLOW]: '#f0fdf4', // green-50
+    [Direction.OUTFLOW]: '#fef2f2', // red-50
+    internal: '#f8fafc', // slate-50
 };
 
 // Props interface for configurable behavior
@@ -1385,33 +1386,35 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     // Using formatDateTimeCompact from dateUtils for consistent date formatting
 
+    // Row background is consumed as a literal CSS color by TransactionTableRow (via inline style),
+    // since that component no longer depends on Chakra design tokens.
     const getRowBgColor = (tx: Transaction) => {
-        if (selectedIds.has(tx.id)) return 'blue.100';
+        if (selectedIds.has(tx.id)) return '#dbeafe'; // blue-100
         // Highlight sibling rows when hovering a suggestion indicator
         if (hoveredSuggestionGroup !== null && showSuggestions) {
             const entry = suggestionMap.get(tx.id);
-            if (entry && entry.groupIndex === hoveredSuggestionGroup) return 'teal.50';
+            if (entry && entry.groupIndex === hoveredSuggestionGroup) return '#f0fdfa'; // teal-50
         }
         // Highlight sibling rows when hovering a bundle membership indicator
-        if (hoveredBundleId !== null && tx.user_calculation_unit_id === hoveredBundleId) return 'purple.50';
+        if (hoveredBundleId !== null && tx.user_calculation_unit_id === hoveredBundleId) return '#faf5ff'; // purple-50
         // Highlight sibling rows when hovering a duplicate indicator
         if (hoveredDuplicateGroup !== null) {
             const dupEntry = duplicateMap.get(tx.id);
-            if (dupEntry && dupEntry.groupIndex === hoveredDuplicateGroup) return 'red.50';
+            if (dupEntry && dupEntry.groupIndex === hoveredDuplicateGroup) return '#fef2f2'; // red-50
         }
         // Invalid rows get dark gray background to de-emphasize
-        if (tx.review_status === 'invalid') return 'gray.300';
-        return directionRowColors[tx.direction] || 'white';
+        if (tx.review_status === 'invalid') return '#cbd5e1'; // slate-300
+        return DIRECTION_ROW_HEX[tx.direction] || '#ffffff';
     };
 
-    // Review status → bottom border color
+    // Review status → bottom border color (literal hex, consumed via inline style)
     const getRowBorderColor = (tx: Transaction) => {
         const reviewStatusBorderColors: Record<string, string> = {
-            pending: 'yellow.500',
-            valid: 'green.500',
-            invalid: 'red.500',
+            pending: '#eab308', // yellow-500
+            valid: '#22c55e', // green-500
+            invalid: '#ef4444', // red-500
         };
-        return reviewStatusBorderColors[tx.review_status || 'pending'] || 'gray.300';
+        return reviewStatusBorderColors[tx.review_status || 'pending'] || '#cbd5e1';
     };
 
     const currentPageIds = paginatedTransactions.map(tx => tx.id);

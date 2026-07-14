@@ -17,7 +17,7 @@
  */
 
 import React from 'react';
-import { Badge, Flex, Text } from '@chakra-ui/react';
+import { Badge, type BadgeColorScheme } from './ui/primitives';
 import { AccountBadge } from './AccountBadge';
 import { AssetBadge } from './AssetBadge';
 import { TransactionTooltip } from './TransactionTooltip';
@@ -109,6 +109,12 @@ const getTypeColor = (type: string | undefined): string => {
     return 'gray';
 };
 
+const SCHEMES = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toScheme = (c: string): BadgeColorScheme => {
+    if (c === 'teal') return 'green';
+    return (SCHEMES.includes(c) ? c : 'gray') as BadgeColorScheme;
+};
+
 const formatDateShort = (dateStr: string | undefined): string => {
     if (!dateStr) return '-';
     try {
@@ -144,12 +150,9 @@ export const CompactTransactionBadgeRow: React.FC<CompactTransactionBadgeRowProp
     if (!transaction) {
         const badge = (
             <Badge
-                size="xs"
-                colorPalette="gray"
-                variant="subtle"
-                cursor={onTransactionClick ? 'pointer' : 'default'}
+                colorScheme="gray"
+                className={onTransactionClick ? 'cursor-pointer hover:bg-slate-200' : 'cursor-default'}
                 onClick={handleClick}
-                _hover={onTransactionClick ? { bg: 'gray.200' } : undefined}
             >
                 TX#{txId}
             </Badge>
@@ -203,27 +206,19 @@ export const CompactTransactionBadgeRow: React.FC<CompactTransactionBadgeRowProp
     const feeQuoteRef: AssetRef | null = fee_quote_asset || (fee_quote_asset_symbol ? { symbol: fee_quote_asset_symbol } : null);
 
     const rowContent = (
-        <Flex
-            align="center"
-            gap={1}
-            py={0.5}
-            px={1}
-            borderRadius="md"
-            cursor={onTransactionClick ? 'pointer' : 'default'}
-            _hover={onTransactionClick ? { bg: 'gray.100' } : undefined}
+        <div
+            className={`flex flex-nowrap items-center gap-1 overflow-hidden px-1 py-0.5 ${onTransactionClick ? 'cursor-pointer hover:bg-slate-100' : 'cursor-default'}`}
             onClick={handleClick}
-            flexWrap="nowrap"
-            overflow="hidden"
         >
             {/* TX ID Badge */}
-            <Badge size="xs" colorPalette="gray" variant="subtle" flexShrink={0}>
+            <Badge colorScheme="gray" className="shrink-0">
                 TX#{txId}
             </Badge>
 
             {/* Date */}
-            <Text fontSize="2xs" color="gray.500" flexShrink={0} fontFamily="mono">
+            <span className="shrink-0 font-mono text-[10px] text-slate-500">
                 {formatDateShort(date_time)}
-            </Text>
+            </span>
 
             {/* Account Badge */}
             <AccountBadge
@@ -236,7 +231,7 @@ export const CompactTransactionBadgeRow: React.FC<CompactTransactionBadgeRowProp
             />
 
             {/* Type Badge */}
-            <Badge size="xs" colorPalette={getTypeColor(displayType)} variant="subtle" flexShrink={0}>
+            <Badge colorScheme={toScheme(getTypeColor(displayType))} className="shrink-0">
                 {displayType.slice(0, 10)}
             </Badge>
 
@@ -249,17 +244,17 @@ export const CompactTransactionBadgeRow: React.FC<CompactTransactionBadgeRowProp
                 maxLength={8}
                 showWarning={false}
             />
-            <Text fontSize="2xs" color="gray.700" fontFamily="mono" flexShrink={0}>
+            <span className="shrink-0 font-mono text-[10px] text-slate-700">
                 {formatQuantity(quantity)}
-            </Text>
+            </span>
 
             {/* Arrow + Total + Quote Asset */}
             {total != null && (
                 <>
-                    <Text fontSize="2xs" color="gray.400" flexShrink={0}>→</Text>
-                    <Text fontSize="2xs" color="gray.700" fontFamily="mono" flexShrink={0}>
+                    <span className="shrink-0 text-[10px] text-slate-400">→</span>
+                    <span className="shrink-0 font-mono text-[10px] text-slate-700">
                         {formatTotal(total)}
-                    </Text>
+                    </span>
                     {priceQuoteRef && (
                         <AssetBadge
                             asset={priceQuoteRef}
@@ -275,10 +270,10 @@ export const CompactTransactionBadgeRow: React.FC<CompactTransactionBadgeRowProp
             {/* Fee Section */}
             {hasFee && (
                 <>
-                    <Text fontSize="2xs" color="gray.300" flexShrink={0}>|</Text>
-                    <Text fontSize="2xs" color="orange.600" flexShrink={0}>
+                    <span className="shrink-0 text-[10px] text-slate-300">|</span>
+                    <span className="shrink-0 text-[10px] text-orange-600">
                         Fee {formatFee(fee)}
-                    </Text>
+                    </span>
                     {feeQuoteRef && (
                         <AssetBadge
                             asset={feeQuoteRef}
@@ -290,7 +285,7 @@ export const CompactTransactionBadgeRow: React.FC<CompactTransactionBadgeRowProp
                     )}
                 </>
             )}
-        </Flex>
+        </div>
     );
 
     // Wrap in tooltip if enabled

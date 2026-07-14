@@ -1,12 +1,4 @@
-import {
-    Badge,
-    Box,
-    Button,
-    Collapsible,
-    Flex,
-    Progress,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, type BadgeColorScheme, Button, Progress, type ProgressColorScheme } from './ui/primitives';
 import React, { useState } from 'react';
 import { ConnectorProgress, ConnectorSyncStatus } from '../types';
 import { ConnectorLogViewer } from './ConnectorLogViewer';
@@ -41,7 +33,7 @@ const getStatusIcon = (status: ConnectorSyncStatus): string => {
     }
 };
 
-const getStatusColor = (status: ConnectorSyncStatus): string => {
+const getStatusColor = (status: ConnectorSyncStatus): BadgeColorScheme => {
     switch (status) {
         case 'queued':
         case 'pending':
@@ -68,14 +60,14 @@ const getOperationProgress = (progress: ConnectorProgress): number => {
     return Math.min(100, Math.max(0, percentage));
 };
 
-const getProgressBarColor = (status: ConnectorSyncStatus, errorCount: number): string => {
+const getProgressBarColor = (status: ConnectorSyncStatus, errorCount: number): ProgressColorScheme => {
     if (status === 'failed') return 'red';
     if (status === 'running' && errorCount > 0) return 'orange';
     if (status === 'running') return 'blue';
-    if (status === 'completed' && errorCount > 0) return 'yellow';
+    if (status === 'completed' && errorCount > 0) return 'orange';
     if (status === 'completed') return 'green';
     if (status === 'warning') return 'orange';
-    return 'gray';
+    return 'blue';
 };
 
 const formatDuration = (startedAt?: string, finishedAt?: string): string => {
@@ -113,271 +105,229 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
     const connectorName = progress.connector_type ?? progress.connector_name ?? 'Unknown';
 
     return (
-        <Box
-            borderWidth="1px"
-            borderRadius="md"
-            borderColor={
-                isRunning
-                    ? 'blue.300'
+        <div
+            className={`overflow-hidden border ${isRunning
+                    ? 'border-blue-300 bg-blue-50'
                     : isFailed
-                        ? 'red.300'
+                        ? 'border-red-300 bg-red-50'
                         : hasWarning
-                            ? 'orange.300'
+                            ? 'border-orange-300 bg-orange-50'
                             : progress.status === 'completed'
-                                ? 'green.300'
-                                : 'gray.200'
-            }
-            bg={
-                isRunning
-                    ? 'blue.50'
-                    : isFailed
-                        ? 'red.50'
-                        : hasWarning
-                            ? 'orange.50'
-                            : progress.test_mode
-                                ? 'orange.50'
-                                : renormalize
-                                    ? 'purple.50'
-                                    : 'white'
-            }
-            overflow="hidden"
+                                ? 'border-green-300 bg-white'
+                                : progress.test_mode
+                                    ? 'border-slate-200 bg-orange-50'
+                                    : renormalize
+                                        ? 'border-slate-200 bg-purple-50'
+                                        : 'border-slate-200 bg-white'
+                }`}
         >
             {/* Header - always visible */}
-            <Box
-                p={3}
-                cursor="pointer"
+            <div
+                className="cursor-pointer p-3 hover:bg-slate-50"
                 onClick={() => setExpanded(!expanded)}
-                _hover={{ bg: 'gray.50' }}
             >
-                <Flex justify="space-between" align="center" mb={1}>
-                    <Flex align="center" gap={2} minW={0} flex={1}>
-                        <Text fontSize="lg">{getStatusIcon(progress.status)}</Text>
-                        <Text fontWeight="medium" truncate>
+                <div className="mb-1 flex items-center justify-between">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="text-lg">{getStatusIcon(progress.status)}</span>
+                        <span className="truncate font-medium">
                             {connectorName}
-                        </Text>
+                        </span>
                         {showAccountName && (
-                            <Text fontSize="xs" color="gray.400" truncate>
+                            <span className="truncate text-xs text-slate-400">
                                 {progress.account_name}
-                            </Text>
+                            </span>
                         )}
                         {progress.test_mode && (
-                            <Badge colorPalette="orange" size="sm">
+                            <Badge colorScheme="orange">
                                 🧪 Test
                             </Badge>
                         )}
                         {renormalize && (
-                            <Badge colorPalette="purple" size="sm">
+                            <Badge colorScheme="purple">
                                 🔄 Re-Normalize
                             </Badge>
                         )}
-                    </Flex>
-                    <Flex align="center" gap={2} flexShrink={0}>
+                    </div>
+                    <div className="flex flex-shrink-0 items-center gap-2">
                         {(progress.status === 'completed' || progress.status === 'running') && (
-                            <Text fontSize="xs" color="gray.500">
+                            <span className="text-xs text-slate-500">
                                 {formatDuration(progress.started_at, progress.finished_at)}
-                            </Text>
+                            </span>
                         )}
-                        <Badge colorPalette={getStatusColor(progress.status)} size="sm">
+                        <Badge colorScheme={getStatusColor(progress.status)}>
                             {progress.status}
                         </Badge>
-                        <Text color="gray.500" fontSize="sm">
+                        <span className="text-sm text-slate-500">
                             {expanded ? '▼' : '▶'}
-                        </Text>
-                    </Flex>
-                </Flex>
+                        </span>
+                    </div>
+                </div>
 
                 {!showAccountName && (
-                    <Text fontSize="xs" color="gray.500">
+                    <span className="block text-xs text-slate-500">
                         {progress.account_name}
-                    </Text>
+                    </span>
                 )}
-                <Text fontSize="xs" color="gray.400" mb={2}>
+                <span className="mb-2 block text-xs text-slate-400">
                     ID: {progress.connector_id}
-                </Text>
+                </span>
 
                 {/* Progress bar for running connector */}
                 {isRunning && progress.operation_total > 0 && (
-                    <Box mb={2}>
-                        <Flex justify="space-between" mb={1}>
-                            <Text fontSize="xs" color={errorCount > 0 ? "orange.600" : "blue.600"}>
+                    <div className="mb-2">
+                        <div className="mb-1 flex justify-between">
+                            <span className={`text-xs ${errorCount > 0 ? 'text-orange-600' : 'text-blue-600'}`}>
                                 {progress.current_operation || 'Processing...'}
-                            </Text>
-                            <Text fontSize="xs" color="gray.400">
+                            </span>
+                            <span className="text-xs text-slate-400">
                                 {progress.operation_progress}/{progress.operation_total}
-                            </Text>
-                        </Flex>
-                        <Progress.Root
+                            </span>
+                        </div>
+                        <Progress
                             value={getOperationProgress(progress)}
                             max={100}
                             size="sm"
-                            colorPalette={getProgressBarColor(progress.status, errorCount)}
-                        >
-                            <Progress.Track>
-                                <Progress.Range />
-                            </Progress.Track>
-                        </Progress.Root>
+                            colorScheme={getProgressBarColor(progress.status, errorCount)}
+                        />
                         {errorCount > 0 && (
-                            <Text fontSize="xs" color="orange.600" mt={1}>
+                            <span className="mt-1 block text-xs text-orange-600">
                                 ⚠️ {errorCount} error{errorCount !== 1 ? 's' : ''} encountered
-                            </Text>
+                            </span>
                         )}
-                    </Box>
+                    </div>
                 )}
 
                 {/* Stats summary */}
                 {(progress.status === 'completed' || progress.status === 'running' || progress.processed > 0 || progress.fetched_count > 0) && (
-                    <Flex gap={3} fontSize="xs" wrap="wrap">
+                    <div className="flex flex-wrap gap-3 text-xs">
                         {progress.status === 'running' && progress.fetched_count > 0 && (
-                            <Text color="purple.500">📥 {progress.fetched_count} fetched</Text>
+                            <span className="text-purple-500">📥 {progress.fetched_count} fetched</span>
                         )}
-                        <Text color="green.400">+{newCount} new</Text>
-                        <Text color="blue.400">{updatedCount} updated</Text>
-                        <Text color="gray.500">{skippedCount} dups</Text>
+                        <span className="text-green-400">+{newCount} new</span>
+                        <span className="text-blue-400">{updatedCount} updated</span>
+                        <span className="text-slate-500">{skippedCount} dups</span>
                         {(errorCount > 0 || progress.error) && (
-                            <Text color="red.400">
+                            <span className="text-red-400">
                                 {errorCount || 1} error{errorCount !== 1 ? 's' : ''}
-                            </Text>
+                            </span>
                         )}
-                    </Flex>
+                    </div>
                 )}
 
                 {/* Error message preview */}
                 {isFailed && progress.error && (
-                    <Text fontSize="xs" color="red.400" mt={2} lineClamp={2}>
+                    <span className="mt-2 line-clamp-2 block text-xs text-red-400">
                         {progress.error.split('\n')[0]}
-                    </Text>
+                    </span>
                 )}
-            </Box>
+            </div>
 
             {/* Expanded content */}
-            <Collapsible.Root open={expanded}>
-                <Collapsible.Content>
-                    <Box p={3} pt={0} borderTopWidth="1px" borderColor="gray.200">
-                        {/* Detailed stats */}
-                        <Flex gap={4} mb={4} wrap="wrap">
-                            {progress.status === 'running' && (
-                                <Box>
-                                    <Text fontSize="xs" color="gray.500">
-                                        Fetched
-                                    </Text>
-                                    <Text fontSize="lg" fontWeight="bold" color="purple.500">
-                                        {progress.fetched_count ?? 0}
-                                    </Text>
-                                </Box>
-                            )}
-                            <Box>
-                                <Text fontSize="xs" color="gray.500">
-                                    Processed
-                                </Text>
-                                <Text fontSize="lg" fontWeight="bold">
-                                    {progress.processed}
-                                </Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="xs" color="gray.500">
-                                    New
-                                </Text>
-                                <Text fontSize="lg" fontWeight="bold" color="green.400">
-                                    {newCount}
-                                </Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="xs" color="gray.500">
-                                    Updated
-                                </Text>
-                                <Text fontSize="lg" fontWeight="bold" color="blue.400">
-                                    {updatedCount}
-                                </Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="xs" color="gray.500">
-                                    Duplicates
-                                </Text>
-                                <Text fontSize="lg" fontWeight="bold" color="gray.500">
-                                    {skippedCount}
-                                </Text>
-                            </Box>
-                        </Flex>
+            {expanded && (
+                <div className="border-t border-slate-200 p-3 pt-0">
+                    {/* Detailed stats */}
+                    <div className="mb-4 flex flex-wrap gap-4">
+                        {progress.status === 'running' && (
+                            <div>
+                                <span className="block text-xs text-slate-500">
+                                    Fetched
+                                </span>
+                                <span className="block text-lg font-bold text-purple-500">
+                                    {progress.fetched_count ?? 0}
+                                </span>
+                            </div>
+                        )}
+                        <div>
+                            <span className="block text-xs text-slate-500">
+                                Processed
+                            </span>
+                            <span className="block text-lg font-bold">
+                                {progress.processed}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="block text-xs text-slate-500">
+                                New
+                            </span>
+                            <span className="block text-lg font-bold text-green-400">
+                                {newCount}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="block text-xs text-slate-500">
+                                Updated
+                            </span>
+                            <span className="block text-lg font-bold text-blue-400">
+                                {updatedCount}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="block text-xs text-slate-500">
+                                Duplicates
+                            </span>
+                            <span className="block text-lg font-bold text-slate-500">
+                                {skippedCount}
+                            </span>
+                        </div>
+                    </div>
 
-                        {/* Error display */}
-                        {isFailed && progress.error && (
-                            <Box
-                                bg="red.50"
-                                borderColor="red.200"
-                                borderWidth={1}
-                                p={3}
-                                borderRadius="md"
-                                mb={4}
+                    {/* Error display */}
+                    {isFailed && progress.error && (
+                        <div className="mb-4 border border-red-200 bg-red-50 p-3">
+                            <span className="mb-2 block font-bold text-red-700">
+                                Error Details:
+                            </span>
+                            <pre className="max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words border border-red-100 bg-white p-2 font-mono text-xs text-red-600">
+                                {progress.error}
+                            </pre>
+                        </div>
+                    )}
+
+                    {/* Retry button */}
+                    {canRetry && (
+                        <div className="mb-4">
+                            <Button
+                                size="sm"
+                                colorScheme="blue"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onRetry(progress.connector_id);
+                                }}
+                                loading={retryLoading}
                             >
-                                <Text fontWeight="bold" color="red.700" mb={2}>
-                                    Error Details:
-                                </Text>
-                                <Box
-                                    as="pre"
-                                    fontSize="xs"
-                                    color="red.600"
-                                    whiteSpace="pre-wrap"
-                                    wordBreak="break-word"
-                                    fontFamily="monospace"
-                                    maxH="300px"
-                                    overflowY="auto"
-                                    bg="white"
-                                    p={2}
-                                    borderRadius="sm"
-                                    borderWidth={1}
-                                    borderColor="red.100"
-                                >
-                                    {progress.error}
-                                </Box>
-                            </Box>
-                        )}
+                                🔄 Retry Connector
+                            </Button>
+                        </div>
+                    )}
 
-                        {/* Retry button */}
-                        {canRetry && (
-                            <Box mb={4}>
-                                <Button
-                                    size="sm"
-                                    colorPalette="blue"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onRetry(progress.connector_id);
-                                    }}
-                                    loading={retryLoading}
-                                >
-                                    🔄 Retry Connector
-                                </Button>
-                            </Box>
-                        )}
+                    {/* View Details button */}
+                    {hasConnectorRunId && (
+                        <div className="mb-4">
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                colorScheme="blue"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDetailDrawerOpen(true);
+                                }}
+                            >
+                                📊 View Details
+                            </Button>
+                        </div>
+                    )}
 
-                        {/* View Details button */}
-                        {hasConnectorRunId && (
-                            <Box mb={4}>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    colorPalette="blue"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setDetailDrawerOpen(true);
-                                    }}
-                                >
-                                    📊 View Details
-                                </Button>
-                            </Box>
-                        )}
-
-                        {/* Logs */}
-                        {progress.logs && progress.logs.length > 0 && (
-                            <Box>
-                                <Text fontSize="xs" color="gray.500" mb={2}>
-                                    Logs
-                                </Text>
-                                <ConnectorLogViewer logs={progress.logs} maxHeight="150px" />
-                            </Box>
-                        )}
-                    </Box>
-                </Collapsible.Content>
-            </Collapsible.Root>
+                    {/* Logs */}
+                    {progress.logs && progress.logs.length > 0 && (
+                        <div>
+                            <span className="mb-2 block text-xs text-slate-500">
+                                Logs
+                            </span>
+                            <ConnectorLogViewer logs={progress.logs} maxHeight="150px" />
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Connector Run Detail Drawer - Use custom resizable drawer */}
             {hasConnectorRunId && detailDrawerOpen && (
@@ -388,6 +338,6 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                     enablePolling={isRunning}
                 />
             )}
-        </Box>
+        </div>
     );
 };

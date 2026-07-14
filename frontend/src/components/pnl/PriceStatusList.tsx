@@ -1,16 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import {
-    Box,
-    Badge,
-    Button,
-    Flex,
-    Input,
-    Table,
-    Text,
-    Icon,
-    Spinner,
-} from '@chakra-ui/react';
+import { Badge, Button, Input, Spinner } from '../ui/primitives';
 import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiDatabase, FiLoader, FiRefreshCw, FiChevronDown } from 'react-icons/fi';
 import { AssetRef, PriceResponse } from '../../types';
 import { formatRelativeTime } from '../../utils/dateUtils';
@@ -182,97 +172,95 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
     const toggleFilter = (f: StatusFilter) => setStatusFilter(prev => prev === f ? 'all' : f);
 
     return (
-        <Box height="100%" display="flex" flexDirection="column">
+        <div className="flex h-full flex-col">
             {/* Header / Stats */}
-            <Box p={4} borderBottom="1px solid" borderColor="gray.100" bg="gray.50">
-                <Flex justify="space-between" align="center" mb={4}>
-                    <Box>
-                        <Text fontSize="lg" fontWeight="bold">Price Status</Text>
-                        <Flex gap={2} mt={1}>
+            <div className="border-b border-gray-100 bg-gray-50 p-4">
+                <div className="mb-4 flex items-center justify-between">
+                    <div>
+                        <div className="text-lg font-bold">Price Status</div>
+                        <div className="mt-1 flex gap-2">
                             {loadingCount > 0 && (
-                                <Badge colorPalette="blue" variant={statusFilter === 'loading' ? 'solid' : 'outline'} cursor="pointer" onClick={() => toggleFilter('loading')}>
+                                <Badge colorScheme="blue" className={`cursor-pointer ${statusFilter === 'loading' ? 'ring-2 ring-blue-400' : ''}`} onClick={() => toggleFilter('loading')}>
                                     {loadingCount} Loading
                                 </Badge>
                             )}
-                            <Badge colorPalette="green" variant={statusFilter === 'ok' ? 'solid' : 'outline'} cursor="pointer" onClick={() => toggleFilter('ok')}>
+                            <Badge colorScheme="green" className={`cursor-pointer ${statusFilter === 'ok' ? 'ring-2 ring-green-400' : ''}`} onClick={() => toggleFilter('ok')}>
                                 {okCount} OK
                             </Badge>
                             {staleCount > 0 && (
-                                <Badge colorPalette="orange" variant={statusFilter === 'stale' ? 'solid' : 'outline'} cursor="pointer" onClick={() => toggleFilter('stale')}>
+                                <Badge colorScheme="orange" className={`cursor-pointer ${statusFilter === 'stale' ? 'ring-2 ring-orange-400' : ''}`} onClick={() => toggleFilter('stale')}>
                                     {staleCount} Stale
                                 </Badge>
                             )}
-                            <Badge colorPalette="red" variant={statusFilter === 'error' ? 'solid' : 'outline'} cursor="pointer" onClick={() => toggleFilter('error')}>
+                            <Badge colorScheme="red" className={`cursor-pointer ${statusFilter === 'error' ? 'ring-2 ring-red-400' : ''}`} onClick={() => toggleFilter('error')}>
                                 {failedCount} Failed
                             </Badge>
                             {failedCount > 0 && onRetryFailed && (
                                 <Button
-                                    size="2xs"
+                                    size="sm"
                                     variant="outline"
-                                    colorPalette="red"
+                                    colorScheme="red"
                                     onClick={onRetryFailed}
                                     disabled={loadingCount > 0}
+                                    className="h-6 px-2 text-xs"
                                 >
                                     <FiRefreshCw size={12} />
-                                    <Text ml={1} fontSize="xs">Retry Failed</Text>
+                                    <span className="ml-1 text-xs">Retry Failed</span>
                                 </Button>
                             )}
                             {naCount > 0 && (
-                                <Badge colorPalette="gray" variant={statusFilter === 'na' ? 'solid' : 'outline'} cursor="pointer" onClick={() => toggleFilter('na')}>
+                                <Badge colorScheme="gray" className={`cursor-pointer ${statusFilter === 'na' ? 'ring-2 ring-slate-400' : ''}`} onClick={() => toggleFilter('na')}>
                                     {naCount} N/A
                                 </Badge>
                             )}
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
                     <PriceGapBulkFix
                         quoteAssetId={quoteAssetId ?? null}
                         onComplete={onBulkGapFixComplete}
                         compact
                     />
-                </Flex>
+                </div>
 
-                <Box position="relative">
+                <div className="relative">
                     <Input
                         placeholder="Search assets..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        pl={8}
-                        size="sm"
-                        borderRadius="md"
-                        bg="white"
+                        className="rounded-md bg-white pl-8"
                     />
-                    <Box position="absolute" left={2.5} top={2.5} color="gray.400">
+                    <div className="absolute left-2.5 top-2.5 text-gray-400">
                         <FiSearch size={14} />
-                    </Box>
-                </Box>
-            </Box>
+                    </div>
+                </div>
+            </div>
 
             {/* List Content */}
-            <Box flex="1" overflowY="auto" p={0}>
+            <div className="flex-1 overflow-y-auto p-0">
                 {displayed.length === 0 ? (
-                    <Flex justify="center" align="center" h="200px" color="gray.400" direction="column">
+                    <div className="flex h-[200px] flex-col items-center justify-center text-gray-400">
                         <FiDatabase size={32} />
-                        <Text mt={2}>{statusFilter !== 'all' ? `No ${statusFilter} assets` : 'No price data available'}</Text>
-                    </Flex>
+                        <div className="mt-2">{statusFilter !== 'all' ? `No ${statusFilter} assets` : 'No price data available'}</div>
+                    </div>
                 ) : (
-                    <Table.Root size="sm" stickyHeader fontSize="xs">
-                        <Table.Header>
-                            <Table.Row>
-                                <Table.ColumnHeader width="40px"></Table.ColumnHeader>
-                                <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                                <Table.ColumnHeader>Price</Table.ColumnHeader>
-                                <Table.ColumnHeader>Source</Table.ColumnHeader>
-                                <Table.ColumnHeader width="40px"></Table.ColumnHeader>
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
+                    <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-white">
+                            <tr>
+                                <th className="w-[40px]"></th>
+                                <th className="text-left">Asset</th>
+                                <th className="text-left">Price</th>
+                                <th className="text-left">Source</th>
+                                <th className="w-[40px]"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
                             {displayed.map((item) => {
                                 const isLoading = loadingAssetIds?.has(item.asset.id!) ?? false;
                                 const isNa = (item as any)._isNa === true;
                                 const isError = !isLoading && !isNa && !!item.error;
                                 const isStale = !isLoading && !isNa && !!item.is_stale;
-                                const rowBg = isLoading ? 'blue.50' : isNa ? 'gray.50' : isError ? 'red.50' : isStale ? 'orange.50' : undefined;
-                                const iconColor = isLoading ? 'blue.500' : isNa ? 'gray.400' : isError ? 'red.500' : isStale ? 'orange.500' : 'green.500';
+                                const rowBg = isLoading ? 'bg-blue-50 hover:bg-blue-100' : isNa ? 'bg-gray-50 hover:bg-gray-100' : isError ? 'bg-red-50 hover:bg-red-100' : isStale ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50';
+                                const iconColorClass = isLoading ? 'text-blue-500' : isNa ? 'text-gray-400' : isError ? 'text-red-500' : isStale ? 'text-orange-500' : 'text-green-500';
                                 const StatusIcon = isLoading ? FiLoader : isNa ? FiDatabase : isError ? FiAlertCircle : isStale ? FiAlertTriangle : FiCheckCircle;
                                 const isExpanded = expandedAssetId === item.asset.id;
 
@@ -287,99 +275,93 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
 
                                 return (
                                     <React.Fragment key={item.asset.id}>
-                                        <Table.Row
-                                            bg={rowBg}
-                                            cursor="pointer"
+                                        <tr
+                                            className={`cursor-pointer ${rowBg}`}
                                             onClick={() => setExpandedAssetId(isExpanded ? null : item.asset.id!)}
-                                            _hover={{ bg: isLoading ? 'blue.100' : isNa ? 'gray.100' : isError ? 'red.100' : isStale ? 'orange.100' : 'gray.50' }}
                                         >
-                                            <Table.Cell>
+                                            <td>
                                                 {isLoading ? (
-                                                    <Spinner size="xs" color="blue.500" />
+                                                    <Spinner size="xs" className="text-blue-500" />
                                                 ) : (
-                                                    <Icon color={iconColor}>
+                                                    <span className={iconColorClass}>
                                                         <StatusIcon />
-                                                    </Icon>
+                                                    </span>
                                                 )}
-                                            </Table.Cell>
-                                            <Table.Cell fontWeight="medium">
-                                                <Flex align="center" gap={1}>
+                                            </td>
+                                            <td className="font-medium">
+                                                <div className="flex items-center gap-1">
                                                     <Tooltip content={item.asset.label || item.asset.symbol || ''} openDelay={300} disabled={!item.asset.label}>
-                                                        <Text>{item.asset.symbol}</Text>
+                                                        <span>{item.asset.symbol}</span>
                                                     </Tooltip>
                                                     {gapMap.has(item.asset.id!) && (
-                                                        <Badge size="xs" colorPalette="orange" variant="subtle">
+                                                        <Badge colorScheme="orange">
                                                             {gapMap.get(item.asset.id!)} gap{gapMap.get(item.asset.id!)! !== 1 ? 's' : ''}
                                                         </Badge>
                                                     )}
-                                                </Flex>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Text fontWeight={isError ? 'normal' : 'bold'}>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span className={isError ? 'font-normal' : 'font-bold'}>
                                                     {isError && item.last_known_price != null
                                                         ? formatCurrency(item.last_known_price, baseCurrency)
                                                         : formatCurrency(item.price, baseCurrency)}
-                                                </Text>
-                                            </Table.Cell>
-                                            <Table.Cell>
+                                                </span>
+                                            </td>
+                                            <td>
                                                 {isLoading ? (
-                                                    <Text color="blue.600" fontSize="xs" fontWeight="medium">Fetching…</Text>
+                                                    <span className="text-xs font-medium text-blue-600">Fetching…</span>
                                                 ) : isNa ? (
-                                                    <Text color="gray.500" fontSize="xs">No active lots</Text>
+                                                    <span className="text-xs text-gray-500">No active lots</span>
                                                 ) : isError ? (
-                                                    <Flex align="center" gap={1}>
+                                                    <div className="flex items-center gap-1">
                                                         <Tooltip content={item.error || ''} openDelay={200}>
-                                                            <Text color="red.600" fontSize="xs" fontWeight="medium" truncate maxW="120px">
+                                                            <span className="max-w-[120px] truncate text-xs font-medium text-red-600">
                                                                 {item.error}
-                                                            </Text>
+                                                            </span>
                                                         </Tooltip>
                                                         {sourceDate && (
-                                                            <Text color="gray.400" fontSize="xs" whiteSpace="nowrap">
+                                                            <span className="whitespace-nowrap text-xs text-gray-400">
                                                                 {formatRelativeTime(sourceDate)}
-                                                            </Text>
+                                                            </span>
                                                         )}
-                                                    </Flex>
+                                                    </div>
                                                 ) : (
-                                                    <Flex align="center" gap={1}>
-                                                        <Text color="gray.600" fontSize="xs" truncate maxW="100px">
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="max-w-[100px] truncate text-xs text-gray-600">
                                                             {sourceText}
-                                                        </Text>
+                                                        </span>
                                                         {sourceDate && (
-                                                            <Text color="gray.400" fontSize="xs" whiteSpace="nowrap">
+                                                            <span className="whitespace-nowrap text-xs text-gray-400">
                                                                 {formatRelativeTime(sourceDate)}
-                                                            </Text>
+                                                            </span>
                                                         )}
-                                                    </Flex>
+                                                    </div>
                                                 )}
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Icon
-                                                    color="gray.500"
-                                                    transition="transform 0.15s"
-                                                    transform={isExpanded ? 'rotate(180deg)' : undefined}
-                                                >
+                                            </td>
+                                            <td>
+                                                <span className={`inline-block text-gray-500 transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`}>
                                                     <FiChevronDown />
-                                                </Icon>
-                                            </Table.Cell>
-                                        </Table.Row>
+                                                </span>
+                                            </td>
+                                        </tr>
                                         {isExpanded && (
-                                            <Table.Row>
-                                                <Table.Cell colSpan={5} p={3} bg="gray.50">
+                                            <tr>
+                                                <td colSpan={5} className="bg-gray-50 p-3">
                                                     <GapFixPanel
                                                         assetId={item.asset.id!}
                                                         symbol={item.asset.symbol || ''}
                                                         onOpenPriceSetter={() => handleOpenPriceSetter(item.asset)}
                                                     />
-                                                </Table.Cell>
-                                            </Table.Row>
+                                                </td>
+                                            </tr>
                                         )}
                                     </React.Fragment>
                                 );
                             })}
-                        </Table.Body>
-                    </Table.Root>
+                        </tbody>
+                    </table>
                 )}
-            </Box>
+            </div>
 
             {/* Manual Price Dialog */}
             {selectedAsset && quoteAssetId && (
@@ -397,6 +379,6 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                     quoteAssetName={baseCurrency}
                 />
             )}
-        </Box>
+        </div>
     );
 };

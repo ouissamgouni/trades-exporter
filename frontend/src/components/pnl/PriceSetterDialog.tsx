@@ -12,17 +12,8 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import {
-    Box,
-    Button,
-    Dialog,
-    Flex,
-    Input,
-    NativeSelect,
-    Portal,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Button, Input, Spinner } from '../ui/primitives';
 import { FiCheck, FiX, FiDownload, FiEdit3, FiAlertTriangle, FiToggleLeft, FiToggleRight, FiPlay } from 'react-icons/fi';
 import { API_URL, CheckExistingResponse, TestFetchResponse } from '../../types';
 import { toaster } from '../ui/toaster';
@@ -305,276 +296,269 @@ export const PriceSetterDialog: React.FC<PriceSetterDialogProps> = ({
             : !!price && parseFloat(price) > 0;
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => !e.open && onClose()}>
-            <Portal>
-                <Dialog.Backdrop css={{ zIndex: 2000 }} />
-                <Dialog.Positioner css={{ zIndex: 2000 }}>
-                    <Dialog.Content maxW="460px">
-                        <Dialog.Header>
-                            <Dialog.Title>Price Setter</Dialog.Title>
-                        </Dialog.Header>
-                        <Dialog.Body>
-                            <Flex direction="column" gap={4}>
-                                {/* Asset (read-only) */}
-                                <Box>
-                                    <Text fontSize="sm" fontWeight="medium" mb={1}>Asset</Text>
-                                    <Input value={assetName} readOnly bg="gray.100" cursor="not-allowed" />
-                                </Box>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] w-full max-w-[460px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-100 px-5 py-4">
+                        <RadixDialog.Title className="text-base font-semibold text-slate-900">Price Setter</RadixDialog.Title>
+                    </div>
+                    <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+                        <div className="flex flex-col gap-4">
+                            {/* Asset (read-only) */}
+                            <div>
+                                <div className="mb-1 text-sm font-medium">Asset</div>
+                                <Input value={assetName} readOnly className="cursor-not-allowed bg-gray-100" />
+                            </div>
 
-                                {/* Source mode toggle: Manual / Fetch */}
-                                <Flex gap={2}>
-                                    <Button
-                                        size="xs"
-                                        variant={sourceMode === 'manual' ? 'solid' : 'outline'}
-                                        colorPalette={sourceMode === 'manual' ? 'blue' : 'gray'}
-                                        onClick={() => setSourceMode('manual')}
+                            {/* Source mode toggle: Manual / Fetch */}
+                            <div className="flex gap-2">
+                                <Button
+                                    size="sm"
+                                    variant={sourceMode === 'manual' ? 'solid' : 'outline'}
+                                    colorScheme={sourceMode === 'manual' ? 'blue' : 'gray'}
+                                    onClick={() => setSourceMode('manual')}
+                                >
+                                    <FiEdit3 style={{ marginRight: 4 }} /> Manual
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant={sourceMode === 'fetch' ? 'solid' : 'outline'}
+                                    colorScheme={sourceMode === 'fetch' ? 'gray' : 'gray'}
+                                    className={sourceMode === 'fetch' ? 'bg-orange-500 text-white hover:bg-orange-600' : ''}
+                                    onClick={() => setSourceMode('fetch')}
+                                >
+                                    <FiDownload style={{ marginRight: 4 }} /> Fetch
+                                </Button>
+                            </div>
+
+                            {/* Manual-only: Quote Currency */}
+                            {sourceMode === 'manual' && (
+                                <div>
+                                    <div className="mb-1 text-sm font-medium">Quote Currency</div>
+                                    <select
+                                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={selectedQuoteId ?? ''}
+                                        onChange={e => setSelectedQuoteId(e.target.value ? Number(e.target.value) : undefined)}
                                     >
-                                        <FiEdit3 style={{ marginRight: 4 }} /> Manual
+                                        <option value="">— None —</option>
+                                        {quoteOptions.map(a => (
+                                            <option key={a.id} value={a.id}>{a.symbol}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Date mode toggle (manual only shows single/range) */}
+                            {sourceMode === 'manual' && (
+                                <div className="flex gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant={dateMode === 'single' ? 'solid' : 'outline'}
+                                        colorScheme={dateMode === 'single' ? 'blue' : 'gray'}
+                                        onClick={() => setDateMode('single')}
+                                    >
+                                        Single date
                                     </Button>
                                     <Button
-                                        size="xs"
-                                        variant={sourceMode === 'fetch' ? 'solid' : 'outline'}
-                                        colorPalette={sourceMode === 'fetch' ? 'orange' : 'gray'}
-                                        onClick={() => setSourceMode('fetch')}
+                                        size="sm"
+                                        variant={dateMode === 'range' ? 'solid' : 'outline'}
+                                        colorScheme={dateMode === 'range' ? 'blue' : 'gray'}
+                                        onClick={() => setDateMode('range')}
                                     >
-                                        <FiDownload style={{ marginRight: 4 }} /> Fetch
+                                        Date range
                                     </Button>
-                                </Flex>
+                                </div>
+                            )}
 
-                                {/* Manual-only: Quote Currency */}
-                                {sourceMode === 'manual' && (
-                                    <Box>
-                                        <Text fontSize="sm" fontWeight="medium" mb={1}>Quote Currency</Text>
-                                        <NativeSelect.Root size="sm">
-                                            <NativeSelect.Field
-                                                value={selectedQuoteId ?? ''}
-                                                onChange={e => setSelectedQuoteId(e.target.value ? Number(e.target.value) : undefined)}
-                                            >
-                                                <option value="">— None —</option>
-                                                {quoteOptions.map(a => (
-                                                    <option key={a.id} value={a.id}>{a.symbol}</option>
-                                                ))}
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
-                                )}
+                            {/* Date fields */}
+                            {(sourceMode === 'manual' && dateMode === 'single') ? (
+                                <div>
+                                    <div className="mb-1 text-sm font-medium">Price Date</div>
+                                    <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                                </div>
+                            ) : (
+                                <div className="flex gap-2">
+                                    <div className="flex-1">
+                                        <div className="mb-1 text-sm font-medium">From</div>
+                                        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="mb-1 text-sm font-medium">To</div>
+                                        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                                    </div>
+                                </div>
+                            )}
 
-                                {/* Date mode toggle (manual only shows single/range) */}
-                                {sourceMode === 'manual' && (
-                                    <Flex gap={2}>
-                                        <Button
-                                            size="xs"
-                                            variant={dateMode === 'single' ? 'solid' : 'outline'}
-                                            colorPalette={dateMode === 'single' ? 'blue' : 'gray'}
-                                            onClick={() => setDateMode('single')}
+                            {/* Manual mode: price fields */}
+                            {sourceMode === 'manual' && (
+                                <>
+                                    {/* Interpolation toggle (range only) */}
+                                    {dateMode === 'range' && (
+                                        <div
+                                            className="flex select-none items-center gap-2 cursor-pointer"
+                                            onClick={() => setInterpolate(!interpolate)}
                                         >
-                                            Single date
-                                        </Button>
-                                        <Button
-                                            size="xs"
-                                            variant={dateMode === 'range' ? 'solid' : 'outline'}
-                                            colorPalette={dateMode === 'range' ? 'blue' : 'gray'}
-                                            onClick={() => setDateMode('range')}
-                                        >
-                                            Date range
-                                        </Button>
-                                    </Flex>
-                                )}
+                                            <span className={`text-xl ${interpolate ? 'text-blue-500' : 'text-gray-400'}`}>
+                                                {interpolate ? <FiToggleRight /> : <FiToggleLeft />}
+                                            </span>
+                                            <span className="text-sm">Interpolation (linear fill between two prices)</span>
+                                        </div>
+                                    )}
 
-                                {/* Date fields */}
-                                {(sourceMode === 'manual' && dateMode === 'single') ? (
-                                    <Box>
-                                        <Text fontSize="sm" fontWeight="medium" mb={1}>Price Date</Text>
-                                        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                                    </Box>
-                                ) : (
-                                    <Flex gap={2}>
-                                        <Box flex={1}>
-                                            <Text fontSize="sm" fontWeight="medium" mb={1}>From</Text>
-                                            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-                                        </Box>
-                                        <Box flex={1}>
-                                            <Text fontSize="sm" fontWeight="medium" mb={1}>To</Text>
-                                            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-                                        </Box>
-                                    </Flex>
-                                )}
-
-                                {/* Manual mode: price fields */}
-                                {sourceMode === 'manual' && (
-                                    <>
-                                        {/* Interpolation toggle (range only) */}
-                                        {dateMode === 'range' && (
-                                            <Flex
-                                                align="center"
-                                                gap={2}
-                                                cursor="pointer"
-                                                onClick={() => setInterpolate(!interpolate)}
-                                                userSelect="none"
-                                            >
-                                                <Box color={interpolate ? 'blue.500' : 'gray.400'} fontSize="xl">
-                                                    {interpolate ? <FiToggleRight /> : <FiToggleLeft />}
-                                                </Box>
-                                                <Text fontSize="sm">Interpolation (linear fill between two prices)</Text>
-                                            </Flex>
-                                        )}
-
-                                        {interpolate && dateMode === 'range' ? (
-                                            <Flex gap={2}>
-                                                <Box flex={1}>
-                                                    <Text fontSize="sm" fontWeight="medium" mb={1}>
-                                                        Start price ({selectedQuoteName})
-                                                    </Text>
-                                                    <Input
-                                                        type="number"
-                                                        step="any"
-                                                        min="0"
-                                                        placeholder="e.g., 40000"
-                                                        value={priceStart}
-                                                        onChange={(e) => setPriceStart(e.target.value)}
-                                                        autoFocus
-                                                    />
-                                                </Box>
-                                                <Box flex={1}>
-                                                    <Text fontSize="sm" fontWeight="medium" mb={1}>
-                                                        End price ({selectedQuoteName})
-                                                    </Text>
-                                                    <Input
-                                                        type="number"
-                                                        step="any"
-                                                        min="0"
-                                                        placeholder="e.g., 42000"
-                                                        value={priceEnd}
-                                                        onChange={(e) => setPriceEnd(e.target.value)}
-                                                    />
-                                                </Box>
-                                            </Flex>
-                                        ) : (
-                                            <Box>
-                                                <Text fontSize="sm" fontWeight="medium" mb={1}>
-                                                    Price in {selectedQuoteName}
-                                                </Text>
+                                    {interpolate && dateMode === 'range' ? (
+                                        <div className="flex gap-2">
+                                            <div className="flex-1">
+                                                <div className="mb-1 text-sm font-medium">
+                                                    Start price ({selectedQuoteName})
+                                                </div>
                                                 <Input
                                                     type="number"
                                                     step="any"
                                                     min="0"
-                                                    placeholder="e.g., 42000.50"
-                                                    value={price}
-                                                    onChange={(e) => setPrice(e.target.value)}
+                                                    placeholder="e.g., 40000"
+                                                    value={priceStart}
+                                                    onChange={(e) => setPriceStart(e.target.value)}
                                                     autoFocus
                                                 />
-                                                {defaultPrice != null && (
-                                                    <Text fontSize="xs" color="gray.500" mt={1}>
-                                                        Pre-filled with last known price before gap
-                                                    </Text>
-                                                )}
-                                            </Box>
-                                        )}
-                                    </>
-                                )}
-
-                                {/* Fetch mode info + test */}
-                                {sourceMode === 'fetch' && (
-                                    <Box>
-                                        <Flex align="center" justify="space-between" bg="orange.50" p={3} borderRadius="md">
-                                            <Text fontSize="sm" color="orange.800" flex={1}>
-                                                Prices will be fetched from configured price getters
-                                                for each missing date in the selected range.
-                                            </Text>
-                                            <Button
-                                                size="xs"
-                                                variant="outline"
-                                                colorPalette="orange"
-                                                onClick={handleTestFetch}
-                                                disabled={isTesting}
-                                                ml={2}
-                                                flexShrink={0}
-                                            >
-                                                {isTesting ? <Spinner size="xs" /> : <><FiPlay size={12} style={{ marginRight: 3 }} /> Test</>}
-                                            </Button>
-                                        </Flex>
-                                        {testResult && (
-                                            <Box bg="green.50" p={2} borderRadius="md" mt={2} borderWidth="1px" borderColor="green.200">
-                                                <Text fontSize="xs" color="green.800" fontWeight="medium">
-                                                    Test result for {testResult.date}
-                                                </Text>
-                                                <Text fontSize="xs" color="green.700" fontFamily="mono">
-                                                    {testResult.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
-                                                    {testResult.quote_currency ? ` ${testResult.quote_currency}` : ''}
-                                                </Text>
-                                                <Text fontSize="2xs" color="green.600">
-                                                    Source: {testResult.source}
-                                                </Text>
-                                            </Box>
-                                        )}
-                                        {testError && (
-                                            <Box bg="red.50" p={2} borderRadius="md" mt={2} borderWidth="1px" borderColor="red.200">
-                                                <Text fontSize="xs" color="red.700">{testError}</Text>
-                                            </Box>
-                                        )}
-                                    </Box>
-                                )}
-
-                                {/* Preview for manual range mode */}
-                                {sourceMode === 'manual' && dateMode === 'range' && !interpolate && price && parseFloat(price) > 0 && (
-                                    <Box bg="blue.50" p={2} borderRadius="md">
-                                        <Text fontSize="xs" color="blue.700">
-                                            Will create snapshots at {selectedQuoteName} {parseFloat(price).toLocaleString()} for each trading day from {dateFrom} to {dateTo}
-                                        </Text>
-                                    </Box>
-                                )}
-
-                                {/* Preview for interpolation */}
-                                {sourceMode === 'manual' && dateMode === 'range' && interpolate && priceStart && priceEnd && (
-                                    <Box bg="blue.50" p={2} borderRadius="md">
-                                        <Text fontSize="xs" color="blue.700">
-                                            Will interpolate linearly from {selectedQuoteName} {parseFloat(priceStart).toLocaleString()} to {parseFloat(priceEnd).toLocaleString()} across each trading day from {dateFrom} to {dateTo}
-                                        </Text>
-                                    </Box>
-                                )}
-
-                                {/* Override confirmation */}
-                                {showOverrideConfirm && (
-                                    <Box bg="yellow.50" p={3} borderRadius="md" borderWidth="1px" borderColor="yellow.300">
-                                        <Flex align="center" gap={2} mb={1}>
-                                            <FiAlertTriangle color="orange" />
-                                            <Text fontSize="sm" fontWeight="bold" color="yellow.800">
-                                                {existingCount} existing price(s) found
-                                            </Text>
-                                        </Flex>
-                                        <Text fontSize="xs" color="yellow.700">
-                                            Saving will overwrite existing prices in this date range. Click Save again to confirm.
-                                        </Text>
-                                    </Box>
-                                )}
-                            </Flex>
-                        </Dialog.Body>
-                        <Dialog.Footer>
-                            <Flex gap={2} justify="flex-end">
-                                <Button variant="outline" onClick={onClose} disabled={isSaving}>
-                                    <FiX style={{ marginRight: 4 }} /> Cancel
-                                </Button>
-                                <Button
-                                    colorPalette={showOverrideConfirm ? 'orange' : sourceMode === 'fetch' ? 'orange' : 'blue'}
-                                    onClick={handleSave}
-                                    disabled={isSaving || !isFormValid}
-                                >
-                                    {isSaving ? (
-                                        <><Spinner size="xs" mr={2} /> {sourceMode === 'fetch' ? 'Fetching...' : 'Saving...'}</>
-                                    ) : showOverrideConfirm ? (
-                                        <><FiAlertTriangle style={{ marginRight: 4 }} /> Confirm Override</>
-                                    ) : sourceMode === 'fetch' ? (
-                                        <><FiDownload style={{ marginRight: 4 }} /> Fetch Prices</>
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="mb-1 text-sm font-medium">
+                                                    End price ({selectedQuoteName})
+                                                </div>
+                                                <Input
+                                                    type="number"
+                                                    step="any"
+                                                    min="0"
+                                                    placeholder="e.g., 42000"
+                                                    value={priceEnd}
+                                                    onChange={(e) => setPriceEnd(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
                                     ) : (
-                                        <><FiCheck style={{ marginRight: 4 }} /> Save Price</>
+                                        <div>
+                                            <div className="mb-1 text-sm font-medium">
+                                                Price in {selectedQuoteName}
+                                            </div>
+                                            <Input
+                                                type="number"
+                                                step="any"
+                                                min="0"
+                                                placeholder="e.g., 42000.50"
+                                                value={price}
+                                                onChange={(e) => setPrice(e.target.value)}
+                                                autoFocus
+                                            />
+                                            {defaultPrice != null && (
+                                                <div className="mt-1 text-xs text-gray-500">
+                                                    Pre-filled with last known price before gap
+                                                </div>
+                                            )}
+                                        </div>
                                     )}
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                                </>
+                            )}
+
+                            {/* Fetch mode info + test */}
+                            {sourceMode === 'fetch' && (
+                                <div>
+                                    <div className="flex items-center justify-between rounded-md bg-orange-50 p-3">
+                                        <div className="flex-1 text-sm text-orange-800">
+                                            Prices will be fetched from configured price getters
+                                            for each missing date in the selected range.
+                                        </div>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            colorScheme="gray"
+                                            className="ml-2 shrink-0 border-orange-300 text-orange-700 hover:bg-orange-50"
+                                            onClick={handleTestFetch}
+                                            disabled={isTesting}
+                                        >
+                                            {isTesting ? <Spinner size="xs" /> : <><FiPlay size={12} style={{ marginRight: 3 }} /> Test</>}
+                                        </Button>
+                                    </div>
+                                    {testResult && (
+                                        <div className="mt-2 rounded-md border border-green-200 bg-green-50 p-2">
+                                            <div className="text-xs font-medium text-green-800">
+                                                Test result for {testResult.date}
+                                            </div>
+                                            <div className="font-mono text-xs text-green-700">
+                                                {testResult.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+                                                {testResult.quote_currency ? ` ${testResult.quote_currency}` : ''}
+                                            </div>
+                                            <div className="text-[10px] text-green-600">
+                                                Source: {testResult.source}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {testError && (
+                                        <div className="mt-2 rounded-md border border-red-200 bg-red-50 p-2">
+                                            <div className="text-xs text-red-700">{testError}</div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Preview for manual range mode */}
+                            {sourceMode === 'manual' && dateMode === 'range' && !interpolate && price && parseFloat(price) > 0 && (
+                                <div className="rounded-md bg-blue-50 p-2">
+                                    <div className="text-xs text-blue-700">
+                                        Will create snapshots at {selectedQuoteName} {parseFloat(price).toLocaleString()} for each trading day from {dateFrom} to {dateTo}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Preview for interpolation */}
+                            {sourceMode === 'manual' && dateMode === 'range' && interpolate && priceStart && priceEnd && (
+                                <div className="rounded-md bg-blue-50 p-2">
+                                    <div className="text-xs text-blue-700">
+                                        Will interpolate linearly from {selectedQuoteName} {parseFloat(priceStart).toLocaleString()} to {parseFloat(priceEnd).toLocaleString()} across each trading day from {dateFrom} to {dateTo}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Override confirmation */}
+                            {showOverrideConfirm && (
+                                <div className="rounded-md border border-yellow-300 bg-yellow-50 p-3">
+                                    <div className="mb-1 flex items-center gap-2">
+                                        <FiAlertTriangle color="orange" />
+                                        <span className="text-sm font-bold text-yellow-800">
+                                            {existingCount} existing price(s) found
+                                        </span>
+                                    </div>
+                                    <div className="text-xs text-yellow-700">
+                                        Saving will overwrite existing prices in this date range. Click Save again to confirm.
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+                        <Button variant="outline" colorScheme="gray" onClick={onClose} disabled={isSaving}>
+                            <FiX style={{ marginRight: 4 }} /> Cancel
+                        </Button>
+                        <Button
+                            colorScheme={showOverrideConfirm ? 'red' : sourceMode === 'fetch' ? 'red' : 'blue'}
+                            className={sourceMode === 'fetch' && !showOverrideConfirm ? 'bg-orange-500 hover:bg-orange-600' : ''}
+                            onClick={handleSave}
+                            disabled={isSaving || !isFormValid}
+                        >
+                            {isSaving ? (
+                                <><Spinner size="xs" className="mr-2" /> {sourceMode === 'fetch' ? 'Fetching...' : 'Saving...'}</>
+                            ) : showOverrideConfirm ? (
+                                <><FiAlertTriangle style={{ marginRight: 4 }} /> Confirm Override</>
+                            ) : sourceMode === 'fetch' ? (
+                                <><FiDownload style={{ marginRight: 4 }} /> Fetch Prices</>
+                            ) : (
+                                <><FiCheck style={{ marginRight: 4 }} /> Save Price</>
+                            )}
+                        </Button>
+                    </div>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

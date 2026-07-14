@@ -9,19 +9,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import {
-    Badge,
-    Box,
-    Card,
-    Flex,
-    Heading,
-    HStack,
-    Text,
-    VStack,
-    Table,
-    Spinner,
-    Center,
-} from '@chakra-ui/react';
+import { Badge, Heading, Spinner, Text } from './ui/primitives';
 import { usePositions } from '../hooks/usePositions';
 import type { DerivativePosition } from '../types';
 
@@ -44,65 +32,56 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ positions }) => {
         {
             label: 'Total P&L',
             value: `${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} USDC`,
-            valueColor: totalPnl >= 0 ? 'green.600' : 'red.600',
-            bg: totalPnl >= 0 ? 'green.50' : 'red.50',
-            borderColor: totalPnl >= 0 ? 'green.400' : 'red.400',
+            valueColor: totalPnl >= 0 ? 'text-green-600' : 'text-red-600',
+            bg: totalPnl >= 0 ? 'bg-green-50' : 'bg-red-50',
+            borderColor: totalPnl >= 0 ? 'border-l-green-400' : 'border-l-red-400',
         },
         {
             label: 'Win Rate',
             value: `${winRate.toFixed(1)}%`,
             subtitle: `${wins}W / ${closedPositions.length - wins}L`,
-            valueColor: winRate >= 50 ? 'green.600' : 'orange.600',
-            bg: 'gray.50',
-            borderColor: winRate >= 50 ? 'green.400' : 'orange.400',
+            valueColor: winRate >= 50 ? 'text-green-600' : 'text-orange-600',
+            bg: 'bg-gray-50',
+            borderColor: winRate >= 50 ? 'border-l-green-400' : 'border-l-orange-400',
         },
         {
             label: 'Positions',
             value: String(closedPositions.length),
             subtitle: `${positions.filter(p => p.status === 'open').length} open`,
-            valueColor: 'blue.600',
-            bg: 'blue.50',
-            borderColor: 'blue.400',
+            valueColor: 'text-blue-600',
+            bg: 'bg-blue-50',
+            borderColor: 'border-l-blue-400',
         },
         {
             label: 'Total Fees',
             value: `${totalFees.toFixed(2)} USDC`,
-            valueColor: 'orange.600',
-            bg: 'orange.50',
-            borderColor: 'orange.400',
+            valueColor: 'text-orange-600',
+            bg: 'bg-orange-50',
+            borderColor: 'border-l-orange-400',
         },
     ];
 
     return (
-        <HStack gap={3} mb={4} flexWrap="wrap">
+        <div className="mb-4 flex flex-wrap gap-3">
             {cards.map((card) => (
-                <Card.Root
+                <div
                     key={card.label}
-                    flex="1"
-                    minW="150px"
-                    bg={card.bg}
-                    borderWidth="1px"
-                    borderColor="gray.200"
-                    borderLeft="3px solid"
-                    borderLeftColor={card.borderColor}
-                    p={3}
+                    className={`flex-1 min-w-[150px] border border-gray-200 border-l-[3px] p-3 ${card.bg} ${card.borderColor}`}
                 >
-                    <Card.Body p={0}>
-                        <Text fontSize="xs" color="gray.500" mb={1}>
-                            {card.label}
+                    <Text className="mb-1 block text-xs text-gray-500">
+                        {card.label}
+                    </Text>
+                    <Text className={`block text-lg font-bold ${card.valueColor}`}>
+                        {card.value}
+                    </Text>
+                    {card.subtitle && (
+                        <Text className="block text-xs text-gray-500">
+                            {card.subtitle}
                         </Text>
-                        <Text fontSize="lg" fontWeight="bold" color={card.valueColor}>
-                            {card.value}
-                        </Text>
-                        {card.subtitle && (
-                            <Text fontSize="xs" color="gray.500">
-                                {card.subtitle}
-                            </Text>
-                        )}
-                    </Card.Body>
-                </Card.Root>
+                    )}
+                </div>
             ))}
-        </HStack>
+        </div>
     );
 };
 
@@ -130,28 +109,23 @@ const Filters: React.FC<FiltersProps> = ({
     const statuses: StatusFilter[] = ['all', 'open', 'closed'];
 
     return (
-        <Flex gap={3} mb={4} flexWrap="wrap" align="center">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
             {/* Status segmented control */}
-            <HStack gap={0} borderWidth="1px" borderColor="gray.200" borderRadius="md" overflow="hidden">
+            <div className="flex overflow-hidden border border-gray-200">
                 {statuses.map((s) => (
-                    <Box
+                    <button
                         key={s}
-                        as="button"
-                        px={3}
-                        py={1}
-                        fontSize="xs"
-                        fontWeight={statusFilter === s ? 'bold' : 'normal'}
-                        bg={statusFilter === s ? 'blue.500' : 'white'}
-                        color={statusFilter === s ? 'white' : 'gray.600'}
-                        _hover={{ bg: statusFilter === s ? 'blue.600' : 'gray.50' }}
+                        type="button"
+                        className={`cursor-pointer px-3 py-1 text-xs transition-all duration-150 ${statusFilter === s
+                                ? 'bg-blue-500 font-bold text-white hover:bg-blue-600'
+                                : 'bg-white font-normal text-gray-600 hover:bg-gray-50'
+                            }`}
                         onClick={() => onStatusChange(s)}
-                        cursor="pointer"
-                        transition="all 0.15s"
                     >
                         {s.charAt(0).toUpperCase() + s.slice(1)}
-                    </Box>
+                    </button>
                 ))}
-            </HStack>
+            </div>
 
             {/* Coin filter */}
             <select
@@ -173,7 +147,7 @@ const Filters: React.FC<FiltersProps> = ({
                     </option>
                 ))}
             </select>
-        </Flex>
+        </div>
     );
 };
 
@@ -196,20 +170,17 @@ const SortableHeader: React.FC<{
     sortDir: string;
     onSort: (f: string) => void;
 }> = ({ label, field, sortBy, sortDir, onSort }) => (
-    <Table.ColumnHeader
-        cursor="pointer"
+    <th
+        className="cursor-pointer py-2 text-left text-xs hover:bg-gray-200"
         onClick={() => onSort(field)}
-        _hover={{ bg: 'gray.200' }}
-        fontSize="xs"
-        py={2}
     >
-        <Flex align="center" gap={1}>
+        <div className="flex items-center gap-1">
             {label}
             {sortBy === field && (
-                <Text fontSize="9px">{sortDir === 'asc' ? '▲' : '▼'}</Text>
+                <Text className="text-[9px]">{sortDir === 'asc' ? '▲' : '▼'}</Text>
             )}
-        </Flex>
-    </Table.ColumnHeader>
+        </div>
+    </th>
 );
 
 const PositionsTable: React.FC<PositionsTableProps> = ({
@@ -220,10 +191,10 @@ const PositionsTable: React.FC<PositionsTableProps> = ({
     onRowClick,
 }) => {
     return (
-        <Box overflowX="auto" bg="white" borderWidth="1px" borderColor="gray.200" borderRadius="md" boxShadow="sm">
-            <Table.Root size="sm">
-                <Table.Header>
-                    <Table.Row bg="gray.100">
+        <div className="overflow-x-auto border border-gray-200 bg-white shadow-sm">
+            <table className="w-full text-sm">
+                <thead>
+                    <tr className="bg-gray-100">
                         <SortableHeader label="Coin" field="coin" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                         <SortableHeader label="Side" field="side" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                         <SortableHeader label="Entry" field="entry_price" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
@@ -232,80 +203,79 @@ const PositionsTable: React.FC<PositionsTableProps> = ({
                         <SortableHeader label="P&L" field="realized_pnl" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                         <SortableHeader label="Fees" field="total_fees" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                         <SortableHeader label="Duration" field="closed_at" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-                        <Table.ColumnHeader fontSize="xs" py={2} bg="gray.100">Status</Table.ColumnHeader>
-                    </Table.Row>
-                </Table.Header>
-                <Table.Body>
+                        <th className="bg-gray-100 py-2 text-left text-xs">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
                     {positions.length === 0 ? (
-                        <Table.Row>
-                            <Table.Cell colSpan={9}>
-                                <Center py={8}>
-                                    <Text fontSize="sm" color="gray.500">
+                        <tr>
+                            <td colSpan={9}>
+                                <div className="flex items-center justify-center py-8">
+                                    <Text className="text-sm text-gray-500">
                                         No positions found
                                     </Text>
-                                </Center>
-                            </Table.Cell>
-                        </Table.Row>
+                                </div>
+                            </td>
+                        </tr>
                     ) : (
                         positions.map((pos) => {
                             const sideColor = pos.side === 'long' ? 'green' : 'red';
-                            const pnlColor = pos.net_pnl >= 0 ? 'green.600' : 'red.600';
+                            const pnlColor = pos.net_pnl >= 0 ? 'text-green-600' : 'text-red-600';
                             const statusColor = pos.status === 'open' ? 'blue' : 'gray';
 
                             return (
-                                <Table.Row
+                                <tr
                                     key={pos.id}
-                                    _hover={{ bg: 'blue.50', cursor: 'pointer' }}
+                                    className="cursor-pointer transition-colors duration-100 hover:bg-blue-50"
                                     onClick={() => onRowClick?.(pos)}
-                                    transition="background 0.1s"
                                 >
-                                    <Table.Cell>
-                                        <Badge size="sm" colorPalette="purple" variant="subtle">
+                                    <td className="px-2 py-1">
+                                        <Badge colorScheme="purple" className="text-xs">
                                             {pos.coin}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Badge size="sm" colorPalette={sideColor} variant="solid">
+                                    </td>
+                                    <td className="px-2 py-1">
+                                        <Badge colorScheme={sideColor} className="text-xs">
                                             {pos.side.toUpperCase()}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs">
+                                    </td>
+                                    <td className="px-2 py-1 text-xs">
                                         ${pos.entry_price?.toFixed(2)}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs">
+                                    </td>
+                                    <td className="px-2 py-1 text-xs">
                                         {pos.exit_price != null ? `$${pos.exit_price.toFixed(2)}` : '—'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs">
+                                    </td>
+                                    <td className="px-2 py-1 text-xs">
                                         {pos.size}
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Text fontSize="xs" color={pnlColor} fontWeight="bold">
+                                    </td>
+                                    <td className="px-2 py-1">
+                                        <Text className={`text-xs font-bold ${pnlColor}`}>
                                             {pos.net_pnl >= 0 ? '+' : ''}
                                             {pos.net_pnl?.toFixed(2)}
                                         </Text>
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs" color="gray.500">
+                                    </td>
+                                    <td className="px-2 py-1 text-xs text-gray-500">
                                         {pos.total_fees?.toFixed(2)}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="xs" color="gray.500">
+                                    </td>
+                                    <td className="px-2 py-1 text-xs text-gray-500">
                                         {pos.duration_hours != null
                                             ? pos.duration_hours < 24
                                                 ? `${pos.duration_hours.toFixed(1)}h`
                                                 : `${(pos.duration_hours / 24).toFixed(1)}d`
                                             : '—'}
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Badge size="sm" colorPalette={statusColor} variant="subtle">
+                                    </td>
+                                    <td className="px-2 py-1">
+                                        <Badge colorScheme={statusColor} className="text-xs">
                                             {pos.status}
                                         </Badge>
-                                    </Table.Cell>
-                                </Table.Row>
+                                    </td>
+                                </tr>
                             );
                         })
                     )}
-                </Table.Body>
-            </Table.Root>
-        </Box>
+                </tbody>
+            </table>
+        </div>
     );
 };
 
@@ -318,53 +288,37 @@ const PositionDetailPanel: React.FC<{
     onClose: () => void;
 }> = ({ position: pos, onClose }) => {
     const sideColor = pos.side === 'long' ? 'green' : 'red';
-    const pnlColor = pos.net_pnl >= 0 ? 'green.300' : 'red.300';
+    const pnlColor = pos.net_pnl >= 0 ? 'text-green-600' : 'text-red-600';
 
     return (
-        <Box
-            position="fixed"
-            right={0}
-            top={0}
-            bottom={0}
-            w="400px"
-            bg="white"
-            borderLeft="1px solid"
-            borderColor="gray.200"
-            p={4}
-            overflowY="auto"
-            zIndex={1000}
-            boxShadow="xl"
-        >
-            <Flex justify="space-between" mb={4}>
-                <HStack gap={2}>
-                    <Badge size="md" colorPalette="purple">{pos.coin}</Badge>
-                    <Badge size="md" colorPalette={sideColor} variant="solid">
+        <div className="fixed bottom-0 right-0 top-0 z-[1000] w-[400px] overflow-y-auto border-l border-gray-200 bg-white p-4 shadow-xl">
+            <div className="mb-4 flex justify-between">
+                <div className="flex items-center gap-2">
+                    <Badge colorScheme="purple">{pos.coin}</Badge>
+                    <Badge colorScheme={sideColor}>
                         {pos.side.toUpperCase()}
                     </Badge>
-                    <Badge size="md" colorPalette={pos.status === 'open' ? 'blue' : 'gray'}>
+                    <Badge colorScheme={pos.status === 'open' ? 'blue' : 'gray'}>
                         {pos.status}
                     </Badge>
-                </HStack>
-                <Box
-                    as="button"
+                </div>
+                <button
+                    type="button"
                     onClick={onClose}
-                    color="gray.400"
-                    _hover={{ color: 'gray.700' }}
-                    cursor="pointer"
-                    fontSize="lg"
+                    className="cursor-pointer text-lg text-gray-400 hover:text-gray-700"
                 >
                     ✕
-                </Box>
-            </Flex>
+                </button>
+            </div>
 
-            <VStack align="stretch" gap={2} fontSize="sm">
+            <div className="flex flex-col gap-2 text-sm">
                 <DetailRow label="Entry Price" value={`$${pos.entry_price?.toFixed(2)}`} />
                 {pos.exit_price != null && (
                     <DetailRow label="Exit Price" value={`$${pos.exit_price.toFixed(2)}`} />
                 )}
                 <DetailRow label="Size" value={`${pos.size} ${pos.coin}`} />
                 <DetailRow label="Remaining" value={`${pos.remaining_size} ${pos.coin}`} />
-                <Box borderTop="1px" borderColor="gray.200" my={1} />
+                <div className="my-1 border-t border-gray-200" />
                 <DetailRow
                     label="Realized P&L"
                     value={`${pos.realized_pnl >= 0 ? '+' : ''}${pos.realized_pnl?.toFixed(2)} ${pos.margin_currency}`}
@@ -397,7 +351,7 @@ const PositionDetailPanel: React.FC<{
                         }
                     />
                 )}
-                <Box borderTop="1px" borderColor="gray.200" my={1} />
+                <div className="my-1 border-t border-gray-200" />
                 <DetailRow label="Exchange" value={pos.exchange} />
                 <DetailRow label="Margin" value={pos.margin_currency} />
                 {pos.opened_at && (
@@ -415,8 +369,8 @@ const PositionDetailPanel: React.FC<{
                             : '—'
                     }
                 />
-            </VStack>
-        </Box>
+            </div>
+        </div>
     );
 };
 
@@ -425,13 +379,13 @@ const DetailRow: React.FC<{
     value: string;
     valueColor?: string;
     bold?: boolean;
-}> = ({ label, value, valueColor = 'gray.700', bold = false }) => (
-    <Flex justify="space-between">
-        <Text color="gray.500">{label}</Text>
-        <Text color={valueColor} fontWeight={bold ? 'bold' : 'normal'}>
+}> = ({ label, value, valueColor = 'text-gray-700', bold = false }) => (
+    <div className="flex justify-between">
+        <Text className="text-gray-500">{label}</Text>
+        <Text className={`${valueColor} ${bold ? 'font-bold' : 'font-normal'}`}>
             {value}
         </Text>
-    </Flex>
+    </div>
 );
 
 // ============================================================================
@@ -470,15 +424,15 @@ const PositionsView: React.FC = () => {
     };
 
     return (
-        <Box p={4}>
-            <Heading as="h2" size="lg" mb={4}>
+        <div className="p-4">
+            <Heading as="h2" className="mb-4 text-lg">
                 Derivative Positions
             </Heading>
 
             {isLoading ? (
-                <Center h="200px">
-                    <Spinner size="xl" color="blue.500" />
-                </Center>
+                <div className="flex h-[200px] items-center justify-center">
+                    <Spinner size="lg" className="text-blue-500" />
+                </div>
             ) : (
                 <>
                     <SummaryCards positions={positions} />
@@ -499,7 +453,7 @@ const PositionsView: React.FC = () => {
                         onRowClick={setSelectedPosition}
                     />
 
-                    <Text fontSize="xs" color="gray.500" mt={2}>
+                    <Text className="mt-2 block text-xs text-gray-500">
                         {positions.length} position{positions.length !== 1 ? 's' : ''}
                     </Text>
                 </>
@@ -509,14 +463,8 @@ const PositionsView: React.FC = () => {
             {selectedPosition && (
                 <>
                     {/* Backdrop */}
-                    <Box
-                        position="fixed"
-                        top={0}
-                        left={0}
-                        right={0}
-                        bottom={0}
-                        bg="blackAlpha.600"
-                        zIndex={999}
+                    <div
+                        className="fixed inset-0 z-[999] bg-black/60"
                         onClick={() => setSelectedPosition(null)}
                     />
                     <PositionDetailPanel
@@ -525,7 +473,7 @@ const PositionsView: React.FC = () => {
                     />
                 </>
             )}
-        </Box>
+        </div>
     );
 };
 

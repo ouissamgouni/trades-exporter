@@ -1,22 +1,11 @@
 "use client"
 
-import {
-    Badge,
-    Box,
-    Button,
-    Dialog,
-    Flex,
-    HStack,
-    Portal,
-    RadioGroup,
-    Spinner,
-    Text,
-    VStack,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import React, { useEffect, useState } from 'react';
 import { FiAlertTriangle } from 'react-icons/fi';
 import { API_URL } from '../types';
 import { toaster } from './ui/toaster';
+import { Badge, Button, Spinner, type BadgeColorScheme } from './ui/primitives';
 
 interface CleanupPreview {
     connector_ids: number[];
@@ -158,152 +147,134 @@ export const CleanupDialog: React.FC<CleanupDialogProps> = ({
     const confirmLabel = mode === 'delete' ? 'Delete Connector & Data' : 'Purge Data';
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(); }}>
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content maxW="520px">
-                        <Dialog.Header>
-                            <Dialog.Title>{title}</Dialog.Title>
-                        </Dialog.Header>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-200 p-4">
+                        <RadixDialog.Title className="text-base font-semibold">{title}</RadixDialog.Title>
+                    </div>
 
-                        <Dialog.Body>
-                            {loading ? (
-                                <Flex justify="center" py={6}>
-                                    <Spinner size="lg" />
-                                </Flex>
-                            ) : error ? (
-                                <Text color="red.500">{error}</Text>
-                            ) : preview ? (
-                                <VStack align="stretch" gap={3}>
-                                    {/* Connector names */}
-                                    {preview.connector_names.length > 0 && (
-                                        <Box>
-                                            <Text fontSize="xs" color="gray.500" mb={1}>Affected connectors:</Text>
-                                            <Flex gap={1} flexWrap="wrap">
-                                                {preview.connector_names.map((name, idx) => (
-                                                    <Badge key={idx} size="sm" variant="subtle" colorPalette="blue">
-                                                        {name}
-                                                    </Badge>
-                                                ))}
-                                            </Flex>
-                                        </Box>
-                                    )}
+                    <div className="p-4">
+                        {loading ? (
+                            <div className="flex justify-center py-6">
+                                <Spinner size="lg" />
+                            </div>
+                        ) : error ? (
+                            <span className="text-red-500">{error}</span>
+                        ) : preview ? (
+                            <div className="flex flex-col items-stretch gap-3">
+                                {/* Connector names */}
+                                {preview.connector_names.length > 0 && (
+                                    <div>
+                                        <span className="mb-1 block text-xs text-slate-500">Affected connectors:</span>
+                                        <div className="flex flex-wrap gap-1">
+                                            {preview.connector_names.map((name, idx) => (
+                                                <Badge key={idx} colorScheme="blue">
+                                                    {name}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
-                                    {/* Impact summary */}
-                                    {hasAnyImpact ? (
-                                        <Box
-                                            borderWidth="1px"
-                                            borderColor="red.200"
-                                            bg="red.50"
-                                            borderRadius="md"
-                                            p={3}
-                                        >
-                                            <HStack gap={2} mb={2}>
-                                                <FiAlertTriangle color="var(--chakra-colors-red-500)" />
-                                                <Text fontWeight="semibold" fontSize="sm" color="red.700">
-                                                    The following data will be permanently deleted:
-                                                </Text>
-                                            </HStack>
-                                            <VStack align="stretch" gap={1} pl={1}>
-                                                {IMPACT_LABELS.map(({ key, label, icon, isWarning }) => {
-                                                    const count = preview[key] as number;
-                                                    if (count === 0) return null;
-                                                    return (
-                                                        <HStack key={key} justify="space-between" fontSize="sm">
-                                                            <Text color="gray.700">{icon} {label}</Text>
-                                                            <Badge
-                                                                colorPalette={isWarning ? 'yellow' : 'red'}
-                                                                variant="subtle"
-                                                                size="sm"
-                                                            >
-                                                                {count}
-                                                            </Badge>
-                                                        </HStack>
-                                                    );
-                                                })}
-                                            </VStack>
+                                {/* Impact summary */}
+                                {hasAnyImpact ? (
+                                    <div className="border border-red-200 bg-red-50 p-3">
+                                        <div className="mb-2 flex items-center gap-2">
+                                            <span className="text-red-500"><FiAlertTriangle /></span>
+                                            <span className="text-sm font-semibold text-red-700">
+                                                The following data will be permanently deleted:
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-col items-stretch gap-1 pl-1">
+                                            {IMPACT_LABELS.map(({ key, label, icon, isWarning }) => {
+                                                const count = preview[key] as number;
+                                                if (count === 0) return null;
+                                                return (
+                                                    <div key={key} className="flex items-center justify-between text-sm">
+                                                        <span className="text-slate-700">{icon} {label}</span>
+                                                        <Badge
+                                                            colorScheme={(isWarning ? 'yellow' : 'red') as BadgeColorScheme}
+                                                        >
+                                                            {count}
+                                                        </Badge>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
 
-                                            {/* P&L warning */}
-                                            {preview.pnl_legs_affected > 0 && (
-                                                <Box
-                                                    mt={2}
-                                                    p={2}
-                                                    bg="orange.50"
-                                                    borderRadius="sm"
-                                                    borderWidth="1px"
-                                                    borderColor="orange.200"
-                                                >
-                                                    <Text fontSize="xs" color="orange.700">
-                                                        ⚠️ {preview.pnl_legs_affected} P&L calculation legs reference these transactions. You will need to recalculate P&L after cleanup.
-                                                    </Text>
-                                                </Box>
-                                            )}
-                                        </Box>
-                                    ) : (
-                                        <Text fontSize="sm" color="gray.600">
-                                            No data found for these connectors.
-                                        </Text>
-                                    )}
+                                        {/* P&L warning */}
+                                        {preview.pnl_legs_affected > 0 && (
+                                            <div className="mt-2 border border-orange-200 bg-orange-50 p-2">
+                                                <span className="text-xs text-orange-700">
+                                                    ⚠️ {preview.pnl_legs_affected} P&L calculation legs reference these transactions. You will need to recalculate P&L after cleanup.
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <span className="text-sm text-slate-600">
+                                        No data found for these connectors.
+                                    </span>
+                                )}
 
-                                    {/* Mode selection (only for connector-level, not account-level) */}
-                                    {!accountId && (
-                                        <Box>
-                                            <Text fontSize="xs" color="gray.500" mb={2}>Cleanup mode:</Text>
-                                            <RadioGroup.Root
-                                                value={mode}
-                                                onValueChange={(e) => setMode(e.value as 'purge' | 'delete')}
-                                            >
-                                                <VStack align="stretch" gap={2}>
-                                                    <RadioGroup.Item value="purge">
-                                                        <RadioGroup.ItemHiddenInput />
-                                                        <RadioGroup.ItemIndicator />
-                                                        <RadioGroup.ItemText fontSize="sm">
-                                                            Purge data only (keep connector configuration)
-                                                        </RadioGroup.ItemText>
-                                                    </RadioGroup.Item>
-                                                    <RadioGroup.Item value="delete">
-                                                        <RadioGroup.ItemHiddenInput />
-                                                        <RadioGroup.ItemIndicator />
-                                                        <RadioGroup.ItemText fontSize="sm">
-                                                            Delete connectors entirely
-                                                        </RadioGroup.ItemText>
-                                                    </RadioGroup.Item>
-                                                </VStack>
-                                            </RadioGroup.Root>
-                                        </Box>
-                                    )}
+                                {/* Mode selection (only for connector-level, not account-level) */}
+                                {!accountId && (
+                                    <div>
+                                        <span className="mb-2 block text-xs text-slate-500">Cleanup mode:</span>
+                                        <div className="flex flex-col items-stretch gap-2">
+                                            <label className="flex items-center gap-2 text-sm">
+                                                <input
+                                                    type="radio"
+                                                    name="cleanup-mode"
+                                                    value="purge"
+                                                    checked={mode === 'purge'}
+                                                    onChange={() => setMode('purge')}
+                                                />
+                                                Purge data only (keep connector configuration)
+                                            </label>
+                                            <label className="flex items-center gap-2 text-sm">
+                                                <input
+                                                    type="radio"
+                                                    name="cleanup-mode"
+                                                    value="delete"
+                                                    checked={mode === 'delete'}
+                                                    onChange={() => setMode('delete')}
+                                                />
+                                                Delete connectors entirely
+                                            </label>
+                                        </div>
+                                    </div>
+                                )}
 
-                                    <Text fontSize="xs" color="gray.500">
-                                        This action cannot be undone.
-                                    </Text>
-                                </VStack>
-                            ) : null}
-                        </Dialog.Body>
+                                <span className="text-xs text-slate-500">
+                                    This action cannot be undone.
+                                </span>
+                            </div>
+                        ) : null}
+                    </div>
 
-                        <Dialog.Footer>
-                            <Flex gap={3}>
-                                <Button
-                                    variant="outline"
-                                    onClick={onClose}
-                                    disabled={executing}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    colorPalette="red"
-                                    onClick={handleConfirm}
-                                    loading={executing}
-                                    disabled={loading || !!error}
-                                >
-                                    {confirmLabel}
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                    <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                        <Button
+                            variant="outline"
+                            onClick={onClose}
+                            disabled={executing}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            colorScheme="red"
+                            onClick={handleConfirm}
+                            loading={executing}
+                            disabled={loading || !!error}
+                        >
+                            {confirmLabel}
+                        </Button>
+                    </div>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

@@ -12,7 +12,7 @@ tasks:
       ]
     cmds:
       - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini upgrade head
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini upgrade head
       - echo "✅ Dev database migrated"
 
   migrate:staging:
@@ -52,7 +52,7 @@ tasks:
       ]
     cmds:
       - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Dev database seeded"
 
   seed:staging:
@@ -90,9 +90,9 @@ tasks:
           exit 0
         fi
       - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" echo "y" | {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.reset
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" echo "y" | {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.reset
       - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Dev database reset and seeded"
 
   reset:staging:
@@ -137,15 +137,15 @@ tasks:
       - |
         echo "Creating tables from SQLModel..."
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.BACKEND_DIR}}/.venv/bin/python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
+          {{.ROOT_DIR}}/.venv/bin/python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
       - |
         echo "Stamping database to current migration..."
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp head
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp head
       - |
         echo "Seeding test data..."
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+          {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Integration test database ready (trades_db_integ)"
 
   reset:integ:
@@ -162,10 +162,10 @@ tasks:
       - |
         echo "🔄 Resetting integration test database..."
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          echo "y" | {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.reset
+          echo "y" | {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.reset
       - |
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+          {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Integration test database reset and seeded"
 
   reset:prod:
@@ -200,14 +200,14 @@ tasks:
         echo ""
         echo "Current version:"
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current 2>&1 | grep -v "^\[Alembic\]" | grep -v "^INFO"
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current 2>&1 | grep -v "^\[Alembic\]" | grep -v "^INFO"
         echo ""
         echo "Head(s):"
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>&1 | grep -v "^\[Alembic\]"
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>&1 | grep -v "^\[Alembic\]"
         echo ""
         HEAD_COUNT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
         if [ "$HEAD_COUNT" -gt 1 ]; then
           echo "⚠️  WARNING: Multiple heads detected ($HEAD_COUNT)! Run 'task db:merge:dev' to fix."
         else
@@ -248,21 +248,21 @@ tasks:
       - |
         echo "🔍 Checking migration health (dev)..."
         HEAD_COUNT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
         if [ "$HEAD_COUNT" -gt 1 ]; then
           echo "❌ FAIL: Multiple migration heads detected ($HEAD_COUNT heads)"
           echo ""
           echo "Heads found:"
           PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-            {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null
+            {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null
           echo ""
           echo "Fix: Run 'task db:merge:dev -- \"merge_description\"'"
           exit 1
         fi
         CURRENT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current 2>/dev/null | grep -v "^\[Alembic\]" | grep -v "^INFO" | awk '{print $1}' | head -1)
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current 2>/dev/null | grep -v "^\[Alembic\]" | grep -v "^INFO" | awk '{print $1}' | head -1)
         HEAD=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep "(head)" | awk '{print $1}')
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep "(head)" | awk '{print $1}')
         if [ "$CURRENT" != "$HEAD" ] && [ -n "$CURRENT" ]; then
           echo "⚠️  WARNING: Pending migrations exist"
           echo "   Current: $CURRENT"
@@ -286,7 +286,7 @@ tasks:
         echo "📜 Migration History (dev)"
         echo "=========================="
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini history --verbose 2>&1 | grep -v "^\[Alembic\]" | head -50
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini history --verbose 2>&1 | grep -v "^\[Alembic\]" | head -50
 
   merge:dev:
     desc: Merge multiple migration heads
@@ -300,7 +300,7 @@ tasks:
     cmds:
       - |
         HEAD_COUNT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
         if [ "$HEAD_COUNT" -le 1 ]; then
           echo "✅ No merge needed - only one head exists"
           exit 0
@@ -308,7 +308,7 @@ tasks:
         echo "🔀 Merging $HEAD_COUNT migration heads..."
         MSG="${1:-merge_heads}"
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini merge heads -m "$MSG"
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini merge heads -m "$MSG"
         echo "✅ Heads merged. Run 'task db:migrate:dev' to apply."
 
   stamp:dev:
@@ -329,7 +329,7 @@ tasks:
           exit 1
         fi
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp {{.CLI_ARGS}}
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp {{.CLI_ARGS}}
         echo "✅ Database stamped to {{.CLI_ARGS}}"
 
   downgrade:dev:
@@ -350,7 +350,7 @@ tasks:
           exit 1
         fi
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini downgrade {{.CLI_ARGS}}
+          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini downgrade {{.CLI_ARGS}}
         echo "✅ Rolled back to {{.CLI_ARGS}}"
 
   # === Tag Cleanup ===
@@ -507,7 +507,7 @@ tasks:
           fi
         fi
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
-          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.cleanup_tags $FLAGS
+          {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.cleanup_tags $FLAGS
         echo "✅ Tag cleanup complete"
 
   cleanup-tags:staging:
@@ -550,6 +550,9 @@ tasks:
     cmds:
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        SCENARIO_LABEL="{{.SCENARIO}}"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+        STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
+        [ -f "$STATE_FILE" ] && source "$STATE_FILE"
         SEED_DIR="{{.SEED_DIR}}"
         WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
         # Auto-resolve SEED_DIR from SCENARIO
@@ -561,33 +564,33 @@ tasks:
           fi
         fi
         # Detect if running in Docker mode or hybrid mode
-        if docker ps --filter "name=$QA_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$QA_BACKEND_CONTAINER"; then
+        if docker ps --filter "name=$SC_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$SC_BACKEND_CONTAINER"; then
           if [ -n "$SEED_DIR" ]; then
             if [ "$WITH_DEFAULTS" = "1" ]; then
               echo "Seeding default data first (WITH_DEFAULTS=1)..."
-              docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed
+              docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME exec backend python -m backend.scripts.seed
             fi
             echo "Seeding scenario from $SEED_DIR..."
-            docker cp "$SEED_DIR/." $QA_BACKEND_CONTAINER:/tmp/scenario/
-            docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
+            docker cp "$SEED_DIR/." $SC_BACKEND_CONTAINER:/tmp/scenario/
+            docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
           else
             echo "Seeding default data..."
-            docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed
+            docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME exec backend python -m backend.scripts.seed
           fi
         else
           if [ -n "$SEED_DIR" ]; then
             if [ "$WITH_DEFAULTS" = "1" ]; then
               echo "Seeding default data first (WITH_DEFAULTS=1)..."
-              PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
-                {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+              PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+                {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
             fi
             echo "Seeding scenario from $SEED_DIR..."
-            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
-              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+              {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
           else
             echo "Seeding default data..."
-            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
-              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+              {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
           fi
         fi
       - echo "✅ Scenario database seeded"
@@ -611,14 +614,20 @@ tasks:
       - |
         if [ "{{.DRY_RUN}}" = "1" ]; then
           source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+          SCENARIO_LABEL="{{.SCENARIO}}"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+          STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
+          [ -f "$STATE_FILE" ] && source "$STATE_FILE"
           echo "🔍 DRY RUN — would reset scenario database:"
           echo "   Instance: {{.SCENARIO | default \"default\"}}"
-          echo "   DB port:  $QA_DB_PORT"
+          echo "   DB port:  $SC_DB_PORT"
           echo "   Actions: drop all tables → seed"
           exit 0
         fi
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        SCENARIO_LABEL="{{.SCENARIO}}"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+        STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
+        [ -f "$STATE_FILE" ] && source "$STATE_FILE"
         SEED_DIR="{{.SEED_DIR}}"
         # Auto-resolve SEED_DIR from SCENARIO
         if [ -z "$SEED_DIR" ] && [ -n "{{.SCENARIO}}" ] && [ "{{.SCENARIO}}" != "default" ]; then
@@ -627,23 +636,23 @@ tasks:
             SEED_DIR="$CANDIDATE"
           fi
         fi
-        if docker ps --filter "name=$QA_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$QA_BACKEND_CONTAINER"; then
-          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend sh -c 'echo "y" | python -m backend.scripts.reset'
+        if docker ps --filter "name=$SC_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$SC_BACKEND_CONTAINER"; then
+          docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME exec backend sh -c 'echo "y" | python -m backend.scripts.reset'
           if [ -n "$SEED_DIR" ]; then
-            docker cp "$SEED_DIR/." $QA_BACKEND_CONTAINER:/tmp/scenario/
-            docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
+            docker cp "$SEED_DIR/." $SC_BACKEND_CONTAINER:/tmp/scenario/
+            docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
           else
-            docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed
+            docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME exec backend python -m backend.scripts.seed
           fi
         else
-          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
-            echo "y" | {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.reset
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+            echo "y" | {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.reset
           if [ -n "$SEED_DIR" ]; then
-            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
-              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+              {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
           else
-            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
-              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+              {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
           fi
         fi
       - echo "✅ Scenario database reset and seeded"

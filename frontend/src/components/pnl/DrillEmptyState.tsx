@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { Box, Flex, Heading, Text, Button } from '@chakra-ui/react';
+import { Button } from '../ui/primitives';
 
 type DrillLevel = 'portfolio' | 'asset' | 'event';
 
@@ -50,47 +50,30 @@ export const DrillEmptyState: React.FC<DrillEmptyStateProps> = ({
     const config = LEVEL_CONFIG[level];
 
     return (
-        <Flex
-            direction="column"
-            align="center"
-            justify="center"
-            py={16}
-            px={6}
-            bg="gray.50"
-            borderRadius="md"
-            textAlign="center"
-        >
-            <Text fontSize="3xl" mb={3}>{config.icon}</Text>
-            <Heading size="md" color="gray.600" mb={2}>
+        <div className="flex flex-col items-center justify-center bg-slate-50 px-6 py-16 text-center">
+            <span className="mb-3 text-3xl">{config.icon}</span>
+            <span className="mb-2 text-base font-semibold text-slate-600">
                 {config.title}
-            </Heading>
-            <Text color="gray.400" maxW="400px" mb={filterDescription ? 2 : 0}>
+            </span>
+            <span className={`max-w-[400px] text-slate-400 ${filterDescription ? 'mb-2' : 'mb-0'}`}>
                 {config.description}
-            </Text>
+            </span>
             {filterDescription && (
-                <Box
-                    mt={2}
-                    px={3}
-                    py={1}
-                    bg="gray.100"
-                    borderRadius="md"
-                    fontSize="xs"
-                    color="gray.500"
-                >
+                <div className="mt-2 bg-slate-100 px-3 py-1 text-xs text-slate-500">
                     Filter: {filterDescription}
-                </Box>
+                </div>
             )}
             {actionLabel && onAction && (
                 <Button
-                    mt={4}
+                    className="mt-4"
                     size="sm"
-                    colorPalette="blue"
+                    colorScheme="blue"
                     variant="outline"
                     onClick={onAction}
                 >
                     {actionLabel}
                 </Button>
             )}
-        </Flex>
+        </div>
     );
 };

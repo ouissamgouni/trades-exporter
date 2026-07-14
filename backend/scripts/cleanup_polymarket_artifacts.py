@@ -10,8 +10,8 @@ Dry-run is the default. Use --apply to write changes.
 
 Usage:
     cd backend
-    PYTHONPATH=.. .venv/bin/python scripts/cleanup_polymarket_artifacts.py
-    PYTHONPATH=.. .venv/bin/python scripts/cleanup_polymarket_artifacts.py --apply
+    PYTHONPATH=.. ../.venv/bin/python scripts/cleanup_polymarket_artifacts.py
+    PYTHONPATH=.. ../.venv/bin/python scripts/cleanup_polymarket_artifacts.py --apply
 """
 
 import argparse

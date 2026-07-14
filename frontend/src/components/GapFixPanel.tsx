@@ -9,7 +9,6 @@
  */
 
 import React, { useState } from 'react';
-import { Box, Button, Flex, Spinner, Text } from '@chakra-ui/react';
 import { FiDownload, FiEdit3, FiZap } from 'react-icons/fi';
 import { AssetPriceChart } from './AssetPriceChart';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
@@ -19,6 +18,7 @@ import { useBaseCurrency } from '../hooks/useBaseCurrency';
 import { GapRange } from '../types';
 import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
+import { Button, Spinner } from './ui/primitives';
 
 export interface GapFixPanelProps {
     assetId: number;
@@ -104,17 +104,17 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol, onOpe
 
     return (
         <>
-            <Flex gap={3} align="stretch">
+            <div className="flex items-stretch gap-3">
                 {/* Left: chart */}
-                <Box flex={2} minW={0}>
+                <div className="min-w-0 flex-[2]">
                     <AssetPriceChart assetId={assetId} symbol={symbol} gaps={gaps} />
                     {/* Price Setter CTA */}
-                    <Flex mt={1.5} gap={1}>
+                    <div className="mt-1.5 flex gap-1">
                         <Button
-                            size="2xs"
+                            size="sm"
                             variant="outline"
-                            colorPalette="blue"
-                            fontSize="2xs"
+                            colorScheme="blue"
+                            className="text-[10px]"
                             onClick={() => {
                                 if (onOpenPriceSetter) {
                                     onOpenPriceSetter();
@@ -125,57 +125,52 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol, onOpe
                         >
                             <FiEdit3 size={10} /> Price Setter
                         </Button>
-                    </Flex>
-                </Box>
+                    </div>
+                </div>
 
                 {/* Right: gap list */}
                 {gaps.length > 0 && (
-                    <Flex direction="column" flex={1} minW="160px" maxW="220px" gap={1}>
+                    <div className="flex min-w-[160px] max-w-[220px] flex-1 flex-col gap-1">
                         {/* Header + Fix All */}
-                        <Flex align="center" justify="space-between" mb={0.5}>
-                            <Text fontSize="2xs" color="orange.700" fontWeight="medium">
+                        <div className="mb-0.5 flex items-center justify-between">
+                            <span className="text-[10px] font-medium text-orange-700">
                                 {gaps.length} range{gaps.length !== 1 ? 's' : ''} · {totalMissing}d
-                            </Text>
+                            </span>
                             {hasGetters ? (
                                 <Button
-                                    size="2xs"
-                                    colorPalette="orange"
+                                    size="sm"
+                                    colorScheme="blue"
                                     variant="solid"
                                     onClick={handleFixAll}
                                     disabled={fixingAll}
-                                    fontSize="2xs"
+                                    className="bg-orange-600 text-[10px] hover:bg-orange-700"
                                 >
                                     {fixingAll ? <Spinner size="xs" /> : <><FiZap size={10} /> Fix all</>}
                                 </Button>
                             ) : (
                                 <Tooltip content="No price getters configured — only manual fill available">
-                                    <Text fontSize="2xs" color="gray.400">auto N/A</Text>
+                                    <span className="text-[10px] text-slate-400">auto N/A</span>
                                 </Tooltip>
                             )}
-                        </Flex>
+                        </div>
 
                         {/* Scrollable gap list */}
-                        <Flex direction="column" gap={1} overflowY="auto" maxH="180px" pr={1}>
+                        <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto pr-1">
                             {gaps.map((gap, i) => (
-                                <Box
+                                <div
                                     key={`${gap.start_date}-${gap.end_date}`}
-                                    bg="orange.50"
-                                    border="1px solid"
-                                    borderColor="orange.100"
-                                    borderRadius="sm"
-                                    px={1.5}
-                                    py={1}
+                                    className="border border-orange-100 bg-orange-50 px-1.5 py-1"
                                 >
-                                    <Text fontSize="2xs" color="orange.800" fontWeight="medium" mb={0.5}>
+                                    <span className="mb-0.5 block text-[10px] font-medium text-orange-800">
                                         {fmtShort(gap.start_date)} — {fmtShort(gap.end_date)} ({gap.missing_days_count}d)
-                                    </Text>
-                                    <Flex gap={1}>
+                                    </span>
+                                    <div className="flex gap-1">
                                         {hasGetters && (
                                             <Button
-                                                size="2xs"
+                                                size="sm"
                                                 variant="outline"
-                                                colorPalette="orange"
-                                                fontSize="2xs"
+                                                colorScheme="blue"
+                                                className="border-orange-300 text-[10px] text-orange-700 hover:bg-orange-50"
                                                 onClick={() => handleFetchOne(gap, i)}
                                                 disabled={fetchingIdx === i}
                                             >
@@ -183,20 +178,20 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol, onOpe
                                             </Button>
                                         )}
                                         <Button
-                                            size="2xs"
+                                            size="sm"
                                             variant="outline"
-                                            fontSize="2xs"
+                                            className="text-[10px]"
                                             onClick={() => setManualGap(gap)}
                                         >
                                             <FiEdit3 size={10} /> Manual
                                         </Button>
-                                    </Flex>
-                                </Box>
+                                    </div>
+                                </div>
                             ))}
-                        </Flex>
-                    </Flex>
+                        </div>
+                    </div>
                 )}
-            </Flex>
+            </div>
 
             {manualGap && (
                 <PriceSetterDialog

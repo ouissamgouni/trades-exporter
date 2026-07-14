@@ -6,11 +6,11 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Badge, Box, Flex, Spinner, Text } from '@chakra-ui/react';
 import { SlidePanel } from './SlidePanel';
 import { UnitDetailRow } from './DataExplorerPanel';
 import { API_URL } from '../../types';
 import type { PnLCalculationUnit } from './types';
+import { Badge, Spinner, type BadgeColorScheme } from '../ui/primitives';
 
 export interface UnitDetailSlidePanelProps {
     isOpen: boolean;
@@ -21,12 +21,12 @@ export interface UnitDetailSlidePanelProps {
     onTransactionClick?: (txId: number) => void;
 }
 
-const PATTERN_COLORS: Record<string, string> = {
+const PATTERN_COLORS: Record<string, BadgeColorScheme> = {
     swap: 'purple',
     internal_transfer: 'blue',
     unmatched_internal_transfer: 'orange',
-    flow: 'cyan',
-    split: 'teal',
+    flow: 'blue',
+    split: 'green',
 };
 
 export const UnitDetailSlidePanel: React.FC<UnitDetailSlidePanelProps> = ({
@@ -106,7 +106,7 @@ export const UnitDetailSlidePanel: React.FC<UnitDetailSlidePanelProps> = ({
             : 'Unit Details';
 
     const titleIcon = unit?.pattern ? (
-        <Badge size="sm" colorPalette={PATTERN_COLORS[unit.pattern] || 'gray'}>
+        <Badge colorScheme={PATTERN_COLORS[unit.pattern] || 'gray'}>
             {unit.pattern.replace(/_/g, ' ')}
         </Badge>
     ) : undefined;
@@ -114,14 +114,14 @@ export const UnitDetailSlidePanel: React.FC<UnitDetailSlidePanelProps> = ({
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title={title} titleIcon={titleIcon} width="1000px" zIndex={200}>
             {isLoading ? (
-                <Flex align="center" justify="center" py={12} gap={2}>
+                <div className="flex items-center justify-center gap-2 py-12">
                     <Spinner size="sm" />
-                    <Text fontSize="sm" color="gray.400">Loading unit details…</Text>
-                </Flex>
+                    <span className="text-sm text-slate-400">Loading unit details…</span>
+                </div>
             ) : error ? (
-                <Box textAlign="center" py={12}>
-                    <Text fontSize="sm" color="red.500">{error}</Text>
-                </Box>
+                <div className="py-12 text-center">
+                    <span className="text-sm text-red-500">{error}</span>
+                </div>
             ) : unit ? (
                 <UnitDetailRow
                     unit={unit}

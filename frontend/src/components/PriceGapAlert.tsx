@@ -12,14 +12,7 @@
  */
 
 import React, { useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Flex,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner } from './ui/primitives';
 import { FiAlertTriangle, FiDownload, FiEdit3, FiZap } from 'react-icons/fi';
 import { GapRange, BackfillResponse } from '../types';
 import { useBackfillPrices } from '../hooks/usePriceGaps';
@@ -115,59 +108,54 @@ const GapRangeAlert: React.FC<GapRangeAlertProps> = ({
 
     return (
         <>
-            <Box
-                bg="orange.50"
-                border="1px solid"
-                borderColor="orange.200"
-                borderRadius="md"
-                p={3}
-            >
-                <Flex align="flex-start" gap={2}>
-                    <Box color="orange.500" mt={0.5}>
+            <div className="rounded-md border border-orange-200 bg-orange-50 p-3">
+                <div className="flex items-start gap-2">
+                    <span className="mt-0.5 text-orange-500">
                         <FiAlertTriangle size={16} />
-                    </Box>
-                    <Box flex={1}>
-                        <Text fontSize="sm" fontWeight="medium" color="orange.800">
+                    </span>
+                    <div className="flex-1">
+                        <span className="block text-sm font-medium text-orange-800">
                             Missing prices: {fmtDate(gap.start_date)} — {fmtDate(gap.end_date)}
                             {' '}({gap.missing_days_count} day{gap.missing_days_count !== 1 ? 's' : ''})
-                        </Text>
+                        </span>
                         {gap.last_known_price != null && (
-                            <Text fontSize="xs" color="gray.600" mt={0.5}>
+                            <span className="mt-0.5 block text-xs text-slate-600">
                                 Last known: {gap.last_known_price.toLocaleString()} ({gap.last_known_source ?? 'unknown'} on{' '}
                                 {gap.last_known_price_date ? fmtDate(gap.last_known_price_date) : '?'})
-                            </Text>
+                            </span>
                         )}
                         {showFailures && (
-                            <Text fontSize="xs" color="red.600" mt={1}>
+                            <span className="mt-1 block text-xs text-red-600">
                                 {backfillResult!.failed.length} date(s) could not be fetched automatically.
                                 Use "Fill Manually" for remaining dates.
-                            </Text>
+                            </span>
                         )}
-                        <Flex gap={2} mt={2}>
+                        <div className="mt-2 flex gap-2">
                             <Button
-                                size="xs"
-                                colorPalette="orange"
+                                size="sm"
+                                colorScheme="gray"
                                 variant="outline"
+                                className="border-orange-300 text-orange-600 hover:bg-orange-50"
                                 onClick={handleFetch}
                                 disabled={isFetching}
                             >
                                 {isFetching ? (
-                                    <><Spinner size="xs" mr={1} /> Fetching...</>
+                                    <><Spinner size="xs" className="mr-1" /> Fetching...</>
                                 ) : (
                                     <><FiDownload style={{ marginRight: 4 }} /> Fetch Missing Prices</>
                                 )}
                             </Button>
                             <Button
-                                size="xs"
+                                size="sm"
                                 variant="outline"
                                 onClick={() => setShowManual(true)}
                             >
                                 <FiEdit3 style={{ marginRight: 4 }} /> Fill Manually
                             </Button>
-                        </Flex>
-                    </Box>
-                </Flex>
-            </Box>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <PriceSetterDialog
                 isOpen={showManual}
@@ -208,36 +196,19 @@ export const PriceGapAlert: React.FC<PriceGapAlertProps> = ({
     // ── Compact mode: just a badge ────────────────────────────────────────
     if (compact) {
         return (
-            <Box position="relative" display="inline-block">
+            <div className="relative inline-block">
                 <Tooltip content={`${gaps.length} gap range(s), ${totalMissing} missing day(s)`}>
                     <Badge
-                        size="sm"
-                        colorPalette="orange"
-                        variant="subtle"
-                        cursor="pointer"
+                        colorScheme="orange"
+                        className="cursor-pointer"
                         onClick={() => setExpandedCompact(!expandedCompact)}
                     >
                         {gaps.length} gap{gaps.length !== 1 ? 's' : ''}
                     </Badge>
                 </Tooltip>
                 {expandedCompact && (
-                    <Box
-                        position="absolute"
-                        top="100%"
-                        left={0}
-                        mt={1}
-                        zIndex={10}
-                        bg="white"
-                        border="1px solid"
-                        borderColor="gray.200"
-                        borderRadius="md"
-                        boxShadow="md"
-                        p={3}
-                        minW="340px"
-                        maxH="400px"
-                        overflowY="auto"
-                    >
-                        <Flex direction="column" gap={2}>
+                    <div className="absolute left-0 top-full z-10 mt-1 max-h-[400px] min-w-[340px] overflow-y-auto border border-slate-200 bg-white p-3 shadow-md">
+                        <div className="flex flex-col gap-2">
                             {gaps.map((gap, i) => (
                                 <GapRangeAlert
                                     key={`${gap.start_date}-${gap.end_date}`}
@@ -249,10 +220,10 @@ export const PriceGapAlert: React.FC<PriceGapAlertProps> = ({
                                     onComplete={onComplete}
                                 />
                             ))}
-                        </Flex>
-                    </Box>
+                        </div>
+                    </div>
                 )}
-            </Box>
+            </div>
         );
     }
 
@@ -295,27 +266,27 @@ export const PriceGapAlert: React.FC<PriceGapAlertProps> = ({
     };
 
     return (
-        <Flex direction="column" gap={2}>
+        <div className="flex flex-col gap-2">
             {/* Header with bulk action */}
             {gaps.length > 1 && (
-                <Flex align="center" justify="space-between">
-                    <Text fontSize="xs" color="orange.700" fontWeight="medium">
+                <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-orange-700">
                         {gaps.length} gap range{gaps.length !== 1 ? 's' : ''} ({totalMissing} missing day{totalMissing !== 1 ? 's' : ''})
-                    </Text>
+                    </span>
                     <Button
-                        size="xs"
-                        colorPalette="orange"
-                        variant="solid"
+                        size="sm"
+                        colorScheme="gray"
+                        className="bg-orange-600 hover:bg-orange-700"
                         onClick={handleFixAll}
                         disabled={fixingAll}
                     >
                         {fixingAll ? (
-                            <><Spinner size="xs" mr={1} /> Fixing all...</>
+                            <><Spinner size="xs" className="mr-1" /> Fixing all...</>
                         ) : (
                             <><FiZap style={{ marginRight: 4 }} /> Fix All Gaps</>
                         )}
                     </Button>
-                </Flex>
+                </div>
             )}
 
             {/* Individual gap range alerts */}
@@ -330,7 +301,7 @@ export const PriceGapAlert: React.FC<PriceGapAlertProps> = ({
                     onComplete={onComplete}
                 />
             ))}
-        </Flex>
+        </div>
     );
 };
 

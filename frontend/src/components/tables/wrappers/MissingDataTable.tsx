@@ -9,7 +9,7 @@
 
 import React, { useMemo, useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Box, Badge, Spinner, Text, Flex, Button, HStack } from '@chakra-ui/react';
+import { Badge, Button, Spinner, type BadgeColorScheme } from '../../ui/primitives';
 import { FiCheck, FiZap } from 'react-icons/fi';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
@@ -22,6 +22,10 @@ import { toaster } from '../../ui/toaster';
 import { Tooltip } from '../../ui/tooltip';
 import { ISSUE_CONFIG } from '../../../constants/issueConfig';
 import { linkRawAccount, linkRawAsset } from '../../../utils/rawAccountApi';
+
+const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toBadgeColor = (color: string): BadgeColorScheme =>
+    (VALID_BADGE_COLORS as string[]).includes(color) ? (color as BadgeColorScheme) : 'blue';
 
 // ============================================================================
 // Types
@@ -189,7 +193,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                 if (txIssues.length === 0) return null;
 
                 return (
-                    <Flex direction="column" gap={1}>
+                    <div className="flex flex-col gap-1">
                         {txIssues.map((issue, idx) => {
                             const key = `${issue.transaction_id}-${issue.issue_type}`;
                             const isFixed = fixedKeys.has(key);
@@ -198,7 +202,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
 
                             if (isFixed) {
                                 return (
-                                    <Badge key={idx} colorPalette="green" size="xs" fontSize="7px">
+                                    <Badge key={idx} colorScheme="green" className="text-[7px]">
                                         <FiCheck size={10} /> {config.label} Fixed
                                     </Badge>
                                 );
@@ -213,32 +217,29 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                                 : suggestionConfidence >= 0.7 ? 'blue' : 'gray';
 
                             return (
-                                <Flex key={idx} direction="column" gap={0.5} onClick={e => e.stopPropagation()}>
-                                    <Flex align="center" gap={1}>
-                                        <Badge size="xs" colorPalette={config.color} fontSize="6px" flexShrink={0} w="65px" textAlign="center">
+                                <div key={idx} className="flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center gap-1">
+                                        <Badge colorScheme={toBadgeColor(config.color)} className="w-[65px] shrink-0 text-center text-[6px]">
                                             {config.label}
                                         </Badge>
                                         <Tooltip content={issue.raw_value} openDelay={100}>
-                                            <Text fontSize="7px" color="orange.600" flexShrink={0} w="40px" truncate>
+                                            <span className="w-[40px] shrink-0 truncate text-[7px] text-orange-600">
                                                 {issue.raw_value}
-                                            </Text>
+                                            </span>
                                         </Tooltip>
                                         {issue.suggestion && issue.raw_value && suggestionConfidence >= 0.7 && (
                                             <Button
-                                                size="xs"
-                                                colorPalette={suggestionColor}
+                                                size="sm"
+                                                colorScheme={suggestionColor}
                                                 variant="outline"
                                                 onClick={() => handleFix(issue, issue.suggestion!.id)}
-                                                h="22px"
-                                                minW="45px"
-                                                px={1}
-                                                flexShrink={0}
+                                                className="h-[22px] min-w-[45px] shrink-0 px-1"
                                             >
                                                 <FiCheck size={11} />
                                             </Button>
                                         )}
-                                    </Flex>
-                                    <Box flex={1} minW={0}>
+                                    </div>
+                                    <div className="min-w-0 flex-1">
                                         {isAccountIssue(issue.issue_type) ? (
                                             <AccountSelector
                                                 accounts={accounts}
@@ -265,11 +266,11 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                                                 rawAssetSource={issue.source}
                                             />
                                         )}
-                                    </Box>
-                                </Flex>
+                                    </div>
+                                </div>
                             );
                         })}
-                    </Flex>
+                    </div>
                 );
             },
         },
@@ -293,36 +294,36 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
 
     if (isLoading) {
         return (
-            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-                <Spinner size="xl" color="blue.500" />
-                <Text mt={4}>Loading missing data issues...</Text>
-            </Box>
+            <div className="rounded-md bg-slate-50 py-10 text-center">
+                <Spinner size="lg" className="text-blue-500" />
+                <span className="mt-4 block">Loading missing data issues...</span>
+            </div>
         );
     }
 
     if (transactionIds.length === 0) {
         return (
-            <Box p={6} bg="green.50" borderRadius="md" textAlign="center">
-                <Text color="green.600" fontWeight="medium">✓ No missing data issues found!</Text>
-            </Box>
+            <div className="rounded-md bg-green-50 p-6 text-center">
+                <span className="font-medium text-green-600">✓ No missing data issues found!</span>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             {/* Bulk apply button */}
             {highConfidenceIssues.length > 0 && (
-                <Flex justify="flex-end" mb={2}>
+                <div className="mb-2 flex justify-end">
                     <Button
-                        size="xs"
-                        colorPalette="green"
+                        size="sm"
+                        colorScheme="green"
                         onClick={handleApplyAll}
                         disabled={isApplyingAll}
                     >
                         {isApplyingAll ? <Spinner size="xs" /> : <FiZap size={12} />}
-                        <Text ml={1}>Apply All ({highConfidenceIssues.length})</Text>
+                        <span className="ml-1">Apply All ({highConfidenceIssues.length})</span>
                     </Button>
-                </Flex>
+                </div>
             )}
 
             <TransactionsTable
@@ -342,7 +343,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                 additionalColumns={additionalColumns}
                 config={tableConfig}
             />
-        </Box>
+        </div>
     );
 };
 

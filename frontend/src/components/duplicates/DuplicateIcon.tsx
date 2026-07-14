@@ -6,7 +6,6 @@
  */
 
 import React from 'react';
-import { Box } from '@chakra-ui/react';
 import { LuCopy } from 'react-icons/lu';
 import { FiAlertTriangle } from 'react-icons/fi';
 
@@ -23,10 +22,10 @@ export const DuplicateIcon: React.FC<DuplicateIconProps> = ({
 }) => {
     const warningSize = Math.max(8, Math.round(size * 0.65));
     return (
-        <Box display="inline-flex" alignItems="center" gap="2px" color={color}>
+        <span className="inline-flex items-center gap-[2px]" style={{ color }}>
             <FiAlertTriangle size={warningSize} style={{ flexShrink: 0 }} />
             <LuCopy size={size} style={{ flexShrink: 0 }} />
-        </Box>
+        </span>
     );
 };
 

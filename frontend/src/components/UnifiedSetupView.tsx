@@ -1,14 +1,5 @@
 import React, { useState, useEffect } from "react";
 import {
-  Box,
-  VStack,
-  Container,
-  Badge,
-  HStack,
-  Text,
-  Flex,
-} from "@chakra-ui/react";
-import {
   FiUser,
   FiDollarSign,
   FiBarChart2,
@@ -22,6 +13,7 @@ import { RawAssetsEditor } from "./RawAssetsEditor";
 import { CategoriesEditor } from "./CategoriesEditor";
 import { PnLDefaultsEditor } from "./PnLDefaultsEditor";
 import { API_URL } from "../types";
+import { Badge } from "./ui/primitives";
 
 interface SetupStatus {
   accounts_configured: boolean;
@@ -161,32 +153,19 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
     const TabIcon = tab.icon;
 
     return (
-      <Box
+      <button
+        type="button"
         key={tab.id}
-        px={{ base: 3, md: 4 }}
-        py={1.5}
-        borderRadius="0"
-        cursor="pointer"
-        bg={isActive ? "gray.700" : "white"}
-        color={isActive ? "white" : "gray.500"}
-        _hover={{
-          color: isActive ? "white" : "gray.700",
-          bg: isActive ? "gray.700" : "gray.50",
-        }}
+        className={`px-3 py-1.5 transition-colors md:px-4 ${isActive ? 'bg-slate-700 text-white hover:bg-slate-700 hover:text-white' : 'bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}
         onClick={() => handlePrimaryTabChange(tab.id)}
-        transition="all 0.15s ease"
       >
-        <HStack gap={1.5}>
-          <Box as={TabIcon} boxSize="14px" />
-          <Text
-            fontWeight={isActive ? "600" : "500"}
-            fontSize="sm"
-            display={{ base: "none", sm: "block" }}
-          >
+        <div className="flex items-center gap-1.5">
+          <TabIcon size={14} />
+          <span className={`hidden text-sm sm:inline ${isActive ? 'font-semibold' : 'font-medium'}`}>
             {tab.label}
-          </Text>
-        </HStack>
-      </Box>
+          </span>
+        </div>
+      </button>
     );
   };
 
@@ -196,86 +175,51 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
     const ItemIcon = item.icon;
 
     return (
-      <Box
+      <button
+        type="button"
         key={item.id}
-        px={3}
-        py={1}
-        borderRadius="0"
-        cursor="pointer"
-        bg={isActive ? "gray.700" : "white"}
-        color={isActive ? "white" : "gray.600"}
-        _hover={{
-          bg: isActive ? "gray.700" : "gray.50",
-          color: isActive ? "white" : "gray.700",
-        }}
+        className={`px-3 py-1 transition-colors ${isActive ? 'bg-slate-700 text-white hover:bg-slate-700 hover:text-white' : 'bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-700'}`}
         onClick={() => setActiveItem(item.id)}
-        transition="all 0.15s ease"
       >
-        <HStack gap={1.5}>
-          <Box as={ItemIcon} boxSize="12px" />
-          <Text fontWeight={isActive ? "600" : "400"} fontSize="xs">
+        <div className="flex items-center gap-1.5">
+          <ItemIcon size={12} />
+          <span className={`text-xs ${isActive ? 'font-semibold' : 'font-normal'}`}>
             {item.label}
-          </Text>
+          </span>
           {item.badge && (
             <Badge
-              fontSize="2xs"
-              px={1.5}
-              py={0}
-              borderRadius="full"
-              bg={hasWarning ? "orange.100" : "gray.100"}
-              color={hasWarning ? "orange.700" : "gray.600"}
-              fontWeight="500"
+              colorScheme={hasWarning ? 'orange' : 'gray'}
+              className="rounded-full px-1.5 py-0 text-[10px] font-medium"
             >
               {item.badge}
             </Badge>
           )}
-        </HStack>
-      </Box>
+        </div>
+      </button>
     );
   };
 
   return (
-    <Container maxW="container.xl" py={1}>
-      <VStack align="stretch" gap={2}>
+    <div className="mx-auto max-w-7xl px-4 py-1">
+      <div className="flex flex-col gap-2">
         {/* Primary Pill Toggle Group */}
-        <HStack
-          bg="white"
-          borderRadius="0"
-          p={0}
-          gap={0}
-          borderWidth={1}
-          borderColor="gray.200"
-          alignSelf="flex-start"
-        >
+        <div className="inline-flex self-start border border-slate-200 bg-white">
           {primaryTabs.map((tab) => renderPrimaryTab(tab))}
-        </HStack>
+        </div>
 
         {/* Secondary Sub-Pills */}
         {secondaryItems.length > 0 && (
-          <HStack
-            gap={0}
-            borderWidth={1}
-            borderColor="gray.200"
-            alignSelf="flex-start"
-            flexWrap="wrap"
-          >
+          <div className="inline-flex flex-wrap self-start border border-slate-200">
             {secondaryItems.map((item) => renderSecondaryItem(item))}
-          </HStack>
+          </div>
         )}
 
         {/* Content Area */}
-        <Box
-          borderWidth={1}
-          borderColor="gray.200"
-          borderRadius="0"
-          p={{ base: 3, md: 4 }}
-          bg="white"
-          minH="500px"
-        >
+        <div className="min-h-[500px] border border-slate-200 bg-white p-3 md:p-4">
           <ActiveComponent />
-        </Box>
-      </VStack>
-    </Container>
+        </div>
+      </div>
+    </div>
   );
 };
 

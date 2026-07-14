@@ -6,7 +6,7 @@
  * hooks (no PnL context needed).
  */
 import React, { useMemo } from 'react';
-import { Badge, Box, Flex, Spinner, Text } from '@chakra-ui/react';
+import { Badge, Spinner, Text } from './ui/primitives';
 import { FiDollarSign, FiTrendingUp, FiTrendingDown, FiClock } from 'react-icons/fi';
 import { LuReceipt } from 'react-icons/lu';
 
@@ -123,16 +123,16 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
     // ── Loading / no-data states ──
     if (versionLoading || metrics.isLoading) {
         return (
-            <Flex justify="center" py={6}>
+            <div className="flex justify-center py-6">
                 <Spinner size="sm" />
-                <Text ml={2} fontSize="xs" color="gray.500">Loading PnL data…</Text>
-            </Flex>
+                <Text className="ml-2 text-xs text-gray-500">Loading PnL data…</Text>
+            </div>
         );
     }
 
     if (!versionId || !scopedMetrics) {
         return (
-            <Text fontSize="xs" color="gray.400" py={3} textAlign="center">
+            <Text className="block py-3 text-center text-xs text-gray-400">
                 No PnL calculation available.
             </Text>
         );
@@ -146,27 +146,17 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
         : 'Unknown';
 
     return (
-        <Box>
+        <div>
             {/* Version info banner */}
-            <Flex
-                align="center"
-                gap={1.5}
-                px={2}
-                py={1}
-                mb={2}
-                bg="gray.50"
-                borderRadius="sm"
-                fontSize="2xs"
-                color="gray.500"
-            >
+            <div className="mb-2 flex items-center gap-1.5 bg-gray-50 px-2 py-1 text-[10px] text-gray-500">
                 <FiClock size={10} />
                 <Text>
                     Version #{version?.version_id} · {createdAt}
                 </Text>
-                <Badge size="xs" variant="subtle" colorPalette="gray" ml={1}>
+                <Badge colorScheme="gray" className="ml-1">
                     {version?.lot_method}
                 </Badge>
-            </Flex>
+            </div>
 
             {/* Hero metrics bar — reuse from PnL drill-down */}
             <HeroMetricsBar
@@ -189,46 +179,39 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
 
             {/* Account breakdown cards — same layout as PnLDetailPanel */}
             {enrichedBreakdowns.length > 0 && (
-                <Flex gap={2} mt={2} flexWrap="wrap" align="stretch">
+                <div className="mt-2 flex flex-wrap items-stretch gap-2">
                     {enrichedBreakdowns.map(b => {
                         const urPnl = b.unrealized_pnl ?? 0;
                         return (
-                            <Box
+                            <div
                                 key={b.account_id}
-                                bg="gray.50"
-                                borderLeft="3px solid"
-                                borderLeftColor="blue.300"
-                                borderRadius="sm"
-                                px={2.5}
-                                py={1.5}
-                                minW="140px"
-                                flex="1"
+                                className="min-w-[140px] flex-1 border-l-[3px] border-l-blue-300 bg-gray-50 px-2.5 py-1.5"
                             >
                                 <AccountBadge accountId={b.account_id} accountName={b.account_name} size="xs" />
-                                <Text fontSize="xs" fontWeight="semibold" color="gray.700" mt={1.5}>
+                                <Text className="mt-1.5 block text-xs font-semibold text-gray-700">
                                     {formatQuantity(b.qty)}
                                 </Text>
                                 {b.market_value != null && (
-                                    <Text fontSize="xs" color="gray.600" mt={0.5}>
+                                    <Text className="mt-0.5 block text-xs text-gray-600">
                                         {fmtCurrency(b.market_value, baseCurrency)}
                                     </Text>
                                 )}
-                                <Text fontSize="xs" color={urPnl >= 0 ? 'green.600' : 'red.600'} mt={0.5}>
+                                <Text className={`mt-0.5 block text-xs ${urPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                     {fmtCurrencySigned(urPnl, baseCurrency)}
                                     {b.unrealized_pnl_pct != null && (
-                                        <Text as="span" color="gray.500" ml={1}>
+                                        <span className="ml-1 text-gray-500">
                                             ({b.unrealized_pnl_pct >= 0 ? '+' : ''}{b.unrealized_pnl_pct.toFixed(1)}%)
-                                        </Text>
+                                        </span>
                                     )}
                                 </Text>
-                            </Box>
+                            </div>
                         );
                     })}
-                </Flex>
+                </div>
             )}
 
             {/* Performance / Cost vs Value chart — reuse PeriodChartPanel */}
-            <Box mt={3}>
+            <div className="mt-3">
                 <PeriodChartPanel
                     points={timeline.data?.points || []}
                     baseCurrency={baseCurrency}
@@ -240,14 +223,14 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
                     assetId={assetId}
                     assetSymbol={assetSymbol}
                 />
-            </Box>
+            </div>
 
             {/* Price gap fix panel (when gaps detected) */}
             {hasGaps && assetSymbol && (
-                <Box mt={3}>
+                <div className="mt-3">
                     <GapFixPanel assetId={assetId} symbol={assetSymbol} />
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };

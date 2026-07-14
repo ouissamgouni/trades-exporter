@@ -1,8 +1,5 @@
-import {
-    Badge, Box,
-    Button, Card, Collapsible, Flex,
-    Heading, HStack, Progress, Spinner, Tabs, Text
-} from '@chakra-ui/react';
+import { Badge, Button, Progress, Spinner, type BadgeColorScheme } from './ui/primitives';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LuEye, LuHistory } from 'react-icons/lu';
@@ -74,8 +71,19 @@ const formatRelativeTime = (dateStr?: string): string => {
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
+// Background classes for accordion type/group headers, keyed by the closed
+// status-color set produced by getAggregateInfo() below.
+const TYPE_HEADER_BG: Record<string, string> = {
+    gray: 'bg-slate-50',
+    blue: 'bg-blue-50',
+    red: 'bg-red-50',
+    orange: 'bg-orange-50',
+    green: 'bg-green-50',
+};
+
 export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
     const queryClient = useQueryClient();
+    const [activeTab, setActiveTab] = useState<'control' | 'history'>('control');
     const [jobStatus, setJobStatus] = useState<SyncJobProgress | null>(null);
     const [connectors, setConnectors] = useState<ConnectorsInfo | null>(null);
     const [loading, setLoading] = useState(true);
@@ -342,206 +350,196 @@ export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true
 
     if (loading && !jobStatus) {
         return (
-            <Box p={6} textAlign="center">
+            <div className="p-6 text-center">
                 <Spinner size="lg" />
-                <Text mt={2}>Loading sync job status...</Text>
-            </Box>
+                <p className="mt-2">Loading sync job status...</p>
+            </div>
         );
     }
 
     return (
-        <Box p={4}>
-            <Heading size="lg" mb={6}>Sync Transactions</Heading>
+        <div className="p-4">
+            <h1 className="mb-6 text-xl font-semibold">Sync Transactions</h1>
 
             {error && (
-                <Box bg="red.100" color="red.800" p={3} borderRadius="md" mb={4}>
+                <div className="mb-4 bg-red-100 p-3 text-red-800">
                     Error: {error}
-                </Box>
+                </div>
             )}
 
-            <Tabs.Root defaultValue="control">
-                <Tabs.List mb={4}>
-                    <Tabs.Trigger value="control">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'control' | 'history')}>
+                <TabsList className="mb-4">
+                    <TabsTrigger value="control">
                         🎛️ Control
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="history">
+                    </TabsTrigger>
+                    <TabsTrigger value="history">
                         📜 History
-                    </Tabs.Trigger>
-                </Tabs.List>
+                    </TabsTrigger>
+                </TabsList>
 
-                <Tabs.Content value="control">
+                <TabsContent value="control">
 
                     {/* Sync Configuration Panel (enable/disable connectors, test mode) */}
-                    <Box mb={4}>
+                    <div className="mb-4">
                         <SyncConfigPanel
                             onOverridesChange={setSyncOverrides}
                             onConfigDataChange={handleConfigDataChange}
                             disabled={isFullJobRunning}
                         />
-                    </Box>
+                    </div>
 
                     {/* Controls Card */}
-                    <Card.Root mb={6}>
-                        <Card.Body>
-                            <Flex justify="space-between" align="center" wrap="wrap" gap={4}>
-                                <Flex align="center" gap={3}>
-                                    {jobStatus && (
-                                        <>
-                                            <Badge
-                                                colorPalette={getStatusColor(jobStatus.status)}
-                                                size="lg"
-                                            >
-                                                {jobStatus.status.toUpperCase()}
-                                                {jobStatus.abort_requested && ' (Aborting...)'}
-                                            </Badge>
-                                            {jobStatus.status === 'pending' && (
-                                                <Text fontSize="sm" color="gray.500">
-                                                    Initializing connectors...
-                                                </Text>
-                                            )}
-                                        </>
-                                    )}
-                                    {syncOverrides.length > 0 && canStart && (
-                                        <Text fontSize="sm" color="blue.400">
-                                            {syncOverrides.length} override{syncOverrides.length !== 1 ? 's' : ''} configured
-                                        </Text>
-                                    )}
-                                </Flex>
-                                <Flex gap={2}>
-                                    {canStart && (
-                                        <>
-                                            <Button
-                                                colorPalette="blue"
-                                                onClick={() => { setRecapRenormalize(false); setRecapOpen(true); }}
-                                                loading={actionLoading}
-                                                disabled={!canStart}
-                                            >
-                                                Start Sync Job
-                                            </Button>
-                                            <Button
-                                                colorPalette="purple"
-                                                variant="outline"
-                                                onClick={() => { setRecapRenormalize(true); setRecapOpen(true); }}
-                                                loading={actionLoading}
-                                                disabled={!canStart}
-                                            >
-                                                Re-Normalize
-                                            </Button>
-                                        </>
-                                    )}
-                                    {isFullJobRunning && (
+                    <div className="mb-6 border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                {jobStatus && (
+                                    <>
+                                        <Badge colorScheme={getStatusColor(jobStatus.status) as BadgeColorScheme}>
+                                            {jobStatus.status.toUpperCase()}
+                                            {jobStatus.abort_requested && ' (Aborting...)'}
+                                        </Badge>
+                                        {jobStatus.status === 'pending' && (
+                                            <span className="text-sm text-slate-500">
+                                                Initializing connectors...
+                                            </span>
+                                        )}
+                                    </>
+                                )}
+                                {syncOverrides.length > 0 && canStart && (
+                                    <span className="text-sm text-blue-400">
+                                        {syncOverrides.length} override{syncOverrides.length !== 1 ? 's' : ''} configured
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex gap-2">
+                                {canStart && (
+                                    <>
                                         <Button
-                                            colorPalette="red"
-                                            variant="outline"
-                                            onClick={abortJob}
+                                            colorScheme="blue"
+                                            onClick={() => { setRecapRenormalize(false); setRecapOpen(true); }}
                                             loading={actionLoading}
+                                            disabled={!canStart}
                                         >
-                                            Abort Job
+                                            Start Sync Job
                                         </Button>
-                                    )}
-                                </Flex>
-                            </Flex>
-
-
-                        </Card.Body>
-                    </Card.Root>
+                                        <Button
+                                            colorScheme="gray"
+                                            variant="outline"
+                                            className="border-purple-300 text-purple-700 hover:bg-purple-50"
+                                            onClick={() => { setRecapRenormalize(true); setRecapOpen(true); }}
+                                            loading={actionLoading}
+                                            disabled={!canStart}
+                                        >
+                                            Re-Normalize
+                                        </Button>
+                                    </>
+                                )}
+                                {isFullJobRunning && (
+                                    <Button
+                                        colorScheme="red"
+                                        variant="outline"
+                                        onClick={abortJob}
+                                        loading={actionLoading}
+                                    >
+                                        Abort Job
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
                     {/* Status Card */}
                     {jobStatus && jobStatus.status !== 'idle' && jobStatus.status !== 'pending' && (
-                        <Card.Root mb={6}>
-                            <Card.Header>
-                                <Flex justify="space-between" align="center">
-                                    <Flex align="center" gap={2}>
-                                        <Heading size="md">
+                        <div className="mb-6 border border-slate-200 bg-white shadow-sm">
+                            <div className="border-b border-slate-200 px-4 py-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <h2 className="text-base font-semibold">
                                             {jobStatus.renormalize ? 'Re-Normalization Progress' : 'Job Progress'}
-                                        </Heading>
+                                        </h2>
                                         {jobStatus.renormalize && (
-                                            <Badge colorPalette="purple" size="sm">Re-Normalize</Badge>
+                                            <Badge colorScheme="purple">Re-Normalize</Badge>
                                         )}
-                                    </Flex>
+                                    </div>
                                     {hasFailedConnectors && !isFullJobRunning && (
-                                        <Text fontSize="sm" color="red.400">
+                                        <span className="text-sm text-red-400">
                                             Some connectors failed. Expand cards to retry.
-                                        </Text>
+                                        </span>
                                     )}
-                                </Flex>
-                            </Card.Header>
-                            <Card.Body>
+                                </div>
+                            </div>
+                            <div className="p-4">
                                 {/* Progress Bar (only during full job, not single-connector retry) */}
                                 {isFullJobRunning && (
-                                    <Box mb={4}>
-                                        <Flex justify="space-between" mb={1}>
-                                            <Text fontSize="sm">
+                                    <div className="mb-4">
+                                        <div className="mb-1 flex justify-between">
+                                            <span className="text-sm">
                                                 Processing: {jobStatus.current_connector || 'Initializing...'}
-                                            </Text>
-                                            <Text fontSize="sm">
+                                            </span>
+                                            <span className="text-sm">
                                                 {jobStatus.connectors_completed.length} / {jobStatus.total_connectors} connectors
-                                            </Text>
-                                        </Flex>
-                                        <Progress.Root value={getProgressPercent()} max={100} size="sm" colorPalette={getJobProgressBarColor()}>
-                                            <Progress.Track>
-                                                <Progress.Range />
-                                            </Progress.Track>
-                                        </Progress.Root>
+                                            </span>
+                                        </div>
+                                        <Progress value={getProgressPercent()} max={100} size="sm" colorScheme={getJobProgressBarColor() as 'blue' | 'orange'} />
                                         {jobStatus.error_count > 0 && (
-                                            <Text fontSize="xs" color="orange.600" mt={1}>
+                                            <p className="mt-1 text-xs text-orange-600">
                                                 ⚠️ {jobStatus.error_count} error{jobStatus.error_count !== 1 ? 's' : ''} encountered so far
-                                            </Text>
+                                            </p>
                                         )}
-                                    </Box>
+                                    </div>
                                 )}
 
                                 {/* Statistics Grid */}
-                                <Flex gap={6} wrap="wrap" mb={4}>
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.500">Total Processed</Text>
-                                        <Text fontSize="2xl" fontWeight="bold">{jobStatus.total_processed}</Text>
-                                    </Box>
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.500">New Entries Added</Text>
-                                        <Text fontSize="2xl" fontWeight="bold" color="green.600">
+                                <div className="mb-4 flex flex-wrap gap-6">
+                                    <div>
+                                        <p className="text-sm text-slate-500">Total Processed</p>
+                                        <p className="text-2xl font-bold">{jobStatus.total_processed}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">New Entries Added</p>
+                                        <p className="text-2xl font-bold text-green-600">
                                             {jobStatus.new_entries_added}
-                                        </Text>
-                                    </Box>
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.500">Entries Updated</Text>
-                                        <Text fontSize="2xl" fontWeight="bold" color="blue.600">
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Entries Updated</p>
+                                        <p className="text-2xl font-bold text-blue-600">
                                             {jobStatus.entries_updated ?? 0}
-                                        </Text>
-                                    </Box>
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.500">Duplicates Skipped</Text>
-                                        <Text fontSize="2xl" fontWeight="bold" color="gray.500">
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Duplicates Skipped</p>
+                                        <p className="text-2xl font-bold text-slate-500">
                                             {jobStatus.duplicates_skipped}
-                                        </Text>
-                                    </Box>
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.500">Errors</Text>
-                                        <Text fontSize="2xl" fontWeight="bold" color={jobStatus.error_count > 0 ? 'red.600' : 'gray.500'}>
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Errors</p>
+                                        <p className={`text-2xl font-bold ${jobStatus.error_count > 0 ? 'text-red-600' : 'text-slate-500'}`}>
                                             {jobStatus.error_count}
-                                        </Text>
-                                    </Box>
-                                </Flex>
+                                        </p>
+                                    </div>
+                                </div>
 
                                 {/* Timing */}
-                                <Flex gap={6} wrap="wrap" mb={4}>
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.500">Started</Text>
-                                        <Text>{formatDateTime(jobStatus.started_at)}</Text>
-                                    </Box>
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.500">Finished</Text>
-                                        <Text>{formatDateTime(jobStatus.finished_at)}</Text>
-                                    </Box>
-                                </Flex>
+                                <div className="mb-4 flex flex-wrap gap-6">
+                                    <div>
+                                        <p className="text-sm text-slate-500">Started</p>
+                                        <p>{formatDateTime(jobStatus.started_at)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-slate-500">Finished</p>
+                                        <p>{formatDateTime(jobStatus.finished_at)}</p>
+                                    </div>
+                                </div>
 
                                 {/* Per-Connector Progress - Grouped by Type → Group with Accordion */}
                                 {jobStatus.connector_statuses &&
                                     Object.keys(jobStatus.connector_statuses).length > 0 && (
-                                        <Box>
-                                            <Text fontSize="sm" color="gray.500" mb={3}>
+                                        <div>
+                                            <p className="mb-3 text-sm text-slate-500">
                                                 Connector Progress
-                                            </Text>
+                                            </p>
                                             {(() => {
                                                 const sorted = getSortedConnectorStatuses();
                                                 // Build nested grouping: type → group → connectors (flat, no per-account grid)
@@ -611,189 +609,152 @@ export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true
                                                     const isTypeExpanded = expandedTypes.has(typeKey);
 
                                                     return (
-                                                        <Box key={typeKey} mb={3}>
+                                                        <div key={typeKey} className="mb-3">
                                                             {/* Type accordion header */}
                                                             {hasManyTypes && (
-                                                                <Flex
-                                                                    align="center"
-                                                                    justify="space-between"
-                                                                    py={1.5}
-                                                                    px={2}
-                                                                    bg={`${typeInfo.color}.50`}
-                                                                    borderRadius="md"
-                                                                    mb={1}
-                                                                    cursor="pointer"
+                                                                <div
+                                                                    className={`mb-1 flex cursor-pointer items-center justify-between px-2 py-1.5 transition-opacity hover:opacity-85 ${TYPE_HEADER_BG[typeInfo.color] ?? 'bg-slate-50'}`}
                                                                     onClick={() => setExpandedTypes(prev => {
                                                                         const next = new Set(prev);
                                                                         if (next.has(typeKey)) next.delete(typeKey); else next.add(typeKey);
                                                                         return next;
                                                                     })}
-                                                                    _hover={{ opacity: 0.85 }}
-                                                                    transition="opacity 0.15s"
                                                                 >
-                                                                    <Flex align="center" gap={2}>
-                                                                        <Text color="gray.400" fontSize="xs">{isTypeExpanded ? '▼' : '▶'}</Text>
-                                                                        <Text fontWeight="semibold" fontSize="sm" color="gray.700">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-xs text-slate-400">{isTypeExpanded ? '▼' : '▶'}</span>
+                                                                        <span className="text-sm font-semibold text-slate-700">
                                                                             {typeLabels[typeKey] || typeKey}
-                                                                        </Text>
-                                                                        <Text fontSize="xs" color="gray.500">
+                                                                        </span>
+                                                                        <span className="text-xs text-slate-500">
                                                                             {typeInfo.icon} {typeInfo.completed}/{typeInfo.total}
-                                                                        </Text>
-                                                                    </Flex>
-                                                                    <Flex align="center" gap={2}>
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
                                                                         {typeInfo.totalNew > 0 && (
-                                                                            <Text fontSize="xs" color="green.500">+{typeInfo.totalNew}</Text>
+                                                                            <span className="text-xs text-green-500">+{typeInfo.totalNew}</span>
                                                                         )}
                                                                         {typeInfo.totalErrors > 0 && (
-                                                                            <Text fontSize="xs" color="red.500">{typeInfo.totalErrors} err</Text>
+                                                                            <span className="text-xs text-red-500">{typeInfo.totalErrors} err</span>
                                                                         )}
                                                                         {typeInfo.running > 0 && (
-                                                                            <Badge colorPalette="blue" size="xs">{typeInfo.running} running</Badge>
+                                                                            <Badge colorScheme="blue">{typeInfo.running} running</Badge>
                                                                         )}
-                                                                    </Flex>
-                                                                </Flex>
+                                                                    </div>
+                                                                </div>
                                                             )}
 
-                                                            <Collapsible.Root open={!hasManyTypes || isTypeExpanded}>
-                                                                <Collapsible.Content>
+                                                            {(!hasManyTypes || isTypeExpanded) && (
+                                                                <>
                                                                     {groupEntries.map(([groupName, groupConnectors]) => {
                                                                         const groupKey = `${typeKey}:${groupName}`;
                                                                         const isGroupExpanded = expandedGroups.has(groupKey);
                                                                         const groupInfo = getAggregateInfo(groupConnectors);
 
                                                                         return (
-                                                                            <Box key={groupName} ml={hasManyTypes ? 2 : 0} mb={2}>
+                                                                            <div key={groupName} className={`mb-2 ${hasManyTypes ? 'ml-2' : ''}`}>
                                                                                 {/* Group accordion header */}
                                                                                 {hasManyGroups && (
-                                                                                    <Flex
-                                                                                        align="center"
-                                                                                        justify="space-between"
-                                                                                        py={1}
-                                                                                        px={2}
-                                                                                        borderRadius="sm"
-                                                                                        mb={1}
-                                                                                        cursor="pointer"
+                                                                                    <div
+                                                                                        className="mb-1 flex cursor-pointer items-center justify-between px-2 py-1 hover:bg-slate-50"
                                                                                         onClick={() => setExpandedGroups(prev => {
                                                                                             const next = new Set(prev);
                                                                                             if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey);
                                                                                             return next;
                                                                                         })}
-                                                                                        _hover={{ bg: 'gray.50' }}
                                                                                     >
-                                                                                        <Flex align="center" gap={2}>
-                                                                                            <Text color="gray.400" fontSize="xs">{isGroupExpanded ? '▼' : '▶'}</Text>
-                                                                                            <Text fontSize="xs" fontWeight="medium" color="gray.600">
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            <span className="text-xs text-slate-400">{isGroupExpanded ? '▼' : '▶'}</span>
+                                                                                            <span className="text-xs font-medium text-slate-600">
                                                                                                 {groupName}
-                                                                                            </Text>
-                                                                                            <Text fontSize="xs" color="gray.400">
+                                                                                            </span>
+                                                                                            <span className="text-xs text-slate-400">
                                                                                                 {groupInfo.icon} {groupInfo.completed}/{groupInfo.total}
-                                                                                            </Text>
-                                                                                        </Flex>
-                                                                                        <Flex align="center" gap={2}>
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-2">
                                                                                             {groupInfo.totalNew > 0 && (
-                                                                                                <Text fontSize="xs" color="green.500">+{groupInfo.totalNew}</Text>
+                                                                                                <span className="text-xs text-green-500">+{groupInfo.totalNew}</span>
                                                                                             )}
                                                                                             {groupInfo.totalErrors > 0 && (
-                                                                                                <Text fontSize="xs" color="red.500">{groupInfo.totalErrors} err</Text>
+                                                                                                <span className="text-xs text-red-500">{groupInfo.totalErrors} err</span>
                                                                                             )}
-                                                                                        </Flex>
-                                                                                    </Flex>
+                                                                                        </div>
+                                                                                    </div>
                                                                                 )}
 
-                                                                                <Collapsible.Root open={!hasManyGroups || isGroupExpanded}>
-                                                                                    <Collapsible.Content>
-                                                                                        {/* Grid at GROUP level - all cards from all accounts in this group */}
-                                                                                        <Box
-                                                                                            display="grid"
-                                                                                            gridTemplateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }}
-                                                                                            gap={2}
-                                                                                            ml={hasManyGroups ? 2 : 0}
-                                                                                        >
-                                                                                            {groupConnectors.map((cp) => (
-                                                                                                <ConnectorProgressCard
-                                                                                                    key={cp.connector_id}
-                                                                                                    progress={cp}
-                                                                                                    isExpanded={cp.status === 'failed' || cp.status === 'warning'}
-                                                                                                    showAccountName={hasManyGroups || groupConnectors.length > 1}
-                                                                                                    onRetry={retryConnector}
-                                                                                                    retryLoading={retryLoading === cp.connector_id}
-                                                                                                    renormalize={jobStatus.renormalize}
-                                                                                                />
-                                                                                            ))}
-                                                                                        </Box>
-                                                                                    </Collapsible.Content>
-                                                                                </Collapsible.Root>
-                                                                            </Box>
+                                                                                {(!hasManyGroups || isGroupExpanded) && (
+                                                                                    <div
+                                                                                        className={`grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3 ${hasManyGroups ? 'ml-2' : ''}`}
+                                                                                    >
+                                                                                        {groupConnectors.map((cp) => (
+                                                                                            <ConnectorProgressCard
+                                                                                                key={cp.connector_id}
+                                                                                                progress={cp}
+                                                                                                isExpanded={cp.status === 'failed' || cp.status === 'warning'}
+                                                                                                showAccountName={hasManyGroups || groupConnectors.length > 1}
+                                                                                                onRetry={retryConnector}
+                                                                                                retryLoading={retryLoading === cp.connector_id}
+                                                                                                renormalize={jobStatus.renormalize}
+                                                                                            />
+                                                                                        ))}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
                                                                         );
                                                                     })}
-                                                                </Collapsible.Content>
-                                                            </Collapsible.Root>
-                                                        </Box>
+                                                                </>
+                                                            )}
+                                                        </div>
                                                     );
                                                 });
                                             })()}
-                                        </Box>
+                                        </div>
                                     )}
 
                                 {/* Legacy: Completed Connectors (fallback for backward compatibility) */}
                                 {!jobStatus.connector_statuses && jobStatus.connectors_completed.length > 0 && (
-                                    <Box mb={4}>
-                                        <Text fontSize="sm" color="gray.500" mb={1}>Completed Connectors</Text>
-                                        <Flex gap={2} wrap="wrap">
+                                    <div className="mb-4">
+                                        <p className="mb-1 text-sm text-slate-500">Completed Connectors</p>
+                                        <div className="flex flex-wrap gap-2">
                                             {jobStatus.connectors_completed.map((c: string) => (
-                                                <Badge key={c} colorPalette="green">{c}</Badge>
+                                                <Badge key={c} colorScheme="green">{c}</Badge>
                                             ))}
-                                        </Flex>
-                                    </Box>
+                                        </div>
+                                    </div>
                                 )}
 
                                 {/* Error Message */}
                                 {jobStatus.error_message && (
-                                    <Box
-                                        bg="red.50"
-                                        borderColor="red.200"
-                                        borderWidth={1}
-                                        p={3}
-                                        borderRadius="md"
-                                        mt={4}
-                                    >
-                                        <Text fontWeight="bold" color="red.700">
+                                    <div className="mt-4 border border-red-200 bg-red-50 p-3">
+                                        <p className="font-bold text-red-700">
                                             Error:
-                                        </Text>
-                                        <Text color="red.600">{jobStatus.error_message}</Text>
-                                    </Box>
+                                        </p>
+                                        <p className="text-red-600">{jobStatus.error_message}</p>
+                                    </div>
                                 )}
 
                                 {/* Error List */}
                                 {jobStatus.errors.length > 0 && (
-                                    <Box mt={4}>
-                                        <Text fontSize="sm" color="gray.500" mb={2}>
+                                    <div className="mt-4">
+                                        <p className="mb-2 text-sm text-slate-500">
                                             Recent Errors ({jobStatus.error_count} total):
-                                        </Text>
-                                        <Box
-                                            maxH="200px"
-                                            overflowY="auto"
-                                            bg="gray.50"
-                                            p={3}
-                                            borderRadius="md"
-                                            fontSize="xs"
-                                            fontFamily="mono"
-                                        >
+                                        </p>
+                                        <div className="max-h-[200px] overflow-y-auto bg-slate-50 p-3 font-mono text-xs">
                                             {jobStatus.errors.map((err: string, idx: number) => (
-                                                <Text key={idx} color="red.600" mb={1}>{err}</Text>
+                                                <p key={idx} className="mb-1 text-red-600">{err}</p>
                                             ))}
-                                        </Box>
-                                    </Box>
+                                        </div>
+                                    </div>
                                 )}
-                            </Card.Body>
-                        </Card.Root>
+                            </div>
+                        </div>
                     )}
-                </Tabs.Content>
+                </TabsContent>
 
                 {/* Job History Tab */}
-                <Tabs.Content value="history">
-                    <Card.Root>
-                        <Card.Body>
+                <TabsContent value="history">
+                    <div className="border border-slate-200 bg-white shadow-sm">
+                        <div className="p-4">
                             <JobHistoryTable
                                 onViewJob={(jobId) => {
                                     setSelectedJobId(jobId);
@@ -801,10 +762,10 @@ export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true
                                 }}
                                 refreshTrigger={historyRefreshTrigger}
                             />
-                        </Card.Body>
-                    </Card.Root>
-                </Tabs.Content>
-            </Tabs.Root>
+                        </div>
+                    </div>
+                </TabsContent>
+            </Tabs>
 
             {/* Job Detail Drawer */}
             <JobDetailDrawer
@@ -830,6 +791,6 @@ export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true
                 renormalize={recapRenormalize}
                 loading={actionLoading}
             />
-        </Box>
+        </div>
     );
 };

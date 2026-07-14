@@ -7,7 +7,6 @@
  */
 
 import React, { useMemo } from 'react';
-import { Box, Text } from '@chakra-ui/react';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
 import { TableConfig } from '../types';
@@ -50,9 +49,9 @@ export const BundleMemberTransactionsTable: React.FC<BundleMemberTransactionsTab
 
     if (!transactionIds || transactionIds.length === 0) {
         return (
-            <Text fontSize="xs" color="gray.500" fontStyle="italic">
+            <span className="text-xs italic text-slate-500">
                 No transactions
-            </Text>
+            </span>
         );
     }
 

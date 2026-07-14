@@ -7,10 +7,8 @@
  */
 
 import React from 'react';
-import {
-    Badge, Box, Button, Checkbox, Flex, HStack, Input,
-    NativeSelect, Switch, Table, Text, VStack
-} from '@chakra-ui/react';
+import { Badge, Input, type BadgeColorScheme } from './ui/primitives';
+import { cn } from '../lib/cn';
 import { BiTransfer } from 'react-icons/bi';
 import { RiExchangeFundsLine } from 'react-icons/ri';
 import { FaQuestion } from 'react-icons/fa';
@@ -47,17 +45,24 @@ const DIRECTION_OPTIONS = [
     { value: 'internal', label: '↔' }
 ];
 
-// Direction color mapping
-const directionRowColors: Record<string, string> = {
-    [Direction.INFLOW]: 'green.50',
-    [Direction.OUTFLOW]: 'red.50',
-    internal: 'gray.50',
-};
+// Direction color mapping is now handled via DIRECTION_ROW_HEX in TransactionsTable.tsx
 
-const statusBadgeColors: Record<TransactionStatus, string> = {
+const statusBadgeColors: Record<TransactionStatus, BadgeColorScheme> = {
     [ReviewStatus.VALID]: 'green',
     [ReviewStatus.PENDING]: 'yellow',
     [ReviewStatus.INVALID]: 'red',
+};
+
+// Text color classes for plugin row action buttons, keyed by the plugin's own colorPalette string
+const PLUGIN_ACTION_COLORS: Record<string, string> = {
+    gray: 'text-slate-500 hover:text-slate-700',
+    blue: 'text-blue-500 hover:text-blue-700',
+    green: 'text-green-500 hover:text-green-700',
+    red: 'text-red-500 hover:text-red-700',
+    orange: 'text-orange-500 hover:text-orange-700',
+    purple: 'text-purple-500 hover:text-purple-700',
+    teal: 'text-teal-500 hover:text-teal-700',
+    yellow: 'text-yellow-500 hover:text-yellow-700',
 };
 
 // ========== Editable field types (shared with TransactionsTable) ==========
@@ -212,64 +217,45 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
     // ============== Collapsed Invalid Row ==============
     if (isInvalidCollapsed) {
         return (
-            <Table.Row
+            <tr
                 key={tx.id}
-                bg="gray.200"
-                _hover={{ bg: 'gray.300' }}
-                cursor="pointer"
+                className="h-5 cursor-pointer bg-slate-200 hover:bg-slate-300"
                 onClick={() => toggleInvalidRow(tx.id)}
-                height="20px"
             >
-                <Table.Cell
-                    colSpan={visibleColumnCount}
-                    py={0}
-                    px={0}
-                    position="relative"
-                >
+                <td colSpan={visibleColumnCount} className="relative p-0">
                     {/* Red status band on far left */}
-                    <Box
-                        position="absolute"
-                        left={0}
-                        top={0}
-                        bottom={0}
-                        width="4px"
-                        bg="red.500"
-                    />
-                    <Flex align="center" gap={2} pl="10px" pr={2} minH="20px">
-                        <Box
-                            as="button"
-                            display="flex"
-                            alignItems="center"
-                            color="gray.400"
-                            _hover={{ color: 'red.500' }}
+                    <div className="absolute bottom-0 left-0 top-0 w-1 bg-red-500" />
+                    <div className="flex min-h-[20px] items-center gap-2 py-0 pl-[10px] pr-2">
+                        <button
+                            type="button"
+                            title="Expand invalid row"
+                            className="flex shrink-0 items-center text-slate-400 hover:text-red-500"
                             onClick={(e: React.MouseEvent) => {
                                 e.stopPropagation();
                                 toggleInvalidRow(tx.id);
                             }}
-                            title="Expand invalid row"
-                            flexShrink={0}
                         >
                             <LuPlus size={11} />
-                        </Box>
-                        <Badge colorPalette="red" variant="subtle" size="xs" fontSize="7px" px={1}>
+                        </button>
+                        <Badge colorScheme="red" className="px-1 text-[7px]">
                             <LuX size={8} /> Invalid
                         </Badge>
-                        <Text fontSize="7px" color="gray.400" truncate maxW="200px">
+                        <span className="max-w-[200px] truncate text-[7px] text-slate-400">
                             {formatDateTimeCompact(tx.date_time)} · {tx.source_asset_symbol || tx.linked_asset?.symbol || '—'}
                             {tx.source ? ` · ${tx.source}` : ''}
-                        </Text>
-                    </Flex>
-                </Table.Cell>
-            </Table.Row>
+                        </span>
+                    </div>
+                </td>
+            </tr>
         );
     }
 
     // ============== Normal / Expanded Row ==============
     return (
         <React.Fragment key={tx.id}>
-            <Table.Row
-                bg={rowBgColor}
-                _hover={{ bg: 'blue.50' }}
+            <tr
+                className="hover:bg-blue-50"
+                style={{ backgroundColor: rowBgColor }}
                 onMouseEnter={() => {
                     if (suggestionEntry) setHoveredSuggestionGroup(suggestionEntry.groupIndex);
                     if (tx.user_calculation_unit_id && !suggestionEntry) setHoveredBundleId(tx.user_calculation_unit_id);
@@ -281,54 +267,20 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                     if (duplicateEntry) setHoveredDuplicateGroup(null);
                 }}
             >
-                <Table.Cell position="sticky" left={0} bg={rowBgColor} zIndex={5} borderRight="2px solid" borderColor="gray.300" p={0}>
+                <td className="sticky left-0 z-[5] border-r-2 border-slate-300 p-0" style={{ backgroundColor: rowBgColor }}>
                     {/* Review status band — full cell height */}
-                    <Box
-                        position="absolute"
-                        left={0}
-                        top={0}
-                        bottom={0}
-                        width="4px"
-                        bg={rowBorderColor}
-                    />
+                    <div className="absolute bottom-0 left-0 top-0 w-1" style={{ backgroundColor: rowBorderColor }} />
                     {/* Suggestion / Bundle color band — right next to review status (mutually exclusive) */}
                     {suggestionEntry ? (
-                        <Box
-                            position="absolute"
-                            left="5px"
-                            top={0}
-                            bottom={0}
-                            width="4px"
-                            bg={suggestionEntry.color}
-                            borderRadius="2px"
-                            zIndex={1}
-                        />
+                        <div className="absolute bottom-0 top-0 z-[1] w-1" style={{ left: '5px', backgroundColor: suggestionEntry.color }} />
                     ) : (tx.user_calculation_unit_id != null) ? (
-                        <Box
-                            position="absolute"
-                            left="5px"
-                            top={0}
-                            bottom={0}
-                            width="4px"
-                            bg={bundleColorMap.get(tx.user_calculation_unit_id) || 'purple.400'}
-                            borderRadius="2px"
-                            zIndex={1}
-                        />
+                        <div className="absolute bottom-0 top-0 z-[1] w-1" style={{ left: '5px', backgroundColor: bundleColorMap.get(tx.user_calculation_unit_id) || '#c084fc' }} />
                     ) : null}
                     {/* Duplicate band (Band 3) — right of suggestion/bundle band */}
                     {duplicateEntry && (
-                        <Box
-                            position="absolute"
-                            left="10px"
-                            top={0}
-                            bottom={0}
-                            width="4px"
-                            bg={duplicateEntry.color}
-                            borderRadius="2px"
-                            zIndex={1}
-                        />
+                        <div className="absolute bottom-0 top-0 z-[1] w-1" style={{ left: '10px', backgroundColor: duplicateEntry.color }} />
                     )}
-                    <Flex gap={1} align="center" pl={duplicateEntry ? '17px' : (suggestionEntry || tx.user_calculation_unit_id) ? '12px' : '7px'} pr={1} minH="28px">
+                    <div className="flex min-h-[28px] items-center gap-1 pr-1" style={{ paddingLeft: duplicateEntry ? '17px' : (suggestionEntry || tx.user_calculation_unit_id) ? '12px' : '7px' }}>
                         {/* Duplicate icon — clickable, opens popover */}
                         {duplicateEntry && (
                             <DuplicatePopover
@@ -342,19 +294,15 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     setIsDrawerOpen(true);
                                 }}
                             >
-                                <Box
-                                    as="button"
-                                    display="flex"
-                                    alignItems="center"
-                                    p={0}
-                                    cursor="pointer"
-                                    color={duplicateEntry.color}
-                                    _hover={{ opacity: 0.7 }}
+                                <button
+                                    type="button"
+                                    className="flex cursor-pointer items-center p-0 hover:opacity-70"
+                                    style={{ color: duplicateEntry.color }}
                                     title={`Duplicate suspicion: ${duplicateEntry.matchCriteria}`}
                                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 >
                                     <DuplicateIcon size={11} />
-                                </Box>
+                                </button>
                             </DuplicatePopover>
                         )}
                         {/* Suggestion band icon — clickable, opens popover */}
@@ -370,26 +318,22 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     setIsDrawerOpen(true);
                                 }}
                             >
-                                <Box
-                                    as="button"
-                                    display="flex"
-                                    alignItems="center"
-                                    p={0}
-                                    cursor="pointer"
-                                    color={suggestionEntry.color}
-                                    _hover={{ opacity: 0.7 }}
+                                <button
+                                    type="button"
+                                    className="flex cursor-pointer items-center p-0 hover:opacity-70"
+                                    style={{ color: suggestionEntry.color }}
                                     title={`Bundle suggestion: ${suggestionEntry.suggestion.label}`}
                                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 >
                                     <BundleSuggestionIcon size={12} />
-                                </Box>
+                                </button>
                             </SuggestionPopover>
                         )}
                         {/* Bundle membership badge — clickable, opens popover */}
                         {!suggestionEntry && tx.user_calculation_unit_id && (
                             <BundleMembershipPopover
                                 bundleId={tx.user_calculation_unit_id}
-                                color={bundleColorMap.get(tx.user_calculation_unit_id) || 'purple.400'}
+                                color={bundleColorMap.get(tx.user_calculation_unit_id) || '#c084fc'}
                                 open={openBundleTxId === tx.id}
                                 onOpenChange={(open) => setOpenBundleTxId(open ? tx.id : null)}
                                 onTransactionClick={(txId) => {
@@ -398,13 +342,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 }}
                             >
                                 <Badge
-                                    as="button"
-                                    size="xs"
-                                    fontSize="7px"
-                                    colorPalette="purple"
-                                    variant="subtle"
-                                    cursor="pointer"
-                                    _hover={{ opacity: 0.7 }}
+                                    colorScheme="purple"
+                                    className="cursor-pointer text-[7px] hover:opacity-70"
                                     title={`Bundle #${tx.user_calculation_unit_id}`}
                                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 >
@@ -414,39 +353,30 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                         )}
                         {/* Collapse toggle for expanded invalid rows */}
                         {tx.review_status === 'invalid' && expandedInvalidIds.has(tx.id) && (
-                            <Box
-                                as="button"
-                                display="flex"
-                                alignItems="center"
-                                color="red.400"
-                                _hover={{ color: 'red.600' }}
+                            <button
+                                type="button"
+                                className="flex shrink-0 items-center p-0 text-red-400 hover:text-red-600"
                                 onClick={(e: React.MouseEvent) => {
                                     e.stopPropagation();
                                     toggleInvalidRow(tx.id);
                                 }}
                                 title="Collapse invalid row"
-                                p={0}
-                                flexShrink={0}
                             >
                                 <LuMinus size={11} />
-                            </Box>
+                            </button>
                         )}
                         {(!embeddedMode || showSelectionInEmbedded) && (
-                            <Checkbox.Root
+                            <input
+                                type="checkbox"
+                                title="Select row"
+                                className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
                                 checked={selectedIds.has(tx.id)}
-                                onCheckedChange={() => toggleSelection(tx.id)}
-                            >
-                                <Checkbox.HiddenInput />
-                                <Checkbox.Control />
-                            </Checkbox.Root>
+                                onChange={() => toggleSelection(tx.id)}
+                            />
                         )}
                         {/* TX ID - clickable to open drawer */}
-                        <Text
-                            fontSize="8px"
-                            fontFamily="mono"
-                            color="gray.400"
-                            cursor="pointer"
-                            _hover={{ color: 'blue.500', textDecoration: 'underline' }}
+                        <span
+                            className="cursor-pointer font-mono text-[8px] text-slate-400 hover:text-blue-500 hover:underline"
                             onClick={() => {
                                 setDrawerTransactionId(tx.id);
                                 setIsDrawerOpen(true);
@@ -454,40 +384,37 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             title={`TX #${tx.id} — Click to view details`}
                         >
                             #{tx.id}
-                        </Text>
-                    </Flex>
-                </Table.Cell>
+                        </span>
+                    </div>
+                </td>
                 {showColumn('id') && (
-                    <Table.Cell py={1}>
-                        <Text fontSize="8px" fontFamily="mono" color="gray.500">{tx.id}</Text>
-                    </Table.Cell>
+                    <td className="py-1">
+                        <span className="font-mono text-[8px] text-slate-500">{tx.id}</span>
+                    </td>
                 )}
                 {/* Date/Time - click to edit */}
                 {showColumn('date') && (
-                    <Table.Cell py={1} pr={1} onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')} cursor="pointer">
+                    <td className="cursor-pointer py-1 pr-1" onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')}>
                         {isEditingCell(tx.id, 'date_time') ? (
                             <Input
                                 ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                size="xs"
                                 type="datetime-local"
                                 value={toDateTimeLocalString(editValues.date_time)}
                                 onChange={e => updateEditValues({ date_time: e.target.value })}
                                 onKeyDown={handleEditKeyDown}
                                 onBlur={saveAndClose}
-                                width="130px"
-                                fontSize="8px"
-                                px={1}
+                                className="w-[130px] px-1 text-[8px]"
                             />
                         ) : (
-                            <Text fontSize="8px">{formatDateTimeCompact(tx.date_time)}</Text>
+                            <span className="text-[8px]">{formatDateTimeCompact(tx.date_time)}</span>
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Source Info - merged column with Source Account, Source, Source Type, Source Symbol */}
                 {showColumn('source') && (
-                    <Table.Cell py={1} pr={1} cursor="pointer">
+                    <td className="cursor-pointer py-1 pr-1">
                         {isEditingCell(tx.id, 'account_id') ? (
-                            <Flex direction="column" gap={1} minW="120px">
+                            <div className="flex min-w-[120px] flex-col gap-1">
                                 <AccountSelector
                                     value={editValues.account_id ?? null}
                                     onChange={(accountId) => {
@@ -519,10 +446,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     />
                                 )}
                                 {/* Secondary info shown when editing */}
-                                <Text fontSize="7px" color="gray.400">
+                                <span className="text-[7px] text-slate-400">
                                     {[tx.source, tx.source_transaction_type].filter(Boolean).join(' · ')}
-                                </Text>
-                            </Flex>
+                                </span>
+                            </div>
                         ) : (
                             <SourceInfoCell
                                 sourceAccount={tx.source_account}
@@ -581,15 +508,15 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 }}
                             />
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* From / To Accounts - merged column showing both in 2 lines with inline editing */}
                 {showColumn('accounts') && (
-                    <Table.Cell py={1}>
-                        <VStack gap={0.5} align="center">
+                    <td className="py-1">
+                        <div className="flex flex-col items-center gap-0.5">
                             {/* From Account - editable */}
                             {isEditingCell(tx.id, 'from_account_id') ? (
-                                <Flex direction="column" gap={1} minW="100px">
+                                <div className="flex min-w-[100px] flex-col gap-1">
                                     <AccountSelector
                                         value={editValues.from_account_id ?? null}
                                         onChange={async (accountId) => {
@@ -643,10 +570,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             }}
                                         />
                                     )}
-                                </Flex>
+                                </div>
                             ) : (tx.from_account_id || tx.source_from_account) ? (
-                                <Flex direction="column" gap={0.5} align="start">
-                                    <Flex align="center" gap={0.5}>
+                                <div className="flex flex-col items-start gap-0.5">
+                                    <div className="flex items-center gap-0.5">
                                         <Tooltip
                                             content={
                                                 tx.from_account_id
@@ -656,10 +583,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             openDelay={200}
                                         >
                                             <Badge
-                                                size="xs"
-                                                colorPalette={tx.from_account_id ? 'cyan' : 'orange'}
-                                                variant="subtle"
-                                                cursor="pointer"
+                                                colorScheme={tx.from_account_id ? 'blue' : 'orange'}
+                                                className="cursor-pointer text-[8px] px-1 py-0"
                                                 onClick={() => startCellEdit(tx, 'from_account_id')}
                                             >
                                                 {tx.from_account_id ? (
@@ -671,8 +596,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         </Tooltip>
                                         {tx.from_account_id && (
                                             <Tooltip content="Clear from account" openDelay={100}>
-                                                <Box
-                                                    as="button"
+                                                <button
+                                                    type="button"
                                                     onClick={async (e: React.MouseEvent) => {
                                                         e.stopPropagation();
                                                         try {
@@ -687,19 +612,16 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             toaster.error({ title: 'Error', description: 'Failed to clear from account' });
                                                         }
                                                     }}
-                                                    color="red.400"
-                                                    cursor="pointer"
-                                                    flexShrink={0}
-                                                    _hover={{ color: 'red.600' }}
+                                                    className="flex shrink-0 cursor-pointer items-center text-red-400 hover:text-red-600"
                                                 >
                                                     <LuX size={10} />
-                                                </Box>
+                                                </button>
                                             </Tooltip>
                                         )}
                                         {!tx.from_account_id && tx.source_from_account && (
                                             <Tooltip content="Create new account" openDelay={100}>
-                                                <Box
-                                                    as="button"
+                                                <button
+                                                    type="button"
                                                     onClick={(e: React.MouseEvent) => {
                                                         e.stopPropagation();
                                                         setQuickCreateAccount({
@@ -715,16 +637,13 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             rawNetwork: tx.network || undefined,
                                                         });
                                                     }}
-                                                    color="green.500"
-                                                    cursor="pointer"
-                                                    flexShrink={0}
-                                                    _hover={{ color: 'green.700' }}
+                                                    className="flex shrink-0 cursor-pointer items-center text-green-500 hover:text-green-700"
                                                 >
                                                     <FiPlusCircle size={10} />
-                                                </Box>
+                                                </button>
                                             </Tooltip>
                                         )}
-                                    </Flex>
+                                    </div>
                                     {/* Always-visible suggestion badges for unlinked from_account */}
                                     {tx.source_from_account && !tx.from_account_id && (
                                         <AccountSuggestionBadges
@@ -755,23 +674,21 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             }}
                                         />
                                     )}
-                                </Flex>
+                                </div>
                             ) : (
                                 <Badge
-                                    size="xs"
-                                    colorPalette="gray"
-                                    variant="outline"
-                                    cursor="pointer"
+                                    colorScheme="gray"
+                                    className="cursor-pointer border border-slate-300 bg-white text-[8px] px-1 py-0 text-slate-500"
                                     onClick={() => startCellEdit(tx, 'from_account_id')}
                                 >
                                     + From
                                 </Badge>
                             )}
                             {/* Arrow separator between from and to */}
-                            <Text fontSize="10px" color="gray.400" lineHeight="1">↓</Text>
+                            <span className="text-[10px] leading-none text-slate-400">↓</span>
                             {/* To Account - editable */}
                             {isEditingCell(tx.id, 'to_account_id') ? (
-                                <Flex direction="column" gap={1} minW="100px">
+                                <div className="flex min-w-[100px] flex-col gap-1">
                                     <AccountSelector
                                         value={editValues.to_account_id ?? null}
                                         onChange={async (accountId) => {
@@ -825,10 +742,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             }}
                                         />
                                     )}
-                                </Flex>
+                                </div>
                             ) : (tx.to_account_id || tx.source_to_account) ? (
-                                <Flex direction="column" gap={0.5} align="start">
-                                    <Flex align="center" gap={0.5}>
+                                <div className="flex flex-col items-start gap-0.5">
+                                    <div className="flex items-center gap-0.5">
                                         <Tooltip
                                             content={
                                                 tx.to_account_id
@@ -838,10 +755,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             openDelay={200}
                                         >
                                             <Badge
-                                                size="xs"
-                                                colorPalette={tx.to_account_id ? 'cyan' : 'orange'}
-                                                variant="subtle"
-                                                cursor="pointer"
+                                                colorScheme={tx.to_account_id ? 'blue' : 'orange'}
+                                                className="cursor-pointer text-[8px] px-1 py-0"
                                                 onClick={() => startCellEdit(tx, 'to_account_id')}
                                             >
                                                 {tx.to_account_id ? (
@@ -853,8 +768,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         </Tooltip>
                                         {tx.to_account_id && (
                                             <Tooltip content="Clear to account" openDelay={100}>
-                                                <Box
-                                                    as="button"
+                                                <button
+                                                    type="button"
                                                     onClick={async (e: React.MouseEvent) => {
                                                         e.stopPropagation();
                                                         try {
@@ -869,19 +784,16 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             toaster.error({ title: 'Error', description: 'Failed to clear to account' });
                                                         }
                                                     }}
-                                                    color="red.400"
-                                                    cursor="pointer"
-                                                    flexShrink={0}
-                                                    _hover={{ color: 'red.600' }}
+                                                    className="flex shrink-0 cursor-pointer items-center text-red-400 hover:text-red-600"
                                                 >
                                                     <LuX size={10} />
-                                                </Box>
+                                                </button>
                                             </Tooltip>
                                         )}
                                         {!tx.to_account_id && tx.source_to_account && (
                                             <Tooltip content="Create new account" openDelay={100}>
-                                                <Box
-                                                    as="button"
+                                                <button
+                                                    type="button"
                                                     onClick={(e: React.MouseEvent) => {
                                                         e.stopPropagation();
                                                         setQuickCreateAccount({
@@ -897,16 +809,13 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             rawNetwork: tx.network || undefined,
                                                         });
                                                     }}
-                                                    color="green.500"
-                                                    cursor="pointer"
-                                                    flexShrink={0}
-                                                    _hover={{ color: 'green.700' }}
+                                                    className="flex shrink-0 cursor-pointer items-center text-green-500 hover:text-green-700"
                                                 >
                                                     <FiPlusCircle size={10} />
-                                                </Box>
+                                                </button>
                                             </Tooltip>
                                         )}
-                                    </Flex>
+                                    </div>
                                     {/* Always-visible suggestion badges for unlinked to_account */}
                                     {tx.source_to_account && !tx.to_account_id && (
                                         <AccountSuggestionBadges
@@ -937,105 +846,103 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             }}
                                         />
                                     )}
-                                </Flex>
+                                </div>
                             ) : (
                                 <Badge
-                                    size="xs"
-                                    colorPalette="gray"
-                                    variant="outline"
-                                    cursor="pointer"
+                                    colorScheme="gray"
+                                    className="cursor-pointer border border-slate-300 bg-white text-[8px] px-1 py-0 text-slate-500"
                                     onClick={() => startCellEdit(tx, 'to_account_id')}
                                 >
                                     + To
                                 </Badge>
                             )}
-                        </VStack>
-                    </Table.Cell>
+                        </div>
+                    </td>
                 )}
                 {/* Direction - click to edit */}
                 {showColumn('direction') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'direction') && startCellEdit(tx, 'direction')} cursor="pointer">
+                    <td className="cursor-pointer py-1" onClick={() => !isEditingCell(tx.id, 'direction') && startCellEdit(tx, 'direction')}>
                         {isEditingCell(tx.id, 'direction') ? (
-                            <NativeSelect.Root size="sm" width="45px">
-                                <NativeSelect.Field
-                                    value={editValues.direction || tx.direction}
-                                    onChange={async e => {
-                                        const newDir = e.target.value;
-                                        // Save directly with the new value
-                                        try {
-                                            const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                method: 'PATCH',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ direction: newDir })
-                                            });
-                                            if (!response.ok) throw new Error('Failed to update');
-                                            invalidateTransactionData();
-                                            setEditingCell(null);
-                                            setEditValues({});
-                                        } catch (err) {
-                                            toaster.error({ title: 'Error', description: 'Failed to save direction' });
-                                        }
-                                    }}
-                                    onBlur={() => {
-                                        if (!escapePressedRef.current) {
-                                            setEditingCell(null);
-                                            setEditValues({});
-                                        }
-                                    }}
-                                    style={{ fontSize: '8px', padding: '2px' }}
-                                    autoFocus
-                                >
-                                    {DIRECTION_OPTIONS.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </NativeSelect.Field>
-                            </NativeSelect.Root>
+                            <select
+                                title="Direction"
+                                className="w-[45px] border border-slate-300 text-[8px]"
+                                value={editValues.direction || tx.direction}
+                                onChange={async e => {
+                                    const newDir = e.target.value;
+                                    // Save directly with the new value
+                                    try {
+                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                            method: 'PATCH',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ direction: newDir })
+                                        });
+                                        if (!response.ok) throw new Error('Failed to update');
+                                        invalidateTransactionData();
+                                        setEditingCell(null);
+                                        setEditValues({});
+                                    } catch (err) {
+                                        toaster.error({ title: 'Error', description: 'Failed to save direction' });
+                                    }
+                                }}
+                                onBlur={() => {
+                                    if (!escapePressedRef.current) {
+                                        setEditingCell(null);
+                                        setEditValues({});
+                                    }
+                                }}
+                                style={{ fontSize: '8px', padding: '2px' }}
+                                autoFocus
+                            >
+                                {DIRECTION_OPTIONS.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
                         ) : (
-                            <Badge size="sm" colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}>
+                            <Badge colorScheme={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}>
                                 {tx.direction === 'inflow' ? '↓' : tx.direction === 'outflow' ? '↑' : '↔'}
                             </Badge>
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Type - click to edit */}
                 {showColumn('type') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'transaction_type') && startCellEdit(tx, 'transaction_type')} cursor="pointer">
+                    <td className="cursor-pointer py-1" onClick={() => !isEditingCell(tx.id, 'transaction_type') && startCellEdit(tx, 'transaction_type')}>
                         {isEditingCell(tx.id, 'transaction_type') ? (
-                            <NativeSelect.Root size="sm" width="80px">
-                                <NativeSelect.Field
-                                    value={editValues.transaction_type || tx.transaction_type}
-                                    onChange={async e => {
-                                        const newType = e.target.value;
-                                        try {
-                                            const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                method: 'PATCH',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ transaction_type: newType })
-                                            });
-                                            if (!response.ok) throw new Error('Failed to update');
-                                            invalidateTransactionData();
-                                            setEditingCell(null);
-                                            setEditValues({});
-                                        } catch (err) {
-                                            toaster.error({ title: 'Error', description: 'Failed to save type' });
-                                        }
-                                    }}
-                                    onBlur={() => {
-                                        if (!escapePressedRef.current) {
-                                            setEditingCell(null);
-                                            setEditValues({});
-                                        }
-                                    }}
-                                    style={{ fontSize: '8px', padding: '2px' }}
-                                    autoFocus
-                                >
-                                    {TRANSACTION_TYPE_OPTIONS.map(opt => (
-                                        <option key={opt} value={opt}>{opt}</option>
-                                    ))}
-                                </NativeSelect.Field>
-                            </NativeSelect.Root>
+                            <select
+                                title="Transaction type"
+                                className="w-[80px] border border-slate-300 text-[8px]"
+                                value={editValues.transaction_type || tx.transaction_type}
+                                onChange={async e => {
+                                    const newType = e.target.value;
+                                    try {
+                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                            method: 'PATCH',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ transaction_type: newType })
+                                        });
+                                        if (!response.ok) throw new Error('Failed to update');
+                                        invalidateTransactionData();
+                                        setEditingCell(null);
+                                        setEditValues({});
+                                    } catch (err) {
+                                        toaster.error({ title: 'Error', description: 'Failed to save type' });
+                                    }
+                                }}
+                                onBlur={() => {
+                                    if (!escapePressedRef.current) {
+                                        setEditingCell(null);
+                                        setEditValues({});
+                                    }
+                                }}
+                                style={{ fontSize: '8px', padding: '2px' }}
+                                autoFocus
+                            >
+                                {TRANSACTION_TYPE_OPTIONS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                            </select>
                         ) : (
-                            <Flex align="center" gap={1}>
+                            <div className="flex items-center gap-1">
                                 {tx.transaction_type === 'transfer' ? (
                                     <BiTransfer color="#805AD5" size={12} title="Transfer" />
                                 ) : tx.transaction_type === 'trade' ? (
@@ -1047,17 +954,17 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 ) : (
                                     <FaQuestion color="#718096" size={10} title="Other" />
                                 )}
-                                <Badge size="xs" colorPalette="blue">{tx.transaction_type?.substring(0, 6)}</Badge>
-                            </Flex>
+                                <Badge colorScheme="blue" className="text-[10px]">{tx.transaction_type?.substring(0, 6)}</Badge>
+                            </div>
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Linked Asset - click to edit */}
                 {showColumn('asset') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'asset_id') && !isEditingCell(tx.id, 'attributed_asset_id') && startCellEdit(tx, 'asset_id')} cursor="pointer">
-                        <Flex direction="column" gap={0.5}>
+                    <td className="cursor-pointer py-1" onClick={() => !isEditingCell(tx.id, 'asset_id') && !isEditingCell(tx.id, 'attributed_asset_id') && startCellEdit(tx, 'asset_id')}>
+                        <div className="flex flex-col gap-0.5">
                             {isEditingCell(tx.id, 'asset_id') ? (
-                                <Flex direction="column" gap={1} minW="90px">
+                                <div className="flex min-w-[90px] flex-col gap-1">
                                     <AssetSelector
                                         value={editValues.asset_id ?? null}
                                         onChange={(assetId) => {
@@ -1077,8 +984,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     {tx.source_asset_symbol && !tx.asset_id && (() => {
                                         const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 3);
                                         return suggestions.length > 0 ? (
-                                            <HStack gap={1} flexWrap="wrap">
-                                                <Text fontSize="7px" color="gray.500">Suggestions:</Text>
+                                            <div className="flex flex-wrap gap-1">
+                                                <span className="text-[7px] text-slate-500">Suggestions:</span>
                                                 {suggestions.map((s, idx) => (
                                                     <Tooltip
                                                         key={idx}
@@ -1086,11 +993,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         openDelay={100}
                                                     >
                                                         <Badge
-                                                            size="xs"
-                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                            cursor="pointer"
-                                                            fontSize="7px"
+                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                            className={cn('cursor-pointer text-[7px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 updateEditValues({ asset_id: s.item.asset_id });
@@ -1102,10 +1006,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
-                                            </HStack>
+                                            </div>
                                         ) : null;
                                     })()}
-                                </Flex>
+                                </div>
                             ) : (
                                 tx.linked_asset_symbol ? (
                                     <AssetBadge
@@ -1116,16 +1020,16 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}
                                     />
                                 ) : tx.source_asset_symbol ? (
-                                    <Flex direction="column" gap={0.5} align="start">
-                                        <Flex align="center" gap={0.5}>
+                                    <div className="flex flex-col items-start gap-0.5">
+                                        <div className="flex items-center gap-0.5">
                                             <Tooltip content={`${tx.source_asset_symbol} - Click to link`} openDelay={200}>
-                                                <Text color="orange.500" fontWeight="bold" fontSize="8px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
+                                                <span className="cursor-pointer text-[8px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
                                                     ⚠ {tx.source_asset_symbol.slice(0, 8)}{tx.source_asset_symbol.length > 8 && '…'}
-                                                </Text>
+                                                </span>
                                             </Tooltip>
                                             <Tooltip content="Create new asset" openDelay={100}>
-                                                <Box
-                                                    as="button"
+                                                <button
+                                                    type="button"
                                                     onClick={(e: React.MouseEvent) => {
                                                         e.stopPropagation();
                                                         setQuickCreateAsset({
@@ -1136,28 +1040,22 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             rawSymbol: tx.source_asset_symbol || undefined,
                                                         });
                                                     }}
-                                                    color="green.500"
-                                                    cursor="pointer"
-                                                    flexShrink={0}
-                                                    _hover={{ color: 'green.700' }}
+                                                    className="flex shrink-0 cursor-pointer items-center text-green-500 hover:text-green-700"
                                                 >
                                                     <FiPlusCircle size={10} />
-                                                </Box>
+                                                </button>
                                             </Tooltip>
-                                        </Flex>
+                                        </div>
                                         {/* Always-visible suggestion badges for unlinked asset */}
                                         {(() => {
                                             const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 2);
                                             return suggestions.length > 0 ? (
-                                                <HStack gap={0.5} flexWrap="wrap">
+                                                <div className="flex flex-wrap gap-0.5">
                                                     {suggestions.map((s, idx) => (
                                                         <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                             <Badge
-                                                                size="xs"
-                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                cursor="pointer"
-                                                                fontSize="6px"
+                                                                colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                                className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                                 onClick={async (e) => {
                                                                     e.stopPropagation();
                                                                     try {
@@ -1187,19 +1085,19 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             </Badge>
                                                         </Tooltip>
                                                     ))}
-                                                </HStack>
+                                                </div>
                                             ) : null;
                                         })()}
-                                    </Flex>
+                                    </div>
                                 ) : (
-                                    <Text color="gray.400" fontSize="8px">-</Text>
+                                    <span className="text-[8px] text-slate-400">-</span>
                                 )
                             )}
                             {/* Attributed asset badge with inline editing */}
                             {(tx.source_attributed_asset_symbol || tx.attributed_asset_id) && (
                                 isEditingCell(tx.id, 'attributed_asset_id') ? (
-                                    <Flex direction="column" gap={0.5} onClick={(e) => e.stopPropagation()} minW="90px">
-                                        <Text fontSize="7px" color="gray.500">Attr. asset:</Text>
+                                    <div className="flex min-w-[90px] flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                        <span className="text-[7px] text-slate-500">Attr. asset:</span>
                                         <AssetSelector
                                             value={editValues.attributed_asset_id ?? null}
                                             onChange={(assetId) => {
@@ -1218,8 +1116,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         {tx.source_attributed_asset_symbol && !tx.attributed_asset_id && (() => {
                                             const suggestions = getAssetSuggestions(tx.source_attributed_asset_symbol, assets, 0.5, 3);
                                             return suggestions.length > 0 ? (
-                                                <HStack gap={1} flexWrap="wrap">
-                                                    <Text fontSize="7px" color="gray.500">Suggestions:</Text>
+                                                <div className="flex flex-wrap gap-1">
+                                                    <span className="text-[7px] text-slate-500">Suggestions:</span>
                                                     {suggestions.map((s, idx) => (
                                                         <Tooltip
                                                             key={idx}
@@ -1227,11 +1125,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             openDelay={100}
                                                         >
                                                             <Badge
-                                                                size="xs"
-                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                cursor="pointer"
-                                                                fontSize="7px"
+                                                                colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                                className={cn('cursor-pointer text-[7px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     updateEditValues({ attributed_asset_id: s.item.asset_id });
@@ -1243,33 +1138,33 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             </Badge>
                                                         </Tooltip>
                                                     ))}
-                                                </HStack>
+                                                </div>
                                             ) : null;
                                         })()}
-                                    </Flex>
+                                    </div>
                                 ) : (
                                     tx.attributed_asset_id && tx.attributed_asset ? (
-                                        <Flex align="center" gap={0.5} onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }} cursor="pointer">
-                                            <Text fontSize="7px" color="gray.500">→</Text>
+                                        <div className="flex cursor-pointer items-center gap-0.5" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }}>
+                                            <span className="text-[7px] text-slate-500">→</span>
                                             <AssetBadge
                                                 asset={tx.attributed_asset}
                                                 size="xs"
                                                 colorPalette="orange"
                                                 maxLength={8}
                                             />
-                                        </Flex>
+                                        </div>
                                     ) : tx.source_attributed_asset_symbol ? (
-                                        <Flex direction="column" gap={0.5} align="start" onClick={(e) => e.stopPropagation()}>
-                                            <Flex align="center" gap={0.5}>
-                                                <Text fontSize="7px" color="gray.500">→</Text>
+                                        <div className="flex flex-col items-start gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                            <div className="flex items-center gap-0.5">
+                                                <span className="text-[7px] text-slate-500">→</span>
                                                 <Tooltip content={`${tx.source_attributed_asset_symbol} - Click to link attributed asset`} openDelay={200}>
-                                                    <Text color="orange.500" fontWeight="bold" fontSize="7px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }}>
+                                                    <span className="cursor-pointer text-[7px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }}>
                                                         ⚠ {tx.source_attributed_asset_symbol.slice(0, 6)}{tx.source_attributed_asset_symbol.length > 6 && '…'}
-                                                    </Text>
+                                                    </span>
                                                 </Tooltip>
                                                 <Tooltip content="Create new asset" openDelay={100}>
-                                                    <Box
-                                                        as="button"
+                                                    <button
+                                                        type="button"
                                                         onClick={(e: React.MouseEvent) => {
                                                             e.stopPropagation();
                                                             setQuickCreateAsset({
@@ -1280,27 +1175,21 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                                 rawSymbol: tx.source_attributed_asset_symbol || undefined,
                                                             });
                                                         }}
-                                                        color="green.500"
-                                                        cursor="pointer"
-                                                        flexShrink={0}
-                                                        _hover={{ color: 'green.700' }}
+                                                        className="flex shrink-0 cursor-pointer items-center text-green-500 hover:text-green-700"
                                                     >
                                                         <FiPlusCircle size={8} />
-                                                    </Box>
+                                                    </button>
                                                 </Tooltip>
-                                            </Flex>
+                                            </div>
                                             {(() => {
                                                 const suggestions = getAssetSuggestions(tx.source_attributed_asset_symbol, assets, 0.5, 2);
                                                 return suggestions.length > 0 ? (
-                                                    <HStack gap={0.5} flexWrap="wrap">
+                                                    <div className="flex flex-wrap gap-0.5">
                                                         {suggestions.map((s, idx) => (
                                                             <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                                 <Badge
-                                                                    size="xs"
-                                                                    colorPalette={getConfidenceColor(s.confidence)}
-                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                    cursor="pointer"
-                                                                    fontSize="6px"
+                                                                    colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                                    className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                                     onClick={async (e) => {
                                                                         e.stopPropagation();
                                                                         try {
@@ -1329,23 +1218,22 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                                 </Badge>
                                                             </Tooltip>
                                                         ))}
-                                                    </HStack>
+                                                    </div>
                                                 ) : null;
                                             })()}
-                                        </Flex>
+                                        </div>
                                     ) : null
                                 )
                             )}
-                        </Flex>
-                    </Table.Cell>
+                        </div>
+                    </td>
                 )}
                 {/* Quantity - click to edit */}
                 {showColumn('qty') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'quantity') && startCellEdit(tx, 'quantity')} cursor="pointer">
+                    <td className="cursor-pointer py-1" onClick={() => !isEditingCell(tx.id, 'quantity') && startCellEdit(tx, 'quantity')}>
                         {isEditingCell(tx.id, 'quantity') ? (
                             <Input
                                 ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                size="xs"
                                 type="number"
                                 step="any"
                                 value={editValues.quantity ?? tx.quantity ?? ''}
@@ -1355,23 +1243,20 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity); }
                                 }}
                                 onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity)}
-                                width="60px"
-                                fontSize="8px"
-                                px={1}
+                                className="w-[60px] px-1 text-[8px]"
                             />
                         ) : (
-                            <Text fontSize="8px"><ValueDisplay value={tx.quantity} /></Text>
+                            <span className="text-[8px]"><ValueDisplay value={tx.quantity} /></span>
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Price - click to edit value, click badge to edit quote asset */}
                 {showColumn('price') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'price') && !isEditingCell(tx.id, 'price_quote_asset_id') && startCellEdit(tx, 'price')} cursor="pointer">
-                        <Flex direction="column" gap={0}>
+                    <td className="cursor-pointer py-1" onClick={() => !isEditingCell(tx.id, 'price') && !isEditingCell(tx.id, 'price_quote_asset_id') && startCellEdit(tx, 'price')}>
+                        <div className="flex flex-col gap-0">
                             {isEditingCell(tx.id, 'price') ? (
                                 <Input
                                     ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                    size="xs"
                                     type="number"
                                     step="any"
                                     value={editValues.price ?? tx.price ?? ''}
@@ -1381,17 +1266,15 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'price', editValuesRef.current.price); }
                                     }}
                                     onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'price', editValuesRef.current.price)}
-                                    width="60px"
-                                    fontSize="8px"
-                                    px={1}
+                                    className="w-[60px] px-1 text-[8px]"
                                 />
                             ) : (
-                                <Text fontSize="8px">
+                                <span className="text-[8px]">
                                     {tx.price ? <ValueDisplay value={tx.price} /> : '-'}
-                                </Text>
+                                </span>
                             )}
                             {isEditingCell(tx.id, 'price_quote_asset_id') ? (
-                                <Flex direction="column" gap={1} minW="70px">
+                                <div className="flex min-w-[70px] flex-col gap-1">
                                     <AssetSelector
                                         value={editValues.price_quote_asset_id ?? null}
                                         onChange={(assetId) => {
@@ -1411,7 +1294,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     {tx.source_price_quote_asset_symbol && !tx.price_quote_asset_id && (() => {
                                         const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, 0.5, 3);
                                         return suggestions.length > 0 ? (
-                                            <HStack gap={1} flexWrap="wrap">
+                                            <div className="flex flex-wrap gap-1">
                                                 {suggestions.map((s, idx) => (
                                                     <Tooltip
                                                         key={idx}
@@ -1419,11 +1302,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         openDelay={100}
                                                     >
                                                         <Badge
-                                                            size="xs"
-                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                            cursor="pointer"
-                                                            fontSize="6px"
+                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 updateEditValues({ price_quote_asset_id: s.item.asset_id });
@@ -1434,10 +1314,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
-                                            </HStack>
+                                            </div>
                                         ) : null;
                                     })()}
-                                </Flex>
+                                </div>
                             ) : tx.linked_price_quote_asset_symbol ? (
                                 <AssetBadge
                                     asset={tx.price_quote_asset}
@@ -1447,12 +1327,12 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}
                                 />
                             ) : tx.source_price_quote_asset_symbol ? (
-                                <Flex direction="column" gap={0.5} align="start">
-                                    <Flex align="center" gap={0.5}>
-                                        <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</Text>
+                                <div className="flex flex-col items-start gap-0.5">
+                                    <div className="flex items-center gap-0.5">
+                                        <span className="cursor-pointer text-[8px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</span>
                                         <Tooltip content="Create new asset" openDelay={100}>
-                                            <Box
-                                                as="button"
+                                            <button
+                                                type="button"
                                                 onClick={(e: React.MouseEvent) => {
                                                     e.stopPropagation();
                                                     setQuickCreateAsset({
@@ -1463,28 +1343,22 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         rawSymbol: tx.source_price_quote_asset_symbol || undefined,
                                                     });
                                                 }}
-                                                color="green.500"
-                                                cursor="pointer"
-                                                flexShrink={0}
-                                                _hover={{ color: 'green.700' }}
+                                                className="flex shrink-0 cursor-pointer items-center text-green-500 hover:text-green-700"
                                             >
                                                 <FiPlusCircle size={9} />
-                                            </Box>
+                                            </button>
                                         </Tooltip>
-                                    </Flex>
+                                    </div>
                                     {/* Always-visible suggestion badges for unlinked price quote asset */}
                                     {(() => {
                                         const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, 0.5, 2);
                                         return suggestions.length > 0 ? (
-                                            <HStack gap={0.5} flexWrap="wrap">
+                                            <div className="flex flex-wrap gap-0.5">
                                                 {suggestions.map((s, idx) => (
                                                     <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                         <Badge
-                                                            size="xs"
-                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                            cursor="pointer"
-                                                            fontSize="6px"
+                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={async (e) => {
                                                                 e.stopPropagation();
                                                                 try {
@@ -1514,29 +1388,28 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
-                                            </HStack>
+                                            </div>
                                         ) : null;
                                     })()}
-                                </Flex>
+                                </div>
                             ) : null}
-                        </Flex>
-                    </Table.Cell>
+                        </div>
+                    </td>
                 )}
                 {showColumn('total') && (
-                    <Table.Cell py={1}>
-                        <Text fontSize="8px">
+                    <td className="py-1">
+                        <span className="text-[8px]">
                             {tx.total ? <ValueDisplay value={tx.total} /> : '-'}
-                        </Text>
-                    </Table.Cell>
+                        </span>
+                    </td>
                 )}
                 {/* Fee - click to edit value, click badge to edit quote asset */}
                 {showColumn('fee') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'fee') && !isEditingCell(tx.id, 'fee_quote_asset_id') && startCellEdit(tx, 'fee')} cursor="pointer">
-                        <Flex direction="column" gap={0}>
+                    <td className="cursor-pointer py-1" onClick={() => !isEditingCell(tx.id, 'fee') && !isEditingCell(tx.id, 'fee_quote_asset_id') && startCellEdit(tx, 'fee')}>
+                        <div className="flex flex-col gap-0">
                             {isEditingCell(tx.id, 'fee') ? (
                                 <Input
                                     ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                    size="xs"
                                     type="number"
                                     step="any"
                                     value={editValues.fee ?? tx.fee ?? ''}
@@ -1546,17 +1419,15 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee); }
                                     }}
                                     onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee)}
-                                    width="60px"
-                                    fontSize="8px"
-                                    px={1}
+                                    className="w-[60px] px-1 text-[8px]"
                                 />
                             ) : (
-                                <Text fontSize="8px">
+                                <span className="text-[8px]">
                                     {tx.fee ? <ValueDisplay value={tx.fee} /> : '-'}
-                                </Text>
+                                </span>
                             )}
                             {isEditingCell(tx.id, 'fee_quote_asset_id') ? (
-                                <Flex direction="column" gap={1} minW="70px">
+                                <div className="flex min-w-[70px] flex-col gap-1">
                                     <AssetSelector
                                         value={editValues.fee_quote_asset_id ?? null}
                                         onChange={(assetId) => {
@@ -1576,7 +1447,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     {tx.source_fee_quote_asset_symbol && !tx.fee_quote_asset_id && (() => {
                                         const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, 0.5, 3);
                                         return suggestions.length > 0 ? (
-                                            <HStack gap={1} flexWrap="wrap">
+                                            <div className="flex flex-wrap gap-1">
                                                 {suggestions.map((s, idx) => (
                                                     <Tooltip
                                                         key={idx}
@@ -1584,11 +1455,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         openDelay={100}
                                                     >
                                                         <Badge
-                                                            size="xs"
-                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                            cursor="pointer"
-                                                            fontSize="6px"
+                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 updateEditValues({ fee_quote_asset_id: s.item.asset_id });
@@ -1599,10 +1467,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
-                                            </HStack>
+                                            </div>
                                         ) : null;
                                     })()}
-                                </Flex>
+                                </div>
                             ) : tx.linked_fee_quote_asset_symbol ? (
                                 <AssetBadge
                                     asset={tx.fee_quote_asset}
@@ -1612,12 +1480,12 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}
                                 />
                             ) : tx.source_fee_quote_asset_symbol ? (
-                                <Flex direction="column" gap={0.5} align="start">
-                                    <Flex align="center" gap={0.5}>
-                                        <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</Text>
+                                <div className="flex flex-col items-start gap-0.5">
+                                    <div className="flex items-center gap-0.5">
+                                        <span className="cursor-pointer text-[8px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</span>
                                         <Tooltip content="Create new asset" openDelay={100}>
-                                            <Box
-                                                as="button"
+                                            <button
+                                                type="button"
                                                 onClick={(e: React.MouseEvent) => {
                                                     e.stopPropagation();
                                                     setQuickCreateAsset({
@@ -1628,28 +1496,22 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         rawSymbol: tx.source_fee_quote_asset_symbol || undefined,
                                                     });
                                                 }}
-                                                color="green.500"
-                                                cursor="pointer"
-                                                flexShrink={0}
-                                                _hover={{ color: 'green.700' }}
+                                                className="flex shrink-0 cursor-pointer items-center text-green-500 hover:text-green-700"
                                             >
                                                 <FiPlusCircle size={9} />
-                                            </Box>
+                                            </button>
                                         </Tooltip>
-                                    </Flex>
+                                    </div>
                                     {/* Always-visible suggestion badges for unlinked fee quote asset */}
                                     {(() => {
                                         const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, 0.5, 2);
                                         return suggestions.length > 0 ? (
-                                            <HStack gap={0.5} flexWrap="wrap">
+                                            <div className="flex flex-wrap gap-0.5">
                                                 {suggestions.map((s, idx) => (
                                                     <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                         <Badge
-                                                            size="xs"
-                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                            cursor="pointer"
-                                                            fontSize="6px"
+                                                            colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
+                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={async (e) => {
                                                                 e.stopPropagation();
                                                                 try {
@@ -1679,20 +1541,20 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
-                                            </HStack>
+                                            </div>
                                         ) : null;
                                     })()}
-                                </Flex>
+                                </div>
                             ) : null}
-                        </Flex>
-                    </Table.Cell>
+                        </div>
+                    </td>
                 )}
                 {/* Taxable - always toggle, saves immediately */}
                 {showColumn('taxability') && (
-                    <Table.Cell py={1}>
+                    <td className="py-1">
                         {(() => {
                             const status = tx.taxability_status ?? 'unknown';
-                            const colorMap: Record<string, string> = {
+                            const colorMap: Record<string, BadgeColorScheme> = {
                                 taxable: 'red',
                                 non_taxable: 'green',
                                 unknown: 'gray',
@@ -1713,12 +1575,11 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 non_taxable: 'unknown',
                             };
                             return (
-                                <Flex align="center" gap={1}>
+                                <div className="flex items-center gap-1">
                                     <Tooltip content={labelMap[status] || status} openDelay={200}>
                                         <Badge
-                                            size="sm"
-                                            colorPalette={colorMap[status] || 'gray'}
-                                            cursor="pointer"
+                                            colorScheme={colorMap[status] || 'gray'}
+                                            className="cursor-pointer"
                                             onClick={async () => {
                                                 const next = nextMap[status] || 'unknown';
                                                 try {
@@ -1737,115 +1598,117 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     </Tooltip>
                                     {tx.has_fr_tax_override && (
                                         <Tooltip content="FR Tax override active" openDelay={200}>
-                                            <Badge size="xs" colorPalette="blue" variant="subtle" fontSize="7px">
+                                            <Badge colorScheme="blue" className="text-[7px]">
                                                 FR
                                             </Badge>
                                         </Tooltip>
                                     )}
-                                </Flex>
+                                </div>
                             );
                         })()}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Include Fee - always toggle, saves immediately */}
                 {showColumn('feeInBase') && (
-                    <Table.Cell py={1}>
-                        <Switch.Root
-                            size="sm"
-                            checked={tx.include_fee ?? false}
-                            onCheckedChange={() => quickToggle(tx, 'include_fee')}
+                    <td className="py-1">
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={tx.include_fee ?? false}
+                            aria-label="Include fee in base"
+                            onClick={() => quickToggle(tx, 'include_fee')}
+                            className={`relative inline-flex h-[14px] w-[26px] items-center transition-colors ${tx.include_fee ? 'bg-blue-500' : 'bg-slate-300'}`}
                         >
-                            <Switch.HiddenInput />
-                            <Switch.Control />
-                        </Switch.Root>
-                    </Table.Cell>
+                            <span
+                                className={`inline-block h-[10px] w-[10px] transform bg-white transition-transform ${tx.include_fee ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
+                            />
+                        </button>
+                    </td>
                 )}
                 {/* Bundle - read only */}
                 {showColumn('bundle') && (
-                    <Table.Cell py={1}>
-                        {tx.user_calculation_unit_id ? <Badge size="sm" colorPalette="purple">📦 #{tx.user_calculation_unit_id}</Badge> : <Text fontSize="8px" color="gray.400">-</Text>}
-                    </Table.Cell>
+                    <td className="py-1">
+                        {tx.user_calculation_unit_id ? <Badge colorScheme="purple">📦 #{tx.user_calculation_unit_id}</Badge> : <span className="text-[8px] text-slate-400">-</span>}
+                    </td>
                 )}
                 {/* Tags - display only */}
                 {showColumn('tags') && (
-                    <Table.Cell py={1}>
+                    <td className="py-1">
                         {tx.tags && Object.keys(tx.tags).length > 0 ? (
                             <Tooltip
                                 content={
-                                    <VStack gap={0.5} align="start">
+                                    <div className="flex flex-col items-start gap-0.5">
                                         {Object.entries(tx.tags).map(([key, value]) => (
-                                            <Text key={key} fontSize="xs">
+                                            <span key={key} className="text-xs">
                                                 {key}: {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                            </Text>
+                                            </span>
                                         ))}
-                                    </VStack>
+                                    </div>
                                 }
                                 openDelay={200}
                             >
-                                <HStack gap={0.5} flexWrap="wrap" maxW="100px">
+                                <div className="flex max-w-[100px] flex-wrap gap-0.5">
                                     {Object.entries(tx.tags).slice(0, 2).map(([key, value]) => (
-                                        <Badge key={key} size="xs" colorPalette="blue" variant="subtle">
+                                        <Badge key={key} colorScheme="blue">
                                             {key === 'value' ? String(value).slice(0, 8) : key.slice(0, 6)}
                                         </Badge>
                                     ))}
                                     {Object.keys(tx.tags).length > 2 && (
-                                        <Text fontSize="7px" color="gray.500">+{Object.keys(tx.tags).length - 2}</Text>
+                                        <span className="text-[7px] text-slate-500">+{Object.keys(tx.tags).length - 2}</span>
                                     )}
-                                </HStack>
+                                </div>
                             </Tooltip>
                         ) : (
-                            <Text fontSize="8px" color="gray.400">-</Text>
+                            <span className="text-[8px] text-slate-400">-</span>
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Source Transaction ID - display only */}
                 {showColumn('sourceTransactionId') && (
-                    <Table.Cell py={1}>
+                    <td className="py-1">
                         {tx.source_transaction_id ? (
                             <Tooltip content={tx.source_transaction_id} openDelay={200}>
-                                <Text fontSize="8px" color="gray.600" cursor="pointer">
+                                <span className="cursor-pointer text-[8px] text-slate-600">
                                     {tx.source_transaction_id.slice(0, 12)}{tx.source_transaction_id.length > 12 && '…'}
-                                </Text>
+                                </span>
                             </Tooltip>
                         ) : (
-                            <Text fontSize="8px" color="gray.400">-</Text>
+                            <span className="text-[8px] text-slate-400">-</span>
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Additional plugin columns */}
                 {additionalColumns.map(col => (
-                    <Table.Cell key={col.id} py={1} {...(col.cellBg ? { bg: col.cellBg } : {})}>
+                    <td key={col.id} className="py-1" style={col.cellBg ? { backgroundColor: col.cellBg } : undefined}>
                         {col.render(tx as Transaction)}
-                    </Table.Cell>
+                    </td>
                 ))}
                 {/* Status - click to edit */}
                 {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && (
-                    <Table.Cell position="sticky" right="50px" bg={rowBgColor} zIndex={5} borderLeft="2px solid" borderColor="gray.300" onClick={() => !isEditingCell(tx.id, 'review_status') && startCellEdit(tx, 'review_status')} cursor="pointer" px={1} py={0}>
+                    <td className="sticky right-[50px] z-[5] border-l-2 border-slate-300 px-1 py-0 cursor-pointer" style={{ backgroundColor: rowBgColor }} onClick={() => !isEditingCell(tx.id, 'review_status') && startCellEdit(tx, 'review_status')}>
                         {isEditingCell(tx.id, 'review_status') ? (
-                            <NativeSelect.Root size="sm" width="55px">
-                                <NativeSelect.Field
-                                    value={editValues.review_status || tx.review_status}
-                                    onChange={e => updateEditValues({ review_status: e.target.value as TransactionStatus })}
-                                    onKeyDown={handleEditKeyDown}
-                                    onBlur={saveAndClose}
-                                    style={{ fontSize: '7px', padding: '1px' }}
-                                >
-                                    <option value="valid">Valid</option>
-                                    <option value="pending">Pending</option>
-                                    <option value="invalid">Invalid</option>
-                                </NativeSelect.Field>
-                            </NativeSelect.Root>
+                            <select
+                                title="Review status"
+                                className="w-[55px] border border-slate-300"
+                                value={editValues.review_status || tx.review_status}
+                                onChange={e => updateEditValues({ review_status: e.target.value as TransactionStatus })}
+                                onKeyDown={handleEditKeyDown}
+                                onBlur={saveAndClose}
+                                style={{ fontSize: '7px', padding: '1px' }}
+                            >
+                                <option value="valid">Valid</option>
+                                <option value="pending">Pending</option>
+                                <option value="invalid">Invalid</option>
+                            </select>
                         ) : (
-                            <Flex direction="column" gap={0}>
-                                <Badge size="xs" colorPalette={statusBadgeColors[tx.review_status] || 'gray'} fontSize="6px">
+                            <div className="flex flex-col gap-0">
+                                <Badge colorScheme={statusBadgeColors[tx.review_status] || 'gray'} className="text-[6px]">
                                     {tx.review_status}
                                 </Badge>
                                 {/* Quick set valid button */}
                                 {tx.review_status !== 'valid' && (
-                                    <Button
-                                        size="2xs"
-                                        variant="ghost"
-                                        colorPalette="green"
+                                    <button
+                                        type="button"
                                         onClick={async (e) => {
                                             e.stopPropagation();
                                             try {
@@ -1861,12 +1724,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             }
                                         }}
                                         title="Set valid"
-                                        p={0}
-                                        minW="14px"
-                                        h="12px"
+                                        className="flex h-3 min-w-[14px] cursor-pointer items-center justify-center p-0 text-green-500 hover:text-green-700"
                                     >
                                         <LuCheck size={8} />
-                                    </Button>
+                                    </button>
                                 )}
                                 {/* Duplicate indicators */}
                                 {hasPotentialDuplicateTag(tx) && (() => {
@@ -1881,7 +1742,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         if (resolution === 'kept' || resolution === 'keep_selected') {
                                             return (
                                                 <Tooltip content={`Kept (${status || 'resolved'})`}>
-                                                    <Badge size="xs" colorPalette="green" variant="outline" fontSize="7px">
+                                                    <Badge colorScheme="green" className="border border-slate-300 bg-white text-[7px]">
                                                         <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                         Kept
                                                     </Badge>
@@ -1890,7 +1751,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         } else if (resolution === 'dismissed' || resolution === 'dismiss_selected') {
                                             return (
                                                 <Tooltip content={`Dismissed (${status || 'resolved'})`}>
-                                                    <Badge size="xs" colorPalette="gray" variant="outline" fontSize="7px">
+                                                    <Badge colorScheme="gray" className="border border-slate-300 bg-white text-[7px]">
                                                         <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                         Dismissed
                                                     </Badge>
@@ -1899,7 +1760,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         } else if (resolution === 'merged') {
                                             return (
                                                 <Tooltip content={`Merged (${status || 'resolved'})`}>
-                                                    <Badge size="xs" colorPalette="purple" variant="outline" fontSize="7px">
+                                                    <Badge colorScheme="purple" className="border border-slate-300 bg-white text-[7px]">
                                                         <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                         Merged
                                                     </Badge>
@@ -1911,27 +1772,25 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     // Show pending duplicate indicator
                                     return (
                                         <Tooltip content={`Potential duplicate (group: ${groupHash?.slice(0, 8)}...)`}>
-                                            <Badge size="xs" colorPalette="orange" variant="solid" fontSize="7px">
+                                            <Badge colorScheme="orange" className="text-[7px]">
                                                 <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                 Duplicate?
                                             </Badge>
                                         </Tooltip>
                                     );
                                 })()}
-                            </Flex>
+                            </div>
                         )}
-                    </Table.Cell>
+                    </td>
                 )}
                 {/* Actions - show cancel when editing */}
                 {!embeddedMode && (
-                    <Table.Cell position="sticky" right={0} bg={rowBgColor} zIndex={5} minW="50px" px={0} py={0}>
-                        <Flex gap={0}>
+                    <td className="sticky right-0 z-[5] min-w-[50px] px-0 py-0" style={{ backgroundColor: rowBgColor }}>
+                        <div className="flex gap-0">
                             {/* Unbundle action — remove tx from bundle */}
                             {!suggestionEntry && tx.user_calculation_unit_id && (
-                                <Button
-                                    size="2xs"
-                                    variant="ghost"
-                                    colorPalette="red"
+                                <button
+                                    type="button"
                                     onClick={async (e) => {
                                         e.stopPropagation();
                                         try {
@@ -1951,19 +1810,15 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     onMouseEnter={() => setHoveredBundleId(tx.user_calculation_unit_id!)}
                                     onMouseLeave={() => setHoveredBundleId(null)}
                                     title={`Remove from bundle #${tx.user_calculation_unit_id}`}
-                                    p={0}
-                                    minW="16px"
-                                    h="16px"
+                                    className="flex h-4 min-w-[16px] cursor-pointer items-center justify-center p-0 text-red-500 hover:text-red-700"
                                 >
                                     <LuPackageX size={10} />
-                                </Button>
+                                </button>
                             )}
                             {/* Bundle suggestion icon in actions */}
                             {suggestionEntry && (
-                                <Button
-                                    size="2xs"
-                                    variant="ghost"
-                                    colorPalette="teal"
+                                <button
+                                    type="button"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         setOpenSuggestionTxId(openSuggestionTxId === tx.id ? null : tx.id);
@@ -1971,50 +1826,40 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     onMouseEnter={() => setHoveredSuggestionGroup(suggestionEntry.groupIndex)}
                                     onMouseLeave={() => setHoveredSuggestionGroup(null)}
                                     title={`Bundle suggestion: ${suggestionEntry.suggestion.label}`}
-                                    p={0}
-                                    minW="16px"
-                                    h="16px"
+                                    className="flex h-4 min-w-[16px] cursor-pointer items-center justify-center p-0"
                                 >
                                     <BundleSuggestionIcon size={10} color={suggestionEntry.color} />
-                                </Button>
+                                </button>
                             )}
                             {getEditingTxId() === tx.id ? (
-                                <Button size="2xs" variant="ghost" onClick={cancelEdit} title="Cancel (Esc)" p={0} minW="16px" h="16px">
+                                <button type="button" onClick={cancelEdit} title="Cancel (Esc)" className="flex h-4 min-w-[16px] cursor-pointer items-center justify-center p-0 text-slate-500 hover:text-slate-700">
                                     ✗
-                                </Button>
+                                </button>
                             ) : (
                                 <>
-                                    <Button
-                                        size="2xs"
-                                        variant="ghost"
-                                        colorPalette="blue"
+                                    <button
+                                        type="button"
                                         onClick={() => {
                                             setDrawerTransactionId(tx.id);
                                             setIsDrawerOpen(true);
                                         }}
                                         title="Edit all fields"
-                                        p={0}
-                                        minW="16px"
-                                        h="16px"
+                                        className="flex h-4 min-w-[16px] cursor-pointer items-center justify-center p-0 text-blue-500 hover:text-blue-700"
                                     >
                                         <LuPencil size={10} />
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        variant="ghost"
-                                        colorPalette="red"
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => {
                                             setTransactionToDelete(tx);
                                             fetchDeletionImpact([tx.id]);
                                             setShowDeleteDialog(true);
                                         }}
                                         title="Delete transaction"
-                                        p={0}
-                                        minW="16px"
-                                        h="16px"
+                                        className="flex h-4 min-w-[16px] cursor-pointer items-center justify-center p-0 text-red-500 hover:text-red-700"
                                     >
                                         🗑️
-                                    </Button>
+                                    </button>
                                 </>
                             )}
                             {/* Additional plugin row actions */}
@@ -2023,26 +1868,25 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 const isDisabled = action.isDisabled ? action.isDisabled(tx as Transaction) : false;
                                 if (!isVisible) return null;
                                 return (
-                                    <Button
+                                    <button
                                         key={action.id}
-                                        size="2xs"
-                                        variant="ghost"
-                                        colorPalette={action.colorPalette || 'gray'}
+                                        type="button"
                                         onClick={() => action.onClick(tx as Transaction)}
                                         disabled={isDisabled}
                                         title={action.label}
-                                        p={0}
-                                        minW="16px"
-                                        h="16px"
+                                        className={cn(
+                                            'flex h-4 min-w-[16px] cursor-pointer items-center justify-center p-0 disabled:cursor-not-allowed disabled:opacity-50',
+                                            PLUGIN_ACTION_COLORS[action.colorPalette || 'gray'] || PLUGIN_ACTION_COLORS.gray
+                                        )}
                                     >
                                         {action.icon}
-                                    </Button>
+                                    </button>
                                 );
                             })}
-                        </Flex>
-                    </Table.Cell>
+                        </div>
+                    </td>
                 )}
-            </Table.Row>
+            </tr>
         </React.Fragment>
     );
 

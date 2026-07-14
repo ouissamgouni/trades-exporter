@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { Badge, Flex, Text } from '@chakra-ui/react';
+import { Badge } from '../ui/primitives';
 import { FiChevronRight } from 'react-icons/fi';
 import { usePnL } from './PnLContext';
 
@@ -25,18 +25,7 @@ export const DrillDownBreadcrumb: React.FC = () => {
         : 'Portfolio';
 
     return (
-        <Flex
-            align="center"
-            gap={1.5}
-            mb={0}
-            px={3}
-            py={2}
-            bg="gray.50"
-            borderRadius="lg"
-            border="1px solid"
-            borderColor="gray.200"
-            flexWrap="wrap"
-        >
+        <div className="flex flex-wrap items-center gap-1.5 border border-slate-200 bg-slate-50 px-3 py-2">
             {/* Breadcrumb trail */}
             {displayCrumbs.map((crumb, idx) => {
                 const isLast = idx === displayCrumbs.length - 1;
@@ -47,36 +36,24 @@ export const DrillDownBreadcrumb: React.FC = () => {
                         {idx > 0 && (
                             <FiChevronRight
                                 size={14}
-                                style={{ color: 'var(--chakra-colors-gray-400)', flexShrink: 0 }}
+                                className="shrink-0 text-slate-400"
                             />
                         )}
                         {isLast ? (
-                            <Badge
-                                colorPalette="blue"
-                                variant="subtle"
-                                size="sm"
-                                px={2}
-                                py={0.5}
-                                fontWeight="600"
-                            >
+                            <Badge colorScheme="blue" className="px-2 py-0.5 font-semibold">
                                 {label}
                             </Badge>
                         ) : (
-                            <Text
-                                fontSize="sm"
-                                fontWeight="500"
-                                color="blue.600"
-                                cursor="pointer"
-                                _hover={{ textDecoration: 'underline' }}
+                            <span
+                                className="cursor-pointer whitespace-nowrap text-sm font-medium text-blue-600 hover:underline"
                                 onClick={() => dispatch({ type: 'DRILL_TO_BREADCRUMB', index: idx })}
-                                whiteSpace="nowrap"
                             >
                                 {label}
-                            </Text>
+                            </span>
                         )}
                     </React.Fragment>
                 );
             })}
-        </Flex>
+        </div>
     );
 };

@@ -6,14 +6,22 @@
  */
 
 import React from 'react';
-import { Badge, Box, Flex, HStack, Text } from '@chakra-ui/react';
-import { Tooltip } from '@chakra-ui/react/tooltip';
 import { FiAlertTriangle, FiPlusCircle, FiCopy, FiCheck } from 'react-icons/fi';
 import { Account } from '../types';
 import { AccountBadge } from './AccountBadge';
+import { Tooltip } from './ui/tooltip';
+import { Badge, type BadgeColorScheme } from './ui/primitives';
 import { getConfidenceColor, formatConfidence } from '../utils/similarity';
 import { useAccountSuggestions, AccountSuggestion } from '../hooks/useAccountSuggestions';
 import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
+
+const SCHEMES = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toScheme = (c: string): BadgeColorScheme => {
+    if (c === 'grey') return 'gray';
+    if (c === 'pink') return 'purple';
+    if (c === 'teal') return 'green';
+    return (SCHEMES.includes(c) ? c : 'gray') as BadgeColorScheme;
+};
 
 export interface SourceInfoCellProps {
     sourceAccount?: string;      // Raw source_account field
@@ -82,17 +90,12 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
     const accountSuggestions = externalSuggestions ?? (needsSuggestions ? fetchedSuggestions : []);
 
     return (
-        <Flex
-            direction="column"
-            gap={1}
-            minW="100px"
-            maxW="200px"
-        >
+        <div className="flex min-w-[100px] max-w-[200px] flex-col gap-1">
             {/* First row: Account badge + Source badge */}
-            <HStack gap={1} flexWrap="wrap" align="center">
+            <div className="flex flex-wrap items-center gap-1">
                 {/* Account badge */}
                 {isAccountLinked ? (
-                    <Box display="inline-block" maxW="fit-content">
+                    <div className="inline-block max-w-fit">
                         <AccountBadge
                             account={resolvedAccount}
                             accountId={accountId}
@@ -101,157 +104,94 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
                             maxLength={14}
                             onClick={onClick}
                         />
-                    </Box>
+                    </div>
                 ) : sourceAccount ? (
-                    <Flex direction="column" gap={1} minW={0}>
-                        <Flex align="center" gap={1} minW={0}>
-                            <FiAlertTriangle size={10} color="var(--chakra-colors-orange-500)" style={{ flexShrink: 0 }} />
-                            <Text
-                                fontSize="2xs"
-                                color="orange.600"
-                                fontWeight="medium"
-                                overflow="hidden"
-                                textOverflow="ellipsis"
-                                whiteSpace="nowrap"
-                                flex={1}
-                                minW={0}
-                                cursor="pointer"
+                    <div className="flex min-w-0 flex-col gap-1">
+                        <div className="flex min-w-0 items-center gap-1">
+                            <FiAlertTriangle size={10} color="#dd6b20" style={{ flexShrink: 0 }} />
+                            <span
+                                className="min-w-0 flex-1 cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-medium text-orange-600"
                                 onClick={onClick}
                                 title={sourceAccount ? `Unlinked: ${sourceAccount}` : 'No account linked'}
                             >
                                 {sourceAccount.length > 12 ? sourceAccount.slice(0, 12) + '...' : sourceAccount}
-                            </Text>
+                            </span>
                             {onCreateAccount && (
-                                <Tooltip.Root>
-                                    <Tooltip.Trigger asChild>
-                                        <Box
-                                            as="button"
-                                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onCreateAccount(); }}
-                                            color="green.500"
-                                            cursor="pointer"
-                                            flexShrink={0}
-                                            _hover={{ color: 'green.700' }}
-                                            aria-label="Create new account"
-                                        >
-                                            <FiPlusCircle size={10} />
-                                        </Box>
-                                    </Tooltip.Trigger>
-                                    <Tooltip.Positioner>
-                                        <Tooltip.Content>Create new account</Tooltip.Content>
-                                    </Tooltip.Positioner>
-                                </Tooltip.Root>
+                                <Tooltip content="Create new account">
+                                    <button
+                                        type="button"
+                                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); onCreateAccount(); }}
+                                        className="shrink-0 cursor-pointer text-green-500 hover:text-green-700"
+                                        aria-label="Create new account"
+                                    >
+                                        <FiPlusCircle size={10} />
+                                    </button>
+                                </Tooltip>
                             )}
-                        </Flex>
+                        </div>
                         {/* Show compact suggestion chips for unlinked accounts */}
                         {accountSuggestions.length > 0 && (
-                            <HStack gap={1} flexWrap="wrap">
+                            <div className="flex flex-wrap gap-1">
                                 {accountSuggestions.slice(0, 2).map((s, idx) => (
-                                    <Tooltip.Root key={idx}>
-                                        <Tooltip.Trigger asChild>
-                                            <Badge
-                                                size="xs"
-                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                cursor="pointer"
-                                                style={{ fontSize: '7px' }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onAcceptSuggestion?.(s.id);
-                                                }}
-                                            >
-                                                {s.name.slice(0, 10)}{s.name.length > 10 ? '…' : ''}
-                                                {s.confidence >= 0.9 && ' ✓'}
-                                            </Badge>
-                                        </Tooltip.Trigger>
-                                        <Tooltip.Positioner>
-                                            <Tooltip.Content>
-                                                {formatConfidence(s.confidence)} match - Click to link
-                                            </Tooltip.Content>
-                                        </Tooltip.Positioner>
-                                    </Tooltip.Root>
+                                    <Tooltip key={idx} content={`${formatConfidence(s.confidence)} match - Click to link`}>
+                                        <Badge
+                                            colorScheme={toScheme(getConfidenceColor(s.confidence))}
+                                            className={`cursor-pointer ${s.confidence >= 0.9 ? 'font-semibold' : ''}`}
+                                            style={{ fontSize: '7px' }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onAcceptSuggestion?.(s.id);
+                                            }}
+                                        >
+                                            {s.name.slice(0, 10)}{s.name.length > 10 ? '…' : ''}
+                                            {s.confidence >= 0.9 && ' ✓'}
+                                        </Badge>
+                                    </Tooltip>
                                 ))}
-                            </HStack>
+                            </div>
                         )}
-                    </Flex>
+                    </div>
                 ) : null}
 
                 {/* Source badge */}
-                <Tooltip.Root>
-                    <Tooltip.Trigger asChild>
-                        <Badge
-                            size="xs"
-                            bg={hexToRgba(sourceColor, 0.18)}
-                            color={sourceColor}
-                            variant="subtle"
-                            style={{
-                                fontSize: '9px',
-                                padding: '1px 4px',
-                                cursor: 'default',
-                                maxWidth: '120px',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                display: 'inline-block',
-                            }}
-                        >
-                            {source}
-                        </Badge>
-                    </Tooltip.Trigger>
-                    <Tooltip.Positioner>
-                        <Tooltip.Content>
-                            Source: {source}
-                        </Tooltip.Content>
-                    </Tooltip.Positioner>
-                </Tooltip.Root>
-            </HStack>
+                <Tooltip content={`Source: ${source}`}>
+                    <span
+                        className="inline-block max-w-[120px] cursor-default overflow-hidden text-ellipsis whitespace-nowrap px-1 py-px font-medium leading-tight"
+                        style={{ fontSize: '9px', backgroundColor: hexToRgba(sourceColor, 0.18), color: sourceColor }}
+                    >
+                        {source}
+                    </span>
+                </Tooltip>
+            </div>
 
             {/* Second row: Connector run and other optional badges */}
-            <HStack gap={1} flexWrap="wrap" align="center">
+            <div className="flex flex-wrap items-center gap-1">
                 {/* Clickable connector run badge (run ID + date) */}
                 {syncConnectorRunId && runDatetime && (
-                    <Tooltip.Root>
-                        <Tooltip.Trigger asChild>
-                            <Badge
-                                size="xs"
-                                colorPalette="grey"
-                                variant="subtle"
-                                cursor={onConnectorRunClick ? 'pointer' : 'default'}
-                                onClick={(e) => {
-                                    if (onConnectorRunClick) {
-                                        e.stopPropagation();
-                                        onConnectorRunClick(syncConnectorRunId);
-                                    }
-                                }}
-                                _hover={onConnectorRunClick ? { bg: 'purple.100' } : undefined}
-                                style={{
-                                    fontSize: '9px',
-                                    padding: '1px 4px',
-                                    display: 'inline-block',
-                                }}
-                            >
-                                #{syncConnectorRunId} • {new Date(runDatetime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </Badge>
-                        </Tooltip.Trigger>
-                        <Tooltip.Positioner>
-                            <Tooltip.Content>
-                                Click to view connector run details
-                            </Tooltip.Content>
-                        </Tooltip.Positioner>
-                    </Tooltip.Root>
+                    <Tooltip content="Click to view connector run details">
+                        <Badge
+                            colorScheme="gray"
+                            className={`inline-block ${onConnectorRunClick ? 'cursor-pointer hover:bg-purple-100' : 'cursor-default'}`}
+                            style={{ fontSize: '9px', padding: '1px 4px' }}
+                            onClick={(e) => {
+                                if (onConnectorRunClick) {
+                                    e.stopPropagation();
+                                    onConnectorRunClick(syncConnectorRunId);
+                                }
+                            }}
+                        >
+                            #{syncConnectorRunId} • {new Date(runDatetime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </Badge>
+                    </Tooltip>
                 )}
 
                 {/* Source type badge (if different from source) */}
                 {sourceType && sourceType !== source && (
                     <Badge
-                        size="xs"
-                        colorPalette="green"
-                        variant="subtle"
+                        colorScheme="green"
+                        className="inline-block cursor-default"
                         title={`Type: ${sourceType}`}
-                        style={{
-                            fontSize: '9px',
-                            padding: '1px 4px',
-                            cursor: 'default',
-                        }}
+                        style={{ fontSize: '9px', padding: '1px 4px' }}
                     >
                         {sourceType}
                     </Badge>
@@ -259,108 +199,59 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
 
                 {/* Source symbol badge (if provided) */}
                 {sourceSymbol && (
-                    <Tooltip.Root>
-                        <Tooltip.Trigger asChild>
-                            <Badge
-                                size="xs"
-                                colorPalette="purple"
-                                variant="outline"
-                                style={{
-                                    fontSize: '9px',
-                                    padding: '1px 4px',
-                                    cursor: 'default',
-                                    maxWidth: '100px',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    display: 'inline-block',
-                                }}
-                            >
-                                {sourceSymbol}
-                            </Badge>
-                        </Tooltip.Trigger>
-                        <Tooltip.Positioner>
-                            <Tooltip.Content>
-                                Symbol: {sourceSymbol}
-                            </Tooltip.Content>
-                        </Tooltip.Positioner>
-                    </Tooltip.Root>
+                    <Tooltip content={`Symbol: ${sourceSymbol}`}>
+                        <Badge
+                            colorScheme="purple"
+                            className="inline-block max-w-[100px] cursor-default overflow-hidden text-ellipsis whitespace-nowrap"
+                            style={{ fontSize: '9px', padding: '1px 4px' }}
+                        >
+                            {sourceSymbol}
+                        </Badge>
+                    </Tooltip>
                 )}
 
                 {/* Network badge (if provided) */}
                 {network && (
-                    <Tooltip.Root>
-                        <Tooltip.Trigger asChild>
-                            <Badge
-                                size="xs"
-                                colorPalette="pink"
-                                variant="subtle"
-                                style={{
-                                    fontSize: '8px',
-                                    padding: '1px 4px',
-                                    cursor: 'default',
-                                    maxWidth: '100px',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    display: 'inline-block',
-                                }}
-                            >
-                                {network}
-                            </Badge>
-                        </Tooltip.Trigger>
-                        <Tooltip.Positioner>
-                            <Tooltip.Content>
-                                Network: {network}
-                            </Tooltip.Content>
-                        </Tooltip.Positioner>
-                    </Tooltip.Root>
+                    <Tooltip content={`Network: ${network}`}>
+                        <Badge
+                            colorScheme="purple"
+                            className="inline-block max-w-[100px] cursor-default overflow-hidden text-ellipsis whitespace-nowrap"
+                            style={{ fontSize: '8px', padding: '1px 4px' }}
+                        >
+                            {network}
+                        </Badge>
+                    </Tooltip>
                 )}
-            </HStack>
+            </div>
 
             {/* Third row: Source Transaction ID (truncated, copiable with confirmation) */}
             {sourceTransactionId && (
-                <Tooltip.Root openDelay={200}>
-                    <Tooltip.Trigger asChild>
-                        <HStack
-                            gap={0.5}
-                            cursor="pointer"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                navigator.clipboard.writeText(sourceTransactionId);
-                                setCopied(true);
-                                setTimeout(() => setCopied(false), 1500);
-                            }}
-                            _hover={{ color: 'blue.500' }}
-                            title="Click to copy source transaction ID"
+                <Tooltip content={sourceTransactionId} openDelay={200}>
+                    <div
+                        className="flex cursor-pointer items-center gap-0.5 hover:text-blue-500"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(sourceTransactionId);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 1500);
+                        }}
+                        title="Click to copy source transaction ID"
+                    >
+                        <span
+                            className={`max-w-[150px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[7px] ${copied ? 'text-green-500' : 'text-slate-400'}`}
                         >
-                            <Text
-                                fontSize="7px"
-                                fontFamily="mono"
-                                color={copied ? 'green.500' : 'gray.400'}
-                                overflow="hidden"
-                                textOverflow="ellipsis"
-                                whiteSpace="nowrap"
-                                maxW="150px"
-                            >
-                                {copied
-                                    ? 'Copied!'
-                                    : sourceTransactionId.length > 24
-                                        ? sourceTransactionId.slice(0, 12) + '\u2026' + sourceTransactionId.slice(-8)
-                                        : sourceTransactionId}
-                            </Text>
-                            <Box color={copied ? 'green.500' : 'gray.300'} flexShrink={0}>
-                                {copied ? <FiCheck size={8} /> : <FiCopy size={8} />}
-                            </Box>
-                        </HStack>
-                    </Tooltip.Trigger>
-                    <Tooltip.Positioner>
-                        <Tooltip.Content>
-                            {sourceTransactionId}
-                        </Tooltip.Content>
-                    </Tooltip.Positioner>
-                </Tooltip.Root>
+                            {copied
+                                ? 'Copied!'
+                                : sourceTransactionId.length > 24
+                                    ? sourceTransactionId.slice(0, 12) + '\u2026' + sourceTransactionId.slice(-8)
+                                    : sourceTransactionId}
+                        </span>
+                        <span className={`shrink-0 ${copied ? 'text-green-500' : 'text-slate-300'}`}>
+                            {copied ? <FiCheck size={8} /> : <FiCopy size={8} />}
+                        </span>
+                    </div>
+                </Tooltip>
             )}
-        </Flex>
+        </div>
     );
 };
