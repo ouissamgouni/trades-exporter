@@ -45,6 +45,7 @@ pydantic_core==2.23.2
 pyflakes==3.4.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
+python-multipart==0.0.21
 pytz==2025.2
 PyYAML==6.0.3
 requests==2.32.5
