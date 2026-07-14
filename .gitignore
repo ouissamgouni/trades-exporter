@@ -130,6 +130,10 @@ frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
 
+# Keep frontend utility modules available to git-based builds
+!frontend/src/lib/
+!frontend/src/lib/cn.ts
+
 # OS files
 .DS_Store
 .DS_Store?
