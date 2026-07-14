@@ -37,3 +37,18 @@
     background: #CBD5E0;
     border-radius: 2px;
 }
+
+/* Slide-up entrance animation for the floating bulk-actions bar (TransactionsTable). */
+@keyframes slideUp {
+    from {
+        transform: translateY(100%);
+    }
+
+    to {
+        transform: translateY(0);
+    }
+}
+
+.animate-slide-up {
+    animation: slideUp 150ms ease-out;
+}

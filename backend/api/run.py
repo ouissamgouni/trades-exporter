@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the Trade Exporter FastAPI application.
+Run the TradeTrail FastAPI application.
 
 Usage:
     python -m backend.api.run
@@ -19,10 +19,10 @@ if __name__ == "__main__":
     # Get configuration from environment
     port = int(os.getenv("BACKEND_PORT", "8000"))
     reload = os.getenv("UVICORN_RELOAD", "true").lower() in ("true", "1", "yes")
-    
+
     # Get access log configuration
     exclude_paths = get_uvicorn_access_log_exclude_paths()
-    
+
     # Determine access_log and log_config based on configuration
     if exclude_paths is None:
         # None = Fully disable access logs
@@ -35,11 +35,11 @@ if __name__ == "__main__":
     else:
         # Has paths = Enable access logs with filtering
         access_log = True
-        
+
         # Configure uvicorn logging with custom filter
         log_config = uvicorn.config.LOGGING_CONFIG
         log_config = copy.deepcopy(log_config)
-        
+
         # Add our filter to the access logger
         log_config["filters"] = {
             "endpoint_filter": {
@@ -48,7 +48,7 @@ if __name__ == "__main__":
             }
         }
         log_config["handlers"]["access"]["filters"] = ["endpoint_filter"]
-    
+
     uvicorn.run(
         "backend.api.main:app",
         host="0.0.0.0",

@@ -1,5 +1,5 @@
 """
-Price Snapshots endpoints for the Trade Exporter API.
+Price Snapshots endpoints for the TradeTrail API.
 """
 
 from datetime import datetime, date, timezone
@@ -12,7 +12,13 @@ from pydantic import BaseModel
 from sqlmodel import Session, select, func, col, text
 
 from backend.db.database import get_db
-from backend.db.models import PriceSnapshot, Asset, AppSettings, NormalizedTransaction, ensure_utc
+from backend.db.models import (
+    PriceSnapshot,
+    Asset,
+    AppSettings,
+    NormalizedTransaction,
+    ensure_utc,
+)
 from backend.services.price_service import (
     detect_gaps,
     _expected_trading_days,
@@ -102,6 +108,7 @@ class PaginatedPriceSnapshotsResponse(BaseModel):
 # Gap Detection Models
 # ============================================================================
 
+
 class GapRangeResponse(BaseModel):
     start_date: str
     end_date: str
@@ -139,7 +146,7 @@ class GapCandidatesResponse(BaseModel):
 class BackfillRequest(BaseModel):
     asset_id: int
     date_from: str  # ISO date
-    date_to: str    # ISO date
+    date_to: str  # ISO date
     quote_asset_id: Optional[int] = None
 
 
@@ -164,11 +171,13 @@ class BulkManualRequest(BaseModel):
     asset_id: int
     quote_asset_id: Optional[int] = None
     date_from: str  # ISO date
-    date_to: str    # ISO date
+    date_to: str  # ISO date
     price: float = 0.0
     source: str = "manual"
     force: bool = False  # When True, overwrite existing snapshots
-    interpolate: bool = False  # When True, linearly interpolate between price_start and price_end
+    interpolate: bool = (
+        False  # When True, linearly interpolate between price_start and price_end
+    )
     price_start: Optional[float] = None
     price_end: Optional[float] = None
 
@@ -185,8 +194,12 @@ def list_price_snapshots(
     asset_id: Optional[int] = Query(None, description="Filter by asset ID"),
     quote_asset_id: Optional[int] = Query(None, description="Filter by quote asset ID"),
     source: Optional[str] = Query(None, description="Filter by source"),
-    snapshot_time_from: Optional[str] = Query(None, description="Filter by minimum snapshot time (ISO format)"),
-    snapshot_time_to: Optional[str] = Query(None, description="Filter by maximum snapshot time (ISO format)"),
+    snapshot_time_from: Optional[str] = Query(
+        None, description="Filter by minimum snapshot time (ISO format)"
+    ),
+    snapshot_time_to: Optional[str] = Query(
+        None, description="Filter by maximum snapshot time (ISO format)"
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     session: Session = Depends(get_db),
@@ -224,6 +237,7 @@ def list_price_snapshots(
 
         # Get total count before pagination
         from sqlmodel import func
+
         count_statement = select(func.count()).select_from(statement.subquery())
         total = session.exec(count_statement).one()
 
@@ -301,7 +315,9 @@ def get_price_gaps(
         d_from = date.fromisoformat(date_from) if date_from else None
         d_to = date.fromisoformat(date_to) if date_to else None
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
+        )
 
     # Resolve base currency if no explicit quote_asset_id
     if quote_asset_id is None:
@@ -313,7 +329,9 @@ def get_price_gaps(
             quote_asset_id = base_asset.asset_id
 
     try:
-        result = detect_gaps(session, asset_id, d_from, d_to, quote_asset_id=quote_asset_id)
+        result = detect_gaps(
+            session, asset_id, d_from, d_to, quote_asset_id=quote_asset_id
+        )
         return GapDetectionResponse(
             asset_id=result.asset_id,
             symbol=result.symbol,
@@ -369,12 +387,14 @@ def get_price_gaps_summary(
             result = detect_gaps(session, aid, quote_asset_id=quote_asset_id)
             total_missing = sum(g.missing_days_count for g in result.gaps)
             if result.gaps:
-                items.append(GapSummaryItem(
-                    asset_id=aid,
-                    symbol=result.symbol,
-                    gap_count=len(result.gaps),
-                    total_missing_days=total_missing,
-                ))
+                items.append(
+                    GapSummaryItem(
+                        asset_id=aid,
+                        symbol=result.symbol,
+                        gap_count=len(result.gaps),
+                        total_missing_days=total_missing,
+                    )
+                )
         except ValueError:
             continue  # skip unknown asset IDs
 
@@ -414,25 +434,27 @@ def get_price_gap_candidates(
             continue
         if not result.gaps:
             continue
-        items.append(GapDetectionResponse(
-            asset_id=result.asset_id,
-            symbol=result.symbol,
-            price_type=result.price_type,
-            total_expected=result.total_expected,
-            total_covered=result.total_covered,
-            coverage_pct=result.coverage_pct,
-            gaps=[
-                GapRangeResponse(
-                    start_date=g.start_date,
-                    end_date=g.end_date,
-                    missing_days_count=g.missing_days_count,
-                    last_known_price=g.last_known_price,
-                    last_known_price_date=g.last_known_price_date,
-                    last_known_source=g.last_known_source,
-                )
-                for g in result.gaps
-            ],
-        ))
+        items.append(
+            GapDetectionResponse(
+                asset_id=result.asset_id,
+                symbol=result.symbol,
+                price_type=result.price_type,
+                total_expected=result.total_expected,
+                total_covered=result.total_covered,
+                coverage_pct=result.coverage_pct,
+                gaps=[
+                    GapRangeResponse(
+                        start_date=g.start_date,
+                        end_date=g.end_date,
+                        missing_days_count=g.missing_days_count,
+                        last_known_price=g.last_known_price,
+                        last_known_price_date=g.last_known_price_date,
+                        last_known_source=g.last_known_source,
+                    )
+                    for g in result.gaps
+                ],
+            )
+        )
 
     return GapCandidatesResponse(items=items)
 
@@ -452,11 +474,15 @@ def backfill_prices(
         d_from = date.fromisoformat(req.date_from)
         d_to = date.fromisoformat(req.date_to)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
+        )
 
     asset = session.get(Asset, req.asset_id)
     if not asset:
-        raise HTTPException(status_code=404, detail=f"Asset ID {req.asset_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Asset ID {req.asset_id} not found"
+        )
 
     is_crypto = (asset.price_type or "crypto").lower() == "crypto"
 
@@ -471,7 +497,9 @@ def backfill_prices(
             quote_id = base_asset.asset_id
 
     # Find which dates are actually missing
-    gap_result = detect_gaps(session, req.asset_id, d_from, d_to, quote_asset_id=quote_id)
+    gap_result = detect_gaps(
+        session, req.asset_id, d_from, d_to, quote_asset_id=quote_id
+    )
     missing_dates: set[date] = set()
     for g in gap_result.gaps:
         gs = date.fromisoformat(g.start_date)
@@ -485,8 +513,11 @@ def backfill_prices(
     # Lazy-import to avoid circular imports
     from backend.services.price_service import PriceService
     from backend.config.loader import load_settings as _load
+
     config_settings = _load()
-    svc = PriceService(session=session, base_currency=config_settings.get("base_currency", "EUR"))
+    svc = PriceService(
+        session=session, base_currency=config_settings.get("base_currency", "EUR")
+    )
 
     fetched: List[BackfillFetchedItem] = []
     failed: List[BackfillFailedItem] = []
@@ -500,16 +531,20 @@ def backfill_prices(
                 use_fallback=False,
                 max_timeout_seconds=15,
             )
-            fetched.append(BackfillFetchedItem(
-                date=d.isoformat(),
-                price=result.price,
-                source=result.source,
-            ))
+            fetched.append(
+                BackfillFetchedItem(
+                    date=d.isoformat(),
+                    price=result.price,
+                    source=result.source,
+                )
+            )
         except Exception as e:
-            failed.append(BackfillFailedItem(
-                date=d.isoformat(),
-                error=str(e)[:200],
-            ))
+            failed.append(
+                BackfillFailedItem(
+                    date=d.isoformat(),
+                    error=str(e)[:200],
+                )
+            )
 
     return BackfillResponse(asset_id=req.asset_id, fetched=fetched, failed=failed)
 
@@ -517,6 +552,7 @@ def backfill_prices(
 # ---------------------------------------------------------------------------
 # Test-fetch: try fetching a single date price without persisting
 # ---------------------------------------------------------------------------
+
 
 class TestFetchResponse(BaseModel):
     asset_id: int
@@ -539,7 +575,9 @@ def test_fetch_price(
     try:
         d = date.fromisoformat(date_str)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
+        )
 
     asset = session.get(Asset, asset_id)
     if not asset:
@@ -547,8 +585,11 @@ def test_fetch_price(
 
     from backend.services.price_service import PriceService
     from backend.config.loader import load_settings as _load
+
     settings = _load()
-    svc = PriceService(session=session, base_currency=settings.get("base_currency", "EUR"))
+    svc = PriceService(
+        session=session, base_currency=settings.get("base_currency", "EUR")
+    )
 
     dt = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
     try:
@@ -576,6 +617,7 @@ def test_fetch_price(
 # ---------------------------------------------------------------------------
 # Check existing prices in a date range (for override confirmation)
 # ---------------------------------------------------------------------------
+
 
 class ExistingPriceItem(BaseModel):
     date: str
@@ -612,7 +654,8 @@ def check_existing_prices(
         )
         .where(
             PriceSnapshot.asset_id == asset_id,
-            PriceSnapshot.snapshot_time >= datetime.combine(d_from, datetime.min.time()),
+            PriceSnapshot.snapshot_time
+            >= datetime.combine(d_from, datetime.min.time()),
             PriceSnapshot.snapshot_time <= datetime.combine(d_to, datetime.max.time()),
         )
         .order_by(PriceSnapshot.snapshot_time)
@@ -631,11 +674,13 @@ def check_existing_prices(
         if d_str in seen_dates:
             continue
         seen_dates.add(d_str)
-        items.append(ExistingPriceItem(
-            date=d_str,
-            price=float(row[1]),
-            source=row[2],
-        ))
+        items.append(
+            ExistingPriceItem(
+                date=d_str,
+                price=float(row[1]),
+                source=row[2],
+            )
+        )
 
     return CheckExistingResponse(asset_id=asset_id, count=len(items), items=items)
 
@@ -656,12 +701,17 @@ def bulk_create_manual_prices(
         d_from = date.fromisoformat(req.date_from)
         d_to = date.fromisoformat(req.date_to)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
+        )
 
     # Validate pricing fields
     if req.interpolate:
         if req.price_start is None or req.price_end is None:
-            raise HTTPException(status_code=400, detail="price_start and price_end required for interpolation.")
+            raise HTTPException(
+                status_code=400,
+                detail="price_start and price_end required for interpolation.",
+            )
         if req.price_start <= 0 or req.price_end <= 0:
             raise HTTPException(status_code=400, detail="Prices must be positive.")
     else:
@@ -670,22 +720,23 @@ def bulk_create_manual_prices(
 
     asset = session.get(Asset, req.asset_id)
     if not asset:
-        raise HTTPException(status_code=404, detail=f"Asset ID {req.asset_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Asset ID {req.asset_id} not found"
+        )
 
     is_crypto = (asset.price_type or "crypto").lower() == "crypto"
     expected = _expected_trading_days(d_from, d_to, is_crypto)
 
     if not expected:
-        return BulkManualResponse(asset_id=req.asset_id, created_count=0, skipped_count=0, overwritten_count=0)
+        return BulkManualResponse(
+            asset_id=req.asset_id, created_count=0, skipped_count=0, overwritten_count=0
+        )
 
     # Find existing dates
-    existing_stmt = (
-        select(func.date(PriceSnapshot.snapshot_time))
-        .where(
-            PriceSnapshot.asset_id == req.asset_id,
-            PriceSnapshot.snapshot_time >= datetime.combine(d_from, datetime.min.time()),
-            PriceSnapshot.snapshot_time <= datetime.combine(d_to, datetime.max.time()),
-        )
+    existing_stmt = select(func.date(PriceSnapshot.snapshot_time)).where(
+        PriceSnapshot.asset_id == req.asset_id,
+        PriceSnapshot.snapshot_time >= datetime.combine(d_from, datetime.min.time()),
+        PriceSnapshot.snapshot_time <= datetime.combine(d_to, datetime.max.time()),
     )
     if req.quote_asset_id is not None:
         existing_stmt = existing_stmt.where(
@@ -706,11 +757,15 @@ def bulk_create_manual_prices(
             for dd in dates_to_delete:
                 del_stmt = select(PriceSnapshot).where(
                     PriceSnapshot.asset_id == req.asset_id,
-                    PriceSnapshot.snapshot_time >= datetime.combine(dd, datetime.min.time()),
-                    PriceSnapshot.snapshot_time <= datetime.combine(dd, datetime.max.time()),
+                    PriceSnapshot.snapshot_time
+                    >= datetime.combine(dd, datetime.min.time()),
+                    PriceSnapshot.snapshot_time
+                    <= datetime.combine(dd, datetime.max.time()),
                 )
                 if req.quote_asset_id is not None:
-                    del_stmt = del_stmt.where(PriceSnapshot.quote_asset_id == req.quote_asset_id)
+                    del_stmt = del_stmt.where(
+                        PriceSnapshot.quote_asset_id == req.quote_asset_id
+                    )
                 for snap in session.exec(del_stmt).all():
                     session.delete(snap)
                     overwritten += 1
@@ -760,6 +815,7 @@ def bulk_create_manual_prices(
 
 class PriceHealthRow(BaseModel):
     """Health summary for a single asset's price data."""
+
     asset_id: int
     symbol: str
     label: Optional[str] = None
@@ -778,6 +834,7 @@ class PriceHealthRow(BaseModel):
 
 class PriceHealthResponse(BaseModel):
     """Response model for price health endpoint."""
+
     items: List[PriceHealthRow]
     staleness_threshold_days: int
     summary: Dict[str, int]  # {"healthy": N, "warning": N, "stale": N}
@@ -816,14 +873,16 @@ def get_price_health(
 ):
     """
     Get price health summary for all assets with price data.
-    
+
     Returns per-asset freshness status, flat-line detection, and staleness info.
     Uses the configured pnl_price_staleness_days threshold from app settings.
     """
     try:
         settings = _get_app_settings(session)
         staleness_days = settings.pnl_price_staleness_days
-        warning_days = max(1, staleness_days // 2)  # Warning at half the stale threshold
+        warning_days = max(
+            1, staleness_days // 2
+        )  # Warning at half the stale threshold
         now = datetime.now(timezone.utc)
 
         # Resolve base currency → quote_asset_id for filtering
@@ -833,15 +892,12 @@ def get_price_health(
         quote_id = base_asset.asset_id if base_asset else None
 
         # 1) Aggregate stats per asset (filtered by quote currency)
-        agg_stmt = (
-            select(
-                PriceSnapshot.asset_id,
-                func.max(PriceSnapshot.snapshot_time).label("last_updated"),
-                func.min(PriceSnapshot.snapshot_time).label("first_snapshot"),
-                func.count(PriceSnapshot.snapshot_id).label("total_snapshots"),
-            )
-            .group_by(PriceSnapshot.asset_id)
-        )
+        agg_stmt = select(
+            PriceSnapshot.asset_id,
+            func.max(PriceSnapshot.snapshot_time).label("last_updated"),
+            func.min(PriceSnapshot.snapshot_time).label("first_snapshot"),
+            func.count(PriceSnapshot.snapshot_id).label("total_snapshots"),
+        ).group_by(PriceSnapshot.asset_id)
         if quote_id is not None:
             agg_stmt = agg_stmt.where(PriceSnapshot.quote_asset_id == quote_id)
         agg_rows = session.exec(agg_stmt).all()
@@ -866,7 +922,9 @@ def get_price_health(
                 .limit(1)
             )
             if quote_id is not None:
-                latest_stmt = latest_stmt.where(PriceSnapshot.quote_asset_id == quote_id)
+                latest_stmt = latest_stmt.where(
+                    PriceSnapshot.quote_asset_id == quote_id
+                )
             row = session.exec(latest_stmt).first()
             if row:
                 latest_lookup[aid] = (float(row[0]), row[1])
@@ -881,10 +939,15 @@ def get_price_health(
                 .limit(5)
             )
             if quote_id is not None:
-                recent_stmt = recent_stmt.where(PriceSnapshot.quote_asset_id == quote_id)
+                recent_stmt = recent_stmt.where(
+                    PriceSnapshot.quote_asset_id == quote_id
+                )
             recent_prices = session.exec(recent_stmt).all()
             if len(recent_prices) >= 5:
-                prices_float = [float(p[0]) if isinstance(p, tuple) else float(p) for p in recent_prices]
+                prices_float = [
+                    float(p[0]) if isinstance(p, tuple) else float(p)
+                    for p in recent_prices
+                ]
                 if prices_float[0] > 0:
                     all_same = all(
                         abs(p - prices_float[0]) / prices_float[0] < 0.0001
@@ -927,7 +990,12 @@ def get_price_health(
                 qid = qr[0] if isinstance(qr, tuple) else qr
                 if qid is not None:
                     q_asset = session.get(Asset, qid)
-                    quotes.append({"asset_id": qid, "symbol": q_asset.symbol if q_asset else f"ID:{qid}"})
+                    quotes.append(
+                        {
+                            "asset_id": qid,
+                            "symbol": q_asset.symbol if q_asset else f"ID:{qid}",
+                        }
+                    )
             quote_currencies_lookup[aid] = quotes
 
         # 4) Build asset info lookup
@@ -973,22 +1041,26 @@ def get_price_health(
             if status in summary:
                 summary[status] += 1
 
-            items.append(PriceHealthRow(
-                asset_id=aid,
-                symbol=asset.symbol if asset else f"ID:{aid}",
-                label=asset.label if asset else None,
-                last_price=latest[0],
-                last_source=latest[1],
-                last_updated=last_updated_dt.isoformat() if last_updated else "",
-                first_snapshot=ensure_utc(first_snapshot).isoformat() if first_snapshot else "",
-                total_snapshots=total_snapshots,
-                days_stale=days,
-                is_flatline=aid in flatline_set,
-                status=status,
-                has_transactions=has_tx,
-                sparkline=sparkline_lookup.get(aid, []),
-                quote_currencies=quote_currencies_lookup.get(aid, []),
-            ))
+            items.append(
+                PriceHealthRow(
+                    asset_id=aid,
+                    symbol=asset.symbol if asset else f"ID:{aid}",
+                    label=asset.label if asset else None,
+                    last_price=latest[0],
+                    last_source=latest[1],
+                    last_updated=last_updated_dt.isoformat() if last_updated else "",
+                    first_snapshot=ensure_utc(first_snapshot).isoformat()
+                    if first_snapshot
+                    else "",
+                    total_snapshots=total_snapshots,
+                    days_stale=days,
+                    is_flatline=aid in flatline_set,
+                    status=status,
+                    has_transactions=has_tx,
+                    sparkline=sparkline_lookup.get(aid, []),
+                    quote_currencies=quote_currencies_lookup.get(aid, []),
+                )
+            )
 
         # Sort by days_stale descending (worst offenders first)
         items.sort(key=lambda x: x.days_stale, reverse=True)
@@ -1014,7 +1086,7 @@ def get_price_timeseries(
 ):
     """
     Get price timeseries for selected assets, grouped by asset.
-    
+
     Designed for charting — returns all data points (no pagination).
     Limited to 10 assets at a time.
     """
@@ -1023,12 +1095,19 @@ def get_price_timeseries(
         try:
             ids = [int(x.strip()) for x in asset_ids.split(",") if x.strip()]
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid asset_ids format. Use comma-separated integers.")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid asset_ids format. Use comma-separated integers.",
+            )
 
         if not ids:
-            raise HTTPException(status_code=400, detail="At least one asset_id is required.")
+            raise HTTPException(
+                status_code=400, detail="At least one asset_id is required."
+            )
         if len(ids) > 50:
-            raise HTTPException(status_code=400, detail="Maximum 50 assets per request.")
+            raise HTTPException(
+                status_code=400, detail="Maximum 50 assets per request."
+            )
 
         # Build base filters
         base_filters = [col(PriceSnapshot.asset_id).in_(ids)]
@@ -1037,7 +1116,9 @@ def get_price_timeseries(
         if source:
             base_filters.append(PriceSnapshot.source == source)
         if date_from:
-            base_filters.append(PriceSnapshot.snapshot_time >= parse_datetime(date_from))
+            base_filters.append(
+                PriceSnapshot.snapshot_time >= parse_datetime(date_from)
+            )
         if date_to:
             base_filters.append(PriceSnapshot.snapshot_time <= parse_datetime(date_to))
 
@@ -1080,10 +1161,12 @@ def get_price_timeseries(
             pts = grouped[asset_id]
             if pts and pts[-1].date == date_str:
                 continue
-            pts.append(PriceTimeseriesPoint(
-                date=date_str,
-                price=float(price),
-            ))
+            pts.append(
+                PriceTimeseriesPoint(
+                    date=date_str,
+                    price=float(price),
+                )
+            )
 
         # Build response with asset info
         result_assets: List[PriceTimeseriesAsset] = []
@@ -1091,12 +1174,14 @@ def get_price_timeseries(
             if aid not in grouped:
                 continue
             asset = session.get(Asset, aid)
-            result_assets.append(PriceTimeseriesAsset(
-                asset_id=aid,
-                symbol=asset.symbol if asset else f"ID:{aid}",
-                label=asset.label if asset else None,
-                points=grouped[aid],
-            ))
+            result_assets.append(
+                PriceTimeseriesAsset(
+                    asset_id=aid,
+                    symbol=asset.symbol if asset else f"ID:{aid}",
+                    label=asset.label if asset else None,
+                    points=grouped[aid],
+                )
+            )
 
         return PriceTimeseriesResponse(assets=result_assets)
 

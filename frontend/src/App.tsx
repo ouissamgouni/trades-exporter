@@ -1,6 +1,6 @@
 
 import React, { Suspense, useEffect, useState } from 'react';
-import { Box, Container, Heading, Tabs, Text, HStack, Badge, Center, Spinner, Flex } from '@chakra-ui/react';
+import { Badge, Spinner, Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/primitives';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { API_URL, SyncJobProgress, ConnectorProgress, BundleSuggestion } from './types';
 import { DataHealthProvider, useDataHealth } from './contexts/DataHealthContext';
@@ -51,9 +51,9 @@ const PricesViewer = React.lazy(() => import('./components/PricesViewer').then(m
 
 // Loading fallback component
 const TabLoadingFallback = () => (
-    <Center h="200px">
-        <Spinner size="xl" color="blue.500" />
-    </Center>
+    <div className="flex h-[200px] items-center justify-center">
+        <Spinner size="lg" className="text-blue-500" />
+    </div>
 );
 
 const AppContent = () => {
@@ -150,160 +150,164 @@ const AppContent = () => {
     const qaPinnedWidth = useQaPinnedWidth();
 
     return (
-        <Box minH="100vh" bg="gray.50" marginRight={qaPinnedWidth ? `${qaPinnedWidth}px` : undefined} transition="margin-right 0.2s ease" pb={`${STATUS_BAR_HEIGHT_PX + 4}px`}>
-            <Container maxW="8xl" py={2}>
+        <div
+            className="min-h-screen bg-slate-50 transition-[margin-right] duration-200 ease-in-out"
+            style={{
+                marginRight: qaPinnedWidth ? `${qaPinnedWidth}px` : undefined,
+                paddingBottom: `${STATUS_BAR_HEIGHT_PX + 4}px`,
+            }}
+        >
+            <div className="mx-auto max-w-[1400px] px-4 py-2">
                 {/* Compact header: Title (left) + Workflow (center) + Data Health (right) */}
-                <Flex align="center" justify="space-between" mb={2} flexWrap="wrap" gap={2}>
-                    <Heading as="h1" size="md" color="blue.700" whiteSpace="nowrap">
-                        <Flex align="center" gap={1.5} display="inline-flex">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <h1 className="whitespace-nowrap text-xl font-bold text-blue-700">
+                        <span className="inline-flex items-center gap-1.5">
                             <img src={logoSrc} alt="TradeTrail" width={24} height={24} />
                             TradeTrail
-                        </Flex>
-                    </Heading>
+                        </span>
+                    </h1>
 
-                    <HStack gap={1.5} flexWrap="wrap">
-                        <Badge colorScheme="gray" size="sm" px={1.5} py={0.5}>1. Setup</Badge>
-                        <Text color="gray.400" fontSize="xs">→</Text>
-                        <Badge colorScheme="blue" size="sm" px={1.5} py={0.5}>2. Sync/Add</Badge>
-                        <Text color="gray.400" fontSize="xs">→</Text>
-                        <Badge colorScheme="orange" size="sm" px={1.5} py={0.5}>3. Review</Badge>
-                        <Text color="gray.400" fontSize="xs">→</Text>
-                        <Badge colorScheme="green" size="sm" px={1.5} py={0.5}>4. P&L</Badge>
-                    </HStack>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge colorScheme="gray" className="px-1.5 py-0.5">1. Setup</Badge>
+                        <span className="text-xs text-slate-400">→</span>
+                        <Badge colorScheme="blue" className="px-1.5 py-0.5">2. Sync/Add</Badge>
+                        <span className="text-xs text-slate-400">→</span>
+                        <Badge colorScheme="orange" className="px-1.5 py-0.5">3. Review</Badge>
+                        <span className="text-xs text-slate-400">→</span>
+                        <Badge colorScheme="green" className="px-1.5 py-0.5">4. P&L</Badge>
+                    </div>
 
-                </Flex>
+                </div>
 
-                <Tabs.Root defaultValue="setup" lazyMount value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
-                    <Tabs.List>
-                        <Box flex="1" display="flex" alignItems="center">
-                            {/* Step 1: Configuration */}
-                            <Tabs.Trigger value="setup">
-                                <Flex align="center" gap={1}>
-                                    ⚙️ Setup
-                                    {hasSetupIssues && (
-                                        <Badge colorPalette="orange" size="sm" variant="solid" ml={1}>
-                                            ⚠
-                                        </Badge>
-                                    )}
-                                </Flex>
-                            </Tabs.Trigger>
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                    <TabsList>
+                        {/* Step 1: Configuration */}
+                        <TabsTrigger value="setup">
+                            <span className="inline-flex items-center gap-1">
+                                ⚙️ Setup
+                                {hasSetupIssues && (
+                                    <Badge colorScheme="orange" className="ml-1">
+                                        ⚠
+                                    </Badge>
+                                )}
+                            </span>
+                        </TabsTrigger>
 
-                            {/* Step 2: Data Import */}
-                            <Tabs.Trigger value="sync">
-                                <Flex align="center" gap={1}>
-                                    🔄 Sync
-                                    {hasSyncFailures && (
-                                        <Badge colorPalette="red" size="sm" variant="solid" ml={1}>
-                                            {failedConnectorsCount > 0 ? `${failedConnectorsCount} failed` : '⚠'}
-                                        </Badge>
-                                    )}
-                                </Flex>
-                            </Tabs.Trigger>
-                            <Tabs.Trigger value="add-transaction">➕ Add / Import</Tabs.Trigger>
+                        {/* Step 2: Data Import */}
+                        <TabsTrigger value="sync">
+                            <span className="inline-flex items-center gap-1">
+                                🔄 Sync
+                                {hasSyncFailures && (
+                                    <Badge colorScheme="red" className="ml-1">
+                                        {failedConnectorsCount > 0 ? `${failedConnectorsCount} failed` : '⚠'}
+                                    </Badge>
+                                )}
+                            </span>
+                        </TabsTrigger>
+                        <TabsTrigger value="add-transaction">➕ Add / Import</TabsTrigger>
 
-                            {/* Step 3: Review */}
-                            <Tabs.Trigger value="inbox">
-                                <Flex align="center" gap={1}>
-                                    📥 Inbox
-                                    {validationSummary && validationSummary.pending_count > 0 && (
-                                        <Badge colorPalette="blue" size="sm" ml={1}>
-                                            {validationSummary.pending_count}
-                                        </Badge>
-                                    )}
-                                    {bundleSuggestions.length > 0 && (
-                                        <Badge colorPalette="teal" size="sm" ml={1}>
-                                            {bundleSuggestions.length} 💡
-                                        </Badge>
-                                    )}
-                                </Flex>
-                            </Tabs.Trigger>
-                            <Tabs.Trigger value="all-transactions">
-                                📋 All
-                            </Tabs.Trigger>
-                            <Tabs.Trigger value="timeline">📅 Timeline</Tabs.Trigger>
-                            <Tabs.Trigger value="positions">🎯 Positions</Tabs.Trigger>
+                        {/* Step 3: Review */}
+                        <TabsTrigger value="inbox">
+                            <span className="inline-flex items-center gap-1">
+                                📥 Inbox
+                                {validationSummary && validationSummary.pending_count > 0 && (
+                                    <Badge colorScheme="blue" className="ml-1">
+                                        {validationSummary.pending_count}
+                                    </Badge>
+                                )}
+                                {bundleSuggestions.length > 0 && (
+                                    <Badge colorScheme="green" className="ml-1">
+                                        {bundleSuggestions.length} 💡
+                                    </Badge>
+                                )}
+                            </span>
+                        </TabsTrigger>
+                        <TabsTrigger value="all-transactions">
+                            📋 All
+                        </TabsTrigger>
+                        <TabsTrigger value="timeline">📅 Timeline</TabsTrigger>
+                        <TabsTrigger value="positions">🎯 Positions</TabsTrigger>
 
-                            {/* Step 4: Analysis */}
-                            <Tabs.Trigger value="pnl">
-                                <Flex align="center" gap={1}>
-                                    📊 P&L
-                                    {pnlCalcStatus === 'stale' && (
-                                        <Box w={2} h={2} borderRadius="full" bg="orange.400" />
-                                    )}
-                                    {pnlCalcStatus === 'calculating' && (
-                                        <Spinner size="xs" />
-                                    )}
-                                </Flex>
-                            </Tabs.Trigger>
+                        {/* Step 4: Analysis */}
+                        <TabsTrigger value="pnl">
+                            <span className="inline-flex items-center gap-1">
+                                📊 P&L
+                                {pnlCalcStatus === 'stale' && (
+                                    <span className="h-2 w-2 rounded-full bg-orange-400" />
+                                )}
+                                {pnlCalcStatus === 'calculating' && (
+                                    <Spinner size="xs" />
+                                )}
+                            </span>
+                        </TabsTrigger>
 
-                            {/* Reference */}
-                            <Tabs.Trigger value="prices">📈 Prices</Tabs.Trigger>
-                        </Box>
-
-                    </Tabs.List>
+                        {/* Reference */}
+                        <TabsTrigger value="prices">📈 Prices</TabsTrigger>
+                    </TabsList>
 
                     {/* Step 1: Configuration */}
-                    <Tabs.Content value="setup">
+                    <TabsContent value="setup">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <UnifiedSetupView isActive={activeTab === 'setup'} />
                         </Suspense>
-                    </Tabs.Content>
+                    </TabsContent>
 
                     {/* Step 2: Data Import */}
-                    <Tabs.Content value="sync">
+                    <TabsContent value="sync">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <SyncJobPanel isActive={activeTab === 'sync'} />
                         </Suspense>
-                    </Tabs.Content>
-                    <Tabs.Content value="add-transaction">
+                    </TabsContent>
+                    <TabsContent value="add-transaction">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <AddImportPanel />
                         </Suspense>
-                    </Tabs.Content>
+                    </TabsContent>
 
                     {/* Step 3: Review */}
-                    <Tabs.Content value="inbox">
+                    <TabsContent value="inbox">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <InboxView />
                         </Suspense>
-                    </Tabs.Content>
-                    <Tabs.Content value="all-transactions">
+                    </TabsContent>
+                    <TabsContent value="all-transactions">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <AllTransactionsView />
                         </Suspense>
-                    </Tabs.Content>
-                    <Tabs.Content value="timeline">
+                    </TabsContent>
+                    <TabsContent value="timeline">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <TimelineSection />
                         </Suspense>
-                    </Tabs.Content>
-                    <Tabs.Content value="positions">
+                    </TabsContent>
+                    <TabsContent value="positions">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <PositionsView />
                         </Suspense>
-                    </Tabs.Content>
+                    </TabsContent>
 
                     {/* Step 4: Analysis */}
-                    <Tabs.Content value="pnl">
+                    <TabsContent value="pnl">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <PnLPanel
                                 isActive={activeTab === 'pnl'}
                             />
                         </Suspense>
-                    </Tabs.Content>
+                    </TabsContent>
 
                     {/* Reference */}
-                    <Tabs.Content value="prices">
+                    <TabsContent value="prices">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <PricesViewer />
                         </Suspense>
-                    </Tabs.Content>
-                </Tabs.Root>
-            </Container>
+                    </TabsContent>
+                </Tabs>
+            </div>
             <StatusBar />
-        </Box>
+        </div>
     );
 };
+
 
 const App = () => {
     return (

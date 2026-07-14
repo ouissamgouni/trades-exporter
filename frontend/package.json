@@ -2,10 +2,9 @@
     "name": "trades-exporter-react",
     "version": "0.1.0",
     "private": true,
+    "license": "AGPL-3.0-or-later",
     "type": "module",
     "dependencies": {
-        "@chakra-ui/react": "^3.30.0",
-        "@emotion/react": "^11.14.0",
         "@headlessui/react": "^2.2.9",
         "@nivo/bar": "^0.99.0",
         "@nivo/calendar": "^0.99.0",

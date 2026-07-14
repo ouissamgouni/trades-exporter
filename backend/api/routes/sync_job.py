@@ -1,5 +1,5 @@
 """
-Sync Job endpoints for the Trade Exporter API.
+Sync Job endpoints for the TradeTrail API.
 Provides endpoints for starting, monitoring, and aborting sync jobs.
 """
 

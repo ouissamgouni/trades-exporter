@@ -1,4 +1,4 @@
-"""Timeline endpoints for the Trade Exporter API.
+"""Timeline endpoints for the TradeTrail API.
 
 Provides aggregated transaction statistics for calendar heatmap visualization.
 """
@@ -37,7 +37,9 @@ class TimelineStatsResponse(BaseModel):
     year: int
     daily_stats: List[DailyStats]
     total_transactions: int
-    excluded_invalid_count: int = Field(0, description="Number of invalid transactions excluded from stats")
+    excluded_invalid_count: int = Field(
+        0, description="Number of invalid transactions excluded from stats"
+    )
     min_year: int = Field(..., description="Earliest year with transactions")
     max_year: int = Field(..., description="Latest year with transactions")
 
@@ -79,20 +81,17 @@ def get_daily_stats(
             func.date(NormalizedTransaction.date_time).label("tx_date"),
             func.count(NormalizedTransaction.id).label("count"),
             func.coalesce(
-                func.sum(NormalizedTransaction.quantity * func.coalesce(NormalizedTransaction.price, 0)), 
-                0
+                func.sum(
+                    NormalizedTransaction.quantity
+                    * func.coalesce(NormalizedTransaction.price, 0)
+                ),
+                0,
             ).label("volume"),
             func.sum(
-                case(
-                    (NormalizedTransaction.direction == "inflow", 1),
-                    else_=0
-                )
+                case((NormalizedTransaction.direction == "inflow", 1), else_=0)
             ).label("inflow_count"),
             func.sum(
-                case(
-                    (NormalizedTransaction.direction == "outflow", 1),
-                    else_=0
-                )
+                case((NormalizedTransaction.direction == "outflow", 1), else_=0)
             ).label("outflow_count"),
         )
         .where(NormalizedTransaction.date_time >= year_start)

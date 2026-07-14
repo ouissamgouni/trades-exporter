@@ -1,5 +1,5 @@
 """
-End-to-end tests for the complete trades exporter system.
+End-to-end tests for the complete TradeTrail system.
 Tests the full pipeline using SyncJobService: raw data → normalization → persistence
 """
 

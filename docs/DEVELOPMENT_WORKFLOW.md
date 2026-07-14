@@ -1,6 +1,6 @@
 # Development Workflow
 
-This document describes the local development, QA, testing, and release workflow for the trades-exporter project.
+This document describes the local development, QA, testing, and release workflow for TradeTrail (repository `trades-exporter`).
 
 ## Table of Contents
 

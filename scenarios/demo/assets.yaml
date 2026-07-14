@@ -76,3 +76,11 @@ assets:
   - symbol: "PM:eth-etf-inflows-2026-Yes"
     label: "ETH ETFs see net inflows in 2026 — Yes"
     price_type: null
+
+  # ── Benchmark index (not held; powers the S&P 500 reference line) ──
+  # Deterministic mock series lives in prices.yaml under asset_symbol "^GSPC".
+  # The /pnl/benchmark-series endpoint serves it when mock mode is enabled.
+  - symbol: "^GSPC"
+    label: "S&P 500 (benchmark)"
+    price_type: stock
+

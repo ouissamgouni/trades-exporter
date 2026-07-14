@@ -202,7 +202,7 @@ tasks:
     cmds:
       - |
         echo "═══════════════════════════════════════════════════════════════"
-        echo "                    TRADES-EXPORTER TASKS"
+        echo "                    TRADETRAIL TASKS"
         echo "═══════════════════════════════════════════════════════════════"
         echo ""
         echo "BRANCHING"

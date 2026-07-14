@@ -1,11 +1,9 @@
-import {
-    Badge, Box,
-    Button, Checkbox, Dialog, Flex,
-    Heading, HStack, Portal, Spinner,
-    Switch, Table, Text
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner, type BadgeColorScheme } from './ui/primitives';
+import { cn } from '../lib/cn';
 import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuPlus, LuMinus, LuX } from 'react-icons/lu';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { createPortal } from 'react-dom';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     useReactTable,
@@ -86,6 +84,36 @@ const DIRECTION_ROW_HEX: Record<string, string> = {
     [Direction.INFLOW]: '#f0fdf4', // green-50
     [Direction.OUTFLOW]: '#fef2f2', // red-50
     internal: '#f8fafc', // slate-50
+};
+
+// Small pill-style bulk-action button classes (replaces Chakra Button size="2xs" variant="outline"/"solid")
+const BULK_ACTION_BASE = 'inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] disabled:opacity-50 disabled:cursor-not-allowed';
+const BULK_ACTION_OUTLINE: Record<string, string> = {
+    gray: 'border border-slate-300 text-slate-700 hover:bg-slate-50',
+    green: 'border border-green-300 text-green-700 hover:bg-green-50',
+    yellow: 'border border-yellow-300 text-yellow-700 hover:bg-yellow-50',
+    red: 'border border-red-300 text-red-700 hover:bg-red-50',
+    teal: 'border border-teal-300 text-teal-700 hover:bg-teal-50',
+    blue: 'border border-blue-300 text-blue-700 hover:bg-blue-50',
+    orange: 'border border-orange-300 text-orange-700 hover:bg-orange-50',
+    purple: 'border border-purple-300 text-purple-700 hover:bg-purple-50',
+    cyan: 'border border-cyan-300 text-cyan-700 hover:bg-cyan-50',
+};
+const BULK_ACTION_SOLID: Record<string, string> = {
+    gray: 'bg-slate-600 text-white hover:bg-slate-700',
+    green: 'bg-green-600 text-white hover:bg-green-700',
+    yellow: 'bg-yellow-500 text-white hover:bg-yellow-600',
+    red: 'bg-red-600 text-white hover:bg-red-700',
+    teal: 'bg-teal-600 text-white hover:bg-teal-700',
+    blue: 'bg-blue-600 text-white hover:bg-blue-700',
+    orange: 'bg-orange-600 text-white hover:bg-orange-700',
+    purple: 'bg-purple-600 text-white hover:bg-purple-700',
+    cyan: 'bg-cyan-600 text-white hover:bg-cyan-700',
+};
+const getBulkActionClass = (color: string | undefined, variant: string | undefined) => {
+    if (variant === 'ghost') return 'text-slate-500 hover:text-slate-700';
+    if (variant === 'solid') return BULK_ACTION_SOLID[color || 'gray'] || BULK_ACTION_SOLID.gray;
+    return BULK_ACTION_OUTLINE[color || 'gray'] || BULK_ACTION_OUTLINE.gray;
 };
 
 // Props interface for configurable behavior
@@ -1421,26 +1449,22 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const allCurrentPageSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
 
     // Helper to render sortable column header
-    const renderSortableHeader = (columnId: string, label: string, minW?: string, extraProps?: Record<string, any>) => {
+    const renderSortableHeader = (columnId: string, label: string, minWClassName?: string, extraClassName?: string) => {
         const column = tanstackTable.getColumn(columnId);
         const isSorted = column?.getIsSorted();
 
         return (
-            <Table.ColumnHeader
-                cursor="pointer"
+            <th
+                className={cn('cursor-pointer select-none hover:bg-slate-200', minWClassName, extraClassName)}
                 onClick={() => column?.toggleSorting()}
-                userSelect="none"
-                minW={minW}
-                _hover={{ bg: 'gray.200' }}
-                {...extraProps}
             >
-                <Flex align="center" gap={1}>
-                    <Text>{label}</Text>
+                <div className="flex items-center gap-1">
+                    <span>{label}</span>
                     {isSorted === 'asc' && <LuArrowUp size={10} />}
                     {isSorted === 'desc' && <LuArrowDown size={10} />}
                     {!isSorted && <LuArrowUpDown size={10} style={{ opacity: 0.3 }} />}
-                </Flex>
-            </Table.ColumnHeader>
+                </div>
+            </th>
         );
     };
 
@@ -1620,326 +1644,273 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     }, [selectedIds, paginatedTransactions]);
 
     return (
-        <Box pb={selectedIds.size > 0 && !embeddedMode ? '48px' : '0'}>
+        <div className="pb-0" style={selectedIds.size > 0 && !embeddedMode ? { paddingBottom: '48px' } : undefined}>
             {!embeddedMode && (
-                <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                    <Box>
-                        <Heading as="h2" size="md" mb={1}>{title}</Heading>
-                        <Text color="gray.600" fontSize="sm">{subtitle}</Text>
-                    </Box>
+                <div className="mb-6 flex items-center justify-between border-b border-slate-200 pb-2">
+                    <div>
+                        <h2 className="mb-1 text-lg font-semibold">{title}</h2>
+                        <span className="block text-sm text-slate-600">{subtitle}</span>
+                    </div>
                     {/* Invalid row collapse indicator */}
                     {totalInvalidCount > 0 && (
-                        <HStack gap={2} fontSize="xs" color="gray.500">
-                            <Badge colorPalette="red" variant="subtle" size="sm">
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <Badge colorScheme="red">
                                 <LuX size={10} />
                                 {totalInvalidCount} invalid
                             </Badge>
                             {collapsedInvalidCount > 0 ? (
-                                <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    color="gray.500"
-                                    _hover={{ color: 'red.600' }}
+                                <button
+                                    type="button"
                                     onClick={expandAllInvalid}
                                     title="Expand all invalid rows"
+                                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
                                 >
                                     <LuPlus size={12} /> Show
-                                </Button>
+                                </button>
                             ) : (
-                                <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    color="gray.500"
-                                    _hover={{ color: 'red.600' }}
+                                <button
+                                    type="button"
                                     onClick={collapseAllInvalid}
                                     title="Collapse all invalid rows"
+                                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
                                 >
                                     <LuMinus size={12} /> Hide
-                                </Button>
+                                </button>
                             )}
-                        </HStack>
+                        </div>
                     )}
-                </Flex>
+                </div>
             )}
 
             {/* Floating Bulk Actions Bar - pinned to viewport bottom */}
-            {selectedIds.size > 0 && !embeddedMode && (
-                <Portal>
-                    <Box
-                        position="fixed"
-                        bottom={0}
-                        left={0}
-                        right={0}
-                        zIndex={1000}
-                        bg="rgba(255, 255, 255, 0.85)"
-                        backdropFilter="blur(8px)"
-                        borderTop="1px solid"
-                        borderColor="gray.200"
-                        boxShadow="0 -2px 8px rgba(0,0,0,0.08)"
-                        animation="slideUp 150ms ease-out"
-                        css={{
-                            '@keyframes slideUp': {
-                                from: { transform: 'translateY(100%)' },
-                                to: { transform: 'translateY(0)' },
-                            },
-                        }}
-                    >
-                        <Box maxW="1400px" mx="auto" px={4} py={1.5}>
-                            <Flex justify="space-between" align="center" flexWrap="wrap" gap={1.5}>
-                                <Text fontWeight="semibold" color="blue.700" fontSize="xs">
-                                    {selectedIds.size} selected
-                                </Text>
-                                <Flex gap={1} flexWrap="wrap" align="center">
-                                    {/* Additional bulk actions from plugins (rendered first) */}
-                                    {additionalBulkActions
-                                        .filter(action => !action.isVisible || action.isVisible(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]))
-                                        .map(action => (
-                                            <Button
-                                                key={action.id}
-                                                size="2xs"
-                                                fontSize="xs"
-                                                colorPalette={action.colorPalette || 'gray'}
-                                                variant={action.variant || 'outline'}
-                                                onClick={() => action.onClick(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[])}
-                                                disabled={bulkActionLoading || (action.isDisabled ? action.isDisabled(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]) : false)}
-                                            >
-                                                {action.icon} {action.label}
-                                            </Button>
-                                        ))}
-                                    {additionalBulkActions.length > 0 && (
-                                        <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
-                                    )}
-
-                                    {/* Quick Status Actions */}
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="green"
-                                        variant="outline"
-                                        onClick={() => bulkUpdateStatus('valid')}
-                                        disabled={bulkActionLoading}
-                                    >
-                                        ✓ Valid
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="yellow"
-                                        variant="outline"
-                                        onClick={() => bulkUpdateStatus('pending')}
-                                        disabled={bulkActionLoading}
-                                    >
-                                        ⏳ Pending
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="red"
-                                        variant="outline"
-                                        onClick={() => bulkUpdateStatus('invalid')}
-                                        disabled={bulkActionLoading}
-                                    >
-                                        ✗ Invalid
-                                    </Button>
-
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
-
-                                    {/* Taxability Actions */}
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="teal"
-                                        variant="outline"
-                                        onClick={() => bulkUpdateTaxability('taxable')}
-                                        disabled={bulkActionLoading}
-                                        title="Set taxability to Taxable"
-                                    >
-                                        💰 Taxable
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="gray"
-                                        variant="outline"
-                                        onClick={() => bulkUpdateTaxability('non_taxable')}
-                                        disabled={bulkActionLoading}
-                                        title="Set taxability to Non-Taxable"
-                                    >
-                                        🚫 Non-Tax
-                                    </Button>
-
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
-
-                                    {/* Include Fee Actions */}
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="blue"
-                                        variant="outline"
-                                        onClick={() => bulkUpdateIncludeFee(true)}
-                                        disabled={bulkActionLoading}
-                                        title="Include fee in cost basis/proceeds"
-                                    >
-                                        Fee ✓
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="gray"
-                                        variant="outline"
-                                        onClick={() => bulkUpdateIncludeFee(false)}
-                                        disabled={bulkActionLoading}
-                                        title="Exclude fee from cost basis/proceeds"
-                                    >
-                                        Fee ✗
-                                    </Button>
-
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
-
-                                    {/* Quick Bundle Actions */}
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="orange"
-                                        variant="outline"
-                                        onClick={() => openBundleDialog('swap')}
-                                        disabled={bulkActionLoading}
-                                    >
-                                        🔄 Swap
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="blue"
-                                        variant="outline"
-                                        onClick={() => openBundleDialog('internal_transfer')}
-                                        disabled={bulkActionLoading}
-                                    >
-                                        ↔ Transfer
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="purple"
-                                        variant="outline"
-                                        onClick={() => openBundleDialog('custom')}
-                                        disabled={bulkActionLoading}
-                                    >
-                                        📦 Bundle
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="gray"
-                                        variant="outline"
-                                        onClick={bulkUnbundle}
-                                        disabled={bulkActionLoading}
-                                        title="Remove selected transactions from their bundles"
-                                    >
-                                        🔓 Unbundle
-                                    </Button>
-
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
-
-                                    {/* Other Actions */}
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="purple"
-                                        variant="outline"
-                                        onClick={() => setShowBulkTypeDialog(true)}
-                                    >
-                                        🏷️ Type
-                                    </Button>
-                                    {hasUnlinkedFields && (
-                                        <Button
-                                            size="2xs"
-                                            fontSize="xs"
-                                            colorPalette="cyan"
-                                            variant="outline"
-                                            onClick={autoLinkHighConfidence}
-                                            disabled={bulkActionLoading}
-                                            title="Auto-link accounts and assets with ≥95% confidence match"
+            {selectedIds.size > 0 && !embeddedMode && createPortal(
+                <div
+                    className="fixed inset-x-0 bottom-0 z-[1000] animate-slide-up border-t border-slate-200 backdrop-blur-sm"
+                    style={{ backgroundColor: 'rgba(255, 255, 255, 0.85)', boxShadow: '0 -2px 8px rgba(0,0,0,0.08)' }}
+                >
+                    <div className="mx-auto max-w-[1400px] px-4 py-1.5">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                            <span className="text-xs font-semibold text-blue-700">
+                                {selectedIds.size} selected
+                            </span>
+                            <div className="flex flex-wrap items-center gap-1">
+                                {/* Additional bulk actions from plugins (rendered first) */}
+                                {additionalBulkActions
+                                    .filter(action => !action.isVisible || action.isVisible(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]))
+                                    .map(action => (
+                                        <button
+                                            key={action.id}
+                                            type="button"
+                                            className={cn(BULK_ACTION_BASE, getBulkActionClass(action.colorPalette, action.variant))}
+                                            onClick={() => action.onClick(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[])}
+                                            disabled={bulkActionLoading || (action.isDisabled ? action.isDisabled(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]) : false)}
                                         >
-                                            🔗 Auto-Link
-                                        </Button>
-                                    )}
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="orange"
-                                        variant="outline"
-                                        onClick={bulkClearAccounts}
+                                            {action.icon} {action.label}
+                                        </button>
+                                    ))}
+                                {additionalBulkActions.length > 0 && (
+                                    <div className="mx-0.5 h-4 border-l border-slate-300" />
+                                )}
+
+                                {/* Quick Status Actions */}
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.green)}
+                                    onClick={() => bulkUpdateStatus('valid')}
+                                    disabled={bulkActionLoading}
+                                >
+                                    ✓ Valid
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.yellow)}
+                                    onClick={() => bulkUpdateStatus('pending')}
+                                    disabled={bulkActionLoading}
+                                >
+                                    ⏳ Pending
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.red)}
+                                    onClick={() => bulkUpdateStatus('invalid')}
+                                    disabled={bulkActionLoading}
+                                >
+                                    ✗ Invalid
+                                </button>
+
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+
+                                {/* Taxability Actions */}
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.teal)}
+                                    onClick={() => bulkUpdateTaxability('taxable')}
+                                    disabled={bulkActionLoading}
+                                    title="Set taxability to Taxable"
+                                >
+                                    💰 Taxable
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.gray)}
+                                    onClick={() => bulkUpdateTaxability('non_taxable')}
+                                    disabled={bulkActionLoading}
+                                    title="Set taxability to Non-Taxable"
+                                >
+                                    🚫 Non-Tax
+                                </button>
+
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+
+                                {/* Include Fee Actions */}
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.blue)}
+                                    onClick={() => bulkUpdateIncludeFee(true)}
+                                    disabled={bulkActionLoading}
+                                    title="Include fee in cost basis/proceeds"
+                                >
+                                    Fee ✓
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.gray)}
+                                    onClick={() => bulkUpdateIncludeFee(false)}
+                                    disabled={bulkActionLoading}
+                                    title="Exclude fee from cost basis/proceeds"
+                                >
+                                    Fee ✗
+                                </button>
+
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+
+                                {/* Quick Bundle Actions */}
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.orange)}
+                                    onClick={() => openBundleDialog('swap')}
+                                    disabled={bulkActionLoading}
+                                >
+                                    🔄 Swap
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.blue)}
+                                    onClick={() => openBundleDialog('internal_transfer')}
+                                    disabled={bulkActionLoading}
+                                >
+                                    ↔ Transfer
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.purple)}
+                                    onClick={() => openBundleDialog('custom')}
+                                    disabled={bulkActionLoading}
+                                >
+                                    📦 Bundle
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.gray)}
+                                    onClick={bulkUnbundle}
+                                    disabled={bulkActionLoading}
+                                    title="Remove selected transactions from their bundles"
+                                >
+                                    🔓 Unbundle
+                                </button>
+
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+
+                                {/* Other Actions */}
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.purple)}
+                                    onClick={() => setShowBulkTypeDialog(true)}
+                                >
+                                    🏷️ Type
+                                </button>
+                                {hasUnlinkedFields && (
+                                    <button
+                                        type="button"
+                                        className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.cyan)}
+                                        onClick={autoLinkHighConfidence}
                                         disabled={bulkActionLoading}
-                                        title="Clear From/To account links on selected transactions"
+                                        title="Auto-link accounts and assets with ≥95% confidence match"
                                     >
-                                        ✕ Accounts
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        colorPalette="red"
-                                        variant="outline"
-                                        onClick={() => {
-                                            fetchDeletionImpact(Array.from(selectedIds));
-                                            setShowBulkDeleteDialog(true);
-                                        }}
-                                    >
-                                        🗑️ Delete
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        fontSize="xs"
-                                        variant="ghost"
-                                        onClick={() => setSelectedIds(new Set())}
-                                    >
-                                        ✕ Clear
-                                    </Button>
-                                </Flex>
-                            </Flex>
-                        </Box>
-                    </Box>
-                </Portal>
+                                        🔗 Auto-Link
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.orange)}
+                                    onClick={bulkClearAccounts}
+                                    disabled={bulkActionLoading}
+                                    title="Clear From/To account links on selected transactions"
+                                >
+                                    ✕ Accounts
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, BULK_ACTION_OUTLINE.red)}
+                                    onClick={() => {
+                                        fetchDeletionImpact(Array.from(selectedIds));
+                                        setShowBulkDeleteDialog(true);
+                                    }}
+                                >
+                                    🗑️ Delete
+                                </button>
+                                <button
+                                    type="button"
+                                    className={cn(BULK_ACTION_BASE, 'text-slate-500 hover:text-slate-700')}
+                                    onClick={() => setSelectedIds(new Set())}
+                                >
+                                    ✕ Clear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>,
+                document.body
             )}
 
             {/* Transactions content */}
             <>
                 {/* Transactions tab header with actions */}
                 {!embeddedMode && !hideLegend && (
-                    <Flex justify="space-between" align="center" mb={2} gap={2} flexWrap="wrap">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                         {/* Legend (left side) */}
                         {!loading && !error && (
-                            <Flex gap={3} align="center" flexWrap="wrap">
-                                <Text fontSize="xs" color="gray.500">Dir:</Text>
-                                <Flex align="center" gap={1}>
-                                    <Box w={3} h={3} bg="green.100" borderRadius="sm" />
-                                    <Text fontSize="xs">↓In</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={3} h={3} bg="red.100" borderRadius="sm" />
-                                    <Text fontSize="xs">↑Out</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={3} h={3} bg="gray.100" borderRadius="sm" />
-                                    <Text fontSize="xs">↔Int</Text>
-                                </Flex>
-                                <Text fontSize="xs" color="gray.500" ml={2}>Review:</Text>
-                                <Flex align="center" gap={1}>
-                                    <Box w={1} h={3} bg="yellow.500" borderRadius="sm" />
-                                    <Text fontSize="xs">Pending</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={1} h={3} bg="green.500" borderRadius="sm" />
-                                    <Text fontSize="xs">Valid</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={1} h={3} bg="red.500" borderRadius="sm" />
-                                    <Text fontSize="xs">Invalid</Text>
-                                </Flex>
-                            </Flex>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <span className="text-xs text-slate-500">Dir:</span>
+                                <div className="flex items-center gap-1">
+                                    <div className="h-3 w-3 bg-green-100" />
+                                    <span className="text-xs">↓In</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <div className="h-3 w-3 bg-red-100" />
+                                    <span className="text-xs">↑Out</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <div className="h-3 w-3 bg-slate-100" />
+                                    <span className="text-xs">↔Int</span>
+                                </div>
+                                <span className="ml-2 text-xs text-slate-500">Review:</span>
+                                <div className="flex items-center gap-1">
+                                    <div className="h-3 w-1 bg-yellow-500" />
+                                    <span className="text-xs">Pending</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <div className="h-3 w-1 bg-green-500" />
+                                    <span className="text-xs">Valid</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <div className="h-3 w-1 bg-red-500" />
+                                    <span className="text-xs">Invalid</span>
+                                </div>
+                            </div>
                         )}
                         {/* Actions (right side) */}
-                        <Flex gap={2} align="center">
+                        <div className="flex items-center gap-2">
                             <ColumnVisibilityPopover
                                 table={tanstackTable}
                                 onReset={() => {
@@ -1954,7 +1925,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                             <Button
                                 onClick={error ? handleRetry : handleReset}
                                 variant="outline"
-                                colorPalette={error ? "red" : "gray"}
+                                colorScheme={error ? "red" : "gray"}
                                 size="sm"
                             >
                                 {error ? "🔄 Retry" : "↺ Reset"}
@@ -1966,12 +1937,12 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                             >
                                 🔄 Refresh
                             </Button>
-                        </Flex>
-                    </Flex>
+                        </div>
+                    </div>
                 )}
 
                 {showFilters && (
-                    <Box mb={2}>
+                    <div className="mb-2">
                         <TransactionFilters
                             filters={filters}
                             onChange={setFilters}
@@ -1982,90 +1953,90 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                             filterMetadata={filterMetadata}
                             resetFilters={effectiveResetFilters}
                         />
-                    </Box>
+                    </div>
                 )}
 
                 {/* Top Pagination - show when more than 15 transactions */}
                 {!loading && !error && !embeddedMode && (filterMetadata?.filtered_count ?? 0) > 15 && (
-                    <Box mb={2}>
+                    <div className="mb-2">
                         <TablePagination
                             pagination={pagination}
                             total={filterMetadata?.filtered_count ?? 0}
                         />
-                    </Box>
+                    </div>
                 )}
 
                 {/* Error state for transactions */}
                 {error && (
-                    <Box textAlign="center" py={6} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200" mb={4}>
-                        <Text color="red.600" fontWeight="bold">Error loading transactions</Text>
-                        <Text color="red.600" fontSize="sm">{error}</Text>
-                        <Button mt={3} onClick={handleRetry} colorPalette="red" size="sm">
+                    <div className="mb-4 border border-red-200 bg-red-50 py-6 text-center">
+                        <span className="block font-bold text-red-600">Error loading transactions</span>
+                        <span className="block text-sm text-red-600">{error}</span>
+                        <Button className="mt-3" onClick={handleRetry} colorScheme="red" size="sm">
                             🔄 Retry
                         </Button>
-                    </Box>
+                    </div>
                 )}
 
                 {/* Loading overlay for transactions */}
                 {loading && !error && (
-                    <Box textAlign="center" py={10} bg="gray.50" borderRadius="md" mb={4}>
-                        <Spinner size="xl" color="blue.500" />
-                        <Text mt={4}>Loading transactions...</Text>
-                    </Box>
+                    <div className="mb-4 bg-slate-50 py-10 text-center">
+                        <Spinner size="lg" className="text-blue-500" />
+                        <span className="mt-4 block">Loading transactions...</span>
+                    </div>
                 )}
 
 
 
                 {/* Transaction table - only show when not loading or erroring */}
                 {!loading && !error && (
-                    <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" css={{ fontSize: '8px' }} position="relative">
-                        <Table.Root size="sm" variant="line">
-                            <Table.Header css={{ fontSize: '9px' }}>
-                                <Table.Row>
-                                    <Table.ColumnHeader position="sticky" left={0} bg="gray.100" zIndex={10} minW="50px" borderRight="2px solid" borderColor="gray.300">
+                    <div className="relative overflow-x-auto bg-white shadow-sm" style={{ fontSize: '8px' }}>
+                        <table className="w-full">
+                            <thead style={{ fontSize: '9px' }}>
+                                <tr>
+                                    <th className="sticky left-0 z-10 min-w-[50px] border-r-2 border-slate-300 bg-slate-100">
                                         {(!embeddedMode || showSelectionInEmbedded) && (
-                                            <Checkbox.Root
+                                            <input
+                                                type="checkbox"
+                                                title="Select all on page"
+                                                className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
                                                 checked={allCurrentPageSelected}
-                                                onCheckedChange={toggleSelectAll}
-                                            >
-                                                <Checkbox.HiddenInput />
-                                                <Checkbox.Control />
-                                            </Checkbox.Root>
+                                                onChange={toggleSelectAll}
+                                            />
                                         )}
-                                    </Table.ColumnHeader>
+                                    </th>
                                     {showColumn('id') && renderSortableHeader('id', 'ID')}
-                                    {showColumn('date') && renderSortableHeader('date', 'Date/Time', undefined, { pr: 1 })}
-                                    {showColumn('source') && renderSortableHeader('source', 'Source Info', '180px', { pr: 1 })}
-                                    {showColumn('accounts') && <Table.ColumnHeader width="130px">From / To</Table.ColumnHeader>}
+                                    {showColumn('date') && renderSortableHeader('date', 'Date/Time', undefined, 'pr-1')}
+                                    {showColumn('source') && renderSortableHeader('source', 'Source Info', 'min-w-[180px]', 'pr-1')}
+                                    {showColumn('accounts') && <th className="w-[130px]">From / To</th>}
                                     {showColumn('direction') && renderSortableHeader('direction', 'Dir')}
                                     {showColumn('type') && renderSortableHeader('type', 'Type')}
-                                    {showColumn('asset') && renderSortableHeader('asset', 'Asset', '60px')}
+                                    {showColumn('asset') && renderSortableHeader('asset', 'Asset', 'min-w-[60px]')}
                                     {showColumn('qty') && renderSortableHeader('qty', 'Qty')}
                                     {showColumn('price') && renderSortableHeader('price', 'Price')}
-                                    {showColumn('total') && <Table.ColumnHeader>Total</Table.ColumnHeader>}
+                                    {showColumn('total') && <th>Total</th>}
                                     {showColumn('fee') && renderSortableHeader('fee', 'Fee')}
-                                    {showColumn('taxability') && <Table.ColumnHeader>Taxable</Table.ColumnHeader>}
-                                    {showColumn('feeInBase') && <Table.ColumnHeader>Include Fee</Table.ColumnHeader>}
-                                    {showColumn('bundle') && <Table.ColumnHeader>Bundle</Table.ColumnHeader>}
-                                    {showColumn('tags') && <Table.ColumnHeader>Tags</Table.ColumnHeader>}
-                                    {showColumn('sourceTransactionId') && <Table.ColumnHeader>Source Tx ID</Table.ColumnHeader>}
+                                    {showColumn('taxability') && <th>Taxable</th>}
+                                    {showColumn('feeInBase') && <th>Include Fee</th>}
+                                    {showColumn('bundle') && <th>Bundle</th>}
+                                    {showColumn('tags') && <th>Tags</th>}
+                                    {showColumn('sourceTransactionId') && <th>Source Tx ID</th>}
                                     {/* Additional plugin columns */}
                                     {additionalColumns.map(col => (
-                                        <Table.ColumnHeader key={col.id} width={col.width} {...(col.headerBg ? { bg: col.headerBg } : {})}>{col.header}</Table.ColumnHeader>
+                                        <th key={col.id} style={{ width: col.width, ...(col.headerBg ? { backgroundColor: col.headerBg } : {}) }}>{col.header}</th>
                                     ))}
-                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, { position: 'sticky', right: '50px', bg: 'gray.100', zIndex: 10, borderLeft: '2px solid', borderColor: 'gray.300', fontSize: '7px', px: 1 })}
-                                    {!embeddedMode && <Table.ColumnHeader position="sticky" right={0} bg="gray.100" zIndex={10} minW="50px" px={0}></Table.ColumnHeader>}
-                                </Table.Row>
-                            </Table.Header>
-                            <Table.Body>
+                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, 'sticky right-[50px] z-10 border-l-2 border-slate-300 bg-slate-100 px-1 text-[7px]')}
+                                    {!embeddedMode && <th className="sticky right-0 z-10 min-w-[50px] bg-slate-100 px-0" />}
+                                </tr>
+                            </thead>
+                            <tbody>
                                 {paginatedTransactions.length === 0 ? (
-                                    <Table.Row>
-                                        <Table.Cell colSpan={visibleColumnCount}>
-                                            <Text textAlign="center" py={8} color="gray.500">
+                                    <tr>
+                                        <td colSpan={visibleColumnCount}>
+                                            <span className="block py-8 text-center text-slate-500">
                                                 {emptyMessage || 'No transactions found'}
-                                            </Text>
-                                        </Table.Cell>
-                                    </Table.Row>
+                                            </span>
+                                        </td>
+                                    </tr>
                                 ) : (
                                     paginatedTransactions.map(tx => (
                                         <TransactionTableRow
@@ -2105,9 +2076,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         />
                                     ))
                                 )}
-                            </Table.Body>
-                        </Table.Root>
-                    </Box>
+                            </tbody>
+                        </table>
+                    </div>
                 )}
 
                 {/* Pagination Controls - show even when loading/error */}
@@ -2120,521 +2091,513 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             </>
 
             {/* Bulk Set Type Dialog */}
-            <Dialog.Root open={showBulkTypeDialog} onOpenChange={(e) => setShowBulkTypeDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Set Transaction Type for Selected</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text mb={4}>
-                                    Set transaction type for {selectedIds.size} transaction(s)
-                                </Text>
-                                <ComboSelect
-                                    value={bulkType}
-                                    onChange={val => setBulkType(val)}
-                                    options={TRANSACTION_TYPE_OPTIONS}
-                                    placeholder="Select transaction type..."
-                                    width="100%"
-                                />
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => { setShowBulkTypeDialog(false); setBulkType(''); }}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="purple" onClick={bulkUpdateType} disabled={bulkActionLoading || !bulkType}>
-                                        {bulkActionLoading ? 'Updating...' : 'Apply Type'}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+            <RadixDialog.Root open={showBulkTypeDialog} onOpenChange={(open) => setShowBulkTypeDialog(open)}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 p-4">
+                            <RadixDialog.Title className="text-base font-semibold">Set Transaction Type for Selected</RadixDialog.Title>
+                        </div>
+                        <div className="p-4">
+                            <span className="mb-4 block">
+                                Set transaction type for {selectedIds.size} transaction(s)
+                            </span>
+                            <ComboSelect
+                                value={bulkType}
+                                onChange={val => setBulkType(val)}
+                                options={TRANSACTION_TYPE_OPTIONS}
+                                placeholder="Select transaction type..."
+                                width="100%"
+                            />
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => { setShowBulkTypeDialog(false); setBulkType(''); }}>
+                                Cancel
+                            </Button>
+                            <Button colorScheme="gray" className="bg-purple-600 text-white hover:bg-purple-700" onClick={bulkUpdateType} disabled={bulkActionLoading || !bulkType}>
+                                {bulkActionLoading ? 'Updating...' : 'Apply Type'}
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Bulk Delete Dialog */}
-            <Dialog.Root
+            <RadixDialog.Root
                 open={showBulkDeleteDialog}
-                onOpenChange={(e) => {
-                    setShowBulkDeleteDialog(e.open);
-                    if (!e.open) {
+                onOpenChange={(open) => {
+                    setShowBulkDeleteDialog(open);
+                    if (!open) {
                         setDeletionImpact({});
                     }
                 }}
             >
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Delete Selected Transactions</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text color="red.600" fontWeight="bold" mb={2}>
-                                    ⚠️ Warning: This action cannot be undone!
-                                </Text>
-                                <Text mb={4}>
-                                    Are you sure you want to delete {selectedIds.size} transaction(s)?
-                                </Text>
-                                <Text fontSize="sm" color="gray.500">
-                                    IDs: {Array.from(selectedIds).slice(0, 10).join(', ')}
-                                    {selectedIds.size > 10 && ` ... and ${selectedIds.size - 10} more`}
-                                </Text>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 p-4">
+                            <RadixDialog.Title className="text-base font-semibold">Delete Selected Transactions</RadixDialog.Title>
+                        </div>
+                        <div className="p-4">
+                            <span className="mb-2 block font-bold text-red-600">
+                                ⚠️ Warning: This action cannot be undone!
+                            </span>
+                            <span className="mb-4 block">
+                                Are you sure you want to delete {selectedIds.size} transaction(s)?
+                            </span>
+                            <span className="block text-sm text-slate-500">
+                                IDs: {Array.from(selectedIds).slice(0, 10).join(', ')}
+                                {selectedIds.size > 10 && ` ... and ${selectedIds.size - 10} more`}
+                            </span>
 
-                                {isImpactLoading ? (
-                                    <Flex align="center" gap={2} mt={4}>
-                                        <Spinner size="xs" />
-                                        <Text fontSize="xs" color="gray.500">Checking for linked data...</Text>
-                                    </Flex>
-                                ) : Object.keys(deletionImpact).length > 0 && (
-                                    <Box mt={4} p={3} bg="orange.50" border="1px solid" borderColor="orange.200" borderRadius="md">
-                                        <Text fontSize="xs" fontWeight="bold" color="orange.800" mb={1}>
-                                            ⚠️ Linked objects that will also be deleted:
-                                        </Text>
-                                        <Flex direction="column" gap={0.5}>
-                                            {Object.entries(deletionImpact).map(([key, count]) => (
-                                                <Text key={key} fontSize="10px" color="orange.700">
-                                                    • {count} {key.replace(/_/g, ' ')}
-                                                </Text>
-                                            ))}
-                                        </Flex>
-                                        <Text fontSize="10px" color="orange.800" mt={2} fontStyle="italic">
-                                            This data is linked to these transaction(s) and will be removed due to cascade deletion.
-                                        </Text>
-                                    </Box>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBulkDeleteDialog(false)}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="red" onClick={bulkDelete} disabled={bulkActionLoading}>
-                                        {bulkActionLoading ? 'Deleting...' : `Delete ${selectedIds.size} Transaction(s)`}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+                            {isImpactLoading ? (
+                                <div className="mt-4 flex items-center gap-2">
+                                    <Spinner size="xs" />
+                                    <span className="text-xs text-slate-500">Checking for linked data...</span>
+                                </div>
+                            ) : Object.keys(deletionImpact).length > 0 && (
+                                <div className="mt-4 border border-orange-200 bg-orange-50 p-3">
+                                    <span className="mb-1 block text-xs font-bold text-orange-800">
+                                        ⚠️ Linked objects that will also be deleted:
+                                    </span>
+                                    <div className="flex flex-col gap-0.5">
+                                        {Object.entries(deletionImpact).map(([key, count]) => (
+                                            <span key={key} className="text-[10px] text-orange-700">
+                                                • {count} {key.replace(/_/g, ' ')}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <span className="mt-2 block text-[10px] italic text-orange-800">
+                                        This data is linked to these transaction(s) and will be removed due to cascade deletion.
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowBulkDeleteDialog(false)}>
+                                Cancel
+                            </Button>
+                            <Button colorScheme="red" onClick={bulkDelete} disabled={bulkActionLoading}>
+                                {bulkActionLoading ? 'Deleting...' : `Delete ${selectedIds.size} Transaction(s)`}
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Delete Single Transaction Dialog */}
-            <Dialog.Root
+            <RadixDialog.Root
                 open={showDeleteDialog}
-                onOpenChange={(e) => {
-                    setShowDeleteDialog(e.open);
-                    if (!e.open) {
+                onOpenChange={(open) => {
+                    setShowDeleteDialog(open);
+                    if (!open) {
                         setTransactionToDelete(null);
                         setDeletionImpact({});
                     }
                 }}
             >
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Delete Transaction</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text color="red.600" fontWeight="bold" mb={2}>
-                                    ⚠️ Warning: This action cannot be undone!
-                                </Text>
-                                <Text mb={4}>
-                                    Are you sure you want to delete this transaction?
-                                </Text>
-                                {transactionToDelete && (
-                                    <Box p={3} bg="gray.50" borderRadius="md">
-                                        <Text fontSize="sm"><strong>ID:</strong> {transactionToDelete.id}</Text>
-                                        <Text fontSize="sm"><strong>Date:</strong> {formatDateTimeCompact(transactionToDelete.date_time)}</Text>
-                                        <Text fontSize="sm"><strong>Type:</strong> {transactionToDelete.transaction_type}</Text>
-                                        <Text fontSize="sm"><strong>Quantity:</strong> {transactionToDelete.quantity} {transactionToDelete.source_asset_symbol}</Text>
-                                    </Box>
-                                )}
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 p-4">
+                            <RadixDialog.Title className="text-base font-semibold">Delete Transaction</RadixDialog.Title>
+                        </div>
+                        <div className="p-4">
+                            <span className="mb-2 block font-bold text-red-600">
+                                ⚠️ Warning: This action cannot be undone!
+                            </span>
+                            <span className="mb-4 block">
+                                Are you sure you want to delete this transaction?
+                            </span>
+                            {transactionToDelete && (
+                                <div className="bg-slate-50 p-3">
+                                    <span className="block text-sm"><strong>ID:</strong> {transactionToDelete.id}</span>
+                                    <span className="block text-sm"><strong>Date:</strong> {formatDateTimeCompact(transactionToDelete.date_time)}</span>
+                                    <span className="block text-sm"><strong>Type:</strong> {transactionToDelete.transaction_type}</span>
+                                    <span className="block text-sm"><strong>Quantity:</strong> {transactionToDelete.quantity} {transactionToDelete.source_asset_symbol}</span>
+                                </div>
+                            )}
 
-                                {isImpactLoading ? (
-                                    <Flex align="center" gap={2} mt={4}>
-                                        <Spinner size="xs" />
-                                        <Text fontSize="xs" color="gray.500">Checking for linked data...</Text>
-                                    </Flex>
-                                ) : Object.keys(deletionImpact).length > 0 && (
-                                    <Box mt={4} p={3} bg="orange.50" border="1px solid" borderColor="orange.200" borderRadius="md">
-                                        <Text fontSize="xs" fontWeight="bold" color="orange.800" mb={1}>
-                                            ⚠️ Linked objects that will also be deleted:
-                                        </Text>
-                                        <Flex direction="column" gap={0.5}>
-                                            {Object.entries(deletionImpact).map(([key, count]) => (
-                                                <Text key={key} fontSize="10px" color="orange.700">
-                                                    • {count} {key.replace(/_/g, ' ')}
-                                                </Text>
-                                            ))}
-                                        </Flex>
-                                        <Text fontSize="10px" color="orange.800" mt={2} fontStyle="italic">
-                                            This data is linked to this transaction and will be removed due to cascade deletion.
-                                        </Text>
-                                    </Box>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="red" onClick={handleDeleteTransaction} disabled={bulkActionLoading}>
-                                        {bulkActionLoading ? 'Deleting...' : 'Delete Transaction'}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+                            {isImpactLoading ? (
+                                <div className="mt-4 flex items-center gap-2">
+                                    <Spinner size="xs" />
+                                    <span className="text-xs text-slate-500">Checking for linked data...</span>
+                                </div>
+                            ) : Object.keys(deletionImpact).length > 0 && (
+                                <div className="mt-4 border border-orange-200 bg-orange-50 p-3">
+                                    <span className="mb-1 block text-xs font-bold text-orange-800">
+                                        ⚠️ Linked objects that will also be deleted:
+                                    </span>
+                                    <div className="flex flex-col gap-0.5">
+                                        {Object.entries(deletionImpact).map(([key, count]) => (
+                                            <span key={key} className="text-[10px] text-orange-700">
+                                                • {count} {key.replace(/_/g, ' ')}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <span className="mt-2 block text-[10px] italic text-orange-800">
+                                        This data is linked to this transaction and will be removed due to cascade deletion.
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+                                Cancel
+                            </Button>
+                            <Button colorScheme="red" onClick={handleDeleteTransaction} disabled={bulkActionLoading}>
+                                {bulkActionLoading ? 'Deleting...' : 'Delete Transaction'}
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* CSV Import Dialog */}
-            <Dialog.Root open={showImportDialog} onOpenChange={(e) => setShowImportDialog(e.open)} size="xl">
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxW="900px">
-                            <Dialog.Header>
-                                <Dialog.Title>Import Trades from CSV</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                {importStep === 'select' && (
-                                    <Box>
-                                        <Text mb={4}>
-                                            Upload a CSV file with trades to import. The file should have columns for:
-                                            Date, Transaction Type, Asset, Quantity, Unit Price, Trading Fees, Investment Account.
-                                        </Text>
-                                        <Box
-                                            border="2px dashed"
-                                            borderColor="gray.300"
-                                            borderRadius="md"
-                                            p={8}
-                                            textAlign="center"
-                                            onDrop={handleFileDrop}
-                                            onDragOver={(e) => e.preventDefault()}
-                                            bg={importFile ? 'green.50' : 'gray.50'}
-                                            cursor="pointer"
-                                            onClick={() => fileInputRef.current?.click()}
-                                            _hover={{ borderColor: 'teal.400', bg: 'teal.50' }}
-                                        >
-                                            <input
-                                                type="file"
-                                                accept=".csv"
-                                                onChange={handleFileSelect}
-                                                ref={fileInputRef}
-                                                style={{ display: 'none' }}
-                                            />
-                                            {importFile ? (
-                                                <Box>
-                                                    <Text color="green.600" fontWeight="bold">✓ {importFile.name}</Text>
-                                                    <Text fontSize="sm" color="gray.500">{(importFile.size / 1024).toFixed(1)} KB</Text>
-                                                </Box>
-                                            ) : (
-                                                <Box>
-                                                    <Text fontSize="lg" mb={2}>📁 Drop CSV file here or click to browse</Text>
-                                                    <Text fontSize="sm" color="gray.500">Supports .csv files</Text>
-                                                </Box>
-                                            )}
-                                        </Box>
-                                    </Box>
-                                )}
+            <RadixDialog.Root open={showImportDialog} onOpenChange={(open) => setShowImportDialog(open)}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[900px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 p-4">
+                            <RadixDialog.Title className="text-base font-semibold">Import Trades from CSV</RadixDialog.Title>
+                        </div>
+                        <div className="p-4">
+                            {importStep === 'select' && (
+                                <div>
+                                    <span className="mb-4 block">
+                                        Upload a CSV file with trades to import. The file should have columns for:
+                                        Date, Transaction Type, Asset, Quantity, Unit Price, Trading Fees, Investment Account.
+                                    </span>
+                                    <div
+                                        className={cn(
+                                            'cursor-pointer border-2 border-dashed border-slate-300 p-8 text-center hover:border-teal-400 hover:bg-teal-50',
+                                            importFile ? 'bg-green-50' : 'bg-slate-50',
+                                        )}
+                                        onDrop={handleFileDrop}
+                                        onDragOver={(e) => e.preventDefault()}
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <input
+                                            type="file"
+                                            accept=".csv"
+                                            title="Select CSV file to import"
+                                            onChange={handleFileSelect}
+                                            ref={fileInputRef}
+                                            style={{ display: 'none' }}
+                                        />
+                                        {importFile ? (
+                                            <div>
+                                                <span className="block font-bold text-green-600">✓ {importFile.name}</span>
+                                                <span className="block text-sm text-slate-500">{(importFile.size / 1024).toFixed(1)} KB</span>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <span className="mb-2 block text-lg">📁 Drop CSV file here or click to browse</span>
+                                                <span className="block text-sm text-slate-500">Supports .csv files</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
-                                {importStep === 'preview' && importPreview && (
-                                    <Box>
-                                        <Flex gap={4} mb={4} flexWrap="wrap">
-                                            <Badge colorPalette="blue" fontSize="sm" p={2}>
-                                                📊 {importPreview.transactions_count} Transactions
+                            {importStep === 'preview' && importPreview && (
+                                <div>
+                                    <div className="mb-4 flex flex-wrap gap-4">
+                                        <Badge colorScheme="blue" className="p-2 text-sm">
+                                            📊 {importPreview.transactions_count} Transactions
+                                        </Badge>
+                                        <Badge colorScheme="purple" className="p-2 text-sm">
+                                            👤 {importPreview.accounts_count} Accounts
+                                        </Badge>
+                                        <Badge colorScheme="green" className="p-2 text-sm">
+                                            💎 {importPreview.assets_count} Assets
+                                        </Badge>
+                                        {importPreview.fee_transactions_count > 0 && (
+                                            <Badge colorScheme="orange" className="p-2 text-sm">
+                                                💰 {importPreview.fee_transactions_count} Fee Transactions
                                             </Badge>
-                                            <Badge colorPalette="purple" fontSize="sm" p={2}>
-                                                👤 {importPreview.accounts_count} Accounts
-                                            </Badge>
-                                            <Badge colorPalette="teal" fontSize="sm" p={2}>
-                                                💎 {importPreview.assets_count} Assets
-                                            </Badge>
-                                            {importPreview.fee_transactions_count > 0 && (
-                                                <Badge colorPalette="orange" fontSize="sm" p={2}>
-                                                    💰 {importPreview.fee_transactions_count} Fee Transactions
-                                                </Badge>
-                                            )}
-                                        </Flex>
+                                        )}
+                                    </div>
 
-                                        {importPreview.errors.length > 0 && (
-                                            <Box mb={4} p={3} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                                                <Text color="red.600" fontWeight="bold" mb={2}>⚠️ Parse Errors ({importPreview.errors.length})</Text>
-                                                {importPreview.errors.slice(0, 5).map((err, i) => (
-                                                    <Text key={i} fontSize="sm" color="red.600">Row {err.row}: {err.error}</Text>
-                                                ))}
-                                                {importPreview.errors.length > 5 && (
-                                                    <Text fontSize="sm" color="red.500">...and {importPreview.errors.length - 5} more errors</Text>
+                                    {importPreview.errors.length > 0 && (
+                                        <div className="mb-4 border border-red-200 bg-red-50 p-3">
+                                            <span className="mb-2 block font-bold text-red-600">⚠️ Parse Errors ({importPreview.errors.length})</span>
+                                            {importPreview.errors.slice(0, 5).map((err, i) => (
+                                                <span key={i} className="block text-sm text-red-600">Row {err.row}: {err.error}</span>
+                                            ))}
+                                            {importPreview.errors.length > 5 && (
+                                                <span className="block text-sm text-red-500">...and {importPreview.errors.length - 5} more errors</span>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {importPreview.warnings.length > 0 && (
+                                        <div className="mb-4 border border-yellow-200 bg-yellow-50 p-3">
+                                            <span className="mb-2 block font-bold text-yellow-700">⚠️ Warnings ({importPreview.warnings.length})</span>
+                                            {importPreview.warnings.slice(0, 5).map((warn, i) => (
+                                                <span key={i} className="block text-sm text-yellow-700">{warn}</span>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="mb-4">
+                                        <span className="mb-2 block font-bold">Accounts to create as RawAccount:</span>
+                                        <div className="flex flex-wrap gap-1">
+                                            {importPreview.accounts.map((acc, i) => (
+                                                <Badge key={i} colorScheme="purple" className="text-xs">{acc}</Badge>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="mb-4">
+                                        <span className="mb-2 block font-bold">Assets to create as RawAsset:</span>
+                                        <div className="flex max-h-[100px] flex-wrap gap-1 overflow-auto">
+                                            {importPreview.assets.slice(0, 30).map((asset, i) => (
+                                                <Badge key={i} colorScheme="green" className="text-xs">{asset}</Badge>
+                                            ))}
+                                            {importPreview.assets.length > 30 && (
+                                                <Badge colorScheme="gray" className="text-xs">+{importPreview.assets.length - 30} more</Badge>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <span className="mb-2 block font-bold">Transaction Preview (first 20) - Source → Transformed:</span>
+                                        <div className="max-h-[350px] overflow-auto border border-slate-200">
+                                            <table className="w-full">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Date</th>
+                                                        <th className="bg-slate-100">CSV Type</th>
+                                                        <th className="bg-blue-50">→ DB Type</th>
+                                                        <th className="bg-blue-50">→ Direction</th>
+                                                        <th className="bg-slate-100">CSV Asset</th>
+                                                        <th className="bg-blue-50">→ DB Asset</th>
+                                                        <th>Qty</th>
+                                                        <th className="bg-blue-50">→ Fee</th>
+                                                        <th className="bg-slate-100">CSV Account</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {importPreview.transactions.slice(0, 20).map((tx, i) => {
+                                                        // Compute transformed values (what will actually be stored in DB)
+                                                        const dbType = tx.is_fee_transaction ? 'cost' : 'trade';
+                                                        const direction = tx.is_fee_transaction
+                                                            ? 'neutral'
+                                                            : (tx.transaction_type === 'Buy' ? 'inflow' : 'outflow');
+                                                        const dbQty = tx.is_fee_transaction ? 0 : tx.quantity;
+                                                        const dbFee = tx.is_fee_transaction ? tx.quantity : tx.fee;
+                                                        // DB asset: None for FEES, pending RawAsset mapping for trades
+                                                        const dbAsset = tx.is_fee_transaction ? null : tx.asset_ticker;
+
+                                                        return (
+                                                            <tr key={i} style={tx.is_fee_transaction ? { backgroundColor: '#fff7ed' } : undefined}>
+                                                                <td className="text-xs">{formatDateTimeCompact(tx.date_time)}</td>
+                                                                {/* CSV Source Type */}
+                                                                <td className="bg-slate-50 text-xs">
+                                                                    <Badge colorScheme="gray" className="border border-slate-300 bg-white">
+                                                                        {tx.transaction_type}
+                                                                    </Badge>
+                                                                </td>
+                                                                {/* → DB transaction_type */}
+                                                                <td className="bg-blue-50 text-xs">
+                                                                    <Badge colorScheme={tx.is_fee_transaction ? 'orange' : 'blue'}>
+                                                                        {dbType}
+                                                                    </Badge>
+                                                                </td>
+                                                                {/* → DB direction */}
+                                                                <td className="bg-blue-50 text-xs">
+                                                                    <Badge
+                                                                        colorScheme={direction === 'inflow' ? 'green' : direction === 'outflow' ? 'red' : 'gray'}
+                                                                    >
+                                                                        {direction}
+                                                                    </Badge>
+                                                                </td>
+                                                                {/* CSV Source Asset */}
+                                                                <td className="max-w-[100px] overflow-hidden text-ellipsis whitespace-nowrap bg-slate-50 text-xs" title={tx.asset_label}>
+                                                                    {tx.asset_ticker}
+                                                                </td>
+                                                                {/* → DB Asset (asset_id mapping) */}
+                                                                <td className="bg-blue-50 text-xs">
+                                                                    {dbAsset ? (
+                                                                        <Badge colorScheme="green" title="Will create RawAsset for mapping">
+                                                                            {dbAsset}
+                                                                        </Badge>
+                                                                    ) : (
+                                                                        <span className="text-xs text-slate-400">None</span>
+                                                                    )}
+                                                                </td>
+                                                                {/* Quantity */}
+                                                                <td className="text-xs">
+                                                                    {tx.is_fee_transaction ? (
+                                                                        <span className="text-slate-400 line-through">{tx.quantity?.toFixed(2)}</span>
+                                                                    ) : (
+                                                                        tx.quantity?.toFixed(4) || '-'
+                                                                    )}
+                                                                </td>
+                                                                {/* → DB Fee */}
+                                                                <td className="bg-blue-50 text-xs">
+                                                                    {dbFee ? `€${dbFee.toFixed(2)}` : '-'}
+                                                                </td>
+                                                                {/* CSV Account */}
+                                                                <td className="bg-slate-50 text-xs">{tx.account_code}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div className="mt-2 flex gap-4 text-xs text-slate-600">
+                                            <span><span className="rounded-sm bg-slate-100 px-1">Gray</span> = CSV source values</span>
+                                            <span><span className="rounded-sm bg-blue-50 px-1">Blue</span> = Transformed DB values</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-4 bg-blue-50 p-3">
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={dryRunMode}
+                                                aria-label="Dry Run Mode"
+                                                onClick={() => setDryRunMode(!dryRunMode)}
+                                                className={cn(
+                                                    'relative inline-flex h-[14px] w-[26px] items-center transition-colors',
+                                                    dryRunMode ? 'bg-blue-500' : 'bg-slate-300',
                                                 )}
-                                            </Box>
-                                        )}
-
-                                        {importPreview.warnings.length > 0 && (
-                                            <Box mb={4} p={3} bg="yellow.50" borderRadius="md" borderWidth={1} borderColor="yellow.200">
-                                                <Text color="yellow.700" fontWeight="bold" mb={2}>⚠️ Warnings ({importPreview.warnings.length})</Text>
-                                                {importPreview.warnings.slice(0, 5).map((warn, i) => (
-                                                    <Text key={i} fontSize="sm" color="yellow.700">{warn}</Text>
-                                                ))}
-                                            </Box>
-                                        )}
-
-                                        <Box mb={4}>
-                                            <Text fontWeight="bold" mb={2}>Accounts to create as RawAccount:</Text>
-                                            <Flex gap={1} flexWrap="wrap">
-                                                {importPreview.accounts.map((acc, i) => (
-                                                    <Badge key={i} colorPalette="purple" fontSize="xs">{acc}</Badge>
-                                                ))}
-                                            </Flex>
-                                        </Box>
-
-                                        <Box mb={4}>
-                                            <Text fontWeight="bold" mb={2}>Assets to create as RawAsset:</Text>
-                                            <Flex gap={1} flexWrap="wrap" maxH="100px" overflow="auto">
-                                                {importPreview.assets.slice(0, 30).map((asset, i) => (
-                                                    <Badge key={i} colorPalette="teal" fontSize="xs">{asset}</Badge>
-                                                ))}
-                                                {importPreview.assets.length > 30 && (
-                                                    <Badge colorPalette="gray" fontSize="xs">+{importPreview.assets.length - 30} more</Badge>
-                                                )}
-                                            </Flex>
-                                        </Box>
-
-                                        <Box>
-                                            <Text fontWeight="bold" mb={2}>Transaction Preview (first 20) - Source → Transformed:</Text>
-                                            <Box maxH="350px" overflow="auto" borderWidth={1} borderRadius="md">
-                                                <Table.Root size="sm">
-                                                    <Table.Header>
-                                                        <Table.Row>
-                                                            <Table.ColumnHeader>Date</Table.ColumnHeader>
-                                                            <Table.ColumnHeader bg="gray.100">CSV Type</Table.ColumnHeader>
-                                                            <Table.ColumnHeader bg="blue.50">→ DB Type</Table.ColumnHeader>
-                                                            <Table.ColumnHeader bg="blue.50">→ Direction</Table.ColumnHeader>
-                                                            <Table.ColumnHeader bg="gray.100">CSV Asset</Table.ColumnHeader>
-                                                            <Table.ColumnHeader bg="blue.50">→ DB Asset</Table.ColumnHeader>
-                                                            <Table.ColumnHeader>Qty</Table.ColumnHeader>
-                                                            <Table.ColumnHeader bg="blue.50">→ Fee</Table.ColumnHeader>
-                                                            <Table.ColumnHeader bg="gray.100">CSV Account</Table.ColumnHeader>
-                                                        </Table.Row>
-                                                    </Table.Header>
-                                                    <Table.Body>
-                                                        {importPreview.transactions.slice(0, 20).map((tx, i) => {
-                                                            // Compute transformed values (what will actually be stored in DB)
-                                                            const dbType = tx.is_fee_transaction ? 'cost' : 'trade';
-                                                            const direction = tx.is_fee_transaction
-                                                                ? 'neutral'
-                                                                : (tx.transaction_type === 'Buy' ? 'inflow' : 'outflow');
-                                                            const dbQty = tx.is_fee_transaction ? 0 : tx.quantity;
-                                                            const dbFee = tx.is_fee_transaction ? tx.quantity : tx.fee;
-                                                            // DB asset: None for FEES, pending RawAsset mapping for trades
-                                                            const dbAsset = tx.is_fee_transaction ? null : tx.asset_ticker;
-
-                                                            return (
-                                                                <Table.Row key={i} bg={tx.is_fee_transaction ? 'orange.50' : undefined}>
-                                                                    <Table.Cell fontSize="xs">{formatDateTimeCompact(tx.date_time)}</Table.Cell>
-                                                                    {/* CSV Source Type */}
-                                                                    <Table.Cell fontSize="xs" bg="gray.50">
-                                                                        <Badge colorPalette="gray" size="sm" variant="outline">
-                                                                            {tx.transaction_type}
-                                                                        </Badge>
-                                                                    </Table.Cell>
-                                                                    {/* → DB transaction_type */}
-                                                                    <Table.Cell fontSize="xs" bg="blue.50">
-                                                                        <Badge colorPalette={tx.is_fee_transaction ? 'orange' : 'blue'} size="sm">
-                                                                            {dbType}
-                                                                        </Badge>
-                                                                    </Table.Cell>
-                                                                    {/* → DB direction */}
-                                                                    <Table.Cell fontSize="xs" bg="blue.50">
-                                                                        <Badge
-                                                                            colorPalette={direction === 'inflow' ? 'green' : direction === 'outflow' ? 'red' : 'gray'}
-                                                                            size="sm"
-                                                                        >
-                                                                            {direction}
-                                                                        </Badge>
-                                                                    </Table.Cell>
-                                                                    {/* CSV Source Asset */}
-                                                                    <Table.Cell fontSize="xs" bg="gray.50" maxW="100px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title={tx.asset_label}>
-                                                                        {tx.asset_ticker}
-                                                                    </Table.Cell>
-                                                                    {/* → DB Asset (asset_id mapping) */}
-                                                                    <Table.Cell fontSize="xs" bg="blue.50">
-                                                                        {dbAsset ? (
-                                                                            <Badge colorPalette="teal" size="sm" title="Will create RawAsset for mapping">
-                                                                                {dbAsset}
-                                                                            </Badge>
-                                                                        ) : (
-                                                                            <Text color="gray.400" fontSize="xs">None</Text>
-                                                                        )}
-                                                                    </Table.Cell>
-                                                                    {/* Quantity */}
-                                                                    <Table.Cell fontSize="xs">
-                                                                        {tx.is_fee_transaction ? (
-                                                                            <Text as="span" textDecoration="line-through" color="gray.400">{tx.quantity?.toFixed(2)}</Text>
-                                                                        ) : (
-                                                                            tx.quantity?.toFixed(4) || '-'
-                                                                        )}
-                                                                    </Table.Cell>
-                                                                    {/* → DB Fee */}
-                                                                    <Table.Cell fontSize="xs" bg="blue.50">
-                                                                        {dbFee ? `€${dbFee.toFixed(2)}` : '-'}
-                                                                    </Table.Cell>
-                                                                    {/* CSV Account */}
-                                                                    <Table.Cell fontSize="xs" bg="gray.50">{tx.account_code}</Table.Cell>
-                                                                </Table.Row>
-                                                            );
-                                                        })}
-                                                    </Table.Body>
-                                                </Table.Root>
-                                            </Box>
-                                            <Flex mt={2} gap={4} fontSize="xs" color="gray.600">
-                                                <Text><Box as="span" bg="gray.100" px={1} borderRadius="sm">Gray</Box> = CSV source values</Text>
-                                                <Text><Box as="span" bg="blue.50" px={1} borderRadius="sm">Blue</Box> = Transformed DB values</Text>
-                                            </Flex>
-                                        </Box>
-
-                                        <Box mt={4} p={3} bg="blue.50" borderRadius="md">
-                                            <Flex align="center" gap={2}>
-                                                <Switch.Root
-                                                    checked={dryRunMode}
-                                                    onCheckedChange={(e: { checked: boolean }) => setDryRunMode(e.checked)}
-                                                >
-                                                    <Switch.HiddenInput />
-                                                    <Switch.Control />
-                                                </Switch.Root>
-                                                <Text fontWeight="bold">Dry Run Mode</Text>
-                                            </Flex>
-                                            <Text fontSize="sm" color="gray.600" mt={1}>
-                                                {dryRunMode
-                                                    ? 'Preview only - no changes will be saved to the database'
-                                                    : '⚠️ Changes will be committed to the database'}
-                                            </Text>
-                                        </Box>
-                                    </Box>
-                                )}
-
-                                {importStep === 'result' && importResult && (
-                                    <Box>
-                                        <Box mb={4} p={4} bg={importResult.dry_run ? 'blue.50' : 'green.50'} borderRadius="md">
-                                            <Text fontSize="lg" fontWeight="bold" mb={2}>
-                                                {importResult.dry_run ? '🔍 Dry Run Complete' : '✅ Import Complete'}
-                                            </Text>
-                                            {importResult.dry_run && (
-                                                <Text fontSize="sm" color="blue.600">
-                                                    No changes were saved. Run again with Dry Run disabled to commit.
-                                                </Text>
-                                            )}
-                                        </Box>
-
-                                        <Flex gap={4} mb={4} flexWrap="wrap">
-                                            <Box p={3} bg="gray.50" borderRadius="md" flex="1" minW="150px">
-                                                <Text fontSize="sm" color="gray.500">Transactions</Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="green.600">
-                                                    {importResult.transactions.created} created
-                                                </Text>
-                                                <Text fontSize="sm" color="gray.500">
-                                                    {importResult.transactions.skipped} skipped
-                                                </Text>
-                                            </Box>
-                                            <Box p={3} bg="gray.50" borderRadius="md" flex="1" minW="150px">
-                                                <Text fontSize="sm" color="gray.500">Raw Accounts</Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="purple.600">
-                                                    {importResult.raw_accounts.created} created
-                                                </Text>
-                                                <Text fontSize="sm" color="gray.500">
-                                                    {importResult.raw_accounts.skipped} skipped
-                                                </Text>
-                                            </Box>
-                                            <Box p={3} bg="gray.50" borderRadius="md" flex="1" minW="150px">
-                                                <Text fontSize="sm" color="gray.500">Raw Assets</Text>
-                                                <Text fontSize="xl" fontWeight="bold" color="teal.600">
-                                                    {importResult.raw_assets.created} created
-                                                </Text>
-                                                <Text fontSize="sm" color="gray.500">
-                                                    {importResult.raw_assets.skipped} skipped
-                                                </Text>
-                                            </Box>
-                                        </Flex>
-
-                                        {importResult.pending_review_count > 0 && (
-                                            <Box p={3} bg="yellow.50" borderRadius="md" mb={4}>
-                                                <Text color="yellow.700">
-                                                    ⚠️ <strong>{importResult.pending_review_count}</strong> transactions need review
-                                                    (unmapped accounts or assets). Use the Raw Accounts and Raw Assets editors to map them.
-                                                </Text>
-                                            </Box>
-                                        )}
-
-                                        {importResult.summary.total_errors > 0 && (
-                                            <Box p={3} bg="red.50" borderRadius="md">
-                                                <Text color="red.600" fontWeight="bold">
-                                                    ❌ {importResult.summary.total_errors} errors occurred
-                                                </Text>
-                                            </Box>
-                                        )}
-                                    </Box>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2} justify="space-between" width="100%">
-                                    <Button variant="outline" onClick={() => setShowImportDialog(false)}>
-                                        Close
-                                    </Button>
-                                    <Flex gap={2}>
-                                        {importStep === 'select' && (
-                                            <Button
-                                                colorPalette="teal"
-                                                onClick={previewImport}
-                                                disabled={!importFile || importLoading}
                                             >
-                                                {importLoading ? <Spinner size="sm" /> : 'Preview'}
+                                                <span
+                                                    className={cn(
+                                                        'inline-block h-[10px] w-[10px] transform bg-white transition-transform',
+                                                        dryRunMode ? 'translate-x-[14px]' : 'translate-x-[2px]',
+                                                    )}
+                                                />
+                                            </button>
+                                            <span className="font-bold">Dry Run Mode</span>
+                                        </div>
+                                        <span className="mt-1 block text-sm text-slate-600">
+                                            {dryRunMode
+                                                ? 'Preview only - no changes will be saved to the database'
+                                                : '⚠️ Changes will be committed to the database'}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {importStep === 'result' && importResult && (
+                                <div>
+                                    <div className={cn('mb-4 p-4', importResult.dry_run ? 'bg-blue-50' : 'bg-green-50')}>
+                                        <span className="mb-2 block text-lg font-bold">
+                                            {importResult.dry_run ? '🔍 Dry Run Complete' : '✅ Import Complete'}
+                                        </span>
+                                        {importResult.dry_run && (
+                                            <span className="block text-sm text-blue-600">
+                                                No changes were saved. Run again with Dry Run disabled to commit.
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="mb-4 flex flex-wrap gap-4">
+                                        <div className="min-w-[150px] flex-1 bg-slate-50 p-3">
+                                            <span className="block text-sm text-slate-500">Transactions</span>
+                                            <span className="block text-xl font-bold text-green-600">
+                                                {importResult.transactions.created} created
+                                            </span>
+                                            <span className="block text-sm text-slate-500">
+                                                {importResult.transactions.skipped} skipped
+                                            </span>
+                                        </div>
+                                        <div className="min-w-[150px] flex-1 bg-slate-50 p-3">
+                                            <span className="block text-sm text-slate-500">Raw Accounts</span>
+                                            <span className="block text-xl font-bold text-purple-600">
+                                                {importResult.raw_accounts.created} created
+                                            </span>
+                                            <span className="block text-sm text-slate-500">
+                                                {importResult.raw_accounts.skipped} skipped
+                                            </span>
+                                        </div>
+                                        <div className="min-w-[150px] flex-1 bg-slate-50 p-3">
+                                            <span className="block text-sm text-slate-500">Raw Assets</span>
+                                            <span className="block text-xl font-bold text-teal-600">
+                                                {importResult.raw_assets.created} created
+                                            </span>
+                                            <span className="block text-sm text-slate-500">
+                                                {importResult.raw_assets.skipped} skipped
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {importResult.pending_review_count > 0 && (
+                                        <div className="mb-4 bg-yellow-50 p-3">
+                                            <span className="text-yellow-700">
+                                                ⚠️ <strong>{importResult.pending_review_count}</strong> transactions need review
+                                                (unmapped accounts or assets). Use the Raw Accounts and Raw Assets editors to map them.
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    {importResult.summary.total_errors > 0 && (
+                                        <div className="bg-red-50 p-3">
+                                            <span className="block font-bold text-red-600">
+                                                ❌ {importResult.summary.total_errors} errors occurred
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex w-full items-center justify-between gap-2 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowImportDialog(false)}>
+                                Close
+                            </Button>
+                            <div className="flex gap-2">
+                                {importStep === 'select' && (
+                                    <Button
+                                        colorScheme="gray"
+                                        className={BULK_ACTION_SOLID.teal}
+                                        onClick={previewImport}
+                                        disabled={!importFile || importLoading}
+                                    >
+                                        {importLoading ? <Spinner size="sm" /> : 'Preview'}
+                                    </Button>
+                                )}
+                                {importStep === 'preview' && (
+                                    <>
+                                        <Button variant="outline" onClick={resetImportDialog}>
+                                            ← Back
+                                        </Button>
+                                        <Button
+                                            colorScheme={dryRunMode ? 'blue' : 'green'}
+                                            onClick={executeImport}
+                                            disabled={importLoading}
+                                        >
+                                            {importLoading ? <Spinner size="sm" /> : (dryRunMode ? 'Run Dry Import' : 'Import Now')}
+                                        </Button>
+                                    </>
+                                )}
+                                {importStep === 'result' && (
+                                    <>
+                                        <Button variant="outline" onClick={resetImportDialog}>
+                                            Import Another
+                                        </Button>
+                                        {importResult?.dry_run && (
+                                            <Button
+                                                colorScheme="green"
+                                                onClick={() => {
+                                                    setDryRunMode(false);
+                                                    setImportStep('preview');
+                                                }}
+                                            >
+                                                Commit Import
                                             </Button>
                                         )}
-                                        {importStep === 'preview' && (
-                                            <>
-                                                <Button variant="outline" onClick={resetImportDialog}>
-                                                    ← Back
-                                                </Button>
-                                                <Button
-                                                    colorPalette={dryRunMode ? 'blue' : 'green'}
-                                                    onClick={executeImport}
-                                                    disabled={importLoading}
-                                                >
-                                                    {importLoading ? <Spinner size="sm" /> : (dryRunMode ? 'Run Dry Import' : 'Import Now')}
-                                                </Button>
-                                            </>
-                                        )}
-                                        {importStep === 'result' && (
-                                            <>
-                                                <Button variant="outline" onClick={resetImportDialog}>
-                                                    Import Another
-                                                </Button>
-                                                {importResult?.dry_run && (
-                                                    <Button
-                                                        colorPalette="green"
-                                                        onClick={() => {
-                                                            setDryRunMode(false);
-                                                            setImportStep('preview');
-                                                        }}
-                                                    >
-                                                        Commit Import
-                                                    </Button>
-                                                )}
-                                            </>
-                                        )}
-                                    </Flex>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Transaction Detail Drawer - Always rendered, available from any tab */}
             <TransactionDetailDrawer
@@ -2723,6 +2686,6 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 defaults={bundleCreateDefaults}
                 generateLabel={(pattern) => generateBundleLabel(pattern, selectedIds.size > 0 ? selectedIds : new Set(bundleCreateDefaults.transactionIds))}
             />
-        </Box >
+        </div>
     );
 };

@@ -6,6 +6,10 @@ Enabled/disabled via the mock_mode_enabled DB setting (UI toggle).
 
 Features:
 - Deterministic prices via params: {"prices": {"2025-01-15T10:00:00": 40000, "current": 55000}}
+- Historical lookups use last-observation-carried-forward (LOCF): the most
+  recent waypoint at or before the requested date. This means a handful of
+  sparse waypoints correctly cover every in-between day (a quote stays valid
+  until the next quote replaces it), so no dense day-by-day data is required.
 - Per-asset-type random ranges (crypto, stock, fiat) as fallback
 - Per-asset range overrides via params: {"min_price": X, "max_price": Y}
 - Optional quote_currency override via params: {"quote_currency": "EUR"}
@@ -16,8 +20,8 @@ Usage:
 """
 
 import random
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Tuple
+from datetime import datetime, timezone
+from typing import Any, List, Optional, Dict, Tuple
 
 from backend.config.loader import configure_logging
 from backend.db.models import Asset
@@ -36,22 +40,19 @@ log = configure_logging("mock_price_getter")
 
 # (min_price, max_price) tuples per price_type
 PRICE_RANGES: Dict[str, Tuple[float, float]] = {
-    "crypto": (100.0, 50000.0),      # BTC-like range: $100 to $50,000
-    "stock": (10.0, 500.0),          # Stock range: $10 to $500
-    "fiat": (0.5, 2.0),              # Forex range: 0.5 to 2.0 (relative rates)
+    "crypto": (100.0, 50000.0),  # BTC-like range: $100 to $50,000
+    "stock": (10.0, 500.0),  # Stock range: $10 to $500
+    "fiat": (0.5, 2.0),  # Forex range: 0.5 to 2.0 (relative rates)
 }
 
 # Default range for unknown asset types
 DEFAULT_RANGE: Tuple[float, float] = (1.0, 1000.0)
 
-# Tolerance for matching historical datetime keys (±15 min, same as PriceCache)
-PRICE_MATCH_TOLERANCE = timedelta(minutes=15)
-
 
 class MockPriceGetter(BasePriceGetter):
     """
     Mock price getter that returns random prices for testing.
-    
+
     Useful for:
     - Quick manual testing without hitting external APIs
     - Testing P&L calculations with controlled (seeded) prices
@@ -59,7 +60,7 @@ class MockPriceGetter(BasePriceGetter):
     """
 
     name = "mock"
-    
+
     # No retries needed for mock
     max_retries = 1
     initial_delay = 0.0
@@ -108,35 +109,56 @@ class MockPriceGetter(BasePriceGetter):
             return config.extra.get("quote_currency", "USD")
         return "USD"
 
+    @staticmethod
+    def _to_naive_utc(dt: datetime) -> datetime:
+        """Normalize a datetime to naive UTC so aware/naive values compare safely."""
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
     def _lookup_historical_price(
         self, prices: Dict[str, float], dt: datetime
     ) -> Optional[float]:
         """
-        Find the closest price entry within ±15 min of `dt`.
+        Return the price in effect on ``dt`` using last-observation-carried-forward.
 
-        Falls back to the "current" key if no datetime key matches.
-        Returns None if nothing matches.
+        A quote remains valid until the next quote replaces it, so we return the
+        most recent waypoint at or before ``dt``. For dates before the earliest
+        waypoint we carry the earliest known price backward (so historical
+        backfill never leaves gaps). Only when there are no dated waypoints at
+        all do we fall back to the ``"current"`` key. Returns ``None`` if nothing
+        is available.
+
+        Note: waypoint keys are naive ISO strings while callers may pass a
+        timezone-aware ``dt`` (e.g. midnight UTC from the snapshot backfill), so
+        both sides are normalized to naive UTC before comparison.
         """
-        best_price: Optional[float] = None
-        best_delta: Optional[timedelta] = None
+        target = self._to_naive_utc(dt)
 
+        dated: List[Tuple[datetime, float]] = []
         for key, value in prices.items():
             if key == "current":
                 continue
             try:
-                key_dt = datetime.fromisoformat(key)
-                delta = abs(dt - key_dt)
-                if delta <= PRICE_MATCH_TOLERANCE:
-                    if best_delta is None or delta < best_delta:
-                        best_price = float(value)
-                        best_delta = delta
+                key_dt = self._to_naive_utc(datetime.fromisoformat(key))
+                dated.append((key_dt, float(value)))
             except (ValueError, TypeError):
                 continue
 
-        if best_price is not None:
-            return best_price
+        if dated:
+            dated.sort(key=lambda item: item[0])
+            carried: Optional[float] = None
+            for key_dt, value in dated:
+                if key_dt <= target:
+                    carried = value
+                else:
+                    break
+            if carried is not None:
+                return carried
+            # `dt` precedes every waypoint → carry the earliest known price back.
+            return dated[0][1]
 
-        # Fall back to "current"
+        # No dated waypoints → fall back to the "current" price if present.
         if "current" in prices:
             return float(prices["current"])
 
@@ -187,8 +209,9 @@ class MockPriceGetter(BasePriceGetter):
         """
         Return a historical price for the asset.
 
-        Looks up the closest datetime key within ±15 min, then falls back
-        to "current", then falls back to random.
+        Uses last-observation-carried-forward over the configured waypoints
+        (see ``_lookup_historical_price``), falling back to random only when
+        no waypoints are configured.
         """
         prices = self._get_configured_prices(config)
         quote_currency = self._get_quote_currency(config)
@@ -222,3 +245,51 @@ class MockPriceGetter(BasePriceGetter):
             timestamp=dt,
             ticker_used=asset.symbol,
         )
+
+    def get_daily_series(
+        self,
+        asset: Asset,
+        start_date,
+        end_date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build a deterministic daily close series from configured waypoints.
+
+        Mirrors ``YahooDirectPriceGetter.get_daily_series`` so the benchmark
+        endpoint can serve seeded (mock) index data in the same shape:
+        ``[{"date": "YYYY-MM-DD", "close": float}, ...]`` sorted by date.
+
+        Uses last-observation-carried-forward per day, so sparse waypoints
+        produce a gap-free daily series. Returns an empty list when no
+        waypoints are configured.
+        """
+        from datetime import date as date_cls, timedelta
+
+        prices = self._get_configured_prices(config)
+        if not prices:
+            return []
+
+        # Coerce to plain dates.
+        if isinstance(start_date, datetime):
+            start_date = start_date.date()
+        if isinstance(end_date, datetime):
+            end_date = end_date.date()
+        if not isinstance(start_date, date_cls) or not isinstance(end_date, date_cls):
+            return []
+        if end_date < start_date:
+            return []
+
+        points: List[Dict[str, Any]] = []
+        current = start_date
+        while current <= end_date:
+            close = self._lookup_historical_price(
+                prices, datetime(current.year, current.month, current.day)
+            )
+            if close is not None:
+                points.append(
+                    {"date": current.isoformat(), "close": round(float(close), 4)}
+                )
+            current += timedelta(days=1)
+
+        return points

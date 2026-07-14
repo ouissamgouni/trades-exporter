@@ -1,5 +1,5 @@
 /**
- * Shared enums for the Trade Exporter application.
+ * Shared enums for the TradeTrail application.
  * These enums mirror the backend Python enums for type safety and consistency.
  * 
  * Convention: All enum values use lowercase to match database storage format.

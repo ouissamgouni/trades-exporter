@@ -1,5 +1,4 @@
-
-"""Bundle endpoints for the Trade Exporter API.
+"""Bundle endpoints for the TradeTrail API.
 
 Bundles are user-created groupings of multiple transactions for P&L purposes.
 Stored in the 'bundles' table (UserCalculationBundle model).
@@ -160,16 +159,20 @@ def list_bundles(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     pattern: Optional[str] = Query(None, description="Filter by pattern"),
-    min_transaction_count: int = Query(1, ge=0, description="Minimum transaction count"),
+    min_transaction_count: int = Query(
+        1, ge=0, description="Minimum transaction count"
+    ),
     session: Session = Depends(get_db),
 ):
     """
     List all bundles with their transactions.
-    
+
     By default, only shows bundles with at least 1 transaction.
     Set min_transaction_count=0 to include empty bundles.
     """
-    query = select(UserCalculationBundle).order_by(UserCalculationBundle.created_at.desc())
+    query = select(UserCalculationBundle).order_by(
+        UserCalculationBundle.created_at.desc()
+    )
 
     if pattern:
         query = query.where(UserCalculationBundle.pattern == pattern)
@@ -190,7 +193,9 @@ def list_bundles(
 @router.get("/suggestions", response_model=List[SuggestionResponse])
 def get_suggestions(
     max_suggestions: int = Query(200, ge=1, le=500),
-    include_bundled: bool = Query(False, description="Include transactions that already belong to a bundle"),
+    include_bundled: bool = Query(
+        False, description="Include transactions that already belong to a bundle"
+    ),
     session: Session = Depends(get_db),
 ):
     """
@@ -204,7 +209,7 @@ def get_suggestions(
         max_suggestions=max_suggestions,
         include_bundled=include_bundled,
     )
-    
+
     # Load config for taxability suggestion (uses same logic as P&L engine)
     config = PnLConfig()
 
@@ -215,34 +220,34 @@ def get_suggestions(
             pattern=s.pattern,
             crypto_swap_taxable=config.crypto_swap_taxable_by_default,
         )
-        
+
         # Build enriched transaction summaries with account names
         tx_summaries = []
-        for t in (s.transactions or []):
+        for t in s.transactions or []:
             account_name = None
             if t.get("account_id"):
                 account = session.get(Account, t.get("account_id"))
                 account_name = account.name if account else None
-            
+
             from_account_name = None
             if t.get("from_account_id"):
                 from_account = session.get(Account, t.get("from_account_id"))
                 from_account_name = from_account.name if from_account else None
-            
+
             to_account_name = None
             if t.get("to_account_id"):
                 to_account = session.get(Account, t.get("to_account_id"))
                 to_account_name = to_account.name if to_account else None
-            
+
             # Build AssetRef with source_symbol for display
             source_asset_symbol = t.get("asset_symbol") or t.get("symbol", "")
             asset_ref = AssetRef(
                 id=None,
                 symbol=None,
                 label=None,
-                source_symbol=source_asset_symbol if source_asset_symbol else None
+                source_symbol=source_asset_symbol if source_asset_symbol else None,
             )
-            
+
             tx_summaries.append(
                 TransactionSummary(
                     id=t.get("id", 0),
@@ -267,10 +272,12 @@ def get_suggestions(
                     network_transaction_id=t.get("network_transaction_id"),
                 )
             )
-        
+
         responses.append(
             SuggestionResponse(
-                fingerprint=compute_suggestion_fingerprint(s.pattern, s.transaction_ids),
+                fingerprint=compute_suggestion_fingerprint(
+                    s.pattern, s.transaction_ids
+                ),
                 pattern=s.pattern,
                 transaction_ids=s.transaction_ids,
                 confidence=s.confidence,
@@ -281,7 +288,7 @@ def get_suggestions(
                 transactions=tx_summaries,
             )
         )
-    
+
     return responses
 
 
@@ -478,11 +485,11 @@ def update_bundle(
     if request.notes is not None:
         bundle.notes = request.notes
     # Use model_fields_set to detect if taxability_override was explicitly sent (even as null)
-    if 'taxability_override' in request.model_fields_set:
+    if "taxability_override" in request.model_fields_set:
         bundle.taxability_override = (
             request.taxability_override.value if request.taxability_override else None
         )
-    if 'metadata' in request.model_fields_set:
+    if "metadata" in request.model_fields_set:
         bundle.bundle_data = request.metadata
 
     bundle.updated_at = datetime.now(timezone.utc)
@@ -546,7 +553,9 @@ def add_transactions_to_bundle(
         if not tx:
             continue
         if tx.user_calculation_unit_id:
-            skipped.append({"id": tx_id, "existing_bundle_id": tx.user_calculation_unit_id})
+            skipped.append(
+                {"id": tx_id, "existing_bundle_id": tx.user_calculation_unit_id}
+            )
             continue  # Already in a bundle
 
         tx.user_calculation_unit_id = bundle_id
@@ -555,7 +564,12 @@ def add_transactions_to_bundle(
 
     session.commit()
 
-    return {"success": True, "added_count": len(added), "added": added, "skipped": skipped}
+    return {
+        "success": True,
+        "added_count": len(added),
+        "added": added,
+        "skipped": skipped,
+    }
 
 
 @router.post("/{bundle_id}/remove-transactions")
@@ -591,7 +605,9 @@ def remove_transactions_from_bundle(
 # ============================================================================
 
 
-def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> UnitResponse:
+def _build_unit_response(
+    bundle: UserCalculationBundle, session: Session
+) -> UnitResponse:
     """Build a UnitResponse with transaction summaries."""
     # Get transactions in bundle
     transactions = session.exec(
@@ -649,20 +665,19 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
                     id=asset.asset_id,
                     symbol=asset.symbol,
                     label=asset.label,
-                    source_symbol=tx.source_asset_symbol
+                    source_symbol=tx.source_asset_symbol,
                 )
         elif asset_symbol:
             asset_ref = AssetRef(
-                id=None,
-                symbol=None,
-                label=None,
-                source_symbol=asset_symbol
+                id=None, symbol=None, label=None, source_symbol=asset_symbol
             )
 
         tx_summaries.append(
             TransactionSummary(
                 id=tx.id,
-                date_time=tx.date_time.replace(tzinfo=timezone.utc).isoformat() if tx.date_time else None,
+                date_time=tx.date_time.replace(tzinfo=timezone.utc).isoformat()
+                if tx.date_time
+                else None,
                 direction=tx.direction,
                 transaction_type=tx.transaction_type,
                 asset=asset_ref,
@@ -703,7 +718,9 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
         notes=bundle.notes,
         taxability_override=bundle.taxability_override,
         metadata=bundle.bundle_data,
-        created_at=bundle.created_at.replace(tzinfo=timezone.utc).isoformat() if bundle.created_at else "",
+        created_at=bundle.created_at.replace(tzinfo=timezone.utc).isoformat()
+        if bundle.created_at
+        else "",
         transaction_count=len(tx_summaries),
         transactions=tx_summaries,
         total_inflow=inflows if inflows else None,

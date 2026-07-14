@@ -1,9 +1,7 @@
-import {
-    Badge, Box,
-    Button, Checkbox, Dialog, Flex,
-    Heading, Icon, IconButton, Input, NativeSelect, Portal, SimpleGrid, Slider, Spinner, Switch,
-    Table, Tabs, Tag, Text, Textarea, Progress
-} from '@chakra-ui/react';
+import { Badge, Button, Input, Spinner, Tabs, TabsList, TabsTrigger, TabsContent, Textarea, type BadgeColorScheme } from './ui/primitives';
+import { cn } from '../lib/cn';
+import { createPortal } from 'react-dom';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { LuChevronDown, LuChevronLeft, LuChevronRight, LuChevronsLeft, LuChevronsRight, LuFilter, LuPlay, LuSearch, LuCheck, LuTags, LuSettings, LuTrash2, LuX } from 'react-icons/lu';
 import { API_URL, Asset, AssetPriceGetter, Category, DimensionCategories } from '../types';
@@ -131,6 +129,8 @@ export const AssetsEditor: React.FC = () => {
     const [showCategoriesDialog, setShowCategoriesDialog] = useState(false);
     const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<number>>(new Set());
     const [savingCategories, setSavingCategories] = useState(false);
+    const [categoriesDialogTab, setCategoriesDialogTab] = useState('');
+    const [bulkCategoriesDialogTab, setBulkCategoriesDialogTab] = useState('');
 
     // CSV Import
     const [showImportDialog, setShowImportDialog] = useState(false);
@@ -1040,46 +1040,38 @@ export const AssetsEditor: React.FC = () => {
 
     const renderAssetCategories = (asset: Asset) => {
         if (!asset.categories || asset.categories.length === 0) {
-            return <Text color="gray.400" fontSize="2xs">—</Text>;
+            return <span className="text-[10px] text-slate-400">—</span>;
         }
         const MAX_VISIBLE = 2;
         const visible = asset.categories.slice(0, MAX_VISIBLE);
         const remaining = asset.categories.length - MAX_VISIBLE;
         return (
-            <Flex direction="column" gap={0}>
+            <div className="flex flex-col gap-0">
                 {visible.map(cat => (
-                    <Text
+                    <span
                         key={cat.id}
-                        fontSize="2xs"
-                        lineHeight="1.5"
-                        whiteSpace="nowrap"
-                        overflow="hidden"
-                        textOverflow="ellipsis"
-                        maxW="260px"
+                        className="truncate whitespace-nowrap text-[10px] leading-[1.5]"
+                        style={{ maxWidth: '260px' }}
                         title={`${cat.dimension_label}: ${cat.label}`}
                     >
-                        <Text as="span" fontWeight="semibold" color="gray.500">{cat.dimension_label}:</Text>{' '}
+                        <span className="font-semibold text-slate-500">{cat.dimension_label}:</span>{' '}
                         <Badge
-                            fontSize="2xs"
-                            px={1}
-                            py={0}
-                            lineHeight="1.3"
+                            colorScheme={!cat.color ? 'gray' : undefined}
+                            className="px-1 py-0 text-[10px] leading-[1.3]"
                             style={cat.color ? { backgroundColor: cat.color, color: '#fff' } : undefined}
-                            colorPalette={!cat.color ? 'gray' : undefined}
-                            variant="subtle"
                         >
                             {cat.label}
                         </Badge>
-                    </Text>
+                    </span>
                 ))}
                 {remaining > 0 && (
                     <Tooltip content={asset.categories.slice(MAX_VISIBLE).map(c => `${c.dimension_label}: ${c.label}`).join('\n')}>
-                        <Text fontSize="2xs" color="blue.500" cursor="pointer" _hover={{ textDecoration: 'underline' }}>
+                        <span className="cursor-pointer text-[10px] text-blue-500 hover:underline">
                             +{remaining} more
-                        </Text>
+                        </span>
                     </Tooltip>
                 )}
-            </Flex>
+            </div>
         );
     };
 
@@ -1093,7 +1085,7 @@ export const AssetsEditor: React.FC = () => {
 
     const renderPriceGetters = (asset: Asset) => {
         if (!asset.price_getters || asset.price_getters.length === 0) {
-            return <Text color="gray.400" fontSize="2xs">—</Text>;
+            return <span className="text-[10px] text-slate-400">—</span>;
         }
 
         const formatParams = (params: Record<string, any>) => {
@@ -1108,7 +1100,7 @@ export const AssetsEditor: React.FC = () => {
         const remaining = asset.price_getters.length - MAX_VISIBLE;
 
         return (
-            <Flex direction="column" gap={0}>
+            <div className="flex flex-col gap-0">
                 {visible.map(pg => {
                     const paramsStr = formatParams(pg.params);
                     const tooltip = [
@@ -1119,148 +1111,135 @@ export const AssetsEditor: React.FC = () => {
                     ].filter(Boolean).join(' | ');
 
                     return (
-                        <Text key={pg.id} fontSize="2xs" lineHeight="1.5" whiteSpace="nowrap" overflow="hidden" textOverflow="ellipsis" maxW="180px" title={tooltip}>
+                        <span key={pg.id} className="truncate whitespace-nowrap text-[10px] leading-[1.5]" style={{ maxWidth: '180px' }} title={tooltip}>
                             <Badge
-                                colorPalette={pg.enabled ? 'blue' : 'gray'}
-                                fontSize="2xs"
-                                px={1}
-                                py={0}
-                                lineHeight="1.3"
+                                colorScheme={pg.enabled ? 'blue' : 'gray'}
+                                className="px-1 py-0 text-[10px] leading-[1.3]"
                             >
                                 {pg.price_getter}{pg.external_id ? `: ${pg.external_id}` : ''}
                             </Badge>
-                        </Text>
+                        </span>
                     );
                 })}
                 {remaining > 0 && (
                     <Tooltip content={asset.price_getters.slice(MAX_VISIBLE).map(pg => `${pg.price_getter}${pg.external_id ? `: ${pg.external_id}` : ''}`).join('\n')}>
-                        <Text fontSize="2xs" color="blue.500" cursor="pointer" _hover={{ textDecoration: 'underline' }}>
+                        <span className="cursor-pointer text-[10px] text-blue-500 hover:underline">
                             +{remaining} more
-                        </Text>
+                        </span>
                     </Tooltip>
                 )}
-            </Flex>
+            </div>
         );
     };
 
     if (loading) return (
-        <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-            <Spinner size="xl" color="blue.500" />
-            <Text mt={4}>Loading assets...</Text>
-        </Box>
+        <div className="rounded-md bg-slate-50 py-10 text-center">
+            <Spinner size="lg" className="text-blue-500" />
+            <span className="mt-4 block">Loading assets...</span>
+        </div>
     );
 
     if (error) return (
-        <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-            <Text color="red.600">Error: {error}</Text>
-        </Box>
+        <div className="rounded-md border border-red-200 bg-red-50 py-10 text-center">
+            <span className="text-red-600">Error: {error}</span>
+        </div>
     );
 
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={3} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="sm" mb={0.5}>💎 Assets</Heading>
-                    <Text color="gray.600" fontSize="xs">
+        <div>
+            <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-2">
+                <div>
+                    <h2 className="mb-0.5 text-sm font-semibold">💎 Assets</h2>
+                    <span className="block text-xs text-slate-600">
                         Manage assets and their price getter configurations.
-                    </Text>
-                </Box>
-                <Flex gap={2} align="center">
+                    </span>
+                </div>
+                <div className="flex items-center gap-2">
                     {/* Global Mock Mode Toggle */}
-                    <Flex align="center" gap={2} px={3} py={1.5} bg={mockModeEnabled ? 'orange.50' : 'gray.50'} borderRadius="md" border="1px solid" borderColor={mockModeEnabled ? 'orange.200' : 'gray.200'}>
-                        <Switch.Root
-                            checked={mockModeEnabled}
-                            onCheckedChange={() => toggleMockMode()}
+                    <div className={cn('flex items-center gap-2 rounded-md border px-3 py-1.5', mockModeEnabled ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-slate-50')}>
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={mockModeEnabled}
+                            aria-label="Mock Mode"
                             disabled={mockModeLoading}
-                            size="sm"
+                            onClick={() => toggleMockMode()}
+                            className={cn('relative inline-flex h-[18px] w-[32px] items-center rounded-full transition-colors disabled:opacity-50', mockModeEnabled ? 'bg-blue-500' : 'bg-slate-300')}
                         >
-                            <Switch.HiddenInput />
-                            <Switch.Control />
-                        </Switch.Root>
-                        <Text fontSize="xs" fontWeight="medium" whiteSpace="nowrap">
+                            <span className={cn('inline-block h-[14px] w-[14px] transform rounded-full bg-white transition-transform', mockModeEnabled ? 'translate-x-[16px]' : 'translate-x-[2px]')} />
+                        </button>
+                        <span className="whitespace-nowrap text-xs font-medium">
                             Mock {mockModeEnabled ? '🟢' : '⚪'}
-                        </Text>
-                    </Flex>
-                    <Button size="xs" colorPalette="green" onClick={openImportDialog}>
+                        </span>
+                    </div>
+                    <Button size="sm" colorScheme="green" onClick={openImportDialog}>
                         📥 Import CSV
                     </Button>
-                    <Button size="xs" colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
+                    <Button size="sm" colorScheme="blue" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Asset
                     </Button>
-                    <Button size="xs" onClick={refreshAssets} variant="outline">
+                    <Button size="sm" onClick={refreshAssets} variant="outline">
                         🔄 Refresh
                     </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {/* ============ Collapsible Filter Section ============ */}
-            <Box
-                mb={4}
-                bg="gray.50"
-                borderRadius="md"
-                border="1px solid"
-                borderColor={hasActiveFilters ? 'blue.300' : 'gray.200'}
-                overflow="visible"
-            >
+            <div className={cn('mb-4 overflow-visible rounded-md border bg-slate-50', hasActiveFilters ? 'border-blue-300' : 'border-slate-200')}>
                 {/* Clickable header */}
-                <Flex
-                    align="center"
-                    justify="space-between"
-                    p={3}
-                    cursor="pointer"
-                    _hover={{ bg: 'gray.100' }}
+                <div
+                    className="flex cursor-pointer items-center justify-between rounded-md p-3 hover:bg-slate-100"
                     onClick={() => setFiltersExpanded(!filtersExpanded)}
-                    borderRadius="md"
                 >
-                    <Flex align="center" gap={1.5}>
-                        <Box transition="transform 0.2s" transform={filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
+                    <div className="flex items-center gap-1.5">
+                        <div className="transition-transform duration-200" style={{ transform: filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
                             <LuChevronDown size={14} />
-                        </Box>
+                        </div>
                         <LuFilter size={12} />
-                        <Text fontWeight="semibold" fontSize="xs">Filters</Text>
+                        <span className="text-xs font-semibold">Filters</span>
                         {activeFilterCount > 0 && (
-                            <Badge size="xs" colorPalette="blue">{activeFilterCount} active</Badge>
+                            <Badge colorScheme="blue" className="text-[10px]">{activeFilterCount} active</Badge>
                         )}
-                    </Flex>
-                    <Flex gap={1.5} onClick={e => e.stopPropagation()}>
+                    </div>
+                    <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
                         {hasActiveFilters && (
-                            <Button size="xs" variant="ghost" onClick={clearFilters} color="gray.500" _hover={{ color: 'gray.700' }}>
+                            <Button size="sm" variant="ghost" onClick={clearFilters} className="text-slate-500 hover:text-slate-700">
                                 ✕ Clear All
                             </Button>
                         )}
-                    </Flex>
-                </Flex>
+                    </div>
+                </div>
 
                 {/* Chip summary when collapsed but filters active */}
                 {hasActiveFilters && !filtersExpanded && (
-                    <Box px={3} pb={3}>
-                        <Flex flexWrap="wrap" gap={1}>
-                            {searchFilter && <Badge size="sm" colorPalette="blue" variant="outline">Search: {searchFilter}</Badge>}
-                            {statusFilter !== '' && <Badge size="sm" colorPalette="green" variant="outline">Status: {statusFilter === '0' ? 'Active' : 'Inactive'}</Badge>}
-                            {typeFilter && <Badge size="sm" colorPalette="purple" variant="outline">Type: {typeFilter}</Badge>}
-                            {priceGetterFilter && <Badge size="sm" colorPalette="orange" variant="outline">Getter: {priceGetterFilter}</Badge>}
-                            {categoryFilter.size > 0 && <Badge size="sm" colorPalette="teal" variant="outline">{categoryFilter.size} categories</Badge>}
-                        </Flex>
-                    </Box>
+                    <div className="px-3 pb-3">
+                        <div className="flex flex-wrap gap-1">
+                            {searchFilter && <Badge colorScheme="blue" className="border border-blue-300 bg-white text-xs">Search: {searchFilter}</Badge>}
+                            {statusFilter !== '' && <Badge colorScheme="green" className="border border-green-300 bg-white text-xs">Status: {statusFilter === '0' ? 'Active' : 'Inactive'}</Badge>}
+                            {typeFilter && <Badge colorScheme="purple" className="border border-purple-300 bg-white text-xs">Type: {typeFilter}</Badge>}
+                            {priceGetterFilter && <Badge colorScheme="orange" className="border border-orange-300 bg-white text-xs">Getter: {priceGetterFilter}</Badge>}
+                            {categoryFilter.size > 0 && <Badge colorScheme="green" className="border border-green-300 bg-white text-xs">{categoryFilter.size} categories</Badge>}
+                        </div>
+                    </div>
                 )}
 
                 {!hasActiveFilters && !filtersExpanded && (
-                    <Box px={3} pb={3}>
-                        <Text fontSize="xs" color="gray.500" fontStyle="italic">No filters applied</Text>
-                    </Box>
+                    <div className="px-3 pb-3">
+                        <span className="text-xs italic text-slate-500">No filters applied</span>
+                    </div>
                 )}
 
                 {/* Filter Cards Grid */}
                 {filtersExpanded && (
-                    <Box p={3} pt={1}>
-                        <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4, xl: 5 }} gap={2}>
+                    <div className="p-3 pt-1">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                             {/* Search Card */}
-                            <Box bg="white" border="1px solid" borderColor={searchFilter ? 'blue.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
-                                <Flex align="center" gap={1} mb={1.5}>
-                                    <Text fontSize="xs">🔍</Text>
-                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Search</Text>
-                                </Flex>
-                                <Flex align="center" gap={1} px={1} py={1} bg="gray.50" borderRadius="sm">
+                            <div className={cn('min-h-[70px] rounded-md border bg-white p-2', searchFilter ? 'border-blue-200' : 'border-slate-200')}>
+                                <div className="mb-1.5 flex items-center gap-1">
+                                    <span className="text-xs">🔍</span>
+                                    <span className="text-[10px] font-semibold uppercase text-slate-600">Search</span>
+                                </div>
+                                <div className="flex items-center gap-1 rounded-sm bg-slate-50 px-1 py-1">
                                     <LuSearch size={10} color="#A0AEC0" />
                                     <input
                                         type="text"
@@ -1269,494 +1248,489 @@ export const AssetsEditor: React.FC = () => {
                                         onChange={e => setSearchFilter(e.target.value)}
                                         style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '11px', width: '100%', color: '#4A5568' }}
                                     />
-                                </Flex>
-                            </Box>
+                                </div>
+                            </div>
 
                             {/* Status Card */}
-                            <Box bg="white" border="1px solid" borderColor={statusFilter !== '' ? 'green.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
-                                <Flex align="center" gap={1} mb={1.5}>
-                                    <Text fontSize="xs">📋</Text>
-                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Status</Text>
-                                    {statusFilter !== '' && <Badge size="xs" colorPalette="green" borderRadius="full">1</Badge>}
-                                </Flex>
-                                <Flex flexWrap="wrap" gap={1}>
+                            <div className={cn('min-h-[70px] rounded-md border bg-white p-2', statusFilter !== '' ? 'border-green-200' : 'border-slate-200')}>
+                                <div className="mb-1.5 flex items-center gap-1">
+                                    <span className="text-xs">📋</span>
+                                    <span className="text-[10px] font-semibold uppercase text-slate-600">Status</span>
+                                    {statusFilter !== '' && <Badge colorScheme="green" className="rounded-full text-[10px]">1</Badge>}
+                                </div>
+                                <div className="flex flex-wrap gap-1">
                                     {[{ v: '', l: 'All' }, { v: '0', l: 'Active' }, { v: '1', l: 'Inactive' }].map(opt => (
-                                        <Box key={opt.v} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
-                                            bg={statusFilter === opt.v ? 'green.100' : 'gray.50'}
-                                            color={statusFilter === opt.v ? 'green.700' : 'gray.600'}
-                                            border="1px solid" borderColor={statusFilter === opt.v ? 'green.300' : 'gray.200'}
-                                            _hover={{ bg: statusFilter === opt.v ? 'green.200' : 'gray.100' }}
+                                        <button
+                                            key={opt.v}
+                                            type="button"
+                                            className={cn(
+                                                'cursor-pointer rounded-sm border px-1.5 py-0.5 text-[10px] font-medium',
+                                                statusFilter === opt.v
+                                                    ? 'border-green-300 bg-green-100 text-green-700 hover:bg-green-200'
+                                                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                            )}
                                             onClick={() => setStatusFilter(opt.v)}
                                         >
                                             {statusFilter === opt.v && <LuCheck size={8} style={{ display: 'inline', marginRight: 2 }} />}
                                             {opt.l}
-                                        </Box>
+                                        </button>
                                     ))}
-                                </Flex>
-                            </Box>
+                                </div>
+                            </div>
 
                             {/* Type Card */}
-                            <Box bg="white" border="1px solid" borderColor={typeFilter ? 'purple.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
-                                <Flex align="center" gap={1} mb={1.5}>
-                                    <Text fontSize="xs">🏷️</Text>
-                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Type</Text>
-                                    {typeFilter && <Badge size="xs" colorPalette="purple" borderRadius="full">1</Badge>}
-                                </Flex>
-                                <Flex flexWrap="wrap" gap={1}>
+                            <div className={cn('min-h-[70px] rounded-md border bg-white p-2', typeFilter ? 'border-purple-200' : 'border-slate-200')}>
+                                <div className="mb-1.5 flex items-center gap-1">
+                                    <span className="text-xs">🏷️</span>
+                                    <span className="text-[10px] font-semibold uppercase text-slate-600">Type</span>
+                                    {typeFilter && <Badge colorScheme="purple" className="rounded-full text-[10px]">1</Badge>}
+                                </div>
+                                <div className="flex flex-wrap gap-1">
                                     {[{ v: '', l: 'All' }, { v: 'crypto', l: 'Crypto' }, { v: 'stock', l: 'Stock' }, { v: 'fiat', l: 'Fiat' }].map(opt => (
-                                        <Box key={opt.v} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
-                                            bg={typeFilter === opt.v ? 'purple.100' : 'gray.50'}
-                                            color={typeFilter === opt.v ? 'purple.700' : 'gray.600'}
-                                            border="1px solid" borderColor={typeFilter === opt.v ? 'purple.300' : 'gray.200'}
-                                            _hover={{ bg: typeFilter === opt.v ? 'purple.200' : 'gray.100' }}
+                                        <button
+                                            key={opt.v}
+                                            type="button"
+                                            className={cn(
+                                                'cursor-pointer rounded-sm border px-1.5 py-0.5 text-[10px] font-medium',
+                                                typeFilter === opt.v
+                                                    ? 'border-purple-300 bg-purple-100 text-purple-700 hover:bg-purple-200'
+                                                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                            )}
                                             onClick={() => setTypeFilter(opt.v)}
                                         >
                                             {typeFilter === opt.v && opt.v && <LuCheck size={8} style={{ display: 'inline', marginRight: 2 }} />}
                                             {opt.l}
-                                        </Box>
+                                        </button>
                                     ))}
-                                </Flex>
-                            </Box>
+                                </div>
+                            </div>
 
                             {/* Price Getter Card */}
-                            <Box bg="white" border="1px solid" borderColor={priceGetterFilter ? 'orange.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
-                                <Flex align="center" gap={1} mb={1.5}>
-                                    <Text fontSize="xs">💰</Text>
-                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Price Getters</Text>
-                                    {priceGetterFilter && <Badge size="xs" colorPalette="orange" borderRadius="full">1</Badge>}
-                                </Flex>
-                                <Flex flexWrap="wrap" gap={1}>
+                            <div className={cn('min-h-[70px] rounded-md border bg-white p-2', priceGetterFilter ? 'border-orange-200' : 'border-slate-200')}>
+                                <div className="mb-1.5 flex items-center gap-1">
+                                    <span className="text-xs">💰</span>
+                                    <span className="text-[10px] font-semibold uppercase text-slate-600">Price Getters</span>
+                                    {priceGetterFilter && <Badge colorScheme="orange" className="rounded-full text-[10px]">1</Badge>}
+                                </div>
+                                <div className="flex flex-wrap gap-1">
                                     {[{ v: '', l: 'All' }, { v: 'has', l: 'Has any' }, { v: 'none', l: 'None' }, ...availableGetters.map(g => ({ v: g, l: g }))].map(opt => (
-                                        <Box key={opt.v} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
-                                            bg={priceGetterFilter === opt.v ? 'orange.100' : 'gray.50'}
-                                            color={priceGetterFilter === opt.v ? 'orange.700' : 'gray.600'}
-                                            border="1px solid" borderColor={priceGetterFilter === opt.v ? 'orange.300' : 'gray.200'}
-                                            _hover={{ bg: priceGetterFilter === opt.v ? 'orange.200' : 'gray.100' }}
+                                        <button
+                                            key={opt.v}
+                                            type="button"
+                                            className={cn(
+                                                'cursor-pointer rounded-sm border px-1.5 py-0.5 text-[10px] font-medium',
+                                                priceGetterFilter === opt.v
+                                                    ? 'border-orange-300 bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                            )}
                                             onClick={() => setPriceGetterFilter(opt.v)}
                                         >
                                             {priceGetterFilter === opt.v && opt.v && <LuCheck size={8} style={{ display: 'inline', marginRight: 2 }} />}
                                             {opt.l}
-                                        </Box>
+                                        </button>
                                     ))}
-                                </Flex>
-                            </Box>
+                                </div>
+                            </div>
 
                             {/* Categories Card (spans 2 cols) */}
-                            <Box
-                                bg="white" border="1px solid" borderColor={categoryFilter.size > 0 ? 'teal.200' : 'gray.200'}
-                                borderRadius="md" p={2} minH="70px"
-                                gridColumn={{ base: 'span 1', md: 'span 2' }}
+                            <div
+                                className={cn(
+                                    'col-span-1 min-h-[70px] rounded-md border bg-white p-2 md:col-span-2',
+                                    categoryFilter.size > 0 ? 'border-green-200' : 'border-slate-200'
+                                )}
                             >
-                                <Flex align="center" justify="space-between" mb={1.5}>
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="xs">📁</Text>
-                                        <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Categories</Text>
-                                        {categoryFilter.size > 0 && <Badge size="xs" colorPalette="teal" borderRadius="full">{categoryFilter.size}</Badge>}
-                                    </Flex>
+                                <div className="mb-1.5 flex items-center justify-between">
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-xs">📁</span>
+                                        <span className="text-[10px] font-semibold uppercase text-slate-600">Categories</span>
+                                        {categoryFilter.size > 0 && <Badge colorScheme="green" className="text-[10px]">{categoryFilter.size}</Badge>}
+                                    </div>
                                     {categoryFilter.size > 0 && (
-                                        <Button size="xs" variant="ghost" onClick={() => setCategoryFilter(new Set())} fontSize="2xs">Clear</Button>
+                                        <Button size="sm" variant="ghost" onClick={() => setCategoryFilter(new Set())} className="text-[10px]">Clear</Button>
                                     )}
-                                </Flex>
+                                </div>
                                 {dimensionData.length === 0 ? (
-                                    <Text fontSize="xs" color="gray.400">No categories available</Text>
+                                    <span className="text-xs text-slate-400">No categories available</span>
                                 ) : (
-                                    <Flex direction="column" gap={1.5}>
+                                    <div className="flex flex-col gap-1.5">
                                         {dimensionData.map(dim => (
-                                            <Box key={dim.id}>
-                                                <Flex align="center" gap={1} cursor="pointer" onClick={() => toggleFilterDimension(String(dim.id))} _hover={{ bg: 'gray.50' }} p={0.5} borderRadius="sm">
-                                                    <Text fontSize="2xs">{expandedDimensions.has(String(dim.id)) ? '▼' : '▶'}</Text>
-                                                    <Text fontSize="2xs" fontWeight="medium">{dim.label}</Text>
+                                            <div key={dim.id}>
+                                                <div className="flex cursor-pointer items-center gap-1 rounded-sm p-0.5 hover:bg-slate-50" onClick={() => toggleFilterDimension(String(dim.id))}>
+                                                    <span className="text-[10px]">{expandedDimensions.has(String(dim.id)) ? '▼' : '▶'}</span>
+                                                    <span className="text-[10px] font-medium">{dim.label}</span>
                                                     {dim.categories.some(c => categoryFilter.has(c.id)) && (
-                                                        <Badge size="xs" colorPalette="teal">{dim.categories.filter(c => categoryFilter.has(c.id)).length}</Badge>
+                                                        <Badge colorScheme="green" className="text-[10px]">{dim.categories.filter(c => categoryFilter.has(c.id)).length}</Badge>
                                                     )}
-                                                </Flex>
+                                                </div>
                                                 {expandedDimensions.has(String(dim.id)) && (
-                                                    <Flex gap={1} flexWrap="wrap" ml={4} mt={0.5}>
+                                                    <div className="ml-4 mt-0.5 flex flex-wrap gap-1">
                                                         {dim.categories.map(cat => (
-                                                            <Box key={cat.id} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
+                                                            <button
+                                                                key={cat.id}
+                                                                type="button"
+                                                                className="cursor-pointer rounded-sm px-1.5 py-0.5 text-[10px] font-medium"
                                                                 style={categoryFilter.has(cat.id) ? { backgroundColor: cat.color || '#319795', color: '#fff' } : { backgroundColor: '#EDF2F7', color: '#4A5568' }}
                                                                 onClick={() => toggleFilterCategory(cat.id)}
                                                             >
                                                                 {categoryFilter.has(cat.id) && '✓ '}{cat.label}
-                                                            </Box>
+                                                            </button>
                                                         ))}
-                                                    </Flex>
+                                                    </div>
                                                 )}
-                                            </Box>
+                                            </div>
                                         ))}
-                                    </Flex>
+                                    </div>
                                 )}
-                            </Box>
-                        </SimpleGrid>
-                    </Box>
+                            </div>
+                        </div>
+                    </div>
                 )}
-            </Box>
+            </div>
+
 
             {/* ============ Floating Bulk Actions Bar ============ */}
-            {selectedIds.size > 0 && (
-                <Portal>
-                    <Box
-                        position="fixed"
-                        bottom={0}
-                        left={0}
-                        right={0}
-                        zIndex={1000}
-                        bg="rgba(255, 255, 255, 0.85)"
-                        backdropFilter="blur(8px)"
-                        borderTop="1px solid"
-                        borderColor="gray.200"
-                        boxShadow="0 -2px 8px rgba(0,0,0,0.08)"
-                        animation="slideUp 150ms ease-out"
-                        css={{
-                            '@keyframes slideUp': {
-                                from: { transform: 'translateY(100%)' },
-                                to: { transform: 'translateY(0)' },
-                            },
-                        }}
-                    >
-                        <Box maxW="1400px" mx="auto" px={4} py={1.5}>
-                            <Flex justify="space-between" align="center" flexWrap="wrap" gap={1.5}>
-                                <Text fontWeight="semibold" color="blue.700" fontSize="xs">
-                                    {selectedIds.size} asset{selectedIds.size > 1 ? 's' : ''} selected
-                                </Text>
-                                <Flex gap={1} flexWrap="wrap" align="center">
-                                    <Button size="2xs" fontSize="xs" colorPalette="blue" variant="outline" onClick={() => { setBulkStatus(0); setShowBulkStatusDialog(true); }}>
-                                        ✓ Status
-                                    </Button>
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
-                                    <Button size="2xs" fontSize="xs" colorPalette="purple" variant="outline" onClick={() => { setBulkType(''); setShowBulkTypeDialog(true); }}>
-                                        🏷️ Type
-                                    </Button>
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
-                                    <Button size="2xs" fontSize="xs" colorPalette="teal" variant="outline" onClick={() => { setBulkCategoryIds(new Set()); setBulkCategoryMode('add'); setShowBulkCategoriesDialog(true); }}>
-                                        📁 Categories
-                                    </Button>
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
-                                    <Button size="2xs" fontSize="xs" colorPalette="orange" variant="outline" onClick={() => { setBulkPriceGetter({ price_getter: availableGetters[0] || '', external_id: '', priority: 100 }); setShowBulkPriceGettersDialog(true); }}>
-                                        💰 Getters
-                                    </Button>
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
-                                    <Button size="2xs" fontSize="xs" colorPalette="red" variant="outline" onClick={() => { fetchDeletionImpact(Array.from(selectedIds)); setShowBulkDeleteDialog(true); }}>
-                                        🗑️ Delete
-                                    </Button>
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
-                                    <Button size="2xs" fontSize="xs" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-                                        ✕
-                                    </Button>
-                                </Flex>
-                            </Flex>
-                        </Box>
-                    </Box>
-                </Portal>
+            {selectedIds.size > 0 && createPortal(
+                <div className="animate-slide-up fixed inset-x-0 bottom-0 z-[1000] border-t border-slate-200 backdrop-blur-sm" style={{ backgroundColor: 'rgba(255, 255, 255, 0.85)', boxShadow: '0 -2px 8px rgba(0,0,0,0.08)' }}>
+                    <div className="mx-auto max-w-[1400px] px-4 py-1.5">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                            <span className="text-xs font-semibold text-blue-700">
+                                {selectedIds.size} asset{selectedIds.size > 1 ? 's' : ''} selected
+                            </span>
+                            <div className="flex flex-wrap items-center gap-1">
+                                <button type="button" className="inline-flex items-center gap-1 rounded-sm border border-blue-300 px-1.5 py-0.5 text-xs text-blue-700 hover:bg-blue-50" onClick={() => { setBulkStatus(0); setShowBulkStatusDialog(true); }}>
+                                    ✓ Status
+                                </button>
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+                                <button type="button" className="inline-flex items-center gap-1 rounded-sm border border-purple-300 px-1.5 py-0.5 text-xs text-purple-700 hover:bg-purple-50" onClick={() => { setBulkType(''); setShowBulkTypeDialog(true); }}>
+                                    🏷️ Type
+                                </button>
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+                                <button type="button" className="inline-flex items-center gap-1 rounded-sm border border-green-300 px-1.5 py-0.5 text-xs text-green-700 hover:bg-green-50" onClick={() => { setBulkCategoryIds(new Set()); setBulkCategoryMode('add'); setShowBulkCategoriesDialog(true); }}>
+                                    📁 Categories
+                                </button>
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+                                <button type="button" className="inline-flex items-center gap-1 rounded-sm border border-orange-300 px-1.5 py-0.5 text-xs text-orange-700 hover:bg-orange-50" onClick={() => { setBulkPriceGetter({ price_getter: availableGetters[0] || '', external_id: '', priority: 100 }); setShowBulkPriceGettersDialog(true); }}>
+                                    💰 Getters
+                                </button>
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+                                <button type="button" className="inline-flex items-center gap-1 rounded-sm border border-red-300 px-1.5 py-0.5 text-xs text-red-700 hover:bg-red-50" onClick={() => { fetchDeletionImpact(Array.from(selectedIds)); setShowBulkDeleteDialog(true); }}>
+                                    🗑️ Delete
+                                </button>
+                                <div className="mx-0.5 h-4 border-l border-slate-300" />
+                                <button type="button" className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs text-slate-500 hover:text-slate-700" onClick={() => setSelectedIds(new Set())}>
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>,
+                document.body
             )}
 
-            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" fontSize="xs" pb={selectedIds.size > 0 ? '48px' : '0'}>
+            <div className="relative overflow-x-auto rounded-md bg-white text-xs shadow-sm" style={{ paddingBottom: selectedIds.size > 0 ? '48px' : '0' }}>
                 {/* Pagination bar (top) */}
                 {totalRows > PAGE_SIZE_OPTIONS[0] && (
-                    <Box borderBottom="1px solid" borderColor="gray.100">
-                        <Flex justify="space-between" align="center" width="100%" py={1.5} px={3}>
-                            <Flex align="center" gap={2}>
-                                <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                    <div className="border-b border-slate-100">
+                        <div className="flex w-full items-center justify-between px-3 py-1.5">
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500">Rows:</span>
+                                <div className="inline-flex overflow-hidden rounded-md border border-slate-200">
                                     {PAGE_SIZE_OPTIONS.map((size) => (
                                         <Button
                                             key={size}
-                                            size="2xs"
+                                            size="sm"
                                             variant={pageSize === size ? 'subtle' : 'ghost'}
-                                            colorPalette={pageSize === size ? 'blue' : 'gray'}
-                                            borderRadius="0"
+                                            colorScheme={pageSize === size ? 'blue' : 'gray'}
+                                            className="rounded-none px-2 text-xs"
                                             onClick={() => { setPageSize(size); setPage(0); }}
-                                            px={2}
-                                            fontSize="xs"
                                         >
                                             {size}
                                         </Button>
                                     ))}
-                                </Flex>
-                            </Flex>
-                            <Text fontSize="2xs" color="gray.500">
+                                </div>
+                            </div>
+
+                            <span className="text-[10px] text-slate-500">
                                 {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
-                            </Text>
-                            <Flex align="center" gap={1}>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <Button size="sm" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} className="px-1">
                                     <LuChevronsLeft size={12} />
                                 </Button>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                                <Button size="sm" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="px-1">
                                     <LuChevronLeft size={14} />
                                 </Button>
-                                <Text fontSize="xs" color="gray.600" mx={1}>
+                                <span className="mx-1 text-xs text-slate-600">
                                     {safePage + 1} / {pageCount}
-                                </Text>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                                </span>
+                                <Button size="sm" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className="px-1">
                                     <LuChevronRight size={14} />
                                 </Button>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                                <Button size="sm" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} className="px-1">
                                     <LuChevronsRight size={12} />
                                 </Button>
-                            </Flex>
-                        </Flex>
-                    </Box>
+                            </div>
+                        </div>
+                    </div>
                 )}
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader width="30px">
-                                <Checkbox.Root
+                <table className="w-full">
+                    <thead>
+                        <tr>
+                            <th className="w-[30px]">
+                                <input
+                                    type="checkbox"
+                                    title="Select all assets"
+                                    className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
                                     checked={assets.length > 0 && selectedIds.size === assets.length}
-                                    onCheckedChange={toggleSelectAll}
-                                >
-                                    <Checkbox.HiddenInput />
-                                    <Checkbox.Control />
-                                </Checkbox.Root>
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader width="50px">ID</Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px">Symbol</Table.ColumnHeader>
-                            <Table.ColumnHeader width="180px">Label</Table.ColumnHeader>
-                            <Table.ColumnHeader width="100px">ISIN</Table.ColumnHeader>
-                            <Table.ColumnHeader width="60px">Type</Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px">Currency</Table.ColumnHeader>
-                            <Table.ColumnHeader width="280px">Categories</Table.ColumnHeader>
-                            <Table.ColumnHeader width="100px">Getters</Table.ColumnHeader>
-                            <Table.ColumnHeader width="70px">Txns</Table.ColumnHeader>
-                            <Table.ColumnHeader width="60px">Status</Table.ColumnHeader>
-                            <Table.ColumnHeader width="40px"></Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+                                    onChange={toggleSelectAll}
+                                />
+                            </th>
+                            <th className="w-[50px]">ID</th>
+                            <th className="w-[80px]">Symbol</th>
+                            <th className="w-[180px]">Label</th>
+                            <th className="w-[100px]">ISIN</th>
+                            <th className="w-[60px]">Type</th>
+                            <th className="w-[80px]">Currency</th>
+                            <th className="w-[280px]">Categories</th>
+                            <th className="w-[100px]">Getters</th>
+                            <th className="w-[70px]">Txns</th>
+                            <th className="w-[60px]">Status</th>
+                            <th className="w-[40px]"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {assets.length === 0 ? (
-                            <Table.Row>
-                                <Table.Cell colSpan={12}>
-                                    <Text textAlign="center" py={8} color="gray.500">
+                            <tr>
+                                <td colSpan={12}>
+                                    <span className="block py-8 text-center text-slate-500">
                                         {allAssets.length === 0 ? 'No assets found' : 'No assets match filters'}
-                                    </Text>
-                                </Table.Cell>
-                            </Table.Row>
+                                    </span>
+                                </td>
+                            </tr>
                         ) : (
                             paginatedAssets.map(asset => (
-                                <Table.Row key={asset.asset_id} bg={selectedIds.has(asset.asset_id!) ? 'blue.50' : undefined}>
-                                    <Table.Cell>
-                                        <Checkbox.Root
+                                <tr key={asset.asset_id} className={selectedIds.has(asset.asset_id!) ? 'bg-blue-50' : undefined}>
+                                    <td>
+                                        <input
+                                            type="checkbox"
+                                            title={`Select ${asset.symbol}`}
+                                            className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
                                             checked={selectedIds.has(asset.asset_id!)}
-                                            onCheckedChange={() => toggleSelectAsset(asset.asset_id!)}
-                                        >
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control />
-                                        </Checkbox.Root>
-                                    </Table.Cell>
-                                    <Table.Cell>{asset.asset_id}</Table.Cell>
+                                            onChange={() => toggleSelectAsset(asset.asset_id!)}
+                                        />
+                                    </td>
+                                    <td>{asset.asset_id}</td>
                                     {/* Click-to-edit: Symbol */}
-                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'symbol', asset.symbol)}>
+                                    <td className="cursor-pointer" onClick={() => startCellEdit(asset.asset_id!, 'symbol', asset.symbol)}>
                                         {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'symbol' ? (
-                                            <Input size="sm" autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
+                                            <Input autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
                                                 onBlur={saveCellEdit} onKeyDown={handleCellKeyDown} />
                                         ) : (
-                                            <Badge colorPalette="blue">{asset.symbol}</Badge>
+                                            <Badge colorScheme="blue">{asset.symbol}</Badge>
                                         )}
-                                    </Table.Cell>
+                                    </td>
                                     {/* Click-to-edit: Label */}
-                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'label', asset.label || '')}>
+                                    <td className="cursor-pointer" onClick={() => startCellEdit(asset.asset_id!, 'label', asset.label || '')}>
                                         {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'label' ? (
-                                            <Input size="sm" autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
+                                            <Input autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
                                                 onBlur={saveCellEdit} onKeyDown={handleCellKeyDown} />
                                         ) : (
-                                            <Text _hover={{ color: 'blue.600' }}>{asset.label || '-'}</Text>
+                                            <span className="hover:text-blue-600">{asset.label || '-'}</span>
                                         )}
-                                    </Table.Cell>
+                                    </td>
                                     {/* Click-to-edit: ISIN */}
-                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'isin', asset.isin || '')}>
+                                    <td className="cursor-pointer" onClick={() => startCellEdit(asset.asset_id!, 'isin', asset.isin || '')}>
                                         {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'isin' ? (
-                                            <Input size="sm" autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
+                                            <Input autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
                                                 onBlur={saveCellEdit} onKeyDown={handleCellKeyDown} />
                                         ) : (
-                                            <Text fontSize="xs" color={asset.isin ? undefined : 'gray.400'} _hover={{ color: 'blue.600' }}>{asset.isin || '-'}</Text>
+                                            <span className={cn('text-xs hover:text-blue-600', !asset.isin && 'text-slate-400')}>{asset.isin || '-'}</span>
                                         )}
-                                    </Table.Cell>
+                                    </td>
                                     {/* Click-to-edit: Type */}
-                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'price_type', asset.price_type || '')}>
+                                    <td className="cursor-pointer" onClick={() => startCellEdit(asset.asset_id!, 'price_type', asset.price_type || '')}>
                                         {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'price_type' ? (
-                                            <NativeSelect.Root size="sm">
-                                                <NativeSelect.Field autoFocus value={cellValue}
-                                                    onChange={e => { setCellValue(e.target.value); }}
-                                                    onBlur={saveCellEdit}
-                                                >
-                                                    <option value="crypto">Crypto</option>
-                                                    <option value="stock">Stock</option>
-                                                    <option value="fiat">Fiat</option>
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
+                                            <select
+                                                autoFocus
+                                                className="h-8 border border-slate-300 px-2 text-sm"
+                                                value={cellValue}
+                                                onChange={e => { setCellValue(e.target.value); }}
+                                                onBlur={saveCellEdit}
+                                            >
+                                                <option value="crypto">Crypto</option>
+                                                <option value="stock">Stock</option>
+                                                <option value="fiat">Fiat</option>
+                                            </select>
                                         ) : (
-                                            <Tag.Root size="sm" colorPalette={
+                                            <Badge colorScheme={
                                                 asset.price_type === 'crypto' ? 'orange' :
                                                     asset.price_type === 'stock' ? 'blue' :
                                                         asset.price_type === 'fiat' ? 'green' : 'gray'
                                             }>
-                                                <Tag.Label>{asset.price_type || '-'}</Tag.Label>
-                                            </Tag.Root>
+                                                {asset.price_type || '-'}
+                                            </Badge>
                                         )}
-                                    </Table.Cell>
+                                    </td>
                                     {/* Click-to-edit: Denomination Currency */}
-                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'denomination_currency_id', String(asset.denomination_currency_id ?? ''))}>
+                                    <td className="cursor-pointer" onClick={() => startCellEdit(asset.asset_id!, 'denomination_currency_id', String(asset.denomination_currency_id ?? ''))}>
                                         {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'denomination_currency_id' ? (
-                                            <NativeSelect.Root size="sm">
-                                                <NativeSelect.Field autoFocus value={cellValue}
-                                                    onChange={e => setCellValue(e.target.value)}
-                                                    onBlur={saveCellEdit}
-                                                >
-                                                    <option value="">—</option>
-                                                    {allAssets.filter(a => a.price_type === 'fiat' && a.asset_id).map(a => (
-                                                        <option key={a.asset_id} value={String(a.asset_id)}>
-                                                            {a.symbol}
-                                                        </option>
-                                                    ))}
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
+                                            <select
+                                                autoFocus
+                                                className="h-8 border border-slate-300 px-2 text-sm"
+                                                value={cellValue}
+                                                onChange={e => setCellValue(e.target.value)}
+                                                onBlur={saveCellEdit}
+                                            >
+                                                <option value="">—</option>
+                                                {allAssets.filter(a => a.price_type === 'fiat' && a.asset_id).map(a => (
+                                                    <option key={a.asset_id} value={String(a.asset_id)}>
+                                                        {a.symbol}
+                                                    </option>
+                                                ))}
+                                            </select>
                                         ) : (
-                                            <Badge colorPalette={asset.denomination_currency ? 'teal' : 'gray'} size="sm">
+                                            <Badge colorScheme={asset.denomination_currency ? 'green' : 'gray'}>
                                                 {asset.denomination_currency?.symbol || '-'}
                                             </Badge>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Flex align="center" gap={2}>
+                                    </td>
+                                    <td>
+                                        <div className="flex items-center gap-2">
                                             {renderAssetCategories(asset)}
-                                            <IconButton
-                                                size="xs"
-                                                variant="ghost"
-                                                aria-label="Manage categories"
+                                            <button
+                                                type="button"
+                                                className="flex h-4 min-w-[16px] items-center justify-center p-0 text-slate-500 hover:text-slate-700"
                                                 onClick={() => openCategoriesDialog(asset)}
                                                 title="Manage categories"
                                             >
-                                                <Icon as={LuTags} boxSize={3.5} />
-                                            </IconButton>
-                                        </Flex>
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <Flex align="center" gap={2}>
+                                                <LuTags className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div className="flex items-center gap-2">
                                             {renderPriceGetters(asset)}
-                                            <IconButton
-                                                size="xs"
-                                                variant="ghost"
-                                                aria-label="Configure price getters"
+                                            <button
+                                                type="button"
+                                                className="flex h-4 min-w-[16px] items-center justify-center p-0 text-slate-500 hover:text-slate-700"
                                                 onClick={() => openGettersDialog(asset)}
+                                                title="Configure price getters"
                                             >
-                                                <Icon as={LuSettings} boxSize={3.5} />
-                                            </IconButton>
-                                        </Flex>
-                                    </Table.Cell>
+                                                <LuSettings className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    </td>
                                     {/* Transaction count */}
-                                    <Table.Cell>
+                                    <td>
                                         {(() => {
                                             const count = txCountsByAssetId[asset.asset_id!] ?? 0;
                                             return count > 0 ? (
                                                 <Badge
-                                                    colorPalette="purple"
-                                                    cursor="pointer"
-                                                    _hover={{ opacity: 0.8 }}
+                                                    colorScheme="purple"
+                                                    className="cursor-pointer hover:opacity-80"
                                                     onClick={() => setDrawerAsset({ id: asset.asset_id!, symbol: asset.symbol })}
                                                     title={`View ${count} transactions for ${asset.symbol}`}
                                                 >
                                                     {count}
                                                 </Badge>
                                             ) : (
-                                                <Text color="gray.400" fontSize="xs">0</Text>
+                                                <span className="text-xs text-slate-400">0</span>
                                             );
                                         })()}
-                                    </Table.Cell>
+                                    </td>
                                     {/* Click-to-edit: Status */}
-                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'status', String(asset.status ?? 0))}>
+                                    <td className="cursor-pointer" onClick={() => startCellEdit(asset.asset_id!, 'status', String(asset.status ?? 0))}>
                                         {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'status' ? (
-                                            <NativeSelect.Root size="sm">
-                                                <NativeSelect.Field autoFocus value={cellValue}
-                                                    onChange={e => setCellValue(e.target.value)}
-                                                    onBlur={saveCellEdit}
-                                                >
-                                                    <option value="0">Active</option>
-                                                    <option value="1">Inactive</option>
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
+                                            <select
+                                                autoFocus
+                                                className="h-8 border border-slate-300 px-2 text-sm"
+                                                value={cellValue}
+                                                onChange={e => setCellValue(e.target.value)}
+                                                onBlur={saveCellEdit}
+                                            >
+                                                <option value="0">Active</option>
+                                                <option value="1">Inactive</option>
+                                            </select>
                                         ) : (
-                                            <Badge colorPalette={asset.status === 0 ? 'green' : 'gray'}>
+                                            <Badge colorScheme={asset.status === 0 ? 'green' : 'gray'}>
                                                 {asset.status === 0 ? 'Active' : 'Inactive'}
                                             </Badge>
                                         )}
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <IconButton
-                                            size="xs"
-                                            variant="ghost"
-                                            colorPalette="red"
-                                            aria-label="Delete asset"
+                                    </td>
+                                    <td>
+                                        <button
+                                            type="button"
+                                            className="flex h-4 min-w-[16px] items-center justify-center p-0 text-red-500 hover:text-red-700"
                                             onClick={() => deleteAsset(asset.asset_id!, asset.symbol)}
+                                            title="Delete asset"
                                         >
-                                            <Icon as={LuTrash2} boxSize={3.5} />
-                                        </IconButton>
-                                    </Table.Cell>
-                                </Table.Row>
+                                            <LuTrash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                    </td>
+                                </tr>
                             ))
                         )}
-                    </Table.Body>
-                </Table.Root>
+                    </tbody>
+                </table>
                 {/* Pagination bar (bottom) */}
                 {totalRows > PAGE_SIZE_OPTIONS[0] && (
-                    <Box borderTop="1px solid" borderColor="gray.100">
-                        <Flex justify="space-between" align="center" width="100%" py={1.5} px={3}>
-                            <Flex align="center" gap={2}>
-                                <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                    <div className="border-t border-slate-100">
+                        <div className="flex w-full items-center justify-between px-3 py-1.5">
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500">Rows:</span>
+                                <div className="inline-flex overflow-hidden rounded-md border border-slate-200">
                                     {PAGE_SIZE_OPTIONS.map((size) => (
                                         <Button
                                             key={size}
-                                            size="2xs"
+                                            size="sm"
                                             variant={pageSize === size ? 'subtle' : 'ghost'}
-                                            colorPalette={pageSize === size ? 'blue' : 'gray'}
-                                            borderRadius="0"
+                                            colorScheme={pageSize === size ? 'blue' : 'gray'}
+                                            className="rounded-none px-2 text-xs"
                                             onClick={() => { setPageSize(size); setPage(0); }}
-                                            px={2}
-                                            fontSize="xs"
                                         >
                                             {size}
                                         </Button>
                                     ))}
-                                </Flex>
-                            </Flex>
-                            <Text fontSize="2xs" color="gray.500">
+                                </div>
+                            </div>
+                            <span className="text-[10px] text-slate-500">
                                 {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
-                            </Text>
-                            <Flex align="center" gap={1}>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <Button size="sm" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} className="px-1">
                                     <LuChevronsLeft size={12} />
                                 </Button>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                                <Button size="sm" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="px-1">
                                     <LuChevronLeft size={14} />
                                 </Button>
-                                <Text fontSize="xs" color="gray.600" mx={1}>
+                                <span className="mx-1 text-xs text-slate-600">
                                     {safePage + 1} / {pageCount}
-                                </Text>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                                </span>
+                                <Button size="sm" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className="px-1">
                                     <LuChevronRight size={14} />
                                 </Button>
-                                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                                <Button size="sm" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} className="px-1">
                                     <LuChevronsRight size={12} />
                                 </Button>
-                            </Flex>
-                        </Flex>
-                    </Box>
+                            </div>
+                        </div>
+                    </div>
                 )}
-            </Box>
+            </div>
 
-            <Box mt={2} p={2} bg="white" borderRadius="md" boxShadow="sm">
-                <Flex justify="space-between" align="center">
-                    <Text fontSize="xs" color="gray.600">
+            <div className="mt-2 rounded-md bg-white p-2 shadow-sm">
+                <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-600">
                         <strong>Showing:</strong> {assets.length} of {allAssets.length} assets
                         {hasActiveFilters && ' (filtered)'}
-                    </Text>
+                    </span>
                     {selectedIds.size > 0 && (
-                        <Text fontSize="sm" color="blue.600">
+                        <span className="text-sm text-blue-600">
                             <strong>{selectedIds.size}</strong> selected
-                        </Text>
+                        </span>
                     )}
-                </Flex>
-            </Box>
+                </div>
+            </div>
 
             {/* Create Asset Dialog — delegated to canonical AssetFormDialog */}
             <AssetFormDialog
@@ -1765,1324 +1739,1253 @@ export const AssetsEditor: React.FC = () => {
             />
 
             {/* Price Getters Dialog */}
-            <Dialog.Root open={showGettersDialog} onOpenChange={(e) => setShowGettersDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxWidth="750px">
-                            <Dialog.Header>
-                                <Dialog.Title>
-                                    Price Getters for {selectedAsset?.symbol}
-                                </Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text fontSize="sm" color="gray.600" mb={4}>
-                                    Configure price sources for this asset. Lower priority numbers are tried first.
-                                    If no getters are configured, the default (Yahoo) will be used.
-                                </Text>
+            <RadixDialog.Root open={showGettersDialog} onOpenChange={(open) => setShowGettersDialog(open)}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[750px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">
+                                Price Getters for {selectedAsset?.symbol}
+                            </RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <span className="mb-4 block text-sm text-slate-600">
+                                Configure price sources for this asset. Lower priority numbers are tried first.
+                                If no getters are configured, the default (Yahoo) will be used.
+                            </span>
 
-                                {/* Current getters */}
-                                {selectedAsset?.price_getters && selectedAsset.price_getters.length > 0 && (
-                                    <Box mb={6}>
-                                        <Text fontWeight="medium" mb={2}>Current Price Getters:</Text>
-                                        <Box overflowX="auto">
-                                            <Table.Root size="sm">
-                                                <Table.Header>
-                                                    <Table.Row>
-                                                        <Table.ColumnHeader>Source</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>External ID</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Parameters</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Priority</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Enabled</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Test</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Actions</Table.ColumnHeader>
-                                                    </Table.Row>
-                                                </Table.Header>
-                                                <Table.Body>
-                                                    {selectedAsset.price_getters.map(pg => {
-                                                        const isEditing = editingGetterId === pg.id;
-                                                        const isMock = pg.price_getter === 'mock';
-                                                        const autoResult = autoTestResults[pg.id];
+                            {/* Current getters */}
+                            {selectedAsset?.price_getters && selectedAsset.price_getters.length > 0 && (
+                                <div className="mb-6">
+                                    <span className="mb-2 block font-medium">Current Price Getters:</span>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr>
+                                                    <th>Source</th>
+                                                    <th>External ID</th>
+                                                    <th>Parameters</th>
+                                                    <th>Priority</th>
+                                                    <th>Enabled</th>
+                                                    <th>Test</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {selectedAsset.price_getters.map(pg => {
+                                                    const isEditing = editingGetterId === pg.id;
+                                                    const isMock = pg.price_getter === 'mock';
+                                                    const autoResult = autoTestResults[pg.id];
 
-                                                        // For mock getters, show min/max params specially
-                                                        const mockMin = pg.params?.min_price;
-                                                        const mockMax = pg.params?.max_price;
-                                                        const mockPrices = pg.params?.prices as Record<string, number> | undefined;
-                                                        const hasConfiguredPrices = isMock && mockPrices && typeof mockPrices === 'object' && Object.keys(mockPrices).length > 0;
-                                                        const mockQuoteCurrency = pg.params?.quote_currency as string | undefined;
+                                                    // For mock getters, show min/max params specially
+                                                    const mockMin = pg.params?.min_price;
+                                                    const mockMax = pg.params?.max_price;
+                                                    const mockPrices = pg.params?.prices as Record<string, number> | undefined;
+                                                    const hasConfiguredPrices = isMock && mockPrices && typeof mockPrices === 'object' && Object.keys(mockPrices).length > 0;
+                                                    const mockQuoteCurrency = pg.params?.quote_currency as string | undefined;
 
-                                                        // Non-mock params display
-                                                        const paramsEntries = Object.entries(pg.params || {}).filter(
-                                                            ([k]) => !isMock || (k !== 'min_price' && k !== 'max_price')
-                                                        );
-                                                        const hasParams = isMock ? (mockMin != null || mockMax != null || hasConfiguredPrices) : paramsEntries.length > 0;
+                                                    // Non-mock params display
+                                                    const paramsEntries = Object.entries(pg.params || {}).filter(
+                                                        ([k]) => !isMock || (k !== 'min_price' && k !== 'max_price')
+                                                    );
+                                                    const hasParams = isMock ? (mockMin != null || mockMax != null || hasConfiguredPrices) : paramsEntries.length > 0;
 
-                                                        return (
-                                                            <Table.Row key={pg.id}>
-                                                                <Table.Cell>
-                                                                    <Badge colorPalette={isMock ? 'orange' : 'purple'}>{pg.price_getter}</Badge>
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    {isEditing ? (
-                                                                        <Input
-                                                                            size="sm"
-                                                                            value={editingValues.external_id}
-                                                                            onChange={(e) => setEditingValues(v => ({ ...v, external_id: e.target.value }))}
-                                                                            placeholder="e.g. BTC-USD"
-                                                                            fontFamily="mono"
-                                                                            width="120px"
-                                                                        />
-                                                                    ) : (
-                                                                        <Text fontSize="sm" fontFamily="mono">
-                                                                            {pg.external_id || <Text as="span" color="gray.400">(auto)</Text>}
-                                                                        </Text>
-                                                                    )}
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    {isEditing && isMock && !hasConfiguredPrices ? (
-                                                                        /* Mock getter: min/max text boxes */
-                                                                        (() => {
-                                                                            let minVal: number | string = '', maxVal: number | string = '';
-                                                                            try { const p = JSON.parse(editingValues.params); minVal = p.min_price ?? ''; maxVal = p.max_price ?? ''; } catch { /* ignore */ }
-                                                                            return (
-                                                                                <Flex gap={1} align="center">
-                                                                                    <Input
-                                                                                        size="sm"
-                                                                                        type="number"
-                                                                                        placeholder="Min"
-                                                                                        width="80px"
-                                                                                        fontSize="xs"
-                                                                                        value={minVal}
-                                                                                        onChange={(e) => {
-                                                                                            try {
-                                                                                                const p = JSON.parse(editingValues.params || '{}');
-                                                                                                p.min_price = e.target.value ? parseFloat(e.target.value) : 0;
-                                                                                                setEditingValues(v => ({ ...v, params: JSON.stringify(p) }));
-                                                                                            } catch { /* ignore */ }
-                                                                                        }}
-                                                                                    />
-                                                                                    <Text fontSize="xs" color="gray.400">–</Text>
-                                                                                    <Input
-                                                                                        size="sm"
-                                                                                        type="number"
-                                                                                        placeholder="Max"
-                                                                                        width="80px"
-                                                                                        fontSize="xs"
-                                                                                        value={maxVal}
-                                                                                        onChange={(e) => {
-                                                                                            try {
-                                                                                                const p = JSON.parse(editingValues.params || '{}');
-                                                                                                p.max_price = e.target.value ? parseFloat(e.target.value) : 0;
-                                                                                                setEditingValues(v => ({ ...v, params: JSON.stringify(p) }));
-                                                                                            } catch { /* ignore */ }
-                                                                                        }}
-                                                                                    />
-                                                                                </Flex>
-                                                                            );
-                                                                        })()
-                                                                    ) : isEditing ? (
-                                                                        <Textarea
-                                                                            size="sm"
-                                                                            value={editingValues.params}
-                                                                            onChange={(e) => setEditingValues(v => ({ ...v, params: e.target.value }))}
-                                                                            placeholder='{"key": "value"}'
-                                                                            fontFamily="mono"
-                                                                            fontSize="xs"
-                                                                            rows={2}
-                                                                            width="150px"
-                                                                        />
-                                                                    ) : isMock && hasConfiguredPrices ? (
-                                                                        /* Mock getter: deterministic prices summary */
-                                                                        <Tooltip content={
-                                                                            <Box fontFamily="mono" fontSize="xs" whiteSpace="pre">
-                                                                                {Object.entries(mockPrices!).map(([k, v]) => (
-                                                                                    <Box key={k}>{k} → {v}</Box>
-                                                                                ))}
-                                                                            </Box>
-                                                                        } showArrow>
-                                                                            <Text fontSize="xs" fontFamily="mono" color="orange.600" cursor="default">
-                                                                                {Object.keys(mockPrices!).length} price{Object.keys(mockPrices!).length !== 1 ? 's' : ''}{mockQuoteCurrency ? ` (${mockQuoteCurrency})` : ''}
-                                                                            </Text>
-                                                                        </Tooltip>
-                                                                    ) : isMock ? (
-                                                                        /* Mock getter: display range */
-                                                                        <Text fontSize="xs" fontFamily="mono" color="orange.600">
-                                                                            {mockMin != null && mockMax != null
-                                                                                ? `${mockMin} – ${mockMax}`
-                                                                                : <Text as="span" color="gray.400">no range</Text>}
-                                                                        </Text>
-                                                                    ) : hasParams ? (
-                                                                        <Flex gap={1} flexWrap="wrap">
-                                                                            {paramsEntries.map(([k, v]) => (
-                                                                                <Badge key={k} colorPalette="gray" fontSize="xs">
-                                                                                    {k}: {String(v)}
-                                                                                </Badge>
+                                                    return (
+                                                        <tr key={pg.id}>
+                                                            <td>
+                                                                <Badge colorScheme={isMock ? 'orange' : 'purple'}>{pg.price_getter}</Badge>
+                                                            </td>
+                                                            <td>
+                                                                {isEditing ? (
+                                                                    <Input
+                                                                        className="w-[120px] font-mono"
+                                                                        value={editingValues.external_id}
+                                                                        onChange={(e) => setEditingValues(v => ({ ...v, external_id: e.target.value }))}
+                                                                        placeholder="e.g. BTC-USD"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="font-mono text-sm">
+                                                                        {pg.external_id || <span className="text-slate-400">(auto)</span>}
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            <td>
+                                                                {isEditing && isMock && !hasConfiguredPrices ? (
+                                                                    /* Mock getter: min/max text boxes */
+                                                                    (() => {
+                                                                        let minVal: number | string = '', maxVal: number | string = '';
+                                                                        try { const p = JSON.parse(editingValues.params); minVal = p.min_price ?? ''; maxVal = p.max_price ?? ''; } catch { /* ignore */ }
+                                                                        return (
+                                                                            <div className="flex items-center gap-1">
+                                                                                <Input
+                                                                                    type="number"
+                                                                                    placeholder="Min"
+                                                                                    className="w-[80px] text-xs"
+                                                                                    value={minVal}
+                                                                                    onChange={(e) => {
+                                                                                        try {
+                                                                                            const p = JSON.parse(editingValues.params || '{}');
+                                                                                            p.min_price = e.target.value ? parseFloat(e.target.value) : 0;
+                                                                                            setEditingValues(v => ({ ...v, params: JSON.stringify(p) }));
+                                                                                        } catch { /* ignore */ }
+                                                                                    }}
+                                                                                />
+                                                                                <span className="text-xs text-slate-400">–</span>
+                                                                                <Input
+                                                                                    type="number"
+                                                                                    placeholder="Max"
+                                                                                    className="w-[80px] text-xs"
+                                                                                    value={maxVal}
+                                                                                    onChange={(e) => {
+                                                                                        try {
+                                                                                            const p = JSON.parse(editingValues.params || '{}');
+                                                                                            p.max_price = e.target.value ? parseFloat(e.target.value) : 0;
+                                                                                            setEditingValues(v => ({ ...v, params: JSON.stringify(p) }));
+                                                                                        } catch { /* ignore */ }
+                                                                                    }}
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    })()
+                                                                ) : isEditing ? (
+                                                                    <Textarea
+                                                                        className="w-[150px] font-mono text-xs"
+                                                                        value={editingValues.params}
+                                                                        onChange={(e) => setEditingValues(v => ({ ...v, params: e.target.value }))}
+                                                                        placeholder='{"key": "value"}'
+                                                                        rows={2}
+                                                                    />
+                                                                ) : isMock && hasConfiguredPrices ? (
+                                                                    /* Mock getter: deterministic prices summary */
+                                                                    <Tooltip content={
+                                                                        <div className="whitespace-pre font-mono text-xs">
+                                                                            {Object.entries(mockPrices!).map(([k, v]) => (
+                                                                                <div key={k}>{k} → {v}</div>
                                                                             ))}
-                                                                        </Flex>
-                                                                    ) : (
-                                                                        <Text fontSize="xs" color="gray.400">—</Text>
-                                                                    )}
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    {isEditing ? (
-                                                                        <Input
-                                                                            size="sm"
-                                                                            type="number"
-                                                                            value={editingValues.priority}
-                                                                            onChange={(e) => setEditingValues(v => ({ ...v, priority: parseInt(e.target.value) || 100 }))}
-                                                                            width="60px"
-                                                                        />
-                                                                    ) : (
-                                                                        pg.priority
-                                                                    )}
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    <Badge
-                                                                        colorPalette={pg.enabled ? 'green' : 'gray'}
-                                                                        cursor="pointer"
-                                                                        onClick={() => togglePriceGetter(pg)}
-                                                                    >
-                                                                        {pg.enabled ? 'Yes' : 'No'}
-                                                                    </Badge>
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    <Flex align="center" gap={1}>
-                                                                        {/* Auto-test status icon */}
-                                                                        {autoResult && (
-                                                                            <Tooltip
-                                                                                content={
-                                                                                    autoResult.loading
-                                                                                        ? 'Testing...'
-                                                                                        : autoResult.success
-                                                                                            ? `✅ ${autoResult.price?.toFixed(6) ?? 'OK'}`
-                                                                                            : `❌ ${autoResult.error || 'Failed'}`
-                                                                                }
-                                                                                showArrow
-                                                                            >
-                                                                                <Box cursor="default">
-                                                                                    {autoResult.loading ? (
-                                                                                        <Spinner size="xs" />
-                                                                                    ) : autoResult.success ? (
-                                                                                        <Text color="green.500" fontSize="sm">✅</Text>
-                                                                                    ) : (
-                                                                                        <Text color="red.500" fontSize="sm">❌</Text>
-                                                                                    )}
-                                                                                </Box>
-                                                                            </Tooltip>
-                                                                        )}
-                                                                        <IconButton
-                                                                            size="xs"
-                                                                            variant="ghost"
-                                                                            colorPalette="blue"
-                                                                            aria-label="Test getter"
-                                                                            onClick={() => openTestModal(pg)}
-                                                                        >
-                                                                            <LuPlay size={12} />
-                                                                        </IconButton>
-                                                                    </Flex>
-                                                                </Table.Cell>
-                                                                <Table.Cell>
-                                                                    {isEditing ? (
-                                                                        <Flex gap={1}>
-                                                                            <Button size="xs" colorPalette="green" variant="ghost" onClick={saveEditingGetter}>✓</Button>
-                                                                            <Button size="xs" colorPalette="gray" variant="ghost" onClick={cancelEditingGetter}>✕</Button>
-                                                                        </Flex>
-                                                                    ) : (
-                                                                        <Flex gap={1}>
-                                                                            <Button size="xs" colorPalette="blue" variant="ghost" onClick={() => startEditingGetter(pg)}>✏️</Button>
-                                                                            {!isMock && (
-                                                                                <Button size="xs" colorPalette="red" variant="ghost" onClick={() => deletePriceGetter(pg.id)}>🗑️</Button>
-                                                                            )}
-                                                                        </Flex>
-                                                                    )}
-                                                                </Table.Cell>
-                                                            </Table.Row>
-                                                        );
-                                                    })}
-                                                </Table.Body>
-                                            </Table.Root>
-                                        </Box>
-                                    </Box>
-                                )}
-
-                                {/* Add new getter */}
-                                <Box borderTop="1px" borderColor="gray.200" pt={4}>
-                                    <Text fontWeight="medium" mb={3}>Add Price Getter:</Text>
-                                    <Flex direction="column" gap={3}>
-                                        <Flex gap={3}>
-                                            <Box flex={1}>
-                                                <Text fontSize="sm" mb={1}>Source</Text>
-                                                <NativeSelect.Root size="sm">
-                                                    <NativeSelect.Field
-                                                        value={newGetter.price_getter}
-                                                        onChange={e => setNewGetter({ ...newGetter, price_getter: e.target.value })}
-                                                    >
-                                                        {availableGetters.filter(g => g !== 'mock').map(g => (
-                                                            <option key={g} value={g}>{g}</option>
-                                                        ))}
-                                                    </NativeSelect.Field>
-                                                </NativeSelect.Root>
-                                            </Box>
-                                            <Box flex={1}>
-                                                <Text fontSize="sm" mb={1}>Priority</Text>
-                                                <Input
-                                                    size="sm"
-                                                    type="number"
-                                                    value={newGetter.priority}
-                                                    onChange={e => setNewGetter({ ...newGetter, priority: parseInt(e.target.value) || 100 })}
-                                                />
-                                            </Box>
-                                        </Flex>
-                                        <Box>
-                                            <Text fontSize="sm" mb={1}>
-                                                External ID
-                                                <Text as="span" color="gray.500" fontSize="xs" ml={1}>
-                                                    (e.g., "BTC-USD" for Yahoo, "bitcoin" for CoinGecko, "AAPL" for DataReader)
-                                                </Text>
-                                            </Text>
-                                            <Input
-                                                size="sm"
-                                                placeholder={selectedAsset?.symbol || 'Leave empty to use asset symbol'}
-                                                value={newGetter.external_id || ''}
-                                                onChange={e => setNewGetter({
-                                                    ...newGetter,
-                                                    external_id: e.target.value || ''
-                                                })}
-                                            />
-                                            {!newGetter.external_id && selectedAsset?.symbol && (
-                                                <Text fontSize="xs" color="gray.400" mt={0.5}>
-                                                    Will use "{selectedAsset.symbol}" by default
-                                                </Text>
-                                            )}
-                                        </Box>
-                                        <Box>
-                                            <Text fontSize="sm" mb={1}>
-                                                Extra Parameters
-                                                <Text as="span" color="gray.500" fontSize="xs" ml={1}>
-                                                    (JSON, e.g., {`{"native_quote_currency": "EUR"}`})
-                                                </Text>
-                                            </Text>
-                                            <Input
-                                                size="sm"
-                                                placeholder='{"native_quote_currency": "USD"}'
-                                                value={Object.keys(newGetter.params).length > 0 ? JSON.stringify(newGetter.params) : ''}
-                                                onChange={e => {
-                                                    try {
-                                                        const parsed = e.target.value ? JSON.parse(e.target.value) : {};
-                                                        setNewGetter({ ...newGetter, params: parsed });
-                                                    } catch {
-                                                        // Invalid JSON, keep current value
-                                                    }
-                                                }}
-                                            />
-                                        </Box>
-                                        <Flex gap={2}>
-                                            <Button colorPalette="blue" size="sm" onClick={addPriceGetter} flex={1}>
-                                                ➕ Add Price Getter
-                                            </Button>
-                                            <Button
-                                                colorPalette="teal"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={testNewGetter}
-                                                disabled={!newGetter.price_getter || newGetterTestLoading}
-                                            >
-                                                {newGetterTestLoading ? <Spinner size="xs" /> : '🧪 Test'}
-                                            </Button>
-                                        </Flex>
-                                        {newGetterTestResult && (
-                                            <Box p={2} bg={newGetterTestResult.success ? 'green.50' : 'red.50'} borderRadius="sm" fontSize="xs">
-                                                {newGetterTestResult.success ? (
-                                                    <Text color="green.700">
-                                                        ✅ Price: <strong>{newGetterTestResult.price?.toFixed(6)}</strong>
-                                                    </Text>
-                                                ) : (
-                                                    <Text color="red.700">❌ {newGetterTestResult.error}</Text>
-                                                )}
-                                            </Box>
-                                        )}
-                                    </Flex>
-                                </Box>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Button variant="outline" onClick={() => setShowGettersDialog(false)}>
-                                    Close
-                                </Button>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Test Price Getter Modal */}
-            <Dialog.Root open={showTestModal} onOpenChange={(e) => { setShowTestModal(e.open); if (!e.open) { setTestResult(null); setTestModalGetter(null); } }}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxWidth="420px">
-                            <Dialog.Header>
-                                <Dialog.Title fontSize="md">
-                                    🧪 Test: {testModalGetter?.price_getter}
-                                    {testModalGetter?.external_id && (
-                                        <Text as="span" fontWeight="normal" fontSize="sm" color="gray.500"> ({testModalGetter.external_id})</Text>
-                                    )}
-                                </Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={3}>
-                                    <Box>
-                                        <Text fontSize="sm" fontWeight="medium" mb={1}>Test Date</Text>
-                                        <Input
-                                            size="sm"
-                                            type="date"
-                                            value={testDate}
-                                            onChange={e => setTestDate(e.target.value)}
-                                        />
-                                    </Box>
-                                    <Button
-                                        colorPalette="blue"
-                                        size="sm"
-                                        onClick={runTestFromModal}
-                                        disabled={testLoading}
-                                    >
-                                        {testLoading ? <Spinner size="xs" mr={2} /> : null}
-                                        Run Test
-                                    </Button>
-                                    {testResult && (
-                                        <Box p={3} bg={testResult.success ? 'green.50' : 'red.50'} borderRadius="md" border="1px solid" borderColor={testResult.success ? 'green.200' : 'red.200'}>
-                                            {testResult.success ? (
-                                                <Flex direction="column" gap={1}>
-                                                    <Text color="green.700" fontWeight="medium">
-                                                        ✅ Price: {testResult.price?.toFixed(6)}
-                                                    </Text>
-                                                    {testResult.source && (
-                                                        <Text fontSize="xs" color="gray.600">Source: {testResult.source}</Text>
-                                                    )}
-                                                    {testResult.quote_currency && (
-                                                        <Text fontSize="xs" color="gray.600">Quote: {testResult.quote_currency}</Text>
-                                                    )}
-                                                    {testResult.ticker_used && (
-                                                        <Text fontSize="xs" color="gray.600">Ticker: {testResult.ticker_used}</Text>
-                                                    )}
-                                                </Flex>
-                                            ) : (
-                                                <Text color="red.700" fontSize="sm">❌ {testResult.error}</Text>
-                                            )}
-                                        </Box>
-                                    )}
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Button variant="outline" size="sm" onClick={() => setShowTestModal(false)}>
-                                    Close
-                                </Button>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Categories Assignment Dialog */}
-            <Dialog.Root open={showCategoriesDialog} onOpenChange={(e) => setShowCategoriesDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxWidth="650px">
-                            <Dialog.Header>
-                                <Dialog.Title>
-                                    🏷️ Categories for {selectedAsset?.symbol}
-                                </Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text fontSize="sm" color="gray.600" mb={4}>
-                                    Assign categories to classify this asset for reporting and filtering.
-                                    Select categories from each dimension as needed.
-                                </Text>
-
-                                {dimensionData.length === 0 ? (
-                                    <Box textAlign="center" py={6}>
-                                        <Text color="gray.500">No categories available. Create some in the Categories editor first.</Text>
-                                    </Box>
-                                ) : (
-                                    <Tabs.Root defaultValue={String(dimensionData[0]?.id)}>
-                                        <Tabs.List mb={4}>
-                                            {dimensionData.map(dim => (
-                                                <Tabs.Trigger key={dim.id} value={String(dim.id)}>
-                                                    {dim.label}
-                                                    {dim.categories.some(c => selectedCategoryIds.has(c.id)) && (
-                                                        <Badge ml={1} colorPalette="blue" size="sm">
-                                                            {dim.categories.filter(c => selectedCategoryIds.has(c.id)).length}
-                                                        </Badge>
-                                                    )}
-                                                </Tabs.Trigger>
-                                            ))}
-                                        </Tabs.List>
-
-                                        {dimensionData.map(dim => (
-                                            <Tabs.Content key={dim.id} value={String(dim.id)}>
-                                                <Box
-                                                    maxHeight="300px"
-                                                    overflowY="auto"
-                                                    border="1px"
-                                                    borderColor="gray.200"
-                                                    borderRadius="md"
-                                                    p={3}
-                                                >
-                                                    {dim.categories.length === 0 ? (
-                                                        <Text color="gray.500" fontSize="sm">No categories in this dimension.</Text>
-                                                    ) : (
-                                                        <Flex direction="column" gap={2}>
-                                                            {dim.categories.map(cat => (
-                                                                <Flex
-                                                                    key={cat.id}
-                                                                    align="center"
-                                                                    gap={3}
-                                                                    p={2}
-                                                                    borderRadius="md"
-                                                                    bg={selectedCategoryIds.has(cat.id) ? 'blue.50' : 'transparent'}
-                                                                    _hover={{ bg: selectedCategoryIds.has(cat.id) ? 'blue.100' : 'gray.50' }}
-                                                                    cursor="pointer"
-                                                                    onClick={() => toggleCategory(cat.id)}
+                                                                        </div>
+                                                                    } showArrow>
+                                                                        <span className="cursor-default font-mono text-xs text-orange-600">
+                                                                            {Object.keys(mockPrices!).length} price{Object.keys(mockPrices!).length !== 1 ? 's' : ''}{mockQuoteCurrency ? ` (${mockQuoteCurrency})` : ''}
+                                                                        </span>
+                                                                    </Tooltip>
+                                                                ) : isMock ? (
+                                                                    /* Mock getter: display range */
+                                                                    <span className="font-mono text-xs text-orange-600">
+                                                                        {mockMin != null && mockMax != null
+                                                                            ? `${mockMin} – ${mockMax}`
+                                                                            : <span className="text-slate-400">no range</span>}
+                                                                    </span>
+                                                                ) : hasParams ? (
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {paramsEntries.map(([k, v]) => (
+                                                                            <Badge key={k} colorScheme="gray">
+                                                                                {k}: {String(v)}
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-xs text-slate-400">—</span>
+                                                                )}
+                                                            </td>
+                                                            <td>
+                                                                {isEditing ? (
+                                                                    <Input
+                                                                        type="number"
+                                                                        className="w-[60px]"
+                                                                        value={editingValues.priority}
+                                                                        onChange={(e) => setEditingValues(v => ({ ...v, priority: parseInt(e.target.value) || 100 }))}
+                                                                    />
+                                                                ) : (
+                                                                    pg.priority
+                                                                )}
+                                                            </td>
+                                                            <td>
+                                                                <Badge
+                                                                    colorScheme={pg.enabled ? 'green' : 'gray'}
+                                                                    className="cursor-pointer"
+                                                                    onClick={() => togglePriceGetter(pg)}
                                                                 >
-                                                                    <Checkbox.Root
-                                                                        checked={selectedCategoryIds.has(cat.id)}
-                                                                        onCheckedChange={() => toggleCategory(cat.id)}
-                                                                    >
-                                                                        <Checkbox.HiddenInput />
-                                                                        <Checkbox.Control />
-                                                                    </Checkbox.Root>
-                                                                    {cat.color && (
-                                                                        <Box
-                                                                            w={3}
-                                                                            h={3}
-                                                                            borderRadius="full"
-                                                                            bg={cat.color}
-                                                                        />
-                                                                    )}
-                                                                    <Box flex={1}>
-                                                                        <Text fontWeight="medium" fontSize="sm">{cat.label}</Text>
-                                                                    </Box>
-                                                                </Flex>
-                                                            ))}
-                                                        </Flex>
-                                                    )}
-                                                </Box>
-                                            </Tabs.Content>
-                                        ))}
-                                    </Tabs.Root>
-                                )}
-
-                                {/* Selected summary */}
-                                {selectedCategoryIds.size > 0 && (
-                                    <Box mt={4} p={3} bg="gray.50" borderRadius="md">
-                                        <Text fontSize="sm" fontWeight="medium" mb={2}>
-                                            Selected ({selectedCategoryIds.size}):
-                                        </Text>
-                                        <Flex gap={1} flexWrap="wrap">
-                                            {dimensionData.flatMap(dim =>
-                                                dim.categories
-                                                    .filter(c => selectedCategoryIds.has(c.id))
-                                                    .map(cat => (
-                                                        <Badge
-                                                            key={cat.id}
-                                                            fontSize="xs"
-                                                            style={cat.color ? { backgroundColor: cat.color, color: '#fff' } : undefined}
-                                                            colorPalette={!cat.color ? 'purple' : undefined}
-                                                        >
-                                                            {cat.label}
-                                                            <Box
-                                                                as="span"
-                                                                ml={1}
-                                                                cursor="pointer"
-                                                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); toggleCategory(cat.id); }}
-                                                            >
-                                                                ✕
-                                                            </Box>
-                                                        </Badge>
-                                                    ))
-                                            )}
-                                        </Flex>
-                                    </Box>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowCategoriesDialog(false)}>
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        colorPalette="blue"
-                                        onClick={saveCategories}
-                                        loading={savingCategories}
-                                    >
-                                        💾 Save Categories
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* CSV Import Dialog */}
-            <Dialog.Root open={showImportDialog} onOpenChange={(e) => { setShowImportDialog(e.open); if (!e.open) resetImportDialog(); }}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxWidth="800px">
-                            <Dialog.Header>
-                                <Dialog.Title>
-                                    📥 Import Assets from CSV
-                                </Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                {importStep === 'select' && (
-                                    <Box>
-                                        <Text fontSize="sm" color="gray.600" mb={4}>
-                                            Upload a CSV file to bulk import assets with price getters and categories.
-                                        </Text>
-
-                                        {/* File drop zone */}
-                                        <Box
-                                            border="2px dashed"
-                                            borderColor={importFile ? 'green.400' : 'gray.300'}
-                                            borderRadius="md"
-                                            p={8}
-                                            textAlign="center"
-                                            bg={importFile ? 'green.50' : 'gray.50'}
-                                            cursor="pointer"
-                                            onClick={() => fileInputRef.current?.click()}
-                                            onDragOver={(e) => e.preventDefault()}
-                                            onDrop={handleFileDrop}
-                                            _hover={{ borderColor: 'blue.400', bg: 'blue.50' }}
-                                            transition="all 0.2s"
-                                        >
-                                            <input
-                                                ref={fileInputRef}
-                                                type="file"
-                                                accept=".csv"
-                                                onChange={handleFileSelect}
-                                                style={{ display: 'none' }}
-                                            />
-                                            {importFile ? (
-                                                <Box>
-                                                    <Text fontSize="lg" fontWeight="medium" color="green.600">
-                                                        ✅ {importFile.name}
-                                                    </Text>
-                                                    <Text fontSize="sm" color="gray.500" mt={1}>
-                                                        {(importFile.size / 1024).toFixed(1)} KB
-                                                    </Text>
-                                                    <Button size="sm" mt={3} variant="outline" onClick={(e) => { e.stopPropagation(); setImportFile(null); }}>
-                                                        Choose Different File
-                                                    </Button>
-                                                </Box>
-                                            ) : (
-                                                <Box>
-                                                    <Text fontSize="lg" mb={2}>📂</Text>
-                                                    <Text fontWeight="medium">Drop CSV file here or click to browse</Text>
-                                                    <Text fontSize="sm" color="gray.500" mt={1}>
-                                                        Supports: .csv files
-                                                    </Text>
-                                                </Box>
-                                            )}
-                                        </Box>
-
-                                        {/* Expected format info */}
-                                        <Box mt={4} p={3} bg="blue.50" borderRadius="md">
-                                            <Text fontSize="sm" fontWeight="medium" color="blue.700" mb={2}>
-                                                Expected CSV Format:
-                                            </Text>
-                                            <Text fontSize="xs" color="blue.600" fontFamily="mono">
-                                                Ticker / Symbol, Label, Source 1, Symbol 1, Source 2, Symbol 2,
-                                                Source 3, Symbol 3, Currency, Investment Category 1, Investment Category 2
-                                            </Text>
-                                        </Box>
-                                    </Box>
-                                )}
-
-                                {importStep === 'preview' && importPreview && (
-                                    <Box>
-                                        <Flex gap={4} mb={4}>
-                                            <Box flex={1} p={3} bg="blue.50" borderRadius="md">
-                                                <Text fontSize="2xl" fontWeight="bold" color="blue.600">
-                                                    {importPreview.assets_count}
-                                                </Text>
-                                                <Text fontSize="sm" color="blue.600">Assets</Text>
-                                            </Box>
-                                            <Box flex={1} p={3} bg="purple.50" borderRadius="md">
-                                                <Text fontSize="2xl" fontWeight="bold" color="purple.600">
-                                                    {importPreview.categories_count}
-                                                </Text>
-                                                <Text fontSize="sm" color="purple.600">Categories</Text>
-                                            </Box>
-                                            {importPreview.errors.length > 0 && (
-                                                <Box flex={1} p={3} bg="red.50" borderRadius="md">
-                                                    <Text fontSize="2xl" fontWeight="bold" color="red.600">
-                                                        {importPreview.errors.length}
-                                                    </Text>
-                                                    <Text fontSize="sm" color="red.600">Parse Errors</Text>
-                                                </Box>
-                                            )}
-                                        </Flex>
-
-                                        {/* Preview table */}
-                                        <Text fontWeight="medium" mb={2}>Assets to Import:</Text>
-                                        <Box maxHeight="300px" overflowY="auto" border="1px" borderColor="gray.200" borderRadius="md">
-                                            <Table.Root size="sm">
-                                                <Table.Header>
-                                                    <Table.Row>
-                                                        <Table.ColumnHeader>Symbol</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Label</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Type</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Price Getters</Table.ColumnHeader>
-                                                        <Table.ColumnHeader>Categories</Table.ColumnHeader>
-                                                    </Table.Row>
-                                                </Table.Header>
-                                                <Table.Body>
-                                                    {importPreview.assets.slice(0, 20).map((asset, idx) => (
-                                                        <Table.Row key={idx}>
-                                                            <Table.Cell>
-                                                                <Badge colorPalette="blue">{asset.symbol}</Badge>
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                <Text fontSize="sm" truncate maxW="150px">{asset.label}</Text>
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                <Tag.Root size="sm" colorPalette={
-                                                                    asset.price_type === 'crypto' ? 'orange' :
-                                                                        asset.price_type === 'stock' ? 'blue' : 'green'
-                                                                }>
-                                                                    <Tag.Label>{asset.price_type}</Tag.Label>
-                                                                </Tag.Root>
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                <Flex gap={1} flexWrap="wrap">
-                                                                    {asset.price_getters.map((pg, i) => (
-                                                                        <Badge key={i} fontSize="xs" colorPalette="purple">
-                                                                            {pg.getter}
-                                                                        </Badge>
-                                                                    ))}
-                                                                </Flex>
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                <Flex gap={1} flexWrap="wrap">
-                                                                    {asset.categories.slice(0, 2).map((cat, i) => (
-                                                                        <Badge key={i} fontSize="xs" colorPalette="gray">
-                                                                            {cat}
-                                                                        </Badge>
-                                                                    ))}
-                                                                </Flex>
-                                                            </Table.Cell>
-                                                        </Table.Row>
-                                                    ))}
-                                                </Table.Body>
-                                            </Table.Root>
-                                            {importPreview.assets.length > 20 && (
-                                                <Text fontSize="sm" color="gray.500" p={2} textAlign="center">
-                                                    ... and {importPreview.assets.length - 20} more assets
-                                                </Text>
-                                            )}
-                                        </Box>
-
-                                        {/* Import options */}
-                                        <Box mt={4} p={3} bg="gray.50" borderRadius="md">
-                                            <Text fontWeight="medium" mb={3}>Import Options:</Text>
-                                            <Flex direction="column" gap={3}>
-                                                <Flex align="center" gap={3}>
-                                                    <Checkbox.Root
-                                                        checked={dryRunMode}
-                                                        onCheckedChange={(e) => setDryRunMode(!!e.checked)}
-                                                    >
-                                                        <Checkbox.HiddenInput />
-                                                        <Checkbox.Control />
-                                                    </Checkbox.Root>
-                                                    <Box>
-                                                        <Text fontWeight="medium" fontSize="sm">Dry Run (Preview Only)</Text>
-                                                        <Text fontSize="xs" color="gray.500">
-                                                            See what would be imported without making changes
-                                                        </Text>
-                                                    </Box>
-                                                </Flex>
-                                                <Flex align="center" gap={3}>
-                                                    <Checkbox.Root
-                                                        checked={replacePriceGetters}
-                                                        onCheckedChange={(e) => setReplacePriceGetters(!!e.checked)}
-                                                    >
-                                                        <Checkbox.HiddenInput />
-                                                        <Checkbox.Control />
-                                                    </Checkbox.Root>
-                                                    <Box>
-                                                        <Text fontWeight="medium" fontSize="sm">Replace Existing Price Getters</Text>
-                                                        <Text fontSize="xs" color="gray.500">
-                                                            Uncheck to merge with existing price getters
-                                                        </Text>
-                                                    </Box>
-                                                </Flex>
-                                            </Flex>
-                                        </Box>
-
-                                        {/* Errors/warnings */}
-                                        {importPreview.errors.length > 0 && (
-                                            <Box mt={4} p={3} bg="red.50" borderRadius="md">
-                                                <Text fontWeight="medium" color="red.600" mb={2}>⚠️ Parse Errors:</Text>
-                                                {importPreview.errors.slice(0, 5).map((err, i) => (
-                                                    <Text key={i} fontSize="sm" color="red.600">
-                                                        Row {err.row}: {err.error}
-                                                    </Text>
-                                                ))}
-                                                {importPreview.errors.length > 5 && (
-                                                    <Text fontSize="sm" color="red.500">
-                                                        ... and {importPreview.errors.length - 5} more errors
-                                                    </Text>
-                                                )}
-                                            </Box>
-                                        )}
-                                    </Box>
-                                )}
-
-                                {importStep === 'result' && importResult && (
-                                    <Box>
-                                        <Box
-                                            p={4}
-                                            bg={importResult.dry_run ? 'blue.50' : 'green.50'}
-                                            borderRadius="md"
-                                            mb={4}
-                                            textAlign="center"
-                                        >
-                                            <Text fontSize="xl" fontWeight="bold" color={importResult.dry_run ? 'blue.600' : 'green.600'}>
-                                                {importResult.dry_run ? '🔍 Dry Run Complete' : '✅ Import Successful!'}
-                                            </Text>
-                                            {importResult.dry_run && (
-                                                <Text fontSize="sm" color="blue.600" mt={1}>
-                                                    No changes were made. Uncheck "Dry Run" and import again to apply changes.
-                                                </Text>
-                                            )}
-                                        </Box>
-
-                                        <Flex gap={4} mb={4} flexWrap="wrap">
-                                            <Box flex={1} p={3} bg="gray.50" borderRadius="md" minW="150px">
-                                                <Text fontWeight="medium" mb={2}>Assets</Text>
-                                                <Flex gap={2}>
-                                                    <Badge colorPalette="green">{importResult.assets.created} created</Badge>
-                                                    <Badge colorPalette="blue">{importResult.assets.updated} updated</Badge>
-                                                </Flex>
-                                            </Box>
-                                            <Box flex={1} p={3} bg="gray.50" borderRadius="md" minW="150px">
-                                                <Text fontWeight="medium" mb={2}>Categories</Text>
-                                                <Flex gap={2}>
-                                                    <Badge colorPalette="green">{importResult.categories.created} created</Badge>
-                                                    <Badge colorPalette="blue">{importResult.categories.updated} updated</Badge>
-                                                </Flex>
-                                            </Box>
-                                            <Box flex={1} p={3} bg="gray.50" borderRadius="md" minW="150px">
-                                                <Text fontWeight="medium" mb={2}>Price Getters</Text>
-                                                <Flex gap={2}>
-                                                    <Badge colorPalette="green">{importResult.price_getters.created} created</Badge>
-                                                </Flex>
-                                            </Box>
-                                            <Box flex={1} p={3} bg="gray.50" borderRadius="md" minW="150px">
-                                                <Text fontWeight="medium" mb={2}>Category Links</Text>
-                                                <Flex gap={2}>
-                                                    <Badge colorPalette="green">{importResult.asset_categories.created} created</Badge>
-                                                </Flex>
-                                            </Box>
-                                        </Flex>
-
-                                        {importResult.summary.total_errors > 0 && (
-                                            <Box p={3} bg="red.50" borderRadius="md">
-                                                <Text fontWeight="medium" color="red.600" mb={2}>
-                                                    ⚠️ {importResult.summary.total_errors} Errors:
-                                                </Text>
-                                                {importResult.parse_errors.slice(0, 3).map((err, i) => (
-                                                    <Text key={i} fontSize="sm" color="red.600">
-                                                        {JSON.stringify(err)}
-                                                    </Text>
-                                                ))}
-                                            </Box>
-                                        )}
-
-                                        {importResult.warnings.length > 0 && (
-                                            <Box mt={3} p={3} bg="yellow.50" borderRadius="md">
-                                                <Text fontWeight="medium" color="yellow.700" mb={2}>
-                                                    ⚠️ Warnings:
-                                                </Text>
-                                                {importResult.warnings.slice(0, 5).map((warn, i) => (
-                                                    <Text key={i} fontSize="sm" color="yellow.700">{warn}</Text>
-                                                ))}
-                                            </Box>
-                                        )}
-                                    </Box>
-                                )}
-
-                                {importLoading && (
-                                    <Flex justify="center" align="center" py={8}>
-                                        <Spinner size="lg" color="blue.500" />
-                                        <Text ml={3}>Processing...</Text>
-                                    </Flex>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2} justify="space-between" width="100%">
-                                    <Box>
-                                        {importStep !== 'select' && (
-                                            <Button variant="outline" onClick={resetImportDialog}>
-                                                ← Start Over
-                                            </Button>
-                                        )}
-                                    </Box>
-                                    <Flex gap={2}>
-                                        <Button variant="outline" onClick={() => setShowImportDialog(false)}>
-                                            {importStep === 'result' ? 'Close' : 'Cancel'}
-                                        </Button>
-                                        {importStep === 'select' && (
-                                            <Button
-                                                colorPalette="blue"
-                                                onClick={previewImport}
-                                                disabled={!importFile || importLoading}
-                                            >
-                                                Preview Import →
-                                            </Button>
-                                        )}
-                                        {importStep === 'preview' && (
-                                            <Button
-                                                colorPalette={dryRunMode ? 'blue' : 'green'}
-                                                onClick={executeImport}
-                                                disabled={importLoading}
-                                            >
-                                                {dryRunMode ? '🔍 Run Dry Import' : '📥 Import Assets'}
-                                            </Button>
-                                        )}
-                                        {importStep === 'result' && importResult?.dry_run && (
-                                            <Button
-                                                colorPalette="green"
-                                                onClick={() => { setDryRunMode(false); setImportStep('preview'); }}
-                                            >
-                                                📥 Import for Real
-                                            </Button>
-                                        )}
-                                    </Flex>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Bulk Status Dialog */}
-            <Dialog.Root open={showBulkStatusDialog} onOpenChange={(e) => setShowBulkStatusDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Set Status for {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text fontSize="sm" color="gray.600" mb={4}>
-                                    Change the status of all selected assets.
-                                </Text>
-                                <Box>
-                                    <Text fontWeight="medium" mb={2}>New Status</Text>
-                                    <NativeSelect.Root>
-                                        <NativeSelect.Field
-                                            value={String(bulkStatus)}
-                                            onChange={e => setBulkStatus(parseInt(e.target.value))}
-                                        >
-                                            <option value="0">Active</option>
-                                            <option value="1">Inactive</option>
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
-                                </Box>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBulkStatusDialog(false)}>Cancel</Button>
-                                    <Button colorPalette="blue" onClick={executeBulkStatusUpdate} loading={bulkOperationLoading}>
-                                        Apply to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Bulk Type Dialog */}
-            <Dialog.Root open={showBulkTypeDialog} onOpenChange={(e) => setShowBulkTypeDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Set Type for {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text fontSize="sm" color="gray.600" mb={4}>
-                                    Change the price type of all selected assets.
-                                </Text>
-                                <Box>
-                                    <Text fontWeight="medium" mb={2}>New Type</Text>
-                                    <NativeSelect.Root>
-                                        <NativeSelect.Field
-                                            value={bulkType}
-                                            onChange={e => setBulkType(e.target.value)}
-                                        >
-                                            <option value="">-- Select Type --</option>
-                                            <option value="crypto">Crypto</option>
-                                            <option value="stock">Stock</option>
-                                            <option value="fiat">Fiat</option>
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
-                                </Box>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBulkTypeDialog(false)}>Cancel</Button>
-                                    <Button colorPalette="purple" onClick={executeBulkTypeUpdate} loading={bulkOperationLoading} disabled={!bulkType}>
-                                        Apply to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Bulk Categories Dialog */}
-            <Dialog.Root open={showBulkCategoriesDialog} onOpenChange={(e) => setShowBulkCategoriesDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxWidth="650px">
-                            <Dialog.Header>
-                                <Dialog.Title>Assign Categories to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text fontSize="sm" color="gray.600" mb={4}>
-                                    Select how to apply categories to the selected assets.
-                                </Text>
-
-                                {/* Mode Selection */}
-                                <Box mb={4} p={3} bg="gray.50" borderRadius="md">
-                                    <Text fontWeight="medium" mb={2}>Operation Mode</Text>
-                                    <Flex gap={2}>
-                                        <Button
-                                            size="sm"
-                                            colorPalette={bulkCategoryMode === 'add' ? 'teal' : 'gray'}
-                                            variant={bulkCategoryMode === 'add' ? 'solid' : 'outline'}
-                                            onClick={() => setBulkCategoryMode('add')}
-                                        >
-                                            ➕ Add to existing
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            colorPalette={bulkCategoryMode === 'replace' ? 'teal' : 'gray'}
-                                            variant={bulkCategoryMode === 'replace' ? 'solid' : 'outline'}
-                                            onClick={() => setBulkCategoryMode('replace')}
-                                        >
-                                            🔄 Replace all
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            colorPalette={bulkCategoryMode === 'remove' ? 'red' : 'gray'}
-                                            variant={bulkCategoryMode === 'remove' ? 'solid' : 'outline'}
-                                            onClick={() => setBulkCategoryMode('remove')}
-                                        >
-                                            ➖ Remove
-                                        </Button>
-                                    </Flex>
-                                    <Text fontSize="xs" color="gray.500" mt={2}>
-                                        {bulkCategoryMode === 'add' && 'Selected categories will be added to assets (keeping existing).'}
-                                        {bulkCategoryMode === 'replace' && 'All existing categories will be replaced with selected ones.'}
-                                        {bulkCategoryMode === 'remove' && 'Selected categories will be removed from assets.'}
-                                    </Text>
-                                </Box>
-
-                                {/* Category Selection */}
-                                {dimensionData.length === 0 ? (
-                                    <Box textAlign="center" py={6}>
-                                        <Text color="gray.500">No categories available.</Text>
-                                    </Box>
-                                ) : (
-                                    <Tabs.Root defaultValue={String(dimensionData[0]?.id)}>
-                                        <Tabs.List mb={4}>
-                                            {dimensionData.map(dim => (
-                                                <Tabs.Trigger key={dim.id} value={String(dim.id)}>
-                                                    {dim.label}
-                                                    {dim.categories.some(c => bulkCategoryIds.has(c.id)) && (
-                                                        <Badge ml={1} colorPalette="teal" size="sm">
-                                                            {dim.categories.filter(c => bulkCategoryIds.has(c.id)).length}
-                                                        </Badge>
-                                                    )}
-                                                </Tabs.Trigger>
-                                            ))}
-                                        </Tabs.List>
-
-                                        {dimensionData.map(dim => (
-                                            <Tabs.Content key={dim.id} value={String(dim.id)}>
-                                                <Box maxHeight="250px" overflowY="auto" border="1px" borderColor="gray.200" borderRadius="md" p={3}>
-                                                    {dim.categories.length === 0 ? (
-                                                        <Text color="gray.500" fontSize="sm">No categories in this dimension.</Text>
-                                                    ) : (
-                                                        <Flex direction="column" gap={2}>
-                                                            {dim.categories.map(cat => (
-                                                                <Flex
-                                                                    key={cat.id}
-                                                                    align="center"
-                                                                    gap={3}
-                                                                    p={2}
-                                                                    borderRadius="md"
-                                                                    bg={bulkCategoryIds.has(cat.id) ? 'teal.50' : 'transparent'}
-                                                                    _hover={{ bg: bulkCategoryIds.has(cat.id) ? 'teal.100' : 'gray.50' }}
-                                                                    cursor="pointer"
-                                                                    onClick={() => {
-                                                                        setBulkCategoryIds(prev => {
-                                                                            const newSet = new Set(prev);
-                                                                            if (newSet.has(cat.id)) {
-                                                                                newSet.delete(cat.id);
-                                                                            } else {
-                                                                                newSet.add(cat.id);
+                                                                    {pg.enabled ? 'Yes' : 'No'}
+                                                                </Badge>
+                                                            </td>
+                                                            <td>
+                                                                <div className="flex items-center gap-1">
+                                                                    {/* Auto-test status icon */}
+                                                                    {autoResult && (
+                                                                        <Tooltip
+                                                                            content={
+                                                                                autoResult.loading
+                                                                                    ? 'Testing...'
+                                                                                    : autoResult.success
+                                                                                        ? `✅ ${autoResult.price?.toFixed(6) ?? 'OK'}`
+                                                                                        : `❌ ${autoResult.error || 'Failed'}`
                                                                             }
-                                                                            return newSet;
-                                                                        });
-                                                                    }}
-                                                                >
-                                                                    <Checkbox.Root checked={bulkCategoryIds.has(cat.id)}>
-                                                                        <Checkbox.HiddenInput />
-                                                                        <Checkbox.Control />
-                                                                    </Checkbox.Root>
-                                                                    {cat.color && (
-                                                                        <Box w={3} h={3} borderRadius="full" bg={cat.color} />
+                                                                            showArrow
+                                                                        >
+                                                                            <div className="cursor-default">
+                                                                                {autoResult.loading ? (
+                                                                                    <Spinner size="xs" />
+                                                                                ) : autoResult.success ? (
+                                                                                    <span className="text-sm text-green-500">✅</span>
+                                                                                ) : (
+                                                                                    <span className="text-sm text-red-500">❌</span>
+                                                                                )}
+                                                                            </div>
+                                                                        </Tooltip>
                                                                     )}
-                                                                    <Box flex={1}>
-                                                                        <Text fontWeight="medium" fontSize="sm">{cat.label}</Text>
-                                                                    </Box>
-                                                                </Flex>
-                                                            ))}
-                                                        </Flex>
-                                                    )}
-                                                </Box>
-                                            </Tabs.Content>
-                                        ))}
-                                    </Tabs.Root>
-                                )}
+                                                                    <button
+                                                                        type="button"
+                                                                        className="flex h-4 min-w-[16px] items-center justify-center p-0 text-blue-500 hover:text-blue-700"
+                                                                        onClick={() => openTestModal(pg)}
+                                                                        title="Test getter"
+                                                                    >
+                                                                        <LuPlay size={12} />
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                            <td>
+                                                                {isEditing ? (
+                                                                    <div className="flex gap-1">
+                                                                        <button type="button" className="text-green-600 hover:text-green-800" onClick={saveEditingGetter}>✓</button>
+                                                                        <button type="button" className="text-slate-500 hover:text-slate-700" onClick={cancelEditingGetter}>✕</button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex gap-1">
+                                                                        <button type="button" className="text-blue-500 hover:text-blue-700" onClick={() => startEditingGetter(pg)}>✏️</button>
+                                                                        {!isMock && (
+                                                                            <button type="button" className="text-red-500 hover:text-red-700" onClick={() => deletePriceGetter(pg.id)}>🗑️</button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
 
-                                {/* Selected Summary */}
-                                {bulkCategoryIds.size > 0 && (
-                                    <Box mt={4} p={3} bg="gray.50" borderRadius="md">
-                                        <Text fontSize="sm" fontWeight="medium" mb={2}>
-                                            Selected ({bulkCategoryIds.size}):
-                                        </Text>
-                                        <Flex gap={1} flexWrap="wrap">
-                                            {dimensionData.flatMap(dim =>
-                                                dim.categories
-                                                    .filter(c => bulkCategoryIds.has(c.id))
-                                                    .map(cat => (
-                                                        <Badge
-                                                            key={cat.id}
-                                                            fontSize="xs"
-                                                            style={cat.color ? { backgroundColor: cat.color, color: '#fff' } : undefined}
-                                                            colorPalette={!cat.color ? 'teal' : undefined}
-                                                        >
-                                                            {cat.label}
-                                                        </Badge>
-                                                    ))
-                                            )}
-                                        </Flex>
-                                    </Box>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBulkCategoriesDialog(false)}>Cancel</Button>
-                                    <Button
-                                        colorPalette="teal"
-                                        onClick={executeBulkCategoriesUpdate}
-                                        loading={bulkOperationLoading}
-                                        disabled={bulkCategoryIds.size === 0}
-                                    >
-                                        {bulkCategoryMode === 'add' && '➕ Add'}
-                                        {bulkCategoryMode === 'replace' && '🔄 Replace'}
-                                        {bulkCategoryMode === 'remove' && '➖ Remove'}
-                                        {' '}Categories
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Bulk Price Getters Dialog */}
-            <Dialog.Root open={showBulkPriceGettersDialog} onOpenChange={(e) => setShowBulkPriceGettersDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content maxWidth="500px">
-                            <Dialog.Header>
-                                <Dialog.Title>Assign Price Getter to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text fontSize="sm" color="gray.600" mb={4}>
-                                    Add a price getter to all selected assets. This will add to existing getters.
-                                </Text>
-
-                                <Flex direction="column" gap={4}>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={2}>Price Getter Source</Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={bulkPriceGetter.price_getter}
-                                                onChange={e => setBulkPriceGetter({ ...bulkPriceGetter, price_getter: e.target.value })}
+                            {/* Add new getter */}
+                            <div className="border-t border-slate-200 pt-4">
+                                <span className="mb-3 block font-medium">Add Price Getter:</span>
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex gap-3">
+                                        <div className="flex-1">
+                                            <span className="mb-1 block text-sm">Source</span>
+                                            <select
+                                                className="h-8 w-full border border-slate-300 px-2 text-sm"
+                                                value={newGetter.price_getter}
+                                                onChange={e => setNewGetter({ ...newGetter, price_getter: e.target.value })}
                                             >
-                                                <option value="">-- Select Source --</option>
-                                                {availableGetters.map(g => (
+                                                {availableGetters.filter(g => g !== 'mock').map(g => (
                                                     <option key={g} value={g}>{g}</option>
                                                 ))}
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
-
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>External ID (optional)</Text>
+                                            </select>
+                                        </div>
+                                        <div className="flex-1">
+                                            <span className="mb-1 block text-sm">Priority</span>
+                                            <Input
+                                                type="number"
+                                                value={newGetter.priority}
+                                                onChange={e => setNewGetter({ ...newGetter, priority: parseInt(e.target.value) || 100 })}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="mb-1 block text-sm">
+                                            External ID
+                                            <span className="ml-1 text-xs text-slate-500">
+                                                (e.g., "BTC-USD" for Yahoo, "bitcoin" for CoinGecko, "AAPL" for DataReader)
+                                            </span>
+                                        </span>
                                         <Input
-                                            placeholder="Leave empty to use asset symbol"
-                                            value={bulkPriceGetter.external_id}
-                                            onChange={e => setBulkPriceGetter({ ...bulkPriceGetter, external_id: e.target.value })}
+                                            placeholder={selectedAsset?.symbol || 'Leave empty to use asset symbol'}
+                                            value={newGetter.external_id || ''}
+                                            onChange={e => setNewGetter({
+                                                ...newGetter,
+                                                external_id: e.target.value || ''
+                                            })}
                                         />
-                                        <Text fontSize="xs" color="gray.500" mt={1}>
-                                            If empty, each asset's symbol will be used as the external ID.
-                                        </Text>
-                                    </Box>
-
-                                    <Box>
-                                        <Text fontWeight="medium" mb={2}>Priority</Text>
+                                        {!newGetter.external_id && selectedAsset?.symbol && (
+                                            <span className="mt-0.5 block text-xs text-slate-400">
+                                                Will use "{selectedAsset.symbol}" by default
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <span className="mb-1 block text-sm">
+                                            Extra Parameters
+                                            <span className="ml-1 text-xs text-slate-500">
+                                                (JSON, e.g., {`{"native_quote_currency": "EUR"}`})
+                                            </span>
+                                        </span>
                                         <Input
-                                            type="number"
-                                            value={bulkPriceGetter.priority}
-                                            onChange={e => setBulkPriceGetter({ ...bulkPriceGetter, priority: parseInt(e.target.value) || 100 })}
+                                            placeholder='{"native_quote_currency": "USD"}'
+                                            value={Object.keys(newGetter.params).length > 0 ? JSON.stringify(newGetter.params) : ''}
+                                            onChange={e => {
+                                                try {
+                                                    const parsed = e.target.value ? JSON.parse(e.target.value) : {};
+                                                    setNewGetter({ ...newGetter, params: parsed });
+                                                } catch {
+                                                    // Invalid JSON, keep current value
+                                                }
+                                            }}
                                         />
-                                        <Text fontSize="xs" color="gray.500" mt={1}>
-                                            Lower values = higher priority (tried first)
-                                        </Text>
-                                    </Box>
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBulkPriceGettersDialog(false)}>Cancel</Button>
-                                    <Button
-                                        colorPalette="orange"
-                                        onClick={executeBulkPriceGettersUpdate}
-                                        loading={bulkOperationLoading}
-                                        disabled={!bulkPriceGetter.price_getter}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button colorScheme="blue" size="sm" onClick={addPriceGetter} className="flex-1">
+                                            ➕ Add Price Getter
+                                        </Button>
+                                        <Button
+                                            colorScheme="green"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={testNewGetter}
+                                            disabled={!newGetter.price_getter || newGetterTestLoading}
+                                        >
+                                            {newGetterTestLoading ? <Spinner size="xs" /> : '🧪 Test'}
+                                        </Button>
+                                    </div>
+                                    {newGetterTestResult && (
+                                        <div className={cn('p-2 text-xs', newGetterTestResult.success ? 'bg-green-50' : 'bg-red-50')}>
+                                            {newGetterTestResult.success ? (
+                                                <span className="text-green-700">
+                                                    ✅ Price: <strong>{newGetterTestResult.price?.toFixed(6)}</strong>
+                                                </span>
+                                            ) : (
+                                                <span className="text-red-700">❌ {newGetterTestResult.error}</span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowGettersDialog(false)}>
+                                Close
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+
+            {/* Test Price Getter Modal */}
+            <RadixDialog.Root open={showTestModal} onOpenChange={(open) => { setShowTestModal(open); if (!open) { setTestResult(null); setTestModalGetter(null); } }}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">
+                                🧪 Test: {testModalGetter?.price_getter}
+                                {testModalGetter?.external_id && (
+                                    <span className="text-sm font-normal text-slate-500"> ({testModalGetter.external_id})</span>
+                                )}
+                            </RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <div className="flex flex-col gap-3">
+                                <div>
+                                    <span className="mb-1 block text-sm font-medium">Test Date</span>
+                                    <Input
+                                        type="date"
+                                        value={testDate}
+                                        onChange={e => setTestDate(e.target.value)}
+                                    />
+                                </div>
+                                <Button
+                                    colorScheme="blue"
+                                    size="sm"
+                                    onClick={runTestFromModal}
+                                    disabled={testLoading}
+                                >
+                                    {testLoading ? <Spinner size="xs" className="mr-2" /> : null}
+                                    Run Test
+                                </Button>
+                                {testResult && (
+                                    <div className={cn('border p-3', testResult.success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50')}>
+                                        {testResult.success ? (
+                                            <div className="flex flex-col gap-1">
+                                                <span className="font-medium text-green-700">
+                                                    ✅ Price: {testResult.price?.toFixed(6)}
+                                                </span>
+                                                {testResult.source && (
+                                                    <span className="text-xs text-slate-600">Source: {testResult.source}</span>
+                                                )}
+                                                {testResult.quote_currency && (
+                                                    <span className="text-xs text-slate-600">Quote: {testResult.quote_currency}</span>
+                                                )}
+                                                {testResult.ticker_used && (
+                                                    <span className="text-xs text-slate-600">Ticker: {testResult.ticker_used}</span>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <span className="text-sm text-red-700">❌ {testResult.error}</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" size="sm" onClick={() => setShowTestModal(false)}>
+                                Close
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+
+            {/* Categories Assignment Dialog */}
+            <RadixDialog.Root open={showCategoriesDialog} onOpenChange={(open) => {
+                setShowCategoriesDialog(open);
+                if (open) setCategoriesDialogTab(String(dimensionData[0]?.id ?? ''));
+            }}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[650px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">
+                                🏷️ Categories for {selectedAsset?.symbol}
+                            </RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <span className="mb-4 block text-sm text-slate-600">
+                                Assign categories to classify this asset for reporting and filtering.
+                                Select categories from each dimension as needed.
+                            </span>
+
+                            {dimensionData.length === 0 ? (
+                                <div className="py-6 text-center">
+                                    <span className="text-slate-500">No categories available. Create some in the Categories editor first.</span>
+                                </div>
+                            ) : (
+                                <Tabs value={categoriesDialogTab || String(dimensionData[0]?.id)} onValueChange={setCategoriesDialogTab}>
+                                    <TabsList className="mb-4">
+                                        {dimensionData.map(dim => (
+                                            <TabsTrigger key={dim.id} value={String(dim.id)}>
+                                                {dim.label}
+                                                {dim.categories.some(c => selectedCategoryIds.has(c.id)) && (
+                                                    <Badge colorScheme="blue" className="ml-1">
+                                                        {dim.categories.filter(c => selectedCategoryIds.has(c.id)).length}
+                                                    </Badge>
+                                                )}
+                                            </TabsTrigger>
+                                        ))}
+                                    </TabsList>
+
+                                    {dimensionData.map(dim => (
+                                        <TabsContent key={dim.id} value={String(dim.id)}>
+                                            <div className="max-h-[300px] overflow-y-auto border border-slate-200 p-3">
+                                                {dim.categories.length === 0 ? (
+                                                    <span className="text-sm text-slate-500">No categories in this dimension.</span>
+                                                ) : (
+                                                    <div className="flex flex-col gap-2">
+                                                        {dim.categories.map(cat => (
+                                                            <div
+                                                                key={cat.id}
+                                                                className={cn(
+                                                                    'flex cursor-pointer items-center gap-3 p-2',
+                                                                    selectedCategoryIds.has(cat.id) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-slate-50',
+                                                                )}
+                                                                onClick={() => toggleCategory(cat.id)}
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+                                                                    checked={selectedCategoryIds.has(cat.id)}
+                                                                    onChange={() => toggleCategory(cat.id)}
+                                                                />
+                                                                {cat.color && (
+                                                                    <div
+                                                                        className="h-3 w-3 rounded-full"
+                                                                        style={{ backgroundColor: cat.color }}
+                                                                    />
+                                                                )}
+                                                                <div className="flex-1">
+                                                                    <span className="text-sm font-medium">{cat.label}</span>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </TabsContent>
+                                    ))}
+                                </Tabs>
+                            )}
+
+                            {/* Selected summary */}
+                            {selectedCategoryIds.size > 0 && (
+                                <div className="mt-4 bg-slate-50 p-3">
+                                    <span className="mb-2 block text-sm font-medium">
+                                        Selected ({selectedCategoryIds.size}):
+                                    </span>
+                                    <div className="flex flex-wrap gap-1">
+                                        {dimensionData.flatMap(dim =>
+                                            dim.categories
+                                                .filter(c => selectedCategoryIds.has(c.id))
+                                                .map(cat => (
+                                                    <Badge
+                                                        key={cat.id}
+                                                        style={cat.color ? { backgroundColor: cat.color, color: '#fff' } : undefined}
+                                                        colorScheme={!cat.color ? 'purple' : undefined}
+                                                    >
+                                                        {cat.label}
+                                                        <span
+                                                            className="ml-1 cursor-pointer"
+                                                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); toggleCategory(cat.id); }}
+                                                        >
+                                                            ✕
+                                                        </span>
+                                                    </Badge>
+                                                ))
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowCategoriesDialog(false)}>
+                                Cancel
+                            </Button>
+                            <Button
+                                colorScheme="blue"
+                                onClick={saveCategories}
+                                loading={savingCategories}
+                            >
+                                💾 Save Categories
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+
+            {/* CSV Import Dialog */}
+            <RadixDialog.Root open={showImportDialog} onOpenChange={(open) => { setShowImportDialog(open); if (!open) resetImportDialog(); }}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[800px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">
+                                📥 Import Assets from CSV
+                            </RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            {importStep === 'select' && (
+                                <div>
+                                    <span className="mb-4 block text-sm text-slate-600">
+                                        Upload a CSV file to bulk import assets with price getters and categories.
+                                    </span>
+
+                                    {/* File drop zone */}
+                                    <div
+                                        className={cn(
+                                            'cursor-pointer border-2 border-dashed p-8 text-center transition-all hover:border-blue-400 hover:bg-blue-50',
+                                            importFile ? 'border-green-400 bg-green-50' : 'border-slate-300 bg-slate-50',
+                                        )}
+                                        onClick={() => fileInputRef.current?.click()}
+                                        onDragOver={(e) => e.preventDefault()}
+                                        onDrop={handleFileDrop}
                                     >
-                                        Assign to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept=".csv"
+                                            onChange={handleFileSelect}
+                                            style={{ display: 'none' }}
+                                        />
+                                        {importFile ? (
+                                            <div>
+                                                <span className="block text-lg font-medium text-green-600">
+                                                    ✅ {importFile.name}
+                                                </span>
+                                                <span className="mt-1 block text-sm text-slate-500">
+                                                    {(importFile.size / 1024).toFixed(1)} KB
+                                                </span>
+                                                <Button size="sm" className="mt-3" variant="outline" onClick={(e) => { e.stopPropagation(); setImportFile(null); }}>
+                                                    Choose Different File
+                                                </Button>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <span className="mb-2 block text-lg">📂</span>
+                                                <span className="block font-medium">Drop CSV file here or click to browse</span>
+                                                <span className="mt-1 block text-sm text-slate-500">
+                                                    Supports: .csv files
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Expected format info */}
+                                    <div className="mt-4 bg-blue-50 p-3">
+                                        <span className="mb-2 block text-sm font-medium text-blue-700">
+                                            Expected CSV Format:
+                                        </span>
+                                        <span className="block font-mono text-xs text-blue-600">
+                                            Ticker / Symbol, Label, Source 1, Symbol 1, Source 2, Symbol 2,
+                                            Source 3, Symbol 3, Currency, Investment Category 1, Investment Category 2
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {importStep === 'preview' && importPreview && (
+                                <div>
+                                    <div className="mb-4 flex gap-4">
+                                        <div className="flex-1 bg-blue-50 p-3">
+                                            <span className="block text-2xl font-bold text-blue-600">
+                                                {importPreview.assets_count}
+                                            </span>
+                                            <span className="block text-sm text-blue-600">Assets</span>
+                                        </div>
+                                        <div className="flex-1 bg-purple-50 p-3">
+                                            <span className="block text-2xl font-bold text-purple-600">
+                                                {importPreview.categories_count}
+                                            </span>
+                                            <span className="block text-sm text-purple-600">Categories</span>
+                                        </div>
+                                        {importPreview.errors.length > 0 && (
+                                            <div className="flex-1 bg-red-50 p-3">
+                                                <span className="block text-2xl font-bold text-red-600">
+                                                    {importPreview.errors.length}
+                                                </span>
+                                                <span className="block text-sm text-red-600">Parse Errors</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Preview table */}
+                                    <span className="mb-2 block font-medium">Assets to Import:</span>
+                                    <div className="max-h-[300px] overflow-y-auto border border-slate-200">
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr>
+                                                    <th>Symbol</th>
+                                                    <th>Label</th>
+                                                    <th>Type</th>
+                                                    <th>Price Getters</th>
+                                                    <th>Categories</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {importPreview.assets.slice(0, 20).map((asset, idx) => (
+                                                    <tr key={idx}>
+                                                        <td>
+                                                            <Badge colorScheme="blue">{asset.symbol}</Badge>
+                                                        </td>
+                                                        <td>
+                                                            <span className="block max-w-[150px] truncate text-sm">{asset.label}</span>
+                                                        </td>
+                                                        <td>
+                                                            <Badge colorScheme={
+                                                                asset.price_type === 'crypto' ? 'orange' :
+                                                                    asset.price_type === 'stock' ? 'blue' : 'green'
+                                                            }>
+                                                                {asset.price_type}
+                                                            </Badge>
+                                                        </td>
+                                                        <td>
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {asset.price_getters.map((pg, i) => (
+                                                                    <Badge key={i} colorScheme="purple">
+                                                                        {pg.getter}
+                                                                    </Badge>
+                                                                ))}
+                                                            </div>
+                                                        </td>
+                                                        <td>
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {asset.categories.slice(0, 2).map((cat, i) => (
+                                                                    <Badge key={i} colorScheme="gray">
+                                                                        {cat}
+                                                                    </Badge>
+                                                                ))}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        {importPreview.assets.length > 20 && (
+                                            <span className="block p-2 text-center text-sm text-slate-500">
+                                                ... and {importPreview.assets.length - 20} more assets
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {/* Import options */}
+                                    <div className="mt-4 bg-slate-50 p-3">
+                                        <span className="mb-3 block font-medium">Import Options:</span>
+                                        <div className="flex flex-col gap-3">
+                                            <div className="flex items-center gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+                                                    checked={dryRunMode}
+                                                    onChange={(e) => setDryRunMode(e.target.checked)}
+                                                />
+                                                <div>
+                                                    <span className="block text-sm font-medium">Dry Run (Preview Only)</span>
+                                                    <span className="block text-xs text-slate-500">
+                                                        See what would be imported without making changes
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+                                                    checked={replacePriceGetters}
+                                                    onChange={(e) => setReplacePriceGetters(e.target.checked)}
+                                                />
+                                                <div>
+                                                    <span className="block text-sm font-medium">Replace Existing Price Getters</span>
+                                                    <span className="block text-xs text-slate-500">
+                                                        Uncheck to merge with existing price getters
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Errors/warnings */}
+                                    {importPreview.errors.length > 0 && (
+                                        <div className="mt-4 bg-red-50 p-3">
+                                            <span className="mb-2 block font-medium text-red-600">⚠️ Parse Errors:</span>
+                                            {importPreview.errors.slice(0, 5).map((err, i) => (
+                                                <span key={i} className="block text-sm text-red-600">
+                                                    Row {err.row}: {err.error}
+                                                </span>
+                                            ))}
+                                            {importPreview.errors.length > 5 && (
+                                                <span className="block text-sm text-red-500">
+                                                    ... and {importPreview.errors.length - 5} more errors
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {importStep === 'result' && importResult && (
+                                <div>
+                                    <div
+                                        className={cn(
+                                            'mb-4 p-4 text-center',
+                                            importResult.dry_run ? 'bg-blue-50' : 'bg-green-50',
+                                        )}
+                                    >
+                                        <span className={cn('block text-xl font-bold', importResult.dry_run ? 'text-blue-600' : 'text-green-600')}>
+                                            {importResult.dry_run ? '🔍 Dry Run Complete' : '✅ Import Successful!'}
+                                        </span>
+                                        {importResult.dry_run && (
+                                            <span className="mt-1 block text-sm text-blue-600">
+                                                No changes were made. Uncheck "Dry Run" and import again to apply changes.
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="mb-4 flex flex-wrap gap-4">
+                                        <div className="min-w-[150px] flex-1 bg-slate-50 p-3">
+                                            <span className="mb-2 block font-medium">Assets</span>
+                                            <div className="flex gap-2">
+                                                <Badge colorScheme="green">{importResult.assets.created} created</Badge>
+                                                <Badge colorScheme="blue">{importResult.assets.updated} updated</Badge>
+                                            </div>
+                                        </div>
+                                        <div className="min-w-[150px] flex-1 bg-slate-50 p-3">
+                                            <span className="mb-2 block font-medium">Categories</span>
+                                            <div className="flex gap-2">
+                                                <Badge colorScheme="green">{importResult.categories.created} created</Badge>
+                                                <Badge colorScheme="blue">{importResult.categories.updated} updated</Badge>
+                                            </div>
+                                        </div>
+                                        <div className="min-w-[150px] flex-1 bg-slate-50 p-3">
+                                            <span className="mb-2 block font-medium">Price Getters</span>
+                                            <div className="flex gap-2">
+                                                <Badge colorScheme="green">{importResult.price_getters.created} created</Badge>
+                                            </div>
+                                        </div>
+                                        <div className="min-w-[150px] flex-1 bg-slate-50 p-3">
+                                            <span className="mb-2 block font-medium">Category Links</span>
+                                            <div className="flex gap-2">
+                                                <Badge colorScheme="green">{importResult.asset_categories.created} created</Badge>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {importResult.summary.total_errors > 0 && (
+                                        <div className="bg-red-50 p-3">
+                                            <span className="mb-2 block font-medium text-red-600">
+                                                ⚠️ {importResult.summary.total_errors} Errors:
+                                            </span>
+                                            {importResult.parse_errors.slice(0, 3).map((err, i) => (
+                                                <span key={i} className="block text-sm text-red-600">
+                                                    {JSON.stringify(err)}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {importResult.warnings.length > 0 && (
+                                        <div className="mt-3 bg-yellow-50 p-3">
+                                            <span className="mb-2 block font-medium text-yellow-700">
+                                                ⚠️ Warnings:
+                                            </span>
+                                            {importResult.warnings.slice(0, 5).map((warn, i) => (
+                                                <span key={i} className="block text-sm text-yellow-700">{warn}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {importLoading && (
+                                <div className="flex items-center justify-center py-8">
+                                    <Spinner size="lg" className="text-blue-500" />
+                                    <span className="ml-3">Processing...</span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex w-full items-center justify-between gap-2 border-t border-slate-200 p-4">
+                            <div>
+                                {importStep !== 'select' && (
+                                    <Button variant="outline" onClick={resetImportDialog}>
+                                        ← Start Over
                                     </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+                                )}
+                            </div>
+                            <div className="flex gap-2">
+                                <Button variant="outline" onClick={() => setShowImportDialog(false)}>
+                                    {importStep === 'result' ? 'Close' : 'Cancel'}
+                                </Button>
+                                {importStep === 'select' && (
+                                    <Button
+                                        colorScheme="blue"
+                                        onClick={previewImport}
+                                        disabled={!importFile || importLoading}
+                                    >
+                                        Preview Import →
+                                    </Button>
+                                )}
+                                {importStep === 'preview' && (
+                                    <Button
+                                        colorScheme={dryRunMode ? 'blue' : 'green'}
+                                        onClick={executeImport}
+                                        disabled={importLoading}
+                                    >
+                                        {dryRunMode ? '🔍 Run Dry Import' : '📥 Import Assets'}
+                                    </Button>
+                                )}
+                                {importStep === 'result' && importResult?.dry_run && (
+                                    <Button
+                                        colorScheme="green"
+                                        onClick={() => { setDryRunMode(false); setImportStep('preview'); }}
+                                    >
+                                        📥 Import for Real
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+
+            {/* Bulk Status Dialog */}
+            <RadixDialog.Root open={showBulkStatusDialog} onOpenChange={(open) => setShowBulkStatusDialog(open)}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">Set Status for {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <span className="mb-4 block text-sm text-slate-600">
+                                Change the status of all selected assets.
+                            </span>
+                            <div>
+                                <span className="mb-2 block font-medium">New Status</span>
+                                <select
+                                    className="h-8 w-full border border-slate-300 px-2 text-sm"
+                                    value={String(bulkStatus)}
+                                    onChange={e => setBulkStatus(parseInt(e.target.value))}
+                                >
+                                    <option value="0">Active</option>
+                                    <option value="1">Inactive</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowBulkStatusDialog(false)}>Cancel</Button>
+                            <Button colorScheme="blue" onClick={executeBulkStatusUpdate} loading={bulkOperationLoading}>
+                                Apply to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+
+            {/* Bulk Type Dialog */}
+            <RadixDialog.Root open={showBulkTypeDialog} onOpenChange={(open) => setShowBulkTypeDialog(open)}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">Set Type for {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <span className="mb-4 block text-sm text-slate-600">
+                                Change the price type of all selected assets.
+                            </span>
+                            <div>
+                                <span className="mb-2 block font-medium">New Type</span>
+                                <select
+                                    className="h-8 w-full border border-slate-300 px-2 text-sm"
+                                    value={bulkType}
+                                    onChange={e => setBulkType(e.target.value)}
+                                >
+                                    <option value="">-- Select Type --</option>
+                                    <option value="crypto">Crypto</option>
+                                    <option value="stock">Stock</option>
+                                    <option value="fiat">Fiat</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowBulkTypeDialog(false)}>Cancel</Button>
+                            <Button colorScheme="blue" onClick={executeBulkTypeUpdate} loading={bulkOperationLoading} disabled={!bulkType}>
+                                Apply to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+
+            {/* Bulk Categories Dialog */}
+            <RadixDialog.Root open={showBulkCategoriesDialog} onOpenChange={(open) => {
+                setShowBulkCategoriesDialog(open);
+                if (open) setBulkCategoriesDialogTab(String(dimensionData[0]?.id ?? ''));
+            }}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[650px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">Assign Categories to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <span className="mb-4 block text-sm text-slate-600">
+                                Select how to apply categories to the selected assets.
+                            </span>
+
+                            {/* Mode Selection */}
+                            <div className="mb-4 bg-slate-50 p-3">
+                                <span className="mb-2 block font-medium">Operation Mode</span>
+                                <div className="flex gap-2">
+                                    <Button
+                                        size="sm"
+                                        colorScheme={bulkCategoryMode === 'add' ? 'green' : 'gray'}
+                                        variant={bulkCategoryMode === 'add' ? 'solid' : 'outline'}
+                                        onClick={() => setBulkCategoryMode('add')}
+                                    >
+                                        ➕ Add to existing
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        colorScheme={bulkCategoryMode === 'replace' ? 'green' : 'gray'}
+                                        variant={bulkCategoryMode === 'replace' ? 'solid' : 'outline'}
+                                        onClick={() => setBulkCategoryMode('replace')}
+                                    >
+                                        🔄 Replace all
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        colorScheme={bulkCategoryMode === 'remove' ? 'red' : 'gray'}
+                                        variant={bulkCategoryMode === 'remove' ? 'solid' : 'outline'}
+                                        onClick={() => setBulkCategoryMode('remove')}
+                                    >
+                                        ➖ Remove
+                                    </Button>
+                                </div>
+                                <span className="mt-2 block text-xs text-slate-500">
+                                    {bulkCategoryMode === 'add' && 'Selected categories will be added to assets (keeping existing).'}
+                                    {bulkCategoryMode === 'replace' && 'All existing categories will be replaced with selected ones.'}
+                                    {bulkCategoryMode === 'remove' && 'Selected categories will be removed from assets.'}
+                                </span>
+                            </div>
+
+                            {/* Category Selection */}
+                            {dimensionData.length === 0 ? (
+                                <div className="py-6 text-center">
+                                    <span className="text-slate-500">No categories available.</span>
+                                </div>
+                            ) : (
+                                <Tabs value={bulkCategoriesDialogTab || String(dimensionData[0]?.id)} onValueChange={setBulkCategoriesDialogTab}>
+                                    <TabsList className="mb-4">
+                                        {dimensionData.map(dim => (
+                                            <TabsTrigger key={dim.id} value={String(dim.id)}>
+                                                {dim.label}
+                                                {dim.categories.some(c => bulkCategoryIds.has(c.id)) && (
+                                                    <Badge colorScheme="green" className="ml-1">
+                                                        {dim.categories.filter(c => bulkCategoryIds.has(c.id)).length}
+                                                    </Badge>
+                                                )}
+                                            </TabsTrigger>
+                                        ))}
+                                    </TabsList>
+
+                                    {dimensionData.map(dim => (
+                                        <TabsContent key={dim.id} value={String(dim.id)}>
+                                            <div className="max-h-[250px] overflow-y-auto border border-slate-200 p-3">
+                                                {dim.categories.length === 0 ? (
+                                                    <span className="text-sm text-slate-500">No categories in this dimension.</span>
+                                                ) : (
+                                                    <div className="flex flex-col gap-2">
+                                                        {dim.categories.map(cat => (
+                                                            <div
+                                                                key={cat.id}
+                                                                className={cn(
+                                                                    'flex cursor-pointer items-center gap-3 p-2',
+                                                                    bulkCategoryIds.has(cat.id) ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-slate-50',
+                                                                )}
+                                                                onClick={() => {
+                                                                    setBulkCategoryIds(prev => {
+                                                                        const newSet = new Set(prev);
+                                                                        if (newSet.has(cat.id)) {
+                                                                            newSet.delete(cat.id);
+                                                                        } else {
+                                                                            newSet.add(cat.id);
+                                                                        }
+                                                                        return newSet;
+                                                                    });
+                                                                }}
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+                                                                    checked={bulkCategoryIds.has(cat.id)}
+                                                                    onChange={() => { /* toggled via parent onClick */ }}
+                                                                />
+                                                                {cat.color && (
+                                                                    <div className="h-3 w-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                                                                )}
+                                                                <div className="flex-1">
+                                                                    <span className="text-sm font-medium">{cat.label}</span>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </TabsContent>
+                                    ))}
+                                </Tabs>
+                            )}
+
+                            {/* Selected Summary */}
+                            {bulkCategoryIds.size > 0 && (
+                                <div className="mt-4 bg-slate-50 p-3">
+                                    <span className="mb-2 block text-sm font-medium">
+                                        Selected ({bulkCategoryIds.size}):
+                                    </span>
+                                    <div className="flex flex-wrap gap-1">
+                                        {dimensionData.flatMap(dim =>
+                                            dim.categories
+                                                .filter(c => bulkCategoryIds.has(c.id))
+                                                .map(cat => (
+                                                    <Badge
+                                                        key={cat.id}
+                                                        style={cat.color ? { backgroundColor: cat.color, color: '#fff' } : undefined}
+                                                        colorScheme={!cat.color ? 'green' : undefined}
+                                                    >
+                                                        {cat.label}
+                                                    </Badge>
+                                                ))
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowBulkCategoriesDialog(false)}>Cancel</Button>
+                            <Button
+                                colorScheme="green"
+                                onClick={executeBulkCategoriesUpdate}
+                                loading={bulkOperationLoading}
+                                disabled={bulkCategoryIds.size === 0}
+                            >
+                                {bulkCategoryMode === 'add' && '➕ Add'}
+                                {bulkCategoryMode === 'replace' && '🔄 Replace'}
+                                {bulkCategoryMode === 'remove' && '➖ Remove'}
+                                {' '}Categories
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+
+            {/* Bulk Price Getters Dialog */}
+            <RadixDialog.Root open={showBulkPriceGettersDialog} onOpenChange={(open) => setShowBulkPriceGettersDialog(open)}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[500px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">Assign Price Getter to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <span className="mb-4 block text-sm text-slate-600">
+                                Add a price getter to all selected assets. This will add to existing getters.
+                            </span>
+
+                            <div className="flex flex-col gap-4">
+                                <div>
+                                    <span className="mb-2 block font-medium">Price Getter Source</span>
+                                    <select
+                                        className="h-8 w-full border border-slate-300 px-2 text-sm"
+                                        value={bulkPriceGetter.price_getter}
+                                        onChange={e => setBulkPriceGetter({ ...bulkPriceGetter, price_getter: e.target.value })}
+                                    >
+                                        <option value="">-- Select Source --</option>
+                                        {availableGetters.map(g => (
+                                            <option key={g} value={g}>{g}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <span className="mb-1 block font-medium">External ID (optional)</span>
+                                    <Input
+                                        placeholder="Leave empty to use asset symbol"
+                                        value={bulkPriceGetter.external_id}
+                                        onChange={e => setBulkPriceGetter({ ...bulkPriceGetter, external_id: e.target.value })}
+                                    />
+                                    <span className="mt-1 block text-xs text-slate-500">
+                                        If empty, each asset's symbol will be used as the external ID.
+                                    </span>
+                                </div>
+
+                                <div>
+                                    <span className="mb-2 block font-medium">Priority</span>
+                                    <Input
+                                        type="number"
+                                        value={bulkPriceGetter.priority}
+                                        onChange={e => setBulkPriceGetter({ ...bulkPriceGetter, priority: parseInt(e.target.value) || 100 })}
+                                    />
+                                    <span className="mt-1 block text-xs text-slate-500">
+                                        Lower values = higher priority (tried first)
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowBulkPriceGettersDialog(false)}>Cancel</Button>
+                            <Button
+                                colorScheme="blue"
+                                onClick={executeBulkPriceGettersUpdate}
+                                loading={bulkOperationLoading}
+                                disabled={!bulkPriceGetter.price_getter}
+                            >
+                                Assign to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Bulk Delete Dialog */}
-            <Dialog.Root
+            <RadixDialog.Root
                 open={showBulkDeleteDialog}
-                onOpenChange={(e) => {
-                    setShowBulkDeleteDialog(e.open);
-                    if (!e.open) {
+                onOpenChange={(open) => {
+                    setShowBulkDeleteDialog(open);
+                    if (!open) {
                         setDeletionImpact({});
                     }
                 }}
             >
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Delete {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}?</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text color="red.600" fontWeight="bold" mb={2}>
-                                    ⚠️ Warning: This action cannot be undone!
-                                </Text>
-                                <Text mb={4}>
-                                    You are about to delete <strong>{selectedIds.size}</strong> asset{selectedIds.size > 1 ? 's' : ''}.
-                                </Text>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-200 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold">Delete {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}?</RadixDialog.Title>
+                        </div>
+                        <div className="px-5 py-4">
+                            <span className="mb-2 block font-bold text-red-600">
+                                ⚠️ Warning: This action cannot be undone!
+                            </span>
+                            <span className="mb-4 block">
+                                You are about to delete <strong>{selectedIds.size}</strong> asset{selectedIds.size > 1 ? 's' : ''}.
+                            </span>
 
-                                {isImpactLoading ? (
-                                    <Flex align="center" gap={2} mt={4}>
-                                        <Spinner size="xs" />
-                                        <Text fontSize="xs" color="gray.500">Checking for linked data...</Text>
-                                    </Flex>
-                                ) : (
-                                    <>
-                                        {/* Blockers (prevent deletion) */}
-                                        {(deletionImpact.transactions || deletionImpact.cost_lots || deletionImpact.realized_pnl) ? (
-                                            <Box mt={4} p={3} bg="red.50" border="1px solid" borderColor="red.300" borderRadius="md">
-                                                <Text fontSize="xs" fontWeight="bold" color="red.800" mb={1}>
-                                                    🚫 Cannot delete - Linked data exists:
-                                                </Text>
-                                                <Flex direction="column" gap={0.5}>
-                                                    {deletionImpact.transactions && (
-                                                        <Text fontSize="10px" color="red.700">
-                                                            • {deletionImpact.transactions} transaction(s) - delete transactions first
-                                                        </Text>
-                                                    )}
-                                                    {deletionImpact.cost_lots && (
-                                                        <Text fontSize="10px" color="red.700">
-                                                            • {deletionImpact.cost_lots} cost lot(s) - delete transactions first
-                                                        </Text>
-                                                    )}
-                                                    {deletionImpact.realized_pnl && (
-                                                        <Text fontSize="10px" color="red.700">
-                                                            • {deletionImpact.realized_pnl} P&L record(s) - delete transactions first
-                                                        </Text>
-                                                    )}
-                                                </Flex>
-                                                <Text fontSize="10px" color="red.800" mt={2} fontStyle="italic">
-                                                    Assets with transaction history cannot be deleted. Delete all related transactions first.
-                                                </Text>
-                                            </Box>
-                                        ) : Object.keys(deletionImpact).length > 0 ? (
-                                            /* Cascade deletions (informational) */
-                                            <Box mt={4} p={3} bg="orange.50" border="1px solid" borderColor="orange.200" borderRadius="md">
-                                                <Text fontSize="xs" fontWeight="bold" color="orange.800" mb={1}>
-                                                    ⚠️ Linked objects that will also be deleted:
-                                                </Text>
-                                                <Flex direction="column" gap={0.5}>
-                                                    {Object.entries(deletionImpact).map(([key, count]) => (
-                                                        <Text key={key} fontSize="10px" color="orange.700">
-                                                            • {count} {key.replace(/_/g, ' ')}
-                                                        </Text>
-                                                    ))}
-                                                </Flex>
-                                                <Text fontSize="10px" color="orange.800" mt={2} fontStyle="italic">
-                                                    This data is linked to these asset(s) and will be removed due to cascade deletion.
-                                                </Text>
-                                            </Box>
-                                        ) : null}
-                                    </>
-                                )}
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBulkDeleteDialog(false)}>Cancel</Button>
-                                    <Button
-                                        colorPalette="red"
-                                        onClick={executeBulkDelete}
-                                        loading={bulkOperationLoading}
-                                        disabled={bulkOperationLoading || deletionImpact.transactions > 0 || deletionImpact.cost_lots > 0 || deletionImpact.realized_pnl > 0}
-                                    >
-                                        🗑️ Delete {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+                            {isImpactLoading ? (
+                                <div className="mt-4 flex items-center gap-2">
+                                    <Spinner size="xs" />
+                                    <span className="text-xs text-slate-500">Checking for linked data...</span>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Blockers (prevent deletion) */}
+                                    {(deletionImpact.transactions || deletionImpact.cost_lots || deletionImpact.realized_pnl) ? (
+                                        <div className="mt-4 border border-red-300 bg-red-50 p-3">
+                                            <span className="mb-1 block text-xs font-bold text-red-800">
+                                                🚫 Cannot delete - Linked data exists:
+                                            </span>
+                                            <div className="flex flex-col gap-0.5">
+                                                {deletionImpact.transactions && (
+                                                    <span className="text-[10px] text-red-700">
+                                                        • {deletionImpact.transactions} transaction(s) - delete transactions first
+                                                    </span>
+                                                )}
+                                                {deletionImpact.cost_lots && (
+                                                    <span className="text-[10px] text-red-700">
+                                                        • {deletionImpact.cost_lots} cost lot(s) - delete transactions first
+                                                    </span>
+                                                )}
+                                                {deletionImpact.realized_pnl && (
+                                                    <span className="text-[10px] text-red-700">
+                                                        • {deletionImpact.realized_pnl} P&L record(s) - delete transactions first
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <span className="mt-2 block text-[10px] italic text-red-800">
+                                                Assets with transaction history cannot be deleted. Delete all related transactions first.
+                                            </span>
+                                        </div>
+                                    ) : Object.keys(deletionImpact).length > 0 ? (
+                                        /* Cascade deletions (informational) */
+                                        <div className="mt-4 border border-orange-200 bg-orange-50 p-3">
+                                            <span className="mb-1 block text-xs font-bold text-orange-800">
+                                                ⚠️ Linked objects that will also be deleted:
+                                            </span>
+                                            <div className="flex flex-col gap-0.5">
+                                                {Object.entries(deletionImpact).map(([key, count]) => (
+                                                    <span key={key} className="text-[10px] text-orange-700">
+                                                        • {count} {key.replace(/_/g, ' ')}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                            <span className="mt-2 block text-[10px] italic text-orange-800">
+                                                This data is linked to these asset(s) and will be removed due to cascade deletion.
+                                            </span>
+                                        </div>
+                                    ) : null}
+                                </>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-200 p-4">
+                            <Button variant="outline" onClick={() => setShowBulkDeleteDialog(false)}>Cancel</Button>
+                            <Button
+                                colorScheme="red"
+                                onClick={executeBulkDelete}
+                                loading={bulkOperationLoading}
+                                disabled={bulkOperationLoading || deletionImpact.transactions > 0 || deletionImpact.cost_lots > 0 || deletionImpact.realized_pnl > 0}
+                            >
+                                🗑️ Delete {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Delete Asset Dialog with cascade preview */}
             <DeleteAssetDialog
@@ -3108,64 +3011,38 @@ export const AssetsEditor: React.FC = () => {
             {drawerAsset && drawerFilters && (
                 <>
                     {/* Backdrop */}
-                    <Box
-                        position="fixed"
-                        inset={0}
-                        bg="blackAlpha.400"
-                        zIndex={2000}
+                    <div
+                        className="fixed inset-0 z-[2000] cursor-pointer bg-black/40"
                         onClick={() => setDrawerAsset(null)}
-                        cursor="pointer"
                     />
 
                     {/* Panel */}
-                    <Box
-                        position="fixed"
-                        right={0}
-                        top={0}
-                        bottom={0}
-                        width="75vw"
-                        maxW="1400px"
-                        bg="white"
-                        boxShadow="xl"
-                        zIndex={2001}
-                        overflowY="auto"
-                        borderLeft="1px solid"
-                        borderColor="gray.200"
+                    <div
+                        className="fixed bottom-0 right-0 top-0 z-[2001] w-[75vw] max-w-[1400px] overflow-y-auto border-l border-slate-200 bg-white shadow-xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Sticky header */}
-                        <Flex
-                            justify="space-between"
-                            align="center"
-                            px={4}
-                            py={3}
-                            borderBottom="1px solid"
-                            borderColor="gray.200"
-                            bg="white"
-                            position="sticky"
-                            top={0}
-                            zIndex={1}
-                        >
-                            <Flex align="center" gap={2}>
-                                <Badge colorPalette="purple" fontSize="sm">
+                        <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+                            <div className="flex items-center gap-2">
+                                <Badge colorScheme="purple" className="text-sm">
                                     {drawerAsset.symbol}
                                 </Badge>
-                                <Heading size="sm">
+                                <h3 className="text-sm font-semibold">
                                     Transactions ({txCountsByAssetId[drawerAsset.id] ?? 0})
-                                </Heading>
-                            </Flex>
-                            <IconButton
-                                size="sm"
-                                variant="ghost"
-                                aria-label="Close drawer"
+                                </h3>
+                            </div>
+                            <button
+                                type="button"
+                                className="flex h-6 min-w-[24px] items-center justify-center p-0 text-slate-500 hover:text-slate-700"
                                 onClick={() => setDrawerAsset(null)}
+                                title="Close drawer"
                             >
                                 <LuX />
-                            </IconButton>
-                        </Flex>
+                            </button>
+                        </div>
 
                         {/* Transactions Table */}
-                        <Box p={4}>
+                        <div className="p-4">
                             <TransactionsTable
                                 key={`asset-txns-${drawerAsset.id}`}
                                 tableId={`assetTxns-${drawerAsset.id}`}
@@ -3177,10 +3054,10 @@ export const AssetsEditor: React.FC = () => {
                                 showBundles={false}
                                 compact={true}
                             />
-                        </Box>
-                    </Box>
+                        </div>
+                    </div>
                 </>
             )}
-        </Box>
+        </div>
     );
 };

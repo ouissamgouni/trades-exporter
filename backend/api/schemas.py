@@ -1,5 +1,5 @@
 """
-Pydantic request/response schemas for the Trade Exporter API.
+Pydantic request/response schemas for the TradeTrail API.
 
 This module contains all API request and response models.
 For SQLModel ORM classes (NormalizedTransaction, Group, Asset, etc.),

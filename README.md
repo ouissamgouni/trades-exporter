@@ -1,4 +1,4 @@
-# TradeTrail / Trades Exporter
+# TradeTrail
 
 TradeTrail is a self-hosted transaction review and tax-reporting workspace for crypto and multi-asset activity. It imports data from exchanges, wallets, brokers, CSV files, and manual entries; normalizes the transactions; helps review grouping and data quality; calculates P&L; and produces tax-oriented exports.
 
@@ -91,3 +91,21 @@ SCENARIO=fr_tax task start:scenario
 ```
 
 See [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) for integration tests, scenario ports, deployment-style local stacks, branching, and release tasks.
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. In short:
+
+- Sign off every commit under the [Developer Certificate of Origin](DCO) with `git commit -s`.
+- By contributing you also agree to the [Contributor License Agreement](CLA.md).
+- Run `task test` and keep changes focused with accompanying tests where practical.
+
+## License
+
+TradeTrail is free software licensed under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later). See [LICENSE](LICENSE) for the full text.
+
+The AGPL means you can use, study, modify, and self-host TradeTrail freely. If you run a modified version as a network service, you must make your modified source available to its users. The software is provided "as is", without warranty of any kind (see sections 15–16 of the license).
+
+As the sole copyright holder, the maintainer retains the right to offer TradeTrail under separate commercial terms, including a hosted edition. See [CLA.md](CLA.md) for how this applies to contributions.
+
+Copyright © 2026 Ouissam Gouni and the TradeTrail contributors.

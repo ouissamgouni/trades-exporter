@@ -28,8 +28,13 @@ def client():
 
     app.dependency_overrides[get_db] = lambda: session
     app.dependency_overrides[get_session_dependency] = lambda: session
-    with patch("backend.api.main.init_db"), \
-         patch("backend.api.main.get_database_url", return_value="postgresql://test@localhost/test"):
+    with (
+        patch("backend.api.main.init_db"),
+        patch(
+            "backend.api.main.get_database_url",
+            return_value="postgresql://test@localhost/test",
+        ),
+    ):
         yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -44,7 +49,7 @@ def test_root_endpoint(client):
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "Trade Exporter API"
+    assert data["name"] == "TradeTrail API"
     assert data["version"] == "1.0.0"
     assert "docs" in data
 

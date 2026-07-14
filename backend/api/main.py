@@ -1,5 +1,5 @@
 """
-Trade Exporter API
+TradeTrail API
 
 FastAPI application for managing and reviewing cryptocurrency transactions.
 """
@@ -42,8 +42,12 @@ async def lifespan(app: FastAPI):
     # Log current database connection
     db_url = get_database_url()
     # Mask password in log output
-    masked_url = db_url.replace(db_url.split('@')[0].split(':')[-1], '****') if '@' in db_url else db_url
-    print(f"🚀 Trade Exporter API starting")
+    masked_url = (
+        db_url.replace(db_url.split("@")[0].split(":")[-1], "****")
+        if "@" in db_url
+        else db_url
+    )
+    print(f"🚀 TradeTrail API starting")
     print(f"   Database: {masked_url}")
 
     # Initialize database (creates tables + seeds default data)
@@ -54,7 +58,9 @@ async def lifespan(app: FastAPI):
 
     # Initialize P&L calculation service (starts as stale on boot)
     pnl_service = PnLCalculationService.get_instance()
-    print(f"   P&L Calculation Service: initialized (status={pnl_service.get_status()['status']})")
+    print(
+        f"   P&L Calculation Service: initialized (status={pnl_service.get_status()['status']})"
+    )
 
     yield
 
@@ -63,7 +69,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Trade Exporter API",
+    title="TradeTrail API",
     description="API for managing and reviewing cryptocurrency transactions",
     version="1.0.0",
     lifespan=lifespan,
@@ -112,7 +118,7 @@ app.include_router(positions.router)
 def root():
     """API root endpoint"""
     return {
-        "name": "Trade Exporter API",
+        "name": "TradeTrail API",
         "version": "1.0.0",
         "docs": "/docs",
         "openapi": "/openapi.json",

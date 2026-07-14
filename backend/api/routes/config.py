@@ -1,5 +1,5 @@
 """
-Config endpoints for the Trade Exporter API.
+Config endpoints for the TradeTrail API.
 Provides endpoints for retrieving application configuration and status.
 """
 
@@ -9,7 +9,14 @@ from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
 from backend.db.database import get_db
-from backend.db.models import Account, Asset, AssetPriceGetter, AccountConnector, AppSettings, PriceSnapshot
+from backend.db.models import (
+    Account,
+    Asset,
+    AssetPriceGetter,
+    AccountConnector,
+    AppSettings,
+    PriceSnapshot,
+)
 
 
 router = APIRouter(prefix="/config", tags=["Config"])
@@ -93,7 +100,8 @@ def get_app_info(session: Session = Depends(get_db)):
 
     settings = get_or_create_app_settings(session)
     qa_scenarios = [
-        p["scenario"] for p in (settings.qa_test_plans or [])
+        p["scenario"]
+        for p in (settings.qa_test_plans or [])
         if isinstance(p, dict) and "scenario" in p
     ]
 
@@ -116,18 +124,20 @@ def get_test_plan(scenario: str, session: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="scenario parameter required")
 
     settings = get_or_create_app_settings(session)
-    for plan in (settings.qa_test_plans or []):
+    for plan in settings.qa_test_plans or []:
         if isinstance(plan, dict) and plan.get("scenario") == scenario:
             return plan
 
-    raise HTTPException(status_code=404, detail=f"No test plan found for scenario '{scenario}'")
+    raise HTTPException(
+        status_code=404, detail=f"No test plan found for scenario '{scenario}'"
+    )
 
 
 @router.get("/settings", response_model=AppSettingsResponse)
 def get_app_settings(session: Session = Depends(get_db)):
     """
     Get application settings.
-    
+
     Returns the base currency and other app-wide settings.
     """
     settings = get_or_create_app_settings(session)
@@ -146,33 +156,30 @@ def get_app_settings(session: Session = Depends(get_db)):
 
 
 @router.put("/settings", response_model=AppSettingsResponse)
-def update_app_settings(
-    update: AppSettingsUpdate,
-    session: Session = Depends(get_db)
-):
+def update_app_settings(update: AppSettingsUpdate, session: Session = Depends(get_db)):
     """
     Update application settings.
-    
+
     Allows updating:
     - base_currency: The default currency for P&L calculations
     """
     settings = get_or_create_app_settings(session)
-    
+
     if update.base_currency is not None:
         # Validate that the currency exists as an asset
         currency_asset = session.exec(
             select(Asset).where(Asset.symbol == update.base_currency.upper())
         ).first()
-        
+
         if not currency_asset:
             raise HTTPException(
                 status_code=400,
                 detail=f"Currency '{update.base_currency}' not found in assets. "
-                       f"Add it as a fiat asset first."
+                f"Add it as a fiat asset first.",
             )
-        
+
         settings.base_currency = update.base_currency.upper()
-    
+
     # Handle mock mode toggle — bulk-flip all mock getter rows
     if update.mock_mode_enabled is not None:
         settings.mock_mode_enabled = update.mock_mode_enabled
@@ -194,27 +201,40 @@ def update_app_settings(
 
     # Update P&L default configuration fields
     pnl_fields = [
-        'pnl_lot_method', 'pnl_lot_mode', 'pnl_residual_tolerance_pct',
-        'pnl_allow_negative_balances', 'pnl_crypto_swap_taxable', 'pnl_fee_taxable',
-        'pnl_use_price_fallback', 'pnl_price_staleness_days',
+        "pnl_lot_method",
+        "pnl_lot_mode",
+        "pnl_residual_tolerance_pct",
+        "pnl_allow_negative_balances",
+        "pnl_crypto_swap_taxable",
+        "pnl_fee_taxable",
+        "pnl_use_price_fallback",
+        "pnl_price_staleness_days",
     ]
     for field_name in pnl_fields:
         value = getattr(update, field_name, None)
         if value is not None:
             # Validate enum values
-            if field_name == 'pnl_lot_method' and value not in ('FIFO', 'LIFO', 'HIFO'):
-                raise HTTPException(status_code=400, detail=f"Invalid lot method: {value}")
-            if field_name == 'pnl_lot_mode' and value not in ('LOT_TRAVEL', 'MEGA_WALLET'):
-                raise HTTPException(status_code=400, detail=f"Invalid lot mode: {value}")
+            if field_name == "pnl_lot_method" and value not in ("FIFO", "LIFO", "HIFO"):
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid lot method: {value}"
+                )
+            if field_name == "pnl_lot_mode" and value not in (
+                "LOT_TRAVEL",
+                "MEGA_WALLET",
+            ):
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid lot mode: {value}"
+                )
             setattr(settings, field_name, value)
 
     from datetime import datetime, timezone
+
     settings.updated_at = datetime.now(timezone.utc)
-    
+
     session.add(settings)
     session.commit()
     session.refresh(settings)
-    
+
     return AppSettingsResponse(
         base_currency=settings.base_currency,
         mock_mode_enabled=settings.mock_mode_enabled,
@@ -233,29 +253,29 @@ def update_app_settings(
 def get_setup_status(session: Session = Depends(get_db)):
     """
     Get the setup completion status.
-    
+
     Checks if user has configured:
     - At least one account
     - At least one connector
     - At least one asset
     - Base currency for P&L (EUR is default)
-    
+
     Returns setup checklist status.
     """
     # Count accounts
     accounts_count = session.exec(select(func.count(Account.id))).one()
-    
+
     # Count connectors
     connectors_count = session.exec(select(func.count(AccountConnector.id))).one()
-    
+
     # Count assets
     assets_count = session.exec(select(func.count(Asset.asset_id))).one()
-    
+
     # Check for EUR or USD (common base currencies)
     base_currency = session.exec(
         select(Asset).where(Asset.symbol.in_(["EUR", "USD"]))
     ).first()
-    
+
     # Determine what's pending
     pending = []
     if accounts_count == 0:
@@ -266,7 +286,7 @@ def get_setup_status(session: Session = Depends(get_db)):
         pending.append("Configure assets")
     if not base_currency:
         pending.append("Add base currency (EUR or USD)")
-    
+
     return SetupStatusResponse(
         accounts_configured=accounts_count > 0,
         accounts_count=accounts_count,

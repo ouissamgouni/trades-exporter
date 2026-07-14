@@ -40,3 +40,7 @@ TradeTrail is a self-hosted tool. You are responsible for reviewing imported dat
 3. Use [Import and Connectors](IMPORT_AND_CONNECTORS.md) for your exchange, wallet, broker, or file source.
 4. Use [Review and Data Quality](REVIEW_AND_DATA_QUALITY.md) before trusting calculations.
 5. Use [P&L and Cost Lots](PNL_AND_COST_LOTS.md) and [Tax Reporting](TAX_REPORTING.md) when preparing reports.
+
+## License and Contributing
+
+TradeTrail is free software licensed under [AGPL-3.0-or-later](../LICENSE). To contribute, see [CONTRIBUTING.md](../CONTRIBUTING.md); contributions require a DCO sign-off and acceptance of the [CLA](../CLA.md).

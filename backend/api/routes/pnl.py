@@ -7053,9 +7053,53 @@ BENCHMARK_PRESETS: Dict[str, str] = {
     "GC=F": "Gold",
 }
 
+# Map a Yahoo benchmark ticker to the seeded (mock) Asset symbol that provides
+# a deterministic series for it. Used only when mock mode is enabled (demo /
+# QA scenarios) so the benchmark line is reproducible and offline-safe.
+BENCHMARK_MOCK_SYMBOLS: Dict[str, str] = {
+    "^GSPC": "^GSPC",
+}
+
 # Simple in-memory cache: (ticker, start, end) -> (timestamp, data)
 _benchmark_cache: Dict[tuple, tuple] = {}
 _BENCHMARK_CACHE_TTL = 300  # 5 minutes
+
+
+def _seeded_benchmark_points(
+    session: Session, ticker: str, start_date, end_date
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Return a deterministic benchmark daily series from seeded mock prices.
+
+    Only active when ``AppSettings.mock_mode_enabled`` is True and an Asset
+    matching the ticker's mapped symbol has an enabled ``mock`` price getter.
+    Returns ``None`` to signal "no seeded data — fall back to Yahoo".
+    """
+    settings = session.get(AppSettings, 1)
+    if not settings or not getattr(settings, "mock_mode_enabled", False):
+        return None
+
+    symbol = BENCHMARK_MOCK_SYMBOLS.get(ticker, ticker)
+    asset = session.exec(select(Asset).where(Asset.symbol == symbol)).first()
+    if asset is None:
+        return None
+
+    apg = session.exec(
+        select(AssetPriceGetter)
+        .where(AssetPriceGetter.asset_id == asset.asset_id)
+        .where(AssetPriceGetter.price_getter == "mock")
+        .where(AssetPriceGetter.enabled == True)  # noqa: E712
+    ).first()
+    if apg is None or not apg.params or "prices" not in (apg.params or {}):
+        return None
+
+    from backend.services.price_getters.registry import get_price_getter
+    from backend.services.price_getters.base import PriceGetterConfig
+
+    getter = get_price_getter("mock")
+    config = PriceGetterConfig.from_db(apg.external_id, apg.params)
+    points = getter.get_daily_series(asset, start_date, end_date, config)
+    return points or None
 
 
 @router.get("/benchmark-series")
@@ -7063,11 +7107,14 @@ def get_benchmark_series(
     ticker: str = Query(..., description="Yahoo Finance ticker (e.g., ^GSPC)"),
     start_date: str = Query(..., description="Start date YYYY-MM-DD"),
     end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    session: Session = Depends(get_session_dependency),
 ):
     """
     Fetch daily close prices for an external benchmark index.
 
-    Returns rebased-ready daily price series from Yahoo Finance.
+    Returns rebased-ready daily price series. When mock mode is enabled and a
+    seeded series exists for the ticker, that deterministic series is returned
+    (demo / QA); otherwise the data is fetched live from Yahoo Finance.
     Only whitelisted tickers are allowed.
     """
     import time as _time
@@ -7095,6 +7142,17 @@ def get_benchmark_series(
         cached_at, cached_data = _benchmark_cache[cache_key]
         if now - cached_at < _BENCHMARK_CACHE_TTL:
             return cached_data
+
+    # Deterministic seeded series (demo / mock mode) takes precedence.
+    seeded = _seeded_benchmark_points(session, ticker, parsed_start, parsed_end)
+    if seeded is not None:
+        response = {
+            "ticker": ticker,
+            "label": BENCHMARK_PRESETS[ticker],
+            "points": seeded,
+        }
+        _benchmark_cache[cache_key] = (now, response)
+        return response
 
     # Fetch from Yahoo Direct
     from backend.services.price_getters.registry import get_price_getter
