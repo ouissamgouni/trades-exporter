@@ -19,7 +19,7 @@ def test_blockscout_base_token_transfers_connector_yield_normalized():
     """Test Blockscout Base token transfers connector yield_normalized method."""
     # Test with a known address that has token transfers on Base
     connector = ConnectorBlockscoutTokenTransfers(
-        wallet_address="0x1111111111111111111111111111111111111111",
+        wallet_address="0x347681ec529f767dafB3703486570Bc3Da136993",
         chain_name="Base",
     )
 

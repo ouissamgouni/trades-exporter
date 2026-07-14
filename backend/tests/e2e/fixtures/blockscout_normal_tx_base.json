@@ -22,7 +22,7 @@
     "value": "0",
     "from": {
       "ens_domain_name": null,
-      "hash": "0x1111111111111111111111111111111111111111",
+      "hash": "0x347681ec529f767dafB3703486570Bc3Da136993",
       "implementations": [],
       "is_contract": false,
       "is_scam": false,
@@ -130,7 +130,7 @@
     "status": "ok",
     "to": {
       "ens_domain_name": null,
-      "hash": "0x1111111111111111111111111111111111111111",
+      "hash": "0x347681ec529f767dafB3703486570Bc3Da136993",
       "implementations": [],
       "is_contract": false,
       "is_scam": false,

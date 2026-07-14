@@ -30,7 +30,7 @@ def test_etherscan_token_transfers_connector_yield_normalized():
 
     # Test with a known address that has token transfers
     connector = ConnectorEtherscanTokenTransfers(
-        wallet_address="0x1111111111111111111111111111111111111111",
+        wallet_address="0x347681ec529f767dafB3703486570Bc3Da136993",
         chain_name="ethereum",
     )
 

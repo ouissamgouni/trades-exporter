@@ -23,9 +23,7 @@ x_args = context.get_x_argument(as_dictionary=True)
 database_url = get_database_url()
 config.set_main_option("sqlalchemy.url", database_url)
 
-print(
-    f"[Alembic] Using database: {database_url.split('@')[-1]}"
-)
+print(f"[Alembic] Using database: {database_url.split('@')[-1]}")
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

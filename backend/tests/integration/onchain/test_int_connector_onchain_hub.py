@@ -23,7 +23,7 @@ def test_onchain_hub_connector_yield_normalized():
     # Mock wallet configurations for testing
     mock_wallet_configs = [
         {
-            "wallet_address": "0x1111111111111111111111111111111111111111",
+            "wallet_address": "0x347681ec529f767dafB3703486570Bc3Da136993",
             "chain_id": 1,
             "chain_name": "ethereum",
             "scanner": "etherscan-api",
