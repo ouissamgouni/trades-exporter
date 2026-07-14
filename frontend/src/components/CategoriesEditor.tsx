@@ -18,13 +18,13 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
 import { LuTriangleAlert, LuCheck, LuPencil, LuPlus, LuTrash2, LuX, LuChevronDown, LuChevronRight, LuGripVertical } from 'react-icons/lu';
-import { Category, CategoryAssetsResponse, Dimension, DimensionWithCategories, LinkedAsset, UnclassifiedAssetsResponse } from '../types';
+import { API_URL, Category, CategoryAssetsResponse, Dimension, DimensionWithCategories, LinkedAsset, UnclassifiedAssetsResponse } from '../types';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { Toaster, toaster } from './ui/toaster';
 import { ColorSelector } from './ColorSelector';
 import { getNextAvailableColor, getContrastTextColor, DEFAULT_CATEGORY_COLOR } from '../constants/colors';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = API_URL;
 
 interface CategoryFormData {
     dimension_id: number;
