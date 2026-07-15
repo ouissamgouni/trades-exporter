@@ -1,11 +1,14 @@
 #!/bin/bash
-# Script to run database migrations on both prod and test databases
+# Script to run database migrations on both dev and test databases
 #
 # Usage:
 #   ./scripts/run_migrations.sh           # Run on both databases
 #   ./scripts/run_migrations.sh --prod    # Run on production only  
 #   ./scripts/run_migrations.sh --test    # Run on test only
 #   ./scripts/run_migrations.sh --dry-run # Show what would be done
+#
+# Note: Prefer using `task db:migrate:dev` / `task db:migrate:test` instead.
+#       This script builds DATABASE_URL from .env files to target the correct DB.
 
 set -e
 
@@ -53,23 +56,38 @@ echo "================================"
 
 # Change to project root
 cd "$(dirname "$0")/.."
+ROOT_DIR="$(cd .. && pwd)"
+
+# Load common env
+if [ -f "$ROOT_DIR/.env" ]; then
+    set -a && source "$ROOT_DIR/.env" && set +a
+fi
 
 # Function to run migration
 run_migration() {
     local db_type=$1
-    local testing_flag=$2
-    
+    local env_file=$2
+
     echo ""
     echo -e "${GREEN}Running migration on $db_type database...${NC}"
-    
+
+    # Load env-specific vars
+    if [ -f "$env_file" ]; then
+        set -a && source "$env_file" && set +a
+    else
+        echo -e "${RED}  ✗ Env file not found: $env_file${NC}"
+        exit 1
+    fi
+
+    local db_url="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+
     if [ "$DRY_RUN" = true ]; then
-        echo -e "${YELLOW}  [DRY RUN] Would run: TEST_MODE=$testing_flag .venv/bin/python -m alembic upgrade head${NC}"
+        echo -e "${YELLOW}  [DRY RUN] Would run: DATABASE_URL=$db_url alembic upgrade head${NC}"
         return
     fi
-    
-    # Set TEST_MODE flag (alembic env.py checks TEST_MODE)
-    TEST_MODE=$testing_flag .venv/bin/python -m alembic upgrade head
-    
+
+    DATABASE_URL="$db_url" PYTHONPATH="$ROOT_DIR" .venv/bin/python -m alembic upgrade head
+
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ $db_type migration completed successfully${NC}"
     else
@@ -78,14 +96,14 @@ run_migration() {
     fi
 }
 
-# Run production migration
+# Run dev migration
 if [ "$RUN_PROD" = true ]; then
-    run_migration "PRODUCTION" "0"
+    run_migration "DEV" "$ROOT_DIR/config/dev.env"
 fi
 
 # Run test migration
 if [ "$RUN_TEST" = true ]; then
-    run_migration "TEST" "1"
+    run_migration "TEST" "$ROOT_DIR/config/test.env"
 fi
 
 echo ""

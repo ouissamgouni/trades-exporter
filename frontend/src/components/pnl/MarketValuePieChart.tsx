@@ -11,16 +11,13 @@
  */
 
 import React, { useMemo, useState, useCallback } from 'react';
-import {
-    Box,
-    Flex,
-    Heading,
-    NativeSelect,
-    Text,
-} from '@chakra-ui/react';
 import { ResponsivePie } from '@nivo/pie';
 import { DimensionWithCategories, Category } from '../../types';
-import { AssetPnLRow, PieChartDataPoint, aggregateMarketValueByCategory } from './types';
+import { AssetPnLRow, PieChartDataPoint, aggregateMarketValueByCategory, aggregateMarketValueByCurrency } from './types';
+import { Heading } from '../ui/primitives';
+
+/** Sentinel value for the "Currency" pseudo-dimension in the selector */
+const CURRENCY_DIMENSION_ID = -1;
 
 export interface MarketValuePieChartProps {
     /** Assets with market value and category_ids */
@@ -30,9 +27,11 @@ export interface MarketValuePieChartProps {
     /** Base currency symbol for formatting */
     baseCurrency: string;
     /** Currently selected category IDs (for highlighting active filter) */
-    selectedCategoryIds: number[];
+    selectedCategoryIds?: number[];
     /** Callback when a pie slice is clicked */
-    onCategoryClick: (categoryId: number | null) => void;
+    onCategoryClick?: (categoryId: number | null) => void;
+    /** Per-asset denomination currency map: assetId → currency symbol */
+    assetCurrencyMap?: Record<number, string>;
 }
 
 /**
@@ -64,8 +63,9 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
     assets,
     dimensions,
     baseCurrency,
-    selectedCategoryIds,
+    selectedCategoryIds = [],
     onCategoryClick,
+    assetCurrencyMap = {},
 }) => {
     // Default to first dimension
     const [selectedDimensionId, setSelectedDimensionId] = useState<number | null>(null);
@@ -91,7 +91,9 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
         if (selectedDimensionId === null || assets.length === 0) {
             return [];
         }
-        const rawData = aggregateMarketValueByCategory(assets, selectedDimensionId, allCategories);
+        const rawData = selectedDimensionId === CURRENCY_DIMENSION_ID
+            ? aggregateMarketValueByCurrency(assets, assetCurrencyMap)
+            : aggregateMarketValueByCategory(assets, selectedDimensionId, allCategories);
         return rawData.map((d: PieChartDataPoint) => ({
             id: d.label,
             label: d.label,
@@ -101,7 +103,7 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
             percentage: d.percentage,
             assetCount: d.assetCount,
         }));
-    }, [assets, selectedDimensionId, allCategories]);
+    }, [assets, selectedDimensionId, allCategories, assetCurrencyMap]);
 
     // Total market value for display
     const totalMarketValue = useMemo(() => {
@@ -110,7 +112,7 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
 
     // Handle pie slice click
     const handlePieClick = useCallback((data: NivoPieData) => {
-        onCategoryClick(data.categoryId);
+        onCategoryClick?.(data.categoryId);
     }, [onCategoryClick]);
 
     // Handle dimension change via native select
@@ -126,59 +128,47 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
 
     if (assets.length === 0 || totalMarketValue === 0) {
         return (
-            <Box
-                p={4}
-                bg="gray.50"
-                borderRadius="md"
-                border="1px solid"
-                borderColor="gray.200"
-                mb={4}
-            >
-                <Heading size="sm" mb={2}>Market Value by Category</Heading>
-                <Text fontSize="sm" color="gray.500">
+            <div className="mb-4 border border-slate-200 bg-slate-50 p-4">
+                <Heading className="mb-2 text-sm">Market Value by Category</Heading>
+                <span className="block text-sm text-slate-500">
                     No market value data available. Refresh prices to see the distribution.
-                </Text>
-            </Box>
+                </span>
+            </div>
         );
     }
 
     return (
-        <Box
-            p={4}
-            bg="white"
-            borderRadius="md"
-            border="1px solid"
-            borderColor="gray.200"
-            mb={4}
-        >
+        <div className="mb-4 border border-slate-200 bg-white p-4">
             {/* Header with dimension selector */}
-            <Flex justify="space-between" align="center" mb={4}>
-                <Heading size="sm">Market Value by Category</Heading>
-                <NativeSelect.Root size="sm" width="180px">
-                    <NativeSelect.Field
-                        value={selectedDimensionId !== null ? String(selectedDimensionId) : ''}
-                        onChange={handleDimensionChange}
-                    >
-                        {dimensions.map(dim => (
-                            <option key={dim.id} value={String(dim.id)}>
-                                {dim.label}
-                            </option>
-                        ))}
-                    </NativeSelect.Field>
-                </NativeSelect.Root>
-            </Flex>
+            <div className="mb-4 flex items-center justify-between">
+                <Heading className="text-sm">
+                    {selectedDimensionId === CURRENCY_DIMENSION_ID ? 'Market Value by Currency' : 'Market Value by Category'}
+                </Heading>
+                <select
+                    className="h-8 w-[180px] border border-slate-300 bg-white px-2 text-sm"
+                    value={selectedDimensionId !== null ? String(selectedDimensionId) : ''}
+                    onChange={handleDimensionChange}
+                >
+                    <option value={String(CURRENCY_DIMENSION_ID)}>Currency</option>
+                    {dimensions.map(dim => (
+                        <option key={dim.id} value={String(dim.id)}>
+                            {dim.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
 
             {/* Total value display */}
-            <Text fontSize="sm" color="gray.600" mb={3}>
+            <div className="mb-3 text-sm text-slate-600">
                 Total: {formatCurrency(totalMarketValue, baseCurrency)}
-            </Text>
+            </div>
 
             {pieData.length === 0 ? (
-                <Text fontSize="sm" color="gray.500" textAlign="center" py={8}>
+                <div className="py-8 text-center text-sm text-slate-500">
                     No categories assigned in this dimension.
-                </Text>
+                </div>
             ) : (
-                <Box h="320px">
+                <div className="h-[320px]">
                     <ResponsivePie
                         data={pieData}
                         margin={{ top: 40, right: 100, bottom: 40, left: 100 }}
@@ -202,33 +192,24 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
                         enableArcLabels={false}
                         // Tooltip
                         tooltip={({ datum }) => (
-                            <Box
-                                bg="white"
-                                p={3}
-                                borderRadius="md"
-                                boxShadow="lg"
-                                border="1px solid"
-                                borderColor="gray.200"
-                            >
-                                <Flex align="center" gap={2} mb={1}>
-                                    <Box
-                                        w={3}
-                                        h={3}
-                                        borderRadius="sm"
-                                        bg={datum.color}
+                            <div className="border border-slate-200 bg-white p-3 shadow-lg">
+                                <div className="mb-1 flex items-center gap-2">
+                                    <div
+                                        className="h-3 w-3"
+                                        style={{ backgroundColor: datum.color }}
                                     />
-                                    <Text fontWeight="semibold">{datum.label}</Text>
-                                </Flex>
-                                <Text fontSize="sm" color="gray.600">
+                                    <span className="font-semibold">{datum.label}</span>
+                                </div>
+                                <div className="text-sm text-slate-600">
                                     Value: {formatCurrency(datum.value, baseCurrency)}
-                                </Text>
-                                <Text fontSize="sm" color="gray.600">
+                                </div>
+                                <div className="text-sm text-slate-600">
                                     Percentage: {datum.data.percentage.toFixed(1)}%
-                                </Text>
-                                <Text fontSize="sm" color="gray.500">
+                                </div>
+                                <div className="text-sm text-slate-500">
                                     {datum.data.assetCount} asset{datum.data.assetCount !== 1 ? 's' : ''}
-                                </Text>
-                            </Box>
+                                </div>
+                            </div>
                         )}
                         // Interactivity
                         onClick={(data) => handlePieClick(data.data as NivoPieData)}
@@ -253,9 +234,9 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
                             }
                         }}
                     />
-                </Box>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 

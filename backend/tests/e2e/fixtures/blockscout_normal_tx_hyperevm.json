@@ -1,0 +1,68 @@
+[
+    {
+        "hash": "0xhyperevm_test_tx_001",
+        "result": "success",
+        "status": "ok",
+        "from": {
+            "hash": "0x1111111111111111111111111111111111111111",
+            "is_contract": false,
+            "name": null
+        },
+        "to": {
+            "hash": "0xReceiverAddress123",
+            "is_contract": false,
+            "name": null
+        },
+        "value": "1000000000000000000",
+        "fee": {
+            "type": "actual",
+            "value": "210000000000000"
+        },
+        "gas_used": "21000",
+        "gas_limit": "21000",
+        "gas_price": "10000000000",
+        "timestamp": "2025-12-01T10:00:00.000000Z",
+        "block_number": 50000,
+        "nonce": 0,
+        "type": 2,
+        "method": null,
+        "token_transfers": null,
+        "decoded_input": null,
+        "transaction_types": [
+            "coin_transfer"
+        ]
+    },
+    {
+        "hash": "0xhyperevm_test_tx_002",
+        "result": "success",
+        "status": "ok",
+        "from": {
+            "hash": "0xSenderAddress456",
+            "is_contract": false,
+            "name": null
+        },
+        "to": {
+            "hash": "0x1111111111111111111111111111111111111111",
+            "is_contract": false,
+            "name": null
+        },
+        "value": "2500000000000000000",
+        "fee": {
+            "type": "actual",
+            "value": "210000000000000"
+        },
+        "gas_used": "21000",
+        "gas_limit": "21000",
+        "gas_price": "10000000000",
+        "timestamp": "2025-12-02T14:30:00.000000Z",
+        "block_number": 50100,
+        "nonce": 5,
+        "type": 2,
+        "method": null,
+        "token_transfers": null,
+        "decoded_input": null,
+        "transaction_types": [
+            "coin_transfer"
+        ]
+    }
+]

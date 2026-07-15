@@ -1,17 +1,72 @@
 version: "3"
 
+vars:
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
+
 tasks:
   dev:
     desc: View dev database logs
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter logs -f
+      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev logs -f
 
-  test:
-    desc: View test stack logs
+  staging:local:
+    desc: View staging stack logs
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter logs -f
+      - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging logs -f
 
-  prod:
+  prod:local:
     desc: View prod stack logs
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter logs -f
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod logs -f
+
+  staging:remote:
+    desc: View remote staging backend logs on Fly.io
+    cmds:
+      - task: :fly:staging:logs
+
+  prod:remote:
+    desc: View remote prod backend logs on Fly.io
+    cmds:
+      - task: :fly:logs
+
+  scenario:
+    desc: "View scenario logs. SCENARIO=<name> to target instance."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      SCENARIO: '{{.SCENARIO | default ""}}'
+    cmds:
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        # Try unified compose first (full Docker mode), then scenario-DB-only
+        if docker ps --filter "name=$SC_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$SC_BACKEND_CONTAINER"; then
+          docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME logs -f --tail 50
+        else
+          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $SC_PROJECT_NAME logs -f --tail 50
+        fi

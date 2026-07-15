@@ -1,5 +1,5 @@
 """
-Asset endpoints for the Trade Exporter API.
+Asset endpoints for the TradeTrail API.
 
 Includes:
 - Asset CRUD operations
@@ -12,14 +12,75 @@ from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from sqlmodel import Session, select
+from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_db
-from backend.db.models import Asset, AssetPriceGetter, Category, AssetCategory, Dimension
+from backend.db.models import (
+    Asset,
+    AssetPriceGetter,
+    AppSettings,
+    Category,
+    AssetCategory,
+    Dimension,
+    NormalizedTransaction,
+    PriceSnapshot,
+    RawAsset,
+    CostLot,
+    RealizedPnl,
+)
 from backend.services.price_getters import list_price_getters
 from backend.file_loaders.asset_csv_loader import AssetCSVLoader
 from backend.services.asset_import_service import AssetImportService
+from backend.services.data_cleanup_service import DataCleanupService
+from backend.api.schemas import AssetDeletePreviewResponse
 
 router = APIRouter(prefix="/assets", tags=["Assets"])
+
+
+# ============================================================================
+# Mock Getter Defaults
+# ============================================================================
+
+MOCK_RANGES_BY_TYPE = {
+    "crypto": {"min_price": 100.0, "max_price": 50000.0},
+    "stock": {"min_price": 10.0, "max_price": 500.0},
+    "fiat": {"min_price": 0.5, "max_price": 2.0},
+}
+MOCK_DEFAULT_RANGE = {"min_price": 1.0, "max_price": 1000.0}
+
+
+def _get_mock_range_for_type(price_type: str | None) -> dict:
+    """Get the default mock price range params for an asset type."""
+    pt = (price_type or "crypto").lower()
+    return dict(MOCK_RANGES_BY_TYPE.get(pt, MOCK_DEFAULT_RANGE))
+
+
+def _create_mock_getter(
+    session: Session, asset_id: int, price_type: str | None
+) -> None:
+    """Create a disabled mock price getter row for an asset (if not exists)."""
+    existing = session.exec(
+        select(AssetPriceGetter).where(
+            AssetPriceGetter.asset_id == asset_id,
+            AssetPriceGetter.price_getter == "mock",
+        )
+    ).first()
+    if existing:
+        return
+
+    # Check if mock mode is globally enabled
+    settings = session.get(AppSettings, 1)
+    mock_enabled = settings.mock_mode_enabled if settings else False
+
+    getter = AssetPriceGetter(
+        asset_id=asset_id,
+        price_getter="mock",
+        priority=0,
+        enabled=mock_enabled,
+        params=_get_mock_range_for_type(price_type),
+    )
+    session.add(getter)
 
 
 # ============================================================================
@@ -32,9 +93,11 @@ class AssetCreate(BaseModel):
 
     symbol: str
     label: Optional[str] = None
+    isin: Optional[str] = None
     price_type: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     status: Optional[int] = 0
+    denomination_currency_id: Optional[int] = None
 
 
 class AssetUpdate(BaseModel):
@@ -42,9 +105,11 @@ class AssetUpdate(BaseModel):
 
     symbol: Optional[str] = None
     label: Optional[str] = None
+    isin: Optional[str] = None
     price_type: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     status: Optional[int] = None
+    denomination_currency_id: Optional[int] = None
 
 
 class AssetPriceGetterResponse(BaseModel):
@@ -63,6 +128,7 @@ class AssetPriceGetterResponse(BaseModel):
 
 class CategoryResponse(BaseModel):
     """Response model for categories in asset response."""
+
     id: int
     dimension_id: int
     dimension_label: str  # From joined Dimension
@@ -71,16 +137,27 @@ class CategoryResponse(BaseModel):
     ordinal: int = 0
 
 
+class DenominationCurrencyRef(BaseModel):
+    """Lightweight reference for denomination currency."""
+
+    asset_id: int
+    symbol: str
+    label: Optional[str] = None
+
+
 class AssetResponse(BaseModel):
     """Response model for assets."""
 
     asset_id: Optional[int] = None
     symbol: str
     label: Optional[str] = None
+    isin: Optional[str] = None
     price_type: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     created_at: Optional[str] = None
     status: Optional[int] = 0
+    denomination_currency_id: Optional[int] = None
+    denomination_currency: Optional[DenominationCurrencyRef] = None
     price_getters: Optional[List[AssetPriceGetterResponse]] = None
     categories: Optional[List[CategoryResponse]] = None
 
@@ -97,7 +174,9 @@ class AssetPriceGetterCreate(BaseModel):
     external_id: Optional[str] = None  # API identifier: "BTC-USD", "bitcoin", "AAPL"
     priority: Optional[int] = 100  # Lower = higher priority
     enabled: Optional[bool] = True
-    params: Optional[Dict[str, Any]] = None  # Extra params: {"native_quote_currency": "EUR"}
+    params: Optional[Dict[str, Any]] = (
+        None  # Extra params: {"native_quote_currency": "EUR"}
+    )
 
 
 class AssetPriceGetterUpdate(BaseModel):
@@ -115,16 +194,32 @@ class AssetPriceGetterUpdate(BaseModel):
 # ============================================================================
 
 
-def _asset_to_response(asset: Asset, include_getters: bool = False, include_categories: bool = False, session: Session = None) -> AssetResponse:
+def _asset_to_response(
+    asset: Asset,
+    include_getters: bool = False,
+    include_categories: bool = False,
+    session: Session = None,
+) -> AssetResponse:
     """Convert Asset model to response."""
     response = AssetResponse(
         asset_id=asset.asset_id,
         symbol=asset.symbol,
         label=asset.label,
+        isin=asset.isin,
         price_type=asset.price_type,
         tags=asset.tags,
         created_at=asset.created_at.isoformat() if asset.created_at else None,
         status=asset.status,
+        denomination_currency_id=asset.denomination_currency_id,
+        denomination_currency=(
+            DenominationCurrencyRef(
+                asset_id=asset.denomination_currency.asset_id,
+                symbol=asset.denomination_currency.symbol,
+                label=asset.denomination_currency.label,
+            )
+            if asset.denomination_currency
+            else None
+        ),
     )
 
     if include_getters and asset.price_getters:
@@ -189,7 +284,7 @@ def list_assets(
 ):
     """List all assets with optional filtering."""
     try:
-        statement = select(Asset)
+        statement = select(Asset).options(selectinload(Asset.denomination_currency))
 
         if status is not None:
             statement = statement.where(Asset.status == status)
@@ -200,7 +295,15 @@ def list_assets(
         statement = statement.order_by(Asset.symbol).offset(offset).limit(limit)
 
         assets = session.exec(statement).all()
-        return [_asset_to_response(a, include_getters=include_getters, include_categories=include_categories, session=session) for a in assets]
+        return [
+            _asset_to_response(
+                a,
+                include_getters=include_getters,
+                include_categories=include_categories,
+                session=session,
+            )
+            for a in assets
+        ]
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
@@ -210,6 +313,56 @@ def list_assets(
 def get_available_price_getters():
     """Get list of available price getter names."""
     return list_price_getters()
+
+
+@router.get("/transaction-counts", response_model=Dict[str, int])
+def get_transaction_counts_by_symbol(session: Session = Depends(get_db)):
+    """Return {symbol: count} for non-invalid transactions, grouped by source_asset_symbol."""
+    statement = (
+        select(NormalizedTransaction.source_asset_symbol, func.count().label("cnt"))
+        .where(
+            NormalizedTransaction.review_status != "invalid",
+            NormalizedTransaction.source_asset_symbol != "",
+            NormalizedTransaction.source_asset_symbol.isnot(None),
+        )
+        .group_by(NormalizedTransaction.source_asset_symbol)
+        .order_by(func.count().desc())
+    )
+    rows = session.exec(statement).all()
+    return {symbol: cnt for symbol, cnt in rows}
+
+
+@router.get("/transaction-counts-by-id", response_model=Dict[int, int])
+def get_transaction_counts_by_asset_id(session: Session = Depends(get_db)):
+    """Return {asset_id: count} for non-invalid transactions.
+
+    Uses the "related asset" logic: counts transactions where the asset appears
+    as the primary asset_id, the price_quote_asset_id, or the fee_quote_asset_id.
+    """
+    from sqlalchemy import union_all, literal_column as lit
+
+    # Build three sub-selects for each asset-id column
+    q_asset = select(NormalizedTransaction.asset_id.label("aid")).where(
+        NormalizedTransaction.review_status != "invalid",
+        NormalizedTransaction.asset_id.isnot(None),
+    )
+    q_price = select(NormalizedTransaction.price_quote_asset_id.label("aid")).where(
+        NormalizedTransaction.review_status != "invalid",
+        NormalizedTransaction.price_quote_asset_id.isnot(None),
+    )
+    q_fee = select(NormalizedTransaction.fee_quote_asset_id.label("aid")).where(
+        NormalizedTransaction.review_status != "invalid",
+        NormalizedTransaction.fee_quote_asset_id.isnot(None),
+    )
+
+    combined = union_all(q_asset, q_price, q_fee).subquery("combined")
+    statement = (
+        select(combined.c.aid, func.count().label("cnt"))
+        .group_by(combined.c.aid)
+        .order_by(func.count().desc())
+    )
+    rows = session.execute(statement).all()
+    return {int(aid): cnt for aid, cnt in rows}
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)
@@ -230,7 +383,12 @@ def get_asset(
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found")
 
-        return _asset_to_response(asset, include_getters=include_getters, include_categories=include_categories, session=session)
+        return _asset_to_response(
+            asset,
+            include_getters=include_getters,
+            include_categories=include_categories,
+            session=session,
+        )
 
     except HTTPException:
         raise
@@ -258,14 +416,20 @@ def create_asset(
         asset = Asset(
             symbol=asset_data.symbol,
             label=asset_data.label,
+            isin=asset_data.isin,
             price_type=asset_data.price_type,
             tags=asset_data.tags,
             status=asset_data.status or 0,
+            denomination_currency_id=asset_data.denomination_currency_id,
         )
 
         session.add(asset)
         session.commit()
         session.refresh(asset)
+
+        # Auto-create disabled mock price getter for the new asset
+        _create_mock_getter(session, asset.asset_id, asset.price_type)
+        session.commit()
 
         return _asset_to_response(asset)
 
@@ -322,12 +486,14 @@ def update_asset(
 
 class BulkUpdateRequest(BaseModel):
     """Request model for bulk updating assets."""
+
     asset_ids: List[int]
     updates: Dict[str, Any]  # Fields to update: status, price_type, etc.
 
 
 class BulkCategoriesRequest(BaseModel):
     """Request model for bulk category operations."""
+
     asset_ids: List[int]
     category_ids: List[int]
     mode: str  # 'add', 'replace', 'remove'
@@ -335,6 +501,7 @@ class BulkCategoriesRequest(BaseModel):
 
 class BulkPriceGettersRequest(BaseModel):
     """Request model for bulk price getter assignment."""
+
     asset_ids: List[int]
     price_getter: str
     external_id: Optional[str] = None
@@ -343,6 +510,7 @@ class BulkPriceGettersRequest(BaseModel):
 
 class BulkDeleteRequest(BaseModel):
     """Request model for bulk deletion."""
+
     asset_ids: List[int]
 
 
@@ -360,42 +528,42 @@ def bulk_update_assets(
     try:
         if not request.asset_ids:
             raise HTTPException(status_code=400, detail="No asset IDs provided")
-        
+
         if not request.updates:
             raise HTTPException(status_code=400, detail="No updates provided")
-        
+
         # Validate allowed update fields
-        allowed_fields = {'status', 'price_type', 'label', 'tags'}
+        allowed_fields = {"status", "price_type", "label", "tags"}
         for key in request.updates.keys():
             if key not in allowed_fields:
                 raise HTTPException(
-                    status_code=400, 
-                    detail=f"Field '{key}' cannot be bulk updated. Allowed: {allowed_fields}"
+                    status_code=400,
+                    detail=f"Field '{key}' cannot be bulk updated. Allowed: {allowed_fields}",
                 )
-        
+
         updated_count = 0
         errors = []
-        
+
         for asset_id in request.asset_ids:
             asset = session.get(Asset, asset_id)
             if not asset:
                 errors.append({"asset_id": asset_id, "error": "Asset not found"})
                 continue
-            
+
             for key, value in request.updates.items():
                 setattr(asset, key, value)
-            
+
             session.add(asset)
             updated_count += 1
-        
+
         session.commit()
-        
+
         return {
             "message": f"Updated {updated_count} assets",
             "updated_count": updated_count,
-            "errors": errors
+            "errors": errors,
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -412,70 +580,76 @@ def bulk_update_categories(
     try:
         if not request.asset_ids:
             raise HTTPException(status_code=400, detail="No asset IDs provided")
-        
-        if request.mode not in ('add', 'replace', 'remove'):
-            raise HTTPException(status_code=400, detail="Mode must be 'add', 'replace', or 'remove'")
-        
+
+        if request.mode not in ("add", "replace", "remove"):
+            raise HTTPException(
+                status_code=400, detail="Mode must be 'add', 'replace', or 'remove'"
+            )
+
         # Verify all categories exist
         if request.category_ids:
             for cat_id in request.category_ids:
                 cat = session.get(Category, cat_id)
                 if not cat:
-                    raise HTTPException(status_code=404, detail=f"Category {cat_id} not found")
-        
+                    raise HTTPException(
+                        status_code=404, detail=f"Category {cat_id} not found"
+                    )
+
         updated_count = 0
         errors = []
-        
+
         for asset_id in request.asset_ids:
             asset = session.get(Asset, asset_id)
             if not asset:
                 errors.append({"asset_id": asset_id, "error": "Asset not found"})
                 continue
-            
-            if request.mode == 'replace':
+
+            if request.mode == "replace":
                 # Delete all existing category assignments
-                statement = select(AssetCategory).where(AssetCategory.asset_id == asset_id)
+                statement = select(AssetCategory).where(
+                    AssetCategory.asset_id == asset_id
+                )
                 existing = session.exec(statement).all()
                 for ac in existing:
                     session.delete(ac)
-            
-            if request.mode == 'remove':
+
+            if request.mode == "remove":
                 # Remove only specified categories
                 for cat_id in request.category_ids:
                     statement = select(AssetCategory).where(
                         AssetCategory.asset_id == asset_id,
-                        AssetCategory.category_id == cat_id
+                        AssetCategory.category_id == cat_id,
                     )
                     existing = session.exec(statement).first()
                     if existing:
                         session.delete(existing)
-            
-            if request.mode in ('add', 'replace'):
+
+            if request.mode in ("add", "replace"):
                 # Add new categories
                 for cat_id in request.category_ids:
                     # Check if already exists (for 'add' mode)
-                    if request.mode == 'add':
+                    if request.mode == "add":
                         statement = select(AssetCategory).where(
                             AssetCategory.asset_id == asset_id,
-                            AssetCategory.category_id == cat_id
+                            AssetCategory.category_id == cat_id,
                         )
                         if session.exec(statement).first():
                             continue  # Skip if already assigned
-                    
+
                     ac = AssetCategory(asset_id=asset_id, category_id=cat_id)
                     session.add(ac)
-            
+
             updated_count += 1
-        
+
         session.commit()
-        
+
         return {
             "message": f"Updated categories for {updated_count} assets",
             "updated_count": updated_count,
             "mode": request.mode,
-            "errors": errors
+            "errors": errors,
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -492,63 +666,161 @@ def bulk_assign_price_getters(
     try:
         if not request.asset_ids:
             raise HTTPException(status_code=400, detail="No asset IDs provided")
-        
+
         # Validate price_getter
         available = list_price_getters()
         if request.price_getter not in available:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid price_getter '{request.price_getter}'. Available: {available}"
+                detail=f"Invalid price_getter '{request.price_getter}'. Available: {available}",
             )
-        
+
         created_count = 0
         skipped_count = 0
         errors = []
-        
+
         for asset_id in request.asset_ids:
             asset = session.get(Asset, asset_id)
             if not asset:
                 errors.append({"asset_id": asset_id, "error": "Asset not found"})
                 continue
-            
+
             # Check if this getter already exists for the asset
             statement = select(AssetPriceGetter).where(
                 AssetPriceGetter.asset_id == asset_id,
-                AssetPriceGetter.price_getter == request.price_getter
+                AssetPriceGetter.price_getter == request.price_getter,
             )
             existing = session.exec(statement).first()
             if existing:
                 skipped_count += 1
                 continue  # Skip if already has this getter
-            
+
             # Use asset symbol if no external_id provided
             external_id = request.external_id if request.external_id else None
-            
+
             getter = AssetPriceGetter(
                 asset_id=asset_id,
                 price_getter=request.price_getter,
                 external_id=external_id,
                 priority=request.priority,
                 enabled=True,
-                params={}
+                params={},
             )
             session.add(getter)
             created_count += 1
-        
+
         session.commit()
-        
+
         return {
             "message": f"Added price getter to {created_count} assets ({skipped_count} already had it)",
             "created_count": created_count,
             "skipped_count": skipped_count,
-            "errors": errors
+            "errors": errors,
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.post("/bulk/check-linked", response_model=Dict[str, int])
+def check_bulk_delete_impact(
+    request: BulkDeleteRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Check for linked objects that would be affected by deleting these assets.
+
+    Returns counts of related objects:
+    - Cascade deletions (will be automatically deleted): categories, price_getters, raw_assets, price_snapshots
+    - Blockers (will prevent deletion): transactions, cost_lots, realized_pnl
+    """
+    if not request.asset_ids:
+        return {}
+
+    impact = {
+        # Will cascade delete (informational)
+        "asset_categories": 0,
+        "price_getters": 0,
+        "raw_assets": 0,
+        "price_snapshots": 0,
+        # Will block deletion (errors)
+        "transactions": 0,
+        "cost_lots": 0,
+        "realized_pnl": 0,
+    }
+
+    # Count cascade deletions
+    impact["asset_categories"] = (
+        session.exec(
+            select(func.count(AssetCategory.asset_id)).where(
+                AssetCategory.asset_id.in_(request.asset_ids)
+            )
+        ).first()
+        or 0
+    )
+
+    impact["price_getters"] = (
+        session.exec(
+            select(func.count(AssetPriceGetter.id)).where(
+                AssetPriceGetter.asset_id.in_(request.asset_ids)
+            )
+        ).first()
+        or 0
+    )
+
+    impact["raw_assets"] = (
+        session.exec(
+            select(func.count(RawAsset.id)).where(
+                RawAsset.asset_id.in_(request.asset_ids)
+            )
+        ).first()
+        or 0
+    )
+
+    impact["price_snapshots"] = (
+        session.exec(
+            select(func.count(PriceSnapshot.snapshot_id)).where(
+                PriceSnapshot.asset_id.in_(request.asset_ids)
+            )
+        ).first()
+        or 0
+    )
+
+    # Count blockers (transactions referencing these assets)
+    impact["transactions"] = (
+        session.exec(
+            select(func.count(NormalizedTransaction.id)).where(
+                (NormalizedTransaction.asset_id.in_(request.asset_ids))
+                | (NormalizedTransaction.price_quote_asset_id.in_(request.asset_ids))
+                | (NormalizedTransaction.fee_quote_asset_id.in_(request.asset_ids))
+            )
+        ).first()
+        or 0
+    )
+
+    impact["cost_lots"] = (
+        session.exec(
+            select(func.count(CostLot.cost_lot_id)).where(
+                CostLot.asset_id.in_(request.asset_ids)
+            )
+        ).first()
+        or 0
+    )
+
+    impact["realized_pnl"] = (
+        session.exec(
+            select(func.count(RealizedPnl.pnl_id)).where(
+                RealizedPnl.asset_id.in_(request.asset_ids)
+            )
+        ).first()
+        or 0
+    )
+
+    # Filter out zeros for cleaner response
+    return {k: v for k, v in impact.items() if v > 0}
 
 
 @router.post("/bulk/delete")
@@ -560,27 +832,91 @@ def bulk_delete_assets(
     try:
         if not request.asset_ids:
             raise HTTPException(status_code=400, detail="No asset IDs provided")
-        
+
+        # Check for blocking relationships across all assets
+        blockers = {}
+        assets_with_blockers = []
+
+        for asset_id in request.asset_ids:
+            asset_blockers = {}
+
+            # Check for transactions referencing this asset
+            tx_count = (
+                session.exec(
+                    select(func.count(NormalizedTransaction.id)).where(
+                        (NormalizedTransaction.asset_id == asset_id)
+                        | (NormalizedTransaction.price_quote_asset_id == asset_id)
+                        | (NormalizedTransaction.fee_quote_asset_id == asset_id)
+                    )
+                ).first()
+                or 0
+            )
+
+            if tx_count > 0:
+                asset_blockers["transactions"] = tx_count
+
+            # Check for cost lots
+            lot_count = (
+                session.exec(
+                    select(func.count(CostLot.cost_lot_id)).where(
+                        CostLot.asset_id == asset_id
+                    )
+                ).first()
+                or 0
+            )
+
+            if lot_count > 0:
+                asset_blockers["cost_lots"] = lot_count
+
+            # Check for realized P&L
+            pnl_count = (
+                session.exec(
+                    select(func.count(RealizedPnl.pnl_id)).where(
+                        RealizedPnl.asset_id == asset_id
+                    )
+                ).first()
+                or 0
+            )
+
+            if pnl_count > 0:
+                asset_blockers["realized_pnl"] = pnl_count
+
+            if asset_blockers:
+                assets_with_blockers.append(asset_id)
+                blockers[str(asset_id)] = asset_blockers
+
+        # If any assets have blocking relationships, reject the entire operation
+        if blockers:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Cannot delete assets with existing transactions or P&L data",
+                    "blockers": blockers,
+                    "affected_assets": assets_with_blockers,
+                },
+            )
+
+        # Proceed with deletion
         deleted_count = 0
         errors = []
-        
+
         for asset_id in request.asset_ids:
             asset = session.get(Asset, asset_id)
             if not asset:
                 errors.append({"asset_id": asset_id, "error": "Asset not found"})
                 continue
-            
+
             session.delete(asset)
             deleted_count += 1
-        
+
         session.commit()
-        
+
         return {
             "message": f"Deleted {deleted_count} assets",
             "deleted_count": deleted_count,
-            "errors": errors
+            "errors": errors,
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -588,17 +924,133 @@ def bulk_delete_assets(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+@router.get("/{asset_id}/delete-preview", response_model=AssetDeletePreviewResponse)
+def delete_asset_preview(asset_id: int, session: Session = Depends(get_db)):
+    """
+    Preview what will be affected when deleting an asset.
+    Returns counts of all dependent rows without modifying anything.
+    """
+    asset = session.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+
+    service = DataCleanupService(session)
+    counts = service.preview_asset_delete(asset_id)
+
+    return AssetDeletePreviewResponse(
+        asset_id=asset_id,
+        asset_symbol=asset.symbol,
+        **counts,
+    )
+
+
 @router.delete("/{asset_id}")
 def delete_asset(
     asset_id: int,
+    force: bool = Query(
+        False, description="Force delete with cascade (removes all dependent data)"
+    ),
     session: Session = Depends(get_db),
 ):
-    """Delete an asset by ID."""
+    """
+    Delete an asset by ID.
+
+    Without force=true, rejects deletion if the asset has transactions, cost lots, or P&L data.
+    With force=true, cascades and deletes all dependent data.
+    """
     try:
         asset = session.get(Asset, asset_id)
 
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found")
+
+        if force:
+            # Force delete: cascade everything via DataCleanupService
+            service = DataCleanupService(session)
+            result = service.execute_asset_delete(asset_id)
+            session.commit()
+            return {
+                "message": f"Asset and all dependent data deleted",
+                "asset_id": asset_id,
+                "cascade": result,
+            }
+
+        # Non-force: check for blocking relationships
+        blockers = {}
+
+        # Check for transactions
+        tx_count = (
+            session.exec(
+                select(func.count(NormalizedTransaction.id)).where(
+                    (NormalizedTransaction.asset_id == asset_id)
+                    | (NormalizedTransaction.price_quote_asset_id == asset_id)
+                    | (NormalizedTransaction.fee_quote_asset_id == asset_id)
+                )
+            ).first()
+            or 0
+        )
+
+        if tx_count > 0:
+            blockers["transactions"] = tx_count
+
+        # Check for cost lots
+        lot_count = (
+            session.exec(
+                select(func.count(CostLot.cost_lot_id)).where(
+                    CostLot.asset_id == asset_id
+                )
+            ).first()
+            or 0
+        )
+
+        if lot_count > 0:
+            blockers["cost_lots"] = lot_count
+
+        # Check for realized P&L
+        pnl_count = (
+            session.exec(
+                select(func.count(RealizedPnl.pnl_id)).where(
+                    RealizedPnl.asset_id == asset_id
+                )
+            ).first()
+            or 0
+        )
+
+        if pnl_count > 0:
+            blockers["realized_pnl"] = pnl_count
+
+        # If any blocking relationships exist, reject deletion
+        if blockers:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": f"Cannot delete asset '{asset.symbol}' with existing transactions or P&L data",
+                    "asset_id": asset_id,
+                    "asset_symbol": asset.symbol,
+                    "blockers": blockers,
+                },
+            )
+
+        # Delete NOT-NULL FK children before ORM delete to avoid
+        # SQLAlchemy setting asset_id=NULL (which violates NOT NULL constraints)
+        from sqlalchemy import text
+
+        session.exec(
+            text("DELETE FROM asset_price_getters WHERE asset_id = :aid"),
+            params={"aid": asset_id},
+        )
+        session.exec(
+            text("DELETE FROM asset_categories WHERE asset_id = :aid"),
+            params={"aid": asset_id},
+        )
+        session.exec(
+            text("DELETE FROM price_snapshots WHERE asset_id = :aid"),
+            params={"aid": asset_id},
+        )
+        session.exec(
+            text("UPDATE raw_assets SET asset_id = NULL WHERE asset_id = :aid"),
+            params={"aid": asset_id},
+        )
 
         session.delete(asset)
         session.commit()
@@ -608,6 +1060,7 @@ def delete_asset(
     except HTTPException:
         raise
     except Exception as e:
+        session.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -808,12 +1261,100 @@ def delete_asset_price_getter(
 
 
 # ============================================================================
+# Test Price Getter Endpoint
+# ============================================================================
+
+
+class TestPriceGetterRequest(BaseModel):
+    """Request to test a specific price getter for an asset."""
+
+    price_getter: str
+    external_id: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+    date: Optional[str] = (
+        None  # ISO date string, e.g. "2024-06-15". Null = current price.
+    )
+
+
+class TestPriceGetterResponse(BaseModel):
+    """Result of a price getter test."""
+
+    success: bool
+    price: Optional[float] = None
+    quote_currency: Optional[str] = None
+    source: Optional[str] = None
+    ticker_used: Optional[str] = None
+    timestamp: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.post(
+    "/{asset_id}/price-getters/test",
+    response_model=TestPriceGetterResponse,
+)
+def test_asset_price_getter(
+    asset_id: int,
+    body: TestPriceGetterRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Test a price getter for an asset without persisting anything.
+
+    Accepts a getter name, optional external_id / params, and an optional date.
+    Returns the fetched price or the error message.
+    """
+    from backend.services.price_getters import get_price_getter
+    from backend.services.price_getters.base import PriceGetterConfig
+
+    asset = session.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    try:
+        getter = get_price_getter(body.price_getter)
+    except (ValueError, KeyError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown price getter: '{body.price_getter}'",
+        )
+
+    config = PriceGetterConfig(
+        external_id=body.external_id or asset.symbol,
+        extra=body.params or {},
+    )
+
+    try:
+        if body.date:
+            from datetime import datetime as _dt, timezone as _tz
+
+            dt = _dt.fromisoformat(body.date).replace(tzinfo=_tz.utc)
+            result = getter.get_historical_price(asset, dt, config)
+        else:
+            result = getter.get_current_price(asset, config)
+
+        return TestPriceGetterResponse(
+            success=True,
+            price=result.price,
+            quote_currency=result.quote_currency,
+            source=result.source,
+            ticker_used=result.ticker_used,
+            timestamp=result.timestamp.isoformat() if result.timestamp else None,
+        )
+    except Exception as exc:
+        return TestPriceGetterResponse(
+            success=False,
+            error=str(exc),
+        )
+
+
+# ============================================================================
 # CSV Import Endpoints
 # ============================================================================
 
 
 class ImportResultResponse(BaseModel):
     """Response model for CSV import operation."""
+
     assets: Dict[str, Any]
     categories: Dict[str, Any]
     price_getters: Dict[str, Any]
@@ -828,12 +1369,14 @@ class ImportResultResponse(BaseModel):
 async def import_assets_from_csv(
     file: UploadFile = File(...),
     dry_run: bool = Query(False, description="Preview changes without committing"),
-    replace_price_getters: bool = Query(True, description="Replace existing price getters (vs merge)"),
+    replace_price_getters: bool = Query(
+        True, description="Replace existing price getters (vs merge)"
+    ),
     session: Session = Depends(get_db),
 ):
     """
     Import assets, categories, and price getters from a CSV file.
-    
+
     Expected CSV format with columns:
     - Ticker / Symbol: Asset symbol (required)
     - Label: Display name
@@ -842,41 +1385,38 @@ async def import_assets_from_csv(
     - Currency: Base currency (EUR, USD)
     - Investment Category 1: Asset class category
     - Investment Category 2: Sector category
-    
+
     Use dry_run=true to preview what would be imported without making changes.
     """
     try:
         # Validate file type
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file provided")
-        
-        if not file.filename.endswith('.csv'):
+
+        if not file.filename.endswith(".csv"):
             raise HTTPException(status_code=400, detail="File must be a CSV file")
-        
+
         # Read file content
         content = await file.read()
-        
+
         # Parse CSV
         loader = AssetCSVLoader()
         load_result = loader.load_from_content(content)
-        
+
         # Check for critical parse errors
         if load_result.errors and not load_result.assets:
             raise HTTPException(
-                status_code=400, 
-                detail=f"CSV parsing failed: {load_result.errors}"
+                status_code=400, detail=f"CSV parsing failed: {load_result.errors}"
             )
-        
+
         # Import data
         import_service = AssetImportService(session)
         result = import_service.import_from_load_result(
-            load_result,
-            dry_run=dry_run,
-            replace_price_getters=replace_price_getters
+            load_result, dry_run=dry_run, replace_price_getters=replace_price_getters
         )
-        
+
         return ImportResultResponse(**result.to_dict())
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -889,19 +1429,19 @@ async def preview_csv_import(
 ):
     """
     Preview CSV file contents without importing.
-    
+
     Returns parsed assets and categories that would be created/updated.
     Useful for validation before actual import.
     """
     try:
-        if not file.filename or not file.filename.endswith('.csv'):
+        if not file.filename or not file.filename.endswith(".csv"):
             raise HTTPException(status_code=400, detail="File must be a CSV file")
-        
+
         content = await file.read()
-        
+
         loader = AssetCSVLoader()
         load_result = loader.load_from_content(content)
-        
+
         return {
             "filename": file.filename,
             "assets_count": len(load_result.assets),
@@ -918,23 +1458,20 @@ async def preview_csv_import(
                         {
                             "getter": pg.price_getter,
                             "priority": pg.priority,
-                            "params": pg.params
+                            "params": pg.params,
                         }
                         for pg in a.price_getters
                     ],
-                    "categories": [f"{dim}:{key}" for dim, key in a.category_keys]
+                    "categories": [f"{dim}:{cat}" for dim, cat in a.category_keys],
                 }
                 for a in load_result.assets
             ],
             "categories": [
-                {
-                    "dimension_label": c.dimension_label,
-                    "label": c.label
-                }
+                {"dimension_label": c.dimension_label, "label": c.label}
                 for c in load_result.categories
-            ]
+            ],
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:

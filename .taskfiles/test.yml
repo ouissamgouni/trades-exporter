@@ -2,46 +2,158 @@ version: "3"
 
 tasks:
   default:
-    desc: Run unit tests (quick)
+    desc: Run unit tests (quick, parallel)
     cmds:
       - task: unit
 
+  # =========================================================================
+  # Unit Tests (fast, no external dependencies)
+  # =========================================================================
+
   unit:
-    desc: Run all unit tests
+    desc: Run all unit tests (no database required)
     cmds:
-      - task: unit:backend
-      - task: unit:frontend
-      - echo "✅ All unit tests passed"
+      - task: backend:unit
+      - task: frontend:unit
+      - cmd: echo "All unit tests passed"
 
-  unit:backend:
-    desc: Run backend unit tests
+  backend:unit:
+    desc: Run backend unit + API tests in parallel
     dir: "{{.BACKEND_DIR}}"
-    env:
-      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
-      - .venv/bin/python -m pytest -v
+      # tests/integration/ is included here (filtered by -m "not integration")
+      # because some no-network/no-DB logic tests live alongside their live
+      # integration counterparts (e.g. ticker-resolution tests next to live
+      # price-getter tests) — this is the only path that collects them.
+      - '{{.ROOT_DIR}}/.venv/bin/python -m pytest tests/unit/ tests/api/ tests/integration/ -v -n auto -m "not integration" --timeout=30'
 
-  unit:frontend:
-    desc: Run frontend build and type check
+  frontend:unit:
+    desc: Run frontend build, type check, and Vitest unit tests
     dir: "{{.FRONTEND_DIR}}"
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - npm run build
       - npx tsc --noEmit || true
+      - npm run test
 
-  int:dev:
-    desc: Run integration tests against dev environment
+  # =========================================================================
+  # Composite Integration Tasks
+  # =========================================================================
+
+  backend:int:
+    desc: "Run all integration tests against a dedicated scenario database. Self-contained — provisions its own scenario DB via start:scenario:db (default SCENARIO=backend-integration-tests; pass a different SCENARIO=<name> to run against another scenario fixture). Includes live-API/network tests — these self-skip on rate-limit/auth/quota errors instead of hard-failing (see pytest.mark.network tests)."
     dir: "{{.BACKEND_DIR}}"
-    env:
-      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/scenario.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.scenario.env",
+      ]
+    vars:
+      SCENARIO: '{{.SCENARIO | default "backend-integration-tests"}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "1"}}'
     cmds:
-      - .venv/bin/python -m pytest -v -m integration || true
+      - task: :start:scenario:db
+        vars: { SCENARIO: "{{.SCENARIO}}", WITH_DEFAULTS: "{{.WITH_DEFAULTS}}" }
+      - |
+        source {{.ROOT_DIR}}/.taskfiles/scenario_ports.sh "{{.SCENARIO}}"
+        echo "🧪 Running ALL integration tests against scenario '{{.SCENARIO}}'..."
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+          {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/integration/ -v -m integration \
+            --timeout=120
 
-  int:test:
-    desc: Run integration tests against test stack
-    cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml exec backend_test python -m pytest -v -m integration || true
+  # =========================================================================
+  # E2E Tests
+  # =========================================================================
 
-  ci:
-    desc: Simulate full CI locally via Act
+  backend:e2e:
+    desc: "Run backend end-to-end tests. Self-contained — provisions its own scenario DB via start:scenario:db (default SCENARIO=backend-e2e-tests)."
+    dir: "{{.BACKEND_DIR}}"
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/scenario.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.scenario.env",
+      ]
+    vars:
+      SCENARIO: '{{.SCENARIO | default "backend-e2e-tests"}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "1"}}'
     cmds:
-      - act push -j backend-tests --container-architecture linux/amd64
+      - task: :start:scenario:db
+        vars: { SCENARIO: "{{.SCENARIO}}", WITH_DEFAULTS: "{{.WITH_DEFAULTS}}" }
+      - |
+        source {{.ROOT_DIR}}/.taskfiles/scenario_ports.sh "{{.SCENARIO}}"
+        echo "🧪 Running E2E tests against scenario '{{.SCENARIO}}'..."
+        TEST_MODE=1 \
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+          {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/e2e/ -v -m e2e --timeout=30
+
+  frontend:e2e:
+    desc: "Frontend Playwright smoke tests (critical + major, no backend required)"
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npx playwright install --with-deps chromium
+      - npm run test:e2e:frontend
+
+  e2e:
+    desc: "Full-stack e2e: frontend Playwright tests against a real backend + db. Self-contained — Playwright's globalSetup/globalTeardown (frontend/e2e-backend/global-setup.ts) spin up/tear down the dedicated frontend_e2e scenario (task start:scenario:backend / stop:scenario) around the run, so no separate DB/backend setup step is needed here."
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npx playwright install --with-deps chromium
+      - npm run test:e2e:backend
+
+  # =========================================================================
+  # Per-Tier Aggregates (all phases for one tier)
+  # =========================================================================
+
+  backend:
+    desc: "Run all backend tests: unit, integration, e2e (3 phases)"
+    cmds:
+      - cmd: echo "--- Backend Phase 1 - Unit Tests ---"
+      - task: backend:unit
+      - cmd: echo "--- Backend Phase 2 - Integration Tests ---"
+      - task: backend:int
+      - cmd: echo "--- Backend Phase 3 - E2E Tests ---"
+      - task: backend:e2e
+      - cmd: echo "All backend tests passed!"
+
+  frontend:
+    desc: "Run all frontend tests: unit, e2e smoke (2 phases)"
+    cmds:
+      - cmd: echo "--- Frontend Phase 1 - Unit Tests ---"
+      - task: frontend:unit
+      - cmd: echo "--- Frontend Phase 2 - E2E Smoke Tests ---"
+      - task: frontend:e2e
+      - cmd: echo "All frontend tests passed!"
+
+  # =========================================================================
+  # Run everything
+  # =========================================================================
+
+  all:
+    desc: "Run the full test suite: backend (unit+int+e2e), frontend (unit+e2e), full-stack e2e (3 phases)"
+    cmds:
+      - cmd: echo "=== Phase 1 - Backend Tests ==="
+      - task: backend
+      - cmd: echo "=== Phase 2 - Frontend Tests ==="
+      - task: frontend
+      - cmd: echo "=== Phase 3 - Full-Stack E2E ==="
+      - task: e2e
+      - cmd: echo "All tests passed!"

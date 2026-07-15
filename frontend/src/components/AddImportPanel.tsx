@@ -1,46 +1,48 @@
 import React, { Suspense } from 'react';
-import { Box, Tabs, Spinner, Flex } from '@chakra-ui/react';
+import { Spinner, Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
 
 // Lazy load the components
 const ManualTransactionForm = React.lazy(() => import('./ManualTransactionForm').then(m => ({ default: m.ManualTransactionForm })));
 const ImportCSVPanel = React.lazy(() => import('./ImportCSVPanel').then(m => ({ default: m.ImportCSVPanel })));
 
 const LoadingFallback = () => (
-    <Flex justify="center" align="center" py={8}>
-        <Spinner size="lg" color="teal.500" />
-    </Flex>
+    <div className="flex items-center justify-center py-8">
+        <Spinner size="lg" className="text-green-500" />
+    </div>
 );
 
 interface AddImportPanelProps {
     onDataChange?: () => void;
+    activeTab: 'manual' | 'import';
+    onActiveTabChange: (tab: 'manual' | 'import') => void;
 }
 
-export const AddImportPanel: React.FC<AddImportPanelProps> = ({ onDataChange }) => {
+export const AddImportPanel: React.FC<AddImportPanelProps> = ({ onDataChange, activeTab, onActiveTabChange }) => {
     return (
-        <Box>
-            <Tabs.Root defaultValue="manual">
-                <Tabs.List mb={4}>
-                    <Tabs.Trigger value="manual">
+        <div>
+            <Tabs value={activeTab} onValueChange={(v) => onActiveTabChange(v as 'manual' | 'import')}>
+                <TabsList className="mb-4">
+                    <TabsTrigger value="manual">
                         ✏️ Manual Entry
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="import">
+                    </TabsTrigger>
+                    <TabsTrigger value="import">
                         📁 Import CSV
-                    </Tabs.Trigger>
-                </Tabs.List>
+                    </TabsTrigger>
+                </TabsList>
 
-                <Tabs.Content value="manual">
+                <TabsContent value="manual">
                     <Suspense fallback={<LoadingFallback />}>
                         <ManualTransactionForm />
                     </Suspense>
-                </Tabs.Content>
+                </TabsContent>
 
-                <Tabs.Content value="import">
+                <TabsContent value="import">
                     <Suspense fallback={<LoadingFallback />}>
                         <ImportCSVPanel onDataChange={onDataChange} />
                     </Suspense>
-                </Tabs.Content>
-            </Tabs.Root>
-        </Box>
+                </TabsContent>
+            </Tabs>
+        </div>
     );
 };
 

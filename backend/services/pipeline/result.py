@@ -3,9 +3,12 @@ PipelineResult - Result of processing transactions through the pipeline.
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional, TYPE_CHECKING
 
 from backend.db.models import NormalizedTransaction, CalculationUnit
+
+if TYPE_CHECKING:
+    from backend.services.pipeline.context import PersistenceResult
 
 
 @dataclass
@@ -29,3 +32,6 @@ class PipelineResult:
     skipped_count: int = 0
     split_count: int = 0  # Number of transactions that were split
     transfer_count: int = 0  # Number of internal transfers detected
+    
+    # Persistence details (for sync job tracking)
+    persistence_result: Optional["PersistenceResult"] = None

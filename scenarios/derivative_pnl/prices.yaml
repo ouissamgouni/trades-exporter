@@ -1,0 +1,50 @@
+prices:
+  - asset_symbol: USDC
+    quote_currency: EUR
+    entries:
+      - at: "2024-01-10T10:00:00"
+        price: "0.92"
+      - at: "2024-01-12T14:00:00"
+        price: "0.92"
+      - at: "2024-02-05T09:30:00"
+        price: "0.92"
+      - at: "2024-02-20T16:00:00"
+        price: "0.92"
+      - at: "2024-03-01T00:00:00"
+        price: "0.92"
+      - at: "2024-03-15T11:00:00"
+        price: "0.92"
+      - at: "2024-04-01T10:00:00"
+        price: "0.93"
+      - at: "2024-04-10T08:00:00"
+        price: "0.93"
+      - at: current
+        price: "0.93"
+
+  - asset_symbol: ETH
+    quote_currency: EUR
+    entries:
+      - at: "2024-02-05T09:30:00"
+        price: "2200.00"
+      - at: "2024-03-01T00:00:00"
+        price: "3100.00"
+      - at: "2024-03-15T11:00:00"
+        price: "3500.00"
+      - at: current
+        price: "3800.00"
+
+  - asset_symbol: BTC
+    quote_currency: EUR
+    entries:
+      - at: "2024-02-20T16:00:00"
+        price: "48000.00"
+      - at: current
+        price: "62000.00"
+
+  # NOTE: SOL prices omitted — SOL is not in assets.yaml (intentionally unlinked for test step 7)
+
+  - asset_symbol: USDT
+    quote_currency: EUR
+    entries:
+      - at: current
+        price: "0.92"

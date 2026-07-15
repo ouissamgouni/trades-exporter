@@ -1,7 +1,0 @@
-bundles:
-  - id: 1
-    label: " Transfer"
-    pattern: transfer
-    notes: User accepted suggestion
-    taxability_override: taxable
-    reason: User accepted suggestion

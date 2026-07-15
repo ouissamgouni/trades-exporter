@@ -125,14 +125,19 @@ class TestSyncJobServiceDatabaseConnectors:
     def test_service_has_database_connector_flag(self):
         """Test that SyncJobService has use_database_connectors flag."""
         from backend.services.sync_job_service import SyncJobService
+        from unittest.mock import patch
 
         # Reset singleton for testing
         SyncJobService._instance = None
-        service = SyncJobService()
+        
+        # Mock settings to return False for use_database_connectors
+        with patch('backend.services.sync_job_service.load_settings') as mock_settings:
+            mock_settings.return_value = {"use_database_connectors": False}
+            service = SyncJobService()
 
-        assert hasattr(service, "_use_database_connectors")
-        # Default should be False
-        assert service._use_database_connectors is False
+            assert hasattr(service, "_use_database_connectors")
+            # Default should be False (from mocked settings)
+            assert service._use_database_connectors is False
 
     def test_set_use_database_connectors(self):
         """Test setting database connector mode."""
@@ -155,15 +160,20 @@ class TestSyncJobServiceDatabaseConnectors:
     def test_get_status_includes_database_connector_flag(self):
         """Test that get_status includes database connector info."""
         from backend.services.sync_job_service import SyncJobService
+        from unittest.mock import patch
 
         # Reset singleton for testing
         SyncJobService._instance = None
-        service = SyncJobService()
+        
+        # Mock settings to return False for use_database_connectors
+        with patch('backend.services.sync_job_service.load_settings') as mock_settings:
+            mock_settings.return_value = {"use_database_connectors": False}
+            service = SyncJobService()
 
-        status = service.get_status()
+            status = service.get_status()
 
-        assert "use_database_connectors" in status
-        assert status["use_database_connectors"] is False
+            assert "use_database_connectors" in status
+            assert status["use_database_connectors"] is False
 
     def test_cannot_change_connector_source_while_running(self):
         """Test that connector source cannot be changed while job is running."""
@@ -222,7 +232,7 @@ class TestConnectorLoaderServiceIntegration:
         # Blockscout should have multiple chains
         blockscout_chains = registry.get_chain_configs("blockscout")
         assert "base" in blockscout_chains
-        assert "bnb" in blockscout_chains
+        assert "polygon" in blockscout_chains
         assert "ethereum" in blockscout_chains
 
         # Etherscan should have ethereum

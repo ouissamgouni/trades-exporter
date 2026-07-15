@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Deque, Tuple, Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, SQLModel
 from sqlalchemy.orm import selectinload
 from sqlalchemy import and_
 
@@ -19,8 +19,13 @@ from backend.config.loader import configure_logging
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.db.models import (
     Account, CalculationVersion, CostLot, ConsumedLotSlice, LotSettlement, 
-    Asset, NormalizedTransaction, CostLotEvent, LotEventType
+    Asset, NormalizedTransaction, CostLotEvent, LotEventType, utc_now
 )
+
+
+def _is_sqlmodel_instance(obj: Any) -> bool:
+    """Check if object is a proper SQLModel instance (not a Mock)."""
+    return obj is not None and isinstance(obj, SQLModel)
 
 
 log = configure_logging("pnl_lot_manager")
@@ -64,7 +69,6 @@ class LotManager:
         related_lot: Optional[CostLot] = None,
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
-        metadata: Optional[dict] = None,
     ) -> CostLotEvent:
         """
         Emit a cost lot event for audit trail.
@@ -97,24 +101,52 @@ class LotManager:
                 "All lot events must be associated with a calculation unit."
             )
         
+        # Compute balances after this event
+        # Asset-level balance (across all accounts)
+        balance_after = self.get_asset_balance(asset_id=lot.asset_id)
+        # Account-level balance (for this specific account)
+        account_balance_after = self.get_balance(account_id=lot.account_id, asset_id=lot.asset_id)
+        
+        # Use transaction datetime for event timestamp (economic time, not system time)
+        event_timestamp = triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else utc_now()
+        
+        # Only set relationship objects if they're proper SQLModel instances
+        # This allows tests to pass Mock objects (only IDs will be set)
+        tx_relationship = triggered_by_transaction if _is_sqlmodel_instance(triggered_by_transaction) else None
+        unit_relationship = triggered_by_unit if _is_sqlmodel_instance(triggered_by_unit) else None
+        related_lot_relationship = related_lot if _is_sqlmodel_instance(related_lot) else None
+        
         event = CostLotEvent(
             event_type=event_type.value,
-            lot=lot,
-            related_lot=related_lot,
+            # NOTE: Do NOT set lot=lot here. In SQLAlchemy 2.0, setting a
+            # relationship in the constructor only fires back_populates (adding
+            # the event to lot.events in-memory) but does NOT trigger the
+            # save-update cascade on the parent collection. This means the event
+            # is never added to the session and silently drops on commit.
+            # Instead, we explicitly append to lot.events below, which IS a
+            # direct collection mutation that triggers the cascade properly.
+            related_lot=related_lot_relationship,
             quantity_delta=quantity_delta,
             cost_basis_delta=cost_basis_delta,
             qty_remaining_after=lot.qty_remaining,
             cost_basis_remaining_after=lot.remaining_cost_in_base,
-            triggered_by_transaction=triggered_by_transaction,
+            balance_after=balance_after,
+            account_balance_after=account_balance_after,
+            triggered_by_transaction=tx_relationship,
             triggered_by_transaction_id=triggered_by_transaction.id if triggered_by_transaction else None,
-            triggered_by_unit=triggered_by_unit,
+            triggered_by_unit=unit_relationship,
             triggered_by_unit_id=triggered_by_unit.id if triggered_by_unit else None,
-            event_metadata=metadata,
-            timestamp=datetime.utcnow(),
+            timestamp=event_timestamp,
         )
         
-        # Note: Setting lot=lot in constructor auto-populates lot.events via SQLAlchemy back_populates
-        # No need to manually append - the ORM handles the bidirectional relationship
+        # CRITICAL: Explicitly append to lot.events for proper cascade persistence.
+        # In SQLAlchemy 2.0, setting lot=lot in the CostLotEvent constructor fires
+        # back_populates (adding event to lot.events in-memory) but does NOT trigger
+        # the save-update cascade — the event is never registered with the session.
+        # Direct collection append (lot.events.append) DOES trigger the cascade,
+        # ensuring the event is tracked by the session and persisted on commit.
+        # This also sets event.lot = lot via back_populates automatically.
+        lot.events.append(event)
         
         log.debug(
             "lot_event_emitted",
@@ -145,6 +177,7 @@ class LotManager:
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
         emit_event: bool = True,
+        transfer_metadata: Optional[Dict] = None,
     ):
         """
         Add a new lot, maintaining proper ordering for the cost method.
@@ -162,6 +195,7 @@ class LotManager:
             triggered_by_transaction: Transaction that triggered this lot creation
             triggered_by_unit: Calculation unit context
             emit_event: Whether to emit LOT_CREATED event (False for reloaded lots)
+            transfer_metadata: Optional metadata for transfer events (e.g., {"is_transfer": true})
         """
         key = self._get_key(lot.account_id, lot.asset_id)
         
@@ -180,13 +214,12 @@ class LotManager:
             # Emit creation event for negative lot (unless reloading from DB)
             if emit_event:
                 self._emit_event(
-                    event_type=LotEventType.CREATED,
+                    event_type=LotEventType.NEGATIVE_CREATED,
                     lot=lot,
                     quantity_delta=lot.qty,  # Negative
                     cost_basis_delta=Decimal("0"),
                     triggered_by_transaction=triggered_by_transaction,
                     triggered_by_unit=triggered_by_unit,
-                    metadata={"is_negative": True, "provisional": True},
                 )
             return
         
@@ -232,7 +265,6 @@ class LotManager:
                 cost_basis_delta=lot.total_cost_in_base,
                 triggered_by_transaction=triggered_by_transaction,
                 triggered_by_unit=triggered_by_unit,
-                metadata={"method": self.config.lot_method.value},
             )
 
     def load_from_db(
@@ -284,6 +316,8 @@ class LotManager:
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
         emit_event: bool = True,
+        fmv_unit_cost: Optional[Decimal] = None,
+        fmv_metadata: Optional[dict] = None,
     ) -> Tuple[List[ConsumedLotSlice], Optional[CostLot]]:
         """
         Consume lots for a disposal.
@@ -297,6 +331,8 @@ class LotManager:
             triggered_by_transaction: Transaction that triggered this consumption (required if emit_event=True)
             triggered_by_unit: Calculation unit context (required if emit_event=True)
             emit_event: Whether to emit CONSUMED events (False for testing)
+            fmv_unit_cost: Optional FMV-based unit cost for negative lots (used instead of 0 when available)
+            fmv_metadata: Optional FMV metadata dict with keys: source, price, timestamp, is_stale
 
         Returns:
             Tuple of (consumed_slices, negative_lot if created)
@@ -341,7 +377,7 @@ class LotManager:
                     quantity_delta=-consume_qty,
                     cost_basis_delta=-slice_record.total_cost_in_base,
                     triggered_by_transaction=triggered_by_transaction,
-                    triggered_by_unit=triggered_by_unit,
+                    triggered_by_unit=triggered_by_unit
                 )
 
             # Remove exhausted lot from front
@@ -353,8 +389,20 @@ class LotManager:
         if remaining_qty > 0:
             if allow_negative:
                 # For base currency, unit_cost is always 1
+                # For other assets, use FMV if available, otherwise 0 (provisional)
                 is_base_currency = asset_id == self.config.base_currency_id
-                unit_cost = Decimal("1") if is_base_currency else Decimal("0")
+                if is_base_currency:
+                    unit_cost = Decimal("1")
+                    cost_source = "base_currency"
+                elif fmv_unit_cost is not None and fmv_unit_cost > 0:
+                    unit_cost = fmv_unit_cost
+                    cost_source = "fmv"
+                else:
+                    unit_cost = Decimal("0")
+                    cost_source = "provisional"
+                
+                # Extract FMV metadata if available
+                _fmv_meta = fmv_metadata or {}
                 
                 # Create negative lot to track the shortfall
                 # This will be settled when a later acquisition arrives
@@ -369,11 +417,16 @@ class LotManager:
                     ),
                     qty=-remaining_qty,  # Negative qty indicates debt
                     qty_remaining=-remaining_qty,  # Negative - amount of debt outstanding
-                    unit_cost=unit_cost,
-                    acquired_at=datetime.utcnow(),
-                    is_zero_cost=not is_base_currency,
+                    unit_cost_in_base=unit_cost,
+                    acquired_at=triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else utc_now(),
+                    is_zero_cost=(cost_source == "provisional"),
                     is_negative=True,
                     is_settled=False,  # Will be settled by later acquisition
+                    cost_source=cost_source,
+                    cost_fmv_price=_fmv_meta.get("price"),
+                    cost_fmv_source=_fmv_meta.get("source"),
+                    cost_fmv_timestamp=_fmv_meta.get("timestamp"),
+                    cost_fmv_stale=_fmv_meta.get("is_stale"),
                     notes="Negative lot - provisional cost basis until settled",
                 )
                 # Set version relationship at creation time
@@ -415,8 +468,7 @@ class LotManager:
                         quantity_delta=-remaining_qty,
                         cost_basis_delta=-neg_slice.total_cost_in_base,
                         triggered_by_transaction=triggered_by_transaction,
-                        triggered_by_unit=triggered_by_unit,
-                        metadata={"is_negative_lot": True, "provisional": True},
+                        triggered_by_unit=triggered_by_unit
                     )
             else:
                 raise ValueError(
@@ -444,6 +496,32 @@ class LotManager:
         )
         
         return positive_balance - negative_balance
+    
+    def get_asset_balance(self, asset_id: int) -> Decimal:
+        """
+        Get total balance for an asset across all accounts.
+        In MEGA_WALLET mode, this is the same as get_balance(None, asset_id).
+        In LOT_TRAVEL mode, this sums balances across all accounts.
+        """
+        if self.config.lot_mode == LotMode.MEGA_WALLET:
+            return self.get_balance(None, asset_id)
+        
+        # LOT_TRAVEL mode: sum across all accounts for this asset
+        total_balance = Decimal("0")
+        
+        # Sum positive lots across all accounts
+        for key, lots in self.lots_map.items():
+            _, key_asset_id = key
+            if key_asset_id == asset_id:
+                total_balance += sum(lot.qty_remaining for lot in lots if not lot.is_negative)
+        
+        # Subtract unsettled negative lots across all accounts
+        for key, neg_lots in self.negative_lots_map.items():
+            _, key_asset_id = key
+            if key_asset_id == asset_id:
+                total_balance -= sum(abs(lot.qty) for lot in neg_lots if not lot.is_settled)
+        
+        return total_balance
 
     def get_cost_basis(self, account_id: Optional[int], asset_id: int) -> Decimal:
         """Get total remaining cost basis for account/asset."""
@@ -482,6 +560,10 @@ class LotManager:
         - Settlement records link negative lots to the settling positive lot
         - Both qty_remaining are updated for correct balance calculation
         
+        Each settlement record has a `provisional_unit_cost` attribute (set after
+        creation) containing the negative lot's original unit cost, used for
+        computing delta-based P&L adjustments.
+        
         Args:
             account: Account object (None in MEGA_WALLET mode)
             asset: Asset object being settled
@@ -493,7 +575,8 @@ class LotManager:
             emit_event: Whether to emit SETTLED events (False for testing)
             
         Returns:
-            (remaining_qty, settlement_records)
+            (remaining_qty, settlement_info_list) where each element is a tuple of
+            (LotSettlement, provisional_unit_cost: Decimal) for delta-based P&L adjustment
         """
         account_id = account.id if account else None
         asset_id = asset.asset_id
@@ -501,7 +584,7 @@ class LotManager:
         
         key = self._get_key(account_id, asset_id)
         negative_lots = self.negative_lots_map.get(key, [])
-        settlement_records: List[LotSettlement] = []
+        settlement_info: List[Tuple[LotSettlement, Decimal]] = []
         remaining_qty = available_qty
         
         for neg_lot in negative_lots:
@@ -545,11 +628,20 @@ class LotManager:
                 settling_transaction_id=settling_transaction.id if settling_transaction else None,
                 # Settlement details
                 qty_settled=settle_qty,
-                settled_at=datetime.utcnow(),
+                settled_at=utc_now(),
                 cost_basis_applied=cost_applied,
             )
+            # Store provisional unit cost from negative lot for delta-based P&L adjustment
+            neg_lot_provisional_cost = neg_lot.unit_cost_in_base
+            
+            # Add settlement to settling_lot's collection for cascade persistence
+            # (settlements are owned by settling_lot, not by the transaction)
+            if settling_lot:
+                if settling_lot.outgoing_settlements is None:
+                    settling_lot.outgoing_settlements = []
+                settling_lot.outgoing_settlements.append(settlement)
 
-            settlement_records.append(settlement)
+            settlement_info.append((settlement, neg_lot_provisional_cost))
             
             # Emit settlement event (unless disabled for testing)
             if emit_event:
@@ -560,11 +652,7 @@ class LotManager:
                     cost_basis_delta=cost_applied,
                     related_lot=settling_lot,
                     triggered_by_transaction=settling_transaction,
-                    triggered_by_unit=triggered_by_unit,
-                    metadata={
-                        "settlement_id": settlement.settlement_id,
-                        "is_fully_settled": neg_lot.is_settled,
-                    },
+                    triggered_by_unit=triggered_by_unit
                 )
             
             remaining_qty -= settle_qty
@@ -578,7 +666,7 @@ class LotManager:
                 settling_tx=settling_transaction.id if settling_transaction else None,
             )
         
-        return remaining_qty, settlement_records
+        return remaining_qty, settlement_info
 
     def get_all_lots(self) -> List[CostLot]:
         """Get all lots including negative lots (for persistence)."""
@@ -593,3 +681,53 @@ class LotManager:
         """Clear all lots (for testing)."""
         self.lots_map.clear()
         self.negative_lots_map.clear()
+
+
+# =============================================================================
+# Standalone force-settle (outside engine context)
+# =============================================================================
+
+def force_settle_lot(session: Session, lot_id: int, max_base_value: Decimal = Decimal("1.0")) -> CostLot:
+    """
+    Manually force-settle a small unsettled negative lot (dust).
+
+    Validates that the lot is negative, unsettled, and its absolute base value
+    is below ``max_base_value``. Sets qty_remaining=0 and is_settled=True,
+    then emits a SETTLED event without a triggering transaction (manual action).
+
+    Raises:
+        ValueError: if lot not found, not eligible, or too large.
+    """
+    lot = session.get(CostLot, lot_id)
+    if lot is None:
+        raise ValueError(f"Lot {lot_id} not found")
+    if not lot.is_negative:
+        raise ValueError(f"Lot {lot_id} is not a negative lot")
+    if lot.is_settled:
+        raise ValueError(f"Lot {lot_id} is already settled")
+
+    abs_value = abs(lot.qty_remaining * lot.unit_cost_in_base)
+    if abs_value > max_base_value:
+        raise ValueError(
+            f"Lot {lot_id} value ({float(abs_value):.4f}) exceeds threshold ({float(max_base_value):.2f})"
+        )
+
+    qty_delta = -lot.qty_remaining  # move qty_remaining to 0
+    cost_delta = qty_delta * lot.unit_cost_in_base
+
+    lot.qty_remaining = Decimal(0)
+    lot.is_settled = True
+    lot.notes = (lot.notes + "; " if lot.notes else "") + "manual-settle: dust"
+
+    event = CostLotEvent(
+        event_type=LotEventType.SETTLED.value,
+        quantity_delta=qty_delta,
+        cost_basis_delta=cost_delta,
+        qty_remaining_after=Decimal(0),
+        cost_basis_remaining_after=Decimal(0),
+        timestamp=utc_now(),
+    )
+    lot.events.append(event)
+
+    session.add(lot)
+    return lot

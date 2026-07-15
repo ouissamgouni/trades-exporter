@@ -9,23 +9,11 @@ from .connector_blockscout_normal_tx import ConnectorBlockscoutNormalTx
 from .connector_blockscout_token_transfers import ConnectorBlockscoutTokenTransfers
 
 
-# Backward compatibility aliases for Base network
-ConnectorBlockscoutBaseNormalTx = ConnectorBlockscoutNormalTx
-ConnectorBlockscoutBaseTokenTransfers = ConnectorBlockscoutTokenTransfers
-
 __all__ = [
     # Base classes
     "BlockscoutConnectorBase",
-    "BLOCKSCOUT_NETWORKS",
-    # Generic connectors
+    # Hub and specialized connectors
     "ConnectorBlockscoutHub",
     "ConnectorBlockscoutNormalTx",
     "ConnectorBlockscoutTokenTransfers",
-    # Ethereum network connectors
-    "ConnectorBlockscoutEthHub",
-    "ConnectorBlockscoutEthNormalTx",
-    "ConnectorBlockscoutEthTokenTransfers",
-    # Backward compatibility
-    "ConnectorBlockscoutBaseNormalTx",
-    "ConnectorBlockscoutBaseTokenTransfers",
 ]

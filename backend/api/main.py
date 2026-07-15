@@ -1,5 +1,5 @@
 """
-Trade Exporter API
+TradeTrail API
 
 FastAPI application for managing and reviewing cryptocurrency transactions.
 """
@@ -25,9 +25,15 @@ from backend.api.routes import (
     connectors,
     categories,
     fixtures,
+    data_health,
+    timeline,
+    balance,
+    positions,
 )
 from backend.config.loader import get_database_url
 from backend.db import init_db
+from backend.db.database import register_pnl_invalidation_listener
+from backend.services.pnl_calculation_service import PnLCalculationService
 
 
 @asynccontextmanager
@@ -36,19 +42,34 @@ async def lifespan(app: FastAPI):
     # Log current database connection
     db_url = get_database_url()
     # Mask password in log output
-    masked_url = db_url.replace(db_url.split('@')[0].split(':')[-1], '****') if '@' in db_url else db_url
-    print(f"🚀 Trade Exporter API starting")
+    masked_url = (
+        db_url.replace(db_url.split("@")[0].split(":")[-1], "****")
+        if "@" in db_url
+        else db_url
+    )
+    print(f"🚀 TradeTrail API starting")
     print(f"   Database: {masked_url}")
 
     # Initialize database (creates tables + seeds default data)
     init_db()
 
+    # Register P&L invalidation listener (detects data changes → marks stale)
+    register_pnl_invalidation_listener()
+
+    # Initialize P&L calculation service (starts as stale on boot)
+    pnl_service = PnLCalculationService.get_instance()
+    print(
+        f"   P&L Calculation Service: initialized (status={pnl_service.get_status()['status']})"
+    )
+
     yield
-    # Shutdown: nothing to do - connections are closed per-request
+
+    # Shutdown: clean up background services
+    pnl_service.shutdown()
 
 
 app = FastAPI(
-    title="Trade Exporter API",
+    title="TradeTrail API",
     description="API for managing and reviewing cryptocurrency transactions",
     version="1.0.0",
     lifespan=lifespan,
@@ -87,13 +108,17 @@ app.include_router(account_connectors.router)
 app.include_router(connectors.router)
 app.include_router(categories.router)
 app.include_router(fixtures.router)
+app.include_router(data_health.router)
+app.include_router(timeline.router)
+app.include_router(balance.router)
+app.include_router(positions.router)
 
 
 @app.get("/")
 def root():
     """API root endpoint"""
     return {
-        "name": "Trade Exporter API",
+        "name": "TradeTrail API",
         "version": "1.0.0",
         "docs": "/docs",
         "openapi": "/openapi.json",

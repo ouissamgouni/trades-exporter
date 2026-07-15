@@ -1,0 +1,12 @@
+# DeGiro Dividend Lifecycle Scenario — Accounts
+# ================================================
+# One DeGiro broker account. Transactions are seeded directly via
+# transactions.yaml — no connector sync required.
+
+accounts:
+  - name: "DeGiro Dividends QA"
+    account_type: "broker"
+    owned: true
+    group: "Stock Brokers"
+    color: "#C56A00"
+    address_or_identifier: "degiro_dividends_qa"

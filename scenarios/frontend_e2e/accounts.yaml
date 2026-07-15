@@ -1,0 +1,14 @@
+# Frontend Backend-E2E Fixture — Accounts
+# ========================================
+# Single account, no connectors (no network calls, no live sync possible).
+# Used by frontend/e2e-backend/ Playwright specs to assert real
+# backend-rendered data in the UI.
+
+accounts:
+  - name: "Playwright Wallet"
+    account_type: "wallet"
+    owned: true
+    group: "E2E"
+    color: "#2563EB"
+    address_or_identifier: "playwright_e2e_wallet"
+    connectors: []

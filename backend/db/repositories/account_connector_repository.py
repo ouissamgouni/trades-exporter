@@ -39,6 +39,24 @@ class AccountConnectorRepository:
         result = self.session.exec(statement).first()
         return result
 
+    def get_all(self) -> List[Tuple[AccountConnector, Account]]:
+        """
+        Get all enabled connectors with their accounts.
+        
+        Only returns connectors where:
+        - AccountConnector.enabled = True
+        - Account.enabled = True (account-level enable flag)
+
+        Returns:
+            List of (AccountConnector, Account) tuples ordered by sync_priority
+        """
+        statement = (
+            select(AccountConnector, Account)
+            .join(Account)
+            .order_by(AccountConnector.sync_priority)
+        )
+        return list(self.session.exec(statement).all())
+
     def get_enabled(self) -> List[Tuple[AccountConnector, Account]]:
         """
         Get all enabled connectors with their accounts.
@@ -111,6 +129,23 @@ class AccountConnectorRepository:
     def list_all(self) -> List[AccountConnector]:
         """Get all account connectors."""
         statement = select(AccountConnector).order_by(AccountConnector.sync_priority)
+        return list(self.session.exec(statement).all())
+
+    def get_all_with_accounts(self) -> List[Tuple[AccountConnector, Account]]:
+        """
+        Get all connectors with their accounts (enabled and disabled).
+        
+        Returns all connectors regardless of enabled status, joined with account info.
+        Used by sync config panel to allow enabling/disabling any connector.
+
+        Returns:
+            List of (AccountConnector, Account) tuples ordered by account name, sync_priority
+        """
+        statement = (
+            select(AccountConnector, Account)
+            .join(Account)
+            .order_by(Account.name, AccountConnector.sync_priority)
+        )
         return list(self.session.exec(statement).all())
 
     def update(self, connector: AccountConnector) -> AccountConnector:

@@ -1,7 +1,4 @@
 force_rewrite: true
-coingecko_api_keys:
-  - "CG-Ydr9kjJkbYfWrrzBXCwQ4ksz"
-  - "CG-2RyujkgD3R6kKz4oaKmJLyVr"
 base_currency: "EUR"
 
 source_base: "data/input"
@@ -11,15 +8,23 @@ database_path: "data/trades.db"
 # Use database-configured connectors (respects Account.enabled and AccountConnector.enabled)
 use_database_connectors: true
 
-log_level_root: "WARNING"
-log_level_trade_exporter: "DEBUG"
+#log_level_root: "WARNING"
+#log_level_trade_exporter: "DEBUG"
+
+# Uvicorn Access Log Configuration
+# Controls HTTP request access logging for the API server
+# - null: Disable all access logs (default for clean dev logs)
+# - []: Enable all access logs (production mode)
+# - ["/path1", "/path2"]: Enable logs but exclude specific paths (e.g., health checks)
+# Environment variable UVICORN_ACCESS_LOG_EXCLUDE_PATHS (JSON list) takes precedence
+uvicorn_access_log_exclude_paths: null
 
 # Grouping Engine Configuration
 grouping_engine:
   # Time windows (in seconds)
   transfer_time_window: 300 # 5 minutes - max time between outflow and inflow for transfers
-  swap_time_window: 60 # 1 minute - max time between legs of a swap
-  bridge_time_window: 60 # 1 minute - max time for cross-chain bridge transactions
+  swap_time_window: 180 # 3 minutes - max time between legs of a swap
+  bridge_time_window: 180 # 3 minutes - max time for cross-chain bridge transactions
 
   # Tolerances (as decimals, e.g., 0.05 = 5%)
   quantity_tolerance: 0.10 # Max quantity difference ratio for matching transfers/bridges
@@ -31,26 +36,28 @@ grouping_engine:
   medium_confidence: 0.85 # Moderate match criteria
   low_confidence: 0.70 # Time-only match (no value confirmation)
 
+# Duplicate Detection Configuration
+duplicate_detection:
+  enabled: true # Master switch for all duplicate detection
+  time_window_seconds: 30 # ±30s tolerance for transaction hash computation (not used for querying)
+  amount_tolerance_percent: 1.0 # ±1% tolerance for transaction hash computation (not used for querying)
+  # NOTE: Duplicate detection is now VIEW-TIME ONLY:
+  # - At persist time: Only computes transaction_hash (no searching/tagging)
+  # - At view time: Queries transaction_hash column to find duplicates
+  # - Shows ALL transactions with matching hash (resolved + unresolved)
+  # - Resolution uses Option B: re-resolves entire group when user takes action
+
 # Web3 Wallets Configuration
+# Do NOT hardcode API keys or personal wallet addresses here. Provide the
+# Etherscan API key via the ETHERSCAN_API_KEY / secrets env, and wallet
+# addresses via the WEB3_WALLETS env variable (JSON) or your own local
+# override. The block below only documents the expected schema.
 web3_wallets:
-  etherscan_api_key: "REDACTED_ETHERSCAN_KEY" # Etherscan API key for all EVM chains
+  etherscan_api_key: "REPLACE_WITH_YOUR_ETHERSCAN_API_KEY" # placeholder — override via env / secrets
   request_delay: 1.25 # seconds between API calls to respect rate limits
   max_retries: 7 # retry attempts if free-tier temporarily unavailable
-  addresses:
-    - wallet_address: "0x1111111111111111111111111111111111111111"
-      chain_name: "ethereum"
-      scanner: "blockscout" #"etherscan-api"
-    - wallet_address: "0x1111111111111111111111111111111111111111"
-      chain_name: "base"
-      scanner: "blockscout"
-      # Scanner type to use for this address
-    # - wallet_address: "0x1111111111111111111111111111111111111111"
-    #   chain_name: "Base"
-    #   native_token: "ETH"
-    #   scanner: "basescan-api"
-    #   scanner_chain_id: 8453
-    # - wallet_address: "0x1111111111111111111111111111111111111111"
-    #   chain_name: "BSC"
-    #   native_token: "BNB"
-    #   scanner: "bscscan-api"
-    #   scanner_chain_id: 56
+  addresses: []
+    # Example (add your own addresses locally):
+    # - wallet_address: "0x0000000000000000000000000000000000000000"
+    #   chain_name: "ethereum"
+    #   scanner: "blockscout"

@@ -4,7 +4,6 @@ Tests the mapping of CCXT trade responses to normalized format.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
 from datetime import datetime
 
 from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
@@ -13,15 +12,9 @@ from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
 class TestMEXCConnector:
     """Unit tests for MEXC connector trade mapping."""
 
-    @patch("backend.connectors.cex.connector_mexc_trx.load_credentials")
-    @patch("ccxt.mexc")
-    def test_map_trade_buy(self, mock_ccxt, mock_creds):
+    def test_map_trade_buy(self):
         """Test mapping a buy trade from CCXT format to normalized format."""
-        mock_creds.return_value = {"api_key": "test_key", "api_secret": "test_secret"}
-        mock_exchange = MagicMock()
-        mock_ccxt.return_value = mock_exchange
-
-        connector = MEXCConnectorTrx()
+        connector = MEXCConnectorTrx(config={"test_mode": True, "disable_file_output": True})
 
         # Mock CCXT trade response (buy)
         ccxt_trade = {
@@ -45,7 +38,7 @@ class TestMEXCConnector:
         assert result.source_transaction_id == "mx12345"
         assert result.direction == "inflow"
         assert result.source_transaction_type == "buy"  # Original preserved
-        assert result.transaction_type == "acquisition"  # Normalized from "buy"
+        assert result.transaction_type == "trade"  # All CEX trades use 'trade' type
         assert result.quantity == 0.05
         assert result.price == 48000.0
         assert result.source_price_quote_asset_symbol == "USDT"

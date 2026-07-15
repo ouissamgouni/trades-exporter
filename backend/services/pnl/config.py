@@ -31,10 +31,12 @@ class WarningType(str, Enum):
     STALE_PRICE = "stale_price"  # Price used is outside staleness window (fallback)
     RESIDUAL_MISMATCH = "residual_mismatch"
     ZERO_COST_LOT = "zero_cost_lot"
+    PROVISIONAL_COST_LOT = "provisional_cost_lot"  # Negative lot with FMV-based provisional cost
+    UNSETTLED_NEGATIVE_LOT = "unsettled_negative_lot"  # Negative lot never settled by end of calculation
     FEE_CONSUMPTION_FAILED = "fee_consumption_failed"
     UNMATCHED_GROUP = "unmatched_group"
     FMV_FETCH_FAILED = "fmv_fetch_failed"
-    PENDING_TRANSFER = "pending_transfer"  # Transfer with missing counterpart leg
+    UNMATCHED_INTERNAL_TRANSFER = "unmatched_internal_transfer"  # Internal transfer with missing counterpart leg
 
 
 @dataclass
@@ -68,6 +70,9 @@ class PnLConfig:
     # Per-asset-type staleness windows (days). If not specified, uses price_staleness_window_days
     price_staleness_by_type: dict = None  # e.g., {"crypto": 1, "stock": 7, "fiat": 30}
 
+    # Stablecoin peg mapping: symbol → fiat currency it tracks (for FMV fallback)
+    stablecoin_pegs: dict = None  # Default set in __post_init__
+
     def get_staleness_window_days(self, price_type: str) -> int:
         """Get staleness window for a specific asset/price type."""
         if self.price_staleness_by_type and price_type in self.price_staleness_by_type:
@@ -81,3 +86,5 @@ class PnLConfig:
             self.lot_mode = LotMode(self.lot_mode)
         if not isinstance(self.residual_tolerance_pct, Decimal):
             self.residual_tolerance_pct = Decimal(str(self.residual_tolerance_pct))
+        if self.stablecoin_pegs is None:
+            self.stablecoin_pegs = {"USDC": "USD", "USDT": "USD", "DAI": "USD"}

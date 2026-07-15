@@ -1,15 +1,16 @@
-import {
-    Badge, Box,
-    Button, Dialog, Flex,
-    Heading, Input, NativeSelect, Portal, Spinner,
-    Table, Text, HStack
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Badge, Button, Heading, Input, Spinner, Text } from './ui/primitives';
 import React, { useEffect, useState, useMemo } from 'react';
+import { LuChevronLeft, LuChevronRight, LuChevronsLeft, LuChevronsRight } from 'react-icons/lu';
 import { API_URL, Asset, RawAsset } from '../types';
+import { useAssets } from '../hooks/useAssets';
 import { AssetSelector } from './AssetSelector';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
+
+// Button primitive only supports blue/red/green/gray - orange needs a className override.
+const ORANGE_OUTLINE = 'border-orange-300 text-orange-700 hover:bg-orange-50';
 
 // Fuzzy matching utility for smart suggestions
 const calculateSimilarity = (str1: string, str2: string): number => {
@@ -58,9 +59,12 @@ interface SuggestedMatch {
     confidence: number;
 }
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
+
 export const RawAssetsEditor: React.FC = () => {
     const [rawAssets, setRawAssets] = useState<RawAsset[]>([]);
-    const [assets, setAssets] = useState<Asset[]>([]);
+    const { assets, refetchAssets } = useAssets();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -70,13 +74,16 @@ export const RawAssetsEditor: React.FC = () => {
     const [sourceFilter, setSourceFilter] = useState('');
     const [linkedFilter, setLinkedFilter] = useState<string>('');
 
+    // Pagination
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+
     // Confirmation dialogs
     const deleteConfirm = useConfirmDialog<RawAsset>();
     const autoMapConfirm = useConfirmDialog<{ count: number; items: { rawAsset: RawAsset; assetId: number }[] }>();
 
     useEffect(() => {
         fetchRawAssets();
-        fetchAssets();
     }, [sourceFilter, linkedFilter]);
 
     const fetchRawAssets = async () => {
@@ -95,18 +102,6 @@ export const RawAssetsEditor: React.FC = () => {
             setError(err instanceof Error ? err.message : 'Unknown error');
         } finally {
             setLoading(false);
-        }
-    };
-
-    const fetchAssets = async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
         }
     };
 
@@ -272,270 +267,330 @@ export const RawAssetsEditor: React.FC = () => {
     const suggestionsAvailableCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0).length;
     const highConfidenceCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0 && s[0].confidence >= 0.9).length;
 
-    if (loading) return (
-        <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-            <Spinner size="xl" color="blue.500" />
-            <Text mt={4}>Loading raw assets...</Text>
-        </Box>
-    );
-
-    if (error) return (
-        <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-            <Text color="red.600">Error: {error}</Text>
-        </Box>
-    );
-
     const linkedCount = rawAssets.filter(ra => ra.asset_id !== null).length;
     const unlinkedCount = rawAssets.filter(ra => ra.asset_id === null).length;
 
+    // Pagination computation
+    const totalRows = rawAssets.length;
+    const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+    const safePage = Math.min(page, pageCount - 1);
+    const paginatedRawAssets = useMemo(() => {
+        const start = safePage * pageSize;
+        return rawAssets.slice(start, start + pageSize);
+    }, [rawAssets, safePage, pageSize]);
+
+    // Reset page when data changes
+    useEffect(() => { setPage(0); }, [sourceFilter, linkedFilter]);
+
+    if (loading) return (
+        <div className="bg-gray-50 py-10 text-center">
+            <Spinner size="lg" className="text-blue-500" />
+            <Text className="mt-4 block">Loading raw assets...</Text>
+        </div>
+    );
+
+    if (error) return (
+        <div className="border border-red-200 bg-red-50 py-10 text-center">
+            <Text className="text-red-600">Error: {error}</Text>
+        </div>
+    );
+
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="md" mb={1}>🔗 Raw Assets Mapping</Heading>
-                    <Text color="gray.600" fontSize="sm">
+        <div>
+            <div className="mb-3 flex items-center justify-between border-b border-gray-200 pb-2">
+                <div>
+                    <Heading as="h2" className="mb-0.5 text-sm">🔗 Raw Assets Mapping</Heading>
+                    <Text className="text-xs text-gray-600">
                         Link source-specific asset symbols to normalized assets.
                     </Text>
-                </Box>
-                <Flex gap={2}>
+                </div>
+                <div className="flex gap-2">
                     {highConfidenceCount > 0 && (
-                        <Button colorPalette="green" variant="outline" onClick={autoMapAll}>
+                        <Button size="sm" colorScheme="green" variant="outline" className="text-xs" onClick={autoMapAll}>
                             ✨ Auto-Map ({highConfidenceCount})
                         </Button>
                     )}
-                    <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
+                    <Button size="sm" colorScheme="blue" className="text-xs" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Mapping
                     </Button>
-                    <Button onClick={fetchRawAssets} variant="outline">
+                    <Button size="sm" onClick={fetchRawAssets} variant="outline" className="text-xs">
                         🔄 Refresh
                     </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {/* Smart Suggestions Banner */}
             {suggestionsAvailableCount > 0 && (
-                <Box mb={4} p={3} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
-                    <HStack justify="space-between">
-                        <Text fontSize="sm" color="blue.700">
+                <div className="mb-4 border border-blue-200 bg-blue-50 p-3">
+                    <div className="flex justify-between">
+                        <Text className="text-xs text-blue-700">
                             💡 <strong>{suggestionsAvailableCount}</strong> unlinked asset(s) have suggested matches.
                             {highConfidenceCount > 0 && ` ${highConfidenceCount} high-confidence match(es) can be auto-mapped.`}
                         </Text>
-                    </HStack>
-                </Box>
+                    </div>
+                </div>
             )}
 
-            <Flex gap={4} mb={6} align="center" flexWrap="wrap">
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Source:</Text>
-                    <NativeSelect.Root size="sm" width="150px">
-                        <NativeSelect.Field
-                            value={sourceFilter}
-                            onChange={e => setSourceFilter(e.target.value)}
-                        >
-                            <option value="">All Sources</option>
-                            {uniqueSources.map(source => (
-                                <option key={source} value={source}>{source}</option>
-                            ))}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Flex>
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Status:</Text>
-                    <NativeSelect.Root size="sm" width="120px">
-                        <NativeSelect.Field
-                            value={linkedFilter}
-                            onChange={e => setLinkedFilter(e.target.value)}
-                        >
-                            <option value="">All</option>
-                            <option value="linked">Linked</option>
-                            <option value="unlinked">Unlinked</option>
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Flex>
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                    <Text className="text-xs font-medium">Source:</Text>
+                    <select
+                        aria-label="Source filter"
+                        className="h-6 w-[130px] border border-gray-300 px-1.5 text-xs"
+                        value={sourceFilter}
+                        onChange={e => setSourceFilter(e.target.value)}
+                    >
+                        <option value="">All Sources</option>
+                        {uniqueSources.map(source => (
+                            <option key={source} value={source}>{source}</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <Text className="text-xs font-medium">Status:</Text>
+                    <select
+                        aria-label="Status filter"
+                        className="h-6 w-[100px] border border-gray-300 px-1.5 text-xs"
+                        value={linkedFilter}
+                        onChange={e => setLinkedFilter(e.target.value)}
+                    >
+                        <option value="">All</option>
+                        <option value="linked">Linked</option>
+                        <option value="unlinked">Unlinked</option>
+                    </select>
+                </div>
                 {(sourceFilter || linkedFilter) && (
-                    <Button size="sm" variant="outline" onClick={() => { setSourceFilter(''); setLinkedFilter(''); }}>
+                    <Button size="sm" variant="outline" className="text-xs" onClick={() => { setSourceFilter(''); setLinkedFilter(''); }}>
                         Clear Filters
                     </Button>
                 )}
-            </Flex>
+            </div>
 
-            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm">
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader>Source Symbol</Table.ColumnHeader>
-                            <Table.ColumnHeader>Source</Table.ColumnHeader>
-                            <Table.ColumnHeader>Linked Asset</Table.ColumnHeader>
-                            <Table.ColumnHeader>Suggestions</Table.ColumnHeader>
-                            <Table.ColumnHeader>Actions</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                        {rawAssets.length === 0 ? (
-                            <Table.Row>
-                                <Table.Cell colSpan={5}>
-                                    <Text textAlign="center" py={8} color="gray.500">
-                                        No raw assets found
-                                    </Text>
-                                </Table.Cell>
-                            </Table.Row>
-                        ) : (
-                            rawAssets.map(rawAsset => {
-                                const key = getEditKey(rawAsset);
-                                const isEditing = editingKey === key;
-                                const suggestions = suggestionsMap.get(key) || [];
-                                const isUnlinked = rawAsset.asset_id === null;
+            {(() => {
+                const renderPaginationBar = (borderClass: string) => (
+                    <div className={borderClass}>
+                        <div className="flex w-full items-center justify-between px-3 py-1.5">
+                            <div className="flex items-center gap-2">
+                                <Text className="text-[10px] text-gray-500">Rows:</Text>
+                                <div className="inline-flex overflow-hidden border border-gray-200">
+                                    {PAGE_SIZE_OPTIONS.map((size) => (
+                                        <Button
+                                            key={size}
+                                            variant={pageSize === size ? 'solid' : 'ghost'}
+                                            colorScheme={pageSize === size ? 'blue' : 'gray'}
+                                            onClick={() => { setPageSize(size); setPage(0); }}
+                                            className="h-6 px-2 text-xs"
+                                        >
+                                            {size}
+                                        </Button>
+                                    ))}
+                                </div>
+                            </div>
+                            <Text className="text-[10px] text-gray-500">
+                                {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
+                            </Text>
+                            <div className="flex items-center gap-1">
+                                <Button variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} className="h-6 min-w-0 px-1">
+                                    <LuChevronsLeft size={12} />
+                                </Button>
+                                <Button variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="h-6 min-w-0 px-1">
+                                    <LuChevronLeft size={14} />
+                                </Button>
+                                <Text className="mx-1 text-xs text-gray-600">
+                                    {safePage + 1} / {pageCount}
+                                </Text>
+                                <Button variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} className="h-6 min-w-0 px-1">
+                                    <LuChevronRight size={14} />
+                                </Button>
+                                <Button variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} className="h-6 min-w-0 px-1">
+                                    <LuChevronsRight size={12} />
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                );
 
-                                return (
-                                    <Table.Row key={key} bg={isUnlinked ? 'orange.50' : undefined}>
-                                        <Table.Cell maxW="200px">
-                                            <Text fontWeight="medium" fontSize="sm" truncate title={rawAsset.symbol}>{rawAsset.symbol}</Text>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Badge colorPalette="purple">{rawAsset.source}</Badge>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            {isEditing ? (
-                                                <Box width="180px">
-                                                    <AssetSelector
-                                                        value={editAssetId}
-                                                        onChange={setEditAssetId}
-                                                        assets={assets}
-                                                        onAssetCreated={fetchAssets}
-                                                        defaultSymbol={rawAsset.symbol}
-                                                        placeholder="Search assets..."
-                                                    />
-                                                </Box>
-                                            ) : (
-                                                rawAsset.asset_id ? (
-                                                    <Badge colorPalette="green">{getAssetSymbol(rawAsset.asset_id)}</Badge>
-                                                ) : (
-                                                    <Text fontSize="sm" color="gray.400">Not linked</Text>
-                                                )
-                                            )}
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            {/* Smart Suggestions Column */}
-                                            {isUnlinked && suggestions.length > 0 && !isEditing ? (
-                                                <HStack gap={1} flexWrap="wrap">
-                                                    {suggestions.map((s, idx) => (
-                                                        <Tooltip key={idx} content={`${Math.round(s.confidence * 100)}% match - Click to accept`}>
-                                                            <Button
-                                                                size="xs"
-                                                                variant={s.confidence >= 0.9 ? "solid" : "outline"}
-                                                                colorPalette={s.confidence >= 0.9 ? "green" : s.confidence >= 0.7 ? "blue" : "gray"}
-                                                                onClick={() => acceptSuggestion(rawAsset, s.asset.asset_id!)}
-                                                            >
-                                                                {s.asset.symbol}
-                                                                {s.confidence >= 0.9 && " ✓"}
-                                                            </Button>
-                                                        </Tooltip>
-                                                    ))}
-                                                </HStack>
-                                            ) : isUnlinked && !isEditing ? (
-                                                <Text fontSize="xs" color="gray.400">No matches</Text>
-                                            ) : (
-                                                <Text fontSize="xs" color="gray.400">—</Text>
-                                            )}
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Flex gap={1}>
-                                                {isEditing ? (
-                                                    <>
-                                                        <Button size="xs" colorPalette="blue" onClick={() => saveRawAsset(rawAsset)}>
-                                                            💾
-                                                        </Button>
-                                                        <Button size="xs" variant="outline" onClick={() => { setEditingKey(null); setEditAssetId(null); }}>
-                                                            ✗
-                                                        </Button>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Button size="xs" variant="outline" onClick={() => startEditing(rawAsset)}>
-                                                            🔗
-                                                        </Button>
-                                                        {rawAsset.asset_id !== null && (
-                                                            <Button size="xs" colorPalette="orange" variant="outline" onClick={() => unlinkRawAsset(rawAsset)}>
-                                                                ⛓️‍💥
-                                                            </Button>
+                return (
+                    <div className="overflow-x-auto bg-white text-xs shadow-sm">
+                        {/* Pagination bar (top) */}
+                        {totalRows > PAGE_SIZE_OPTIONS[0] && renderPaginationBar('border-b border-gray-100')}
+                        <table className="w-full [&_td]:px-3 [&_td]:py-1.5 [&_th]:px-3 [&_th]:py-1.5 [&_th]:text-left">
+                            <thead>
+                                <tr>
+                                    <th>Source Symbol</th>
+                                    <th>Source</th>
+                                    <th>Linked Asset</th>
+                                    <th>Suggestions</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rawAssets.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5}>
+                                            <Text className="block py-8 text-center text-gray-500">
+                                                No raw assets found
+                                            </Text>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    paginatedRawAssets.map(rawAsset => {
+                                        const key = getEditKey(rawAsset);
+                                        const isEditing = editingKey === key;
+                                        const suggestions = suggestionsMap.get(key) || [];
+                                        const isUnlinked = rawAsset.asset_id === null;
+
+                                        return (
+                                            <tr key={key} className={isUnlinked ? 'bg-orange-50' : undefined}>
+                                                <td className="max-w-[200px]">
+                                                    <Text className="truncate text-xs font-medium" title={rawAsset.symbol}>{rawAsset.symbol}</Text>
+                                                </td>
+                                                <td>
+                                                    <Badge colorScheme="purple">{rawAsset.source}</Badge>
+                                                </td>
+                                                <td>
+                                                    {isEditing ? (
+                                                        <div className="w-[180px]">
+                                                            <AssetSelector
+                                                                value={editAssetId}
+                                                                onChange={setEditAssetId}
+                                                                assets={assets}
+                                                                onAssetCreated={refetchAssets}
+                                                                defaultSymbol={rawAsset.symbol}
+                                                                placeholder="Search assets..."
+                                                            />
+                                                        </div>
+                                                    ) : (
+                                                        rawAsset.asset_id ? (
+                                                            <Badge colorScheme="green">{getAssetSymbol(rawAsset.asset_id)}</Badge>
+                                                        ) : (
+                                                            <Text className="text-xs text-gray-400">Not linked</Text>
+                                                        )
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    {/* Smart Suggestions Column */}
+                                                    {isUnlinked && suggestions.length > 0 && !isEditing ? (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {suggestions.map((s, idx) => (
+                                                                <Tooltip key={idx} content={`${Math.round(s.confidence * 100)}% match - Click to accept`}>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                        colorScheme={s.confidence >= 0.9 ? 'green' : s.confidence >= 0.7 ? 'blue' : 'gray'}
+                                                                        className="text-xs"
+                                                                        onClick={() => acceptSuggestion(rawAsset, s.asset.asset_id!)}
+                                                                    >
+                                                                        {s.asset.symbol}
+                                                                        {s.confidence >= 0.9 && ' ✓'}
+                                                                    </Button>
+                                                                </Tooltip>
+                                                            ))}
+                                                        </div>
+                                                    ) : isUnlinked && !isEditing ? (
+                                                        <Text className="text-xs text-gray-400">No matches</Text>
+                                                    ) : (
+                                                        <Text className="text-xs text-gray-400">—</Text>
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    <div className="flex gap-1">
+                                                        {isEditing ? (
+                                                            <>
+                                                                <Button size="sm" colorScheme="blue" className="text-xs" onClick={() => saveRawAsset(rawAsset)}>
+                                                                    💾
+                                                                </Button>
+                                                                <Button size="sm" variant="outline" className="text-xs" onClick={() => { setEditingKey(null); setEditAssetId(null); }}>
+                                                                    ✗
+                                                                </Button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Button size="sm" variant="outline" className="text-xs" onClick={() => startEditing(rawAsset)}>
+                                                                    🔗
+                                                                </Button>
+                                                                {rawAsset.asset_id !== null && (
+                                                                    <Button size="sm" variant="outline" colorScheme="gray" className={`text-xs ${ORANGE_OUTLINE}`} onClick={() => unlinkRawAsset(rawAsset)}>
+                                                                        ⛓️‍💥
+                                                                    </Button>
+                                                                )}
+                                                                <Button size="sm" colorScheme="red" variant="outline" className="text-xs" onClick={() => deleteRawAsset(rawAsset)}>
+                                                                    🗑️
+                                                                </Button>
+                                                            </>
                                                         )}
-                                                        <Button size="xs" colorPalette="red" variant="outline" onClick={() => deleteRawAsset(rawAsset)}>
-                                                            🗑️
-                                                        </Button>
-                                                    </>
-                                                )}
-                                            </Flex>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                );
-                            })
-                        )}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+                        {/* Pagination bar (bottom) */}
+                        {totalRows > PAGE_SIZE_OPTIONS[0] && renderPaginationBar('border-t border-gray-100')}
+                    </div>
+                );
+            })()}
 
-            <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                <Text fontSize="sm" color="gray.600">
+            <div className="mt-2 bg-white p-2 shadow-sm">
+                <Text className="text-xs text-gray-600">
                     <strong>Total:</strong> {rawAssets.length} raw assets
-                    {' • '}<Badge colorPalette="green" size="sm">{linkedCount} linked</Badge>
-                    {' • '}<Badge colorPalette="orange" size="sm">{unlinkedCount} unlinked</Badge>
+                    {' • '}<Badge colorScheme="green">{linkedCount} linked</Badge>
+                    {' • '}<Badge colorScheme="orange">{unlinkedCount} unlinked</Badge>
                 </Text>
-            </Box>
+            </div>
 
             {/* Create Raw Asset Dialog */}
-            <Dialog.Root open={showCreateDialog} onOpenChange={(e) => setShowCreateDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Add Raw Asset Mapping</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Source Symbol *</Text>
-                                        <Input
-                                            placeholder="e.g., BTCUSDT"
-                                            value={newRawAsset.symbol || ''}
-                                            onChange={e => setNewRawAsset({ ...newRawAsset, symbol: e.target.value })}
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Source *</Text>
-                                        <Input
-                                            placeholder="e.g., binance, coinbase"
-                                            value={newRawAsset.source || ''}
-                                            onChange={e => setNewRawAsset({ ...newRawAsset, source: e.target.value })}
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Link to Asset (optional)</Text>
-                                        <AssetSelector
-                                            value={newRawAsset.asset_id ?? null}
-                                            onChange={(assetId) => setNewRawAsset({ ...newRawAsset, asset_id: assetId ?? undefined })}
-                                            assets={assets}
-                                            onAssetCreated={fetchAssets}
-                                            defaultSymbol={newRawAsset.symbol || ''}
-                                            placeholder="Search or create asset..."
-                                        />
-                                    </Box>
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => { setShowCreateDialog(false); setNewRawAsset({}); }}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="blue" onClick={createRawAsset}>
-                                        Create Mapping
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+            <RadixDialog.Root open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-[1000] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[1000] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 bg-white shadow-xl">
+                        <div className="border-b border-gray-200 px-4 py-3">
+                            <RadixDialog.Title className="text-base font-semibold">Add Raw Asset Mapping</RadixDialog.Title>
+                        </div>
+                        <div className="px-4 py-3">
+                            <div className="flex flex-col gap-4">
+                                <div>
+                                    <Text className="mb-1 block font-medium">Source Symbol *</Text>
+                                    <Input
+                                        placeholder="e.g., BTCUSDT"
+                                        value={newRawAsset.symbol || ''}
+                                        onChange={e => setNewRawAsset({ ...newRawAsset, symbol: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <Text className="mb-1 block font-medium">Source *</Text>
+                                    <Input
+                                        placeholder="e.g., binance, coinbase"
+                                        value={newRawAsset.source || ''}
+                                        onChange={e => setNewRawAsset({ ...newRawAsset, source: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <Text className="mb-1 block font-medium">Link to Asset (optional)</Text>
+                                    <AssetSelector
+                                        value={newRawAsset.asset_id ?? null}
+                                        onChange={(assetId) => setNewRawAsset({ ...newRawAsset, asset_id: assetId ?? undefined })}
+                                        assets={assets}
+                                        onAssetCreated={refetchAssets}
+                                        defaultSymbol={newRawAsset.symbol || ''}
+                                        placeholder="Search or create asset..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
+                            <Button variant="outline" onClick={() => { setShowCreateDialog(false); setNewRawAsset({}); }}>
+                                Cancel
+                            </Button>
+                            <Button colorScheme="blue" onClick={createRawAsset}>
+                                Create Mapping
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
 
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog
@@ -557,6 +612,6 @@ export const RawAssetsEditor: React.FC = () => {
                 message={autoMapConfirm.data ? `Auto-map ${autoMapConfirm.data.count} raw asset(s) with high confidence matches?` : ''}
                 confirmLabel="Auto-Map"
             />
-        </Box>
+        </div>
     );
 };

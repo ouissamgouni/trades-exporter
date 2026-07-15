@@ -4,16 +4,24 @@ Uses CCXT library for robust API handling.
 Object-oriented design implementing BaseConnector interface.
 """
 
+import random
 import time
 import ccxt
+import requests
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Generator
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from backend.connectors.base.base_connector import BaseConnector
 from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("coinbase")
+
+
+# Maximum number of concurrent workers to avoid connection pool exhaustion
+MAX_WORKERS = 10
 
 
 # ===== Coinbase Connector Class =====
@@ -33,14 +41,19 @@ class ConnectorCoinbaseTrx(BaseConnector):
         api_passphrase: str = None,
         account_id: int = None,
         connector_id: int = None,
+        symbols: List[str] = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """Initialize Coinbase connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
-        # In test mode, skip all API configuration
-        if self.test_mode:
+        # Store symbols filter (if provided, only fetch trades for these symbols)
+        self._symbols_filter = symbols or (config.get("symbols") if config else None)
+
+        # In test/renormalize mode, skip all API configuration
+        if self.test_mode or self.renormalize_mode:
             return
 
         # Load credentials from settings.yaml if not provided
@@ -73,13 +86,37 @@ class ConnectorCoinbaseTrx(BaseConnector):
             log.error(f"❌ Failed to initialize Coinbase exchange: {e}")
             raise
 
+        # Configure HTTP session with connection pooling
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=15,
+            max_retries=retry_strategy,
+        )
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
     def get_symbols(self) -> List[str]:
         """
-        Get list of all trading symbols from Coinbase using CCXT.
+        Get list of trading symbols from Coinbase.
+        If symbols filter was provided at init, returns only those symbols.
+        Otherwise fetches all available symbols from the exchange.
 
         Returns:
             list: List of symbols (e.g., ['BTC/USD', 'ETH/USD', ...])
         """
+        # Use provided symbols filter if available
+        if self._symbols_filter:
+            log.info(
+                f"📊 Using {len(self._symbols_filter)} configured symbols for Coinbase"
+            )
+            return self._symbols_filter
+
         try:
             symbols = self.exchange.symbols
             log.info(f"📊 Found {len(symbols)} symbols on Coinbase")
@@ -88,10 +125,10 @@ class ConnectorCoinbaseTrx(BaseConnector):
             log.error(f"Error fetching symbols: {e}")
             return []
 
-    def get_trades(self, symbol: str, limit: int = 100) -> List[Dict[str, Any]]:
+    def _fetch_with_retry(self, symbol: str, limit: int = 100) -> List[Dict[str, Any]]:
         """
-        Fetch private trade history from Coinbase for a specific symbol using CCXT.
-        Retries on rate limit (429) errors with exponential backoff.
+        Fetch trades for a symbol with exponential backoff retry logic.
+        Handles connection errors, timeouts, and rate limits gracefully.
 
         Args:
             symbol (str): Trading pair symbol (e.g., 'BTC/USD')
@@ -100,37 +137,56 @@ class ConnectorCoinbaseTrx(BaseConnector):
         Returns:
             list: List of trade objects from CCXT or empty list on error
         """
-        max_retries = 3
-        retry_delay = 2  # seconds
+        max_retries = 10
+        retry_count = 0
 
-        for attempt in range(max_retries):
+        while retry_count < max_retries:
             try:
-                trades = self.exchange.fetch_my_trades(symbol, limit=limit)
+                trades = self.exchange.fetch_my_trades(symbol, since=self.since_timestamp_ms, limit=limit)
                 return trades
             except ccxt.RateLimitExceeded:
-                if attempt < max_retries - 1:
-                    log.warning(
-                        f"⚠️ Rate limit (429) for {symbol}. Retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})"
-                    )
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                    continue
-                else:
-                    log.debug(
-                        f"❌ Rate limit (429) for {symbol} after {max_retries} retries"
-                    )
+                retry_count += 1
+                if retry_count >= max_retries:
+                    log.debug(f"❌ Rate limit for {symbol} after {max_retries} retries")
                     return []
+                # Exponential backoff with jitter
+                wait_time = (2 ** retry_count) + random.uniform(0, 2)
+                log.warning(f"⚠️ Rate limit for {symbol}. Retrying in {wait_time:.1f}s... (attempt {retry_count}/{max_retries})")
+                time.sleep(wait_time)
             except Exception as e:
                 error_str = str(e).lower()
-                if (
-                    "no trades" in error_str
-                    or "empty" in error_str
-                    or "404" in error_str
-                ):
+                # Check if it's a retryable error
+                if any(keyword in error_str for keyword in ["429", "too many requests", "connection", "pool", "timeout"]):
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        log.debug(f"❌ Connection error for {symbol} after {max_retries} retries: {e}")
+                        return []
+                    wait_time = (2 ** retry_count) + random.uniform(0, 2)
+                    log.warning(f"⚠️ Connection error for {symbol}. Retrying in {wait_time:.1f}s... (attempt {retry_count}/{max_retries})")
+                    time.sleep(wait_time)
+                # Non-retryable errors
+                elif "no trades" in error_str or "empty" in error_str or "404" in error_str:
                     log.debug(f"ℹ️ No trades found for {symbol}")
+                    return []
                 else:
                     log.debug(f"ℹ️ Error fetching trades for {symbol}: {e}")
-                return []
+                    return []
+
+        return []
+
+    def get_trades(self, symbol: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Fetch private trade history from Coinbase for a specific symbol using CCXT.
+        Delegates to _fetch_with_retry for exponential backoff and error handling.
+
+        Args:
+            symbol (str): Trading pair symbol (e.g., 'BTC/USD')
+            limit (int): Number of trades to fetch
+
+        Returns:
+            list: List of trade objects from CCXT or empty list on error
+        """
+        return self._fetch_with_retry(symbol, limit)
 
     def raw_to_normalized(self, ccxt_trade: dict) -> "NormalizedTransaction":
         """
@@ -191,60 +247,133 @@ class ConnectorCoinbaseTrx(BaseConnector):
                 total=cost,
                 fee=fee,
                 source_fee_quote_asset_symbol=fee_quote,
+                include_fee=True,
             )
         except Exception as e:
             error_msg = f"Failed to map Coinbase trade: {e}"
             log.error(error_msg)
             raise ValueError(error_msg) from e
 
-    def get_raws(self) -> List[Dict[str, Any]]:
+    def yield_raws(self) -> "Generator[Dict[str, Any], None, None]":
         """
-        Fetch all trades from Coinbase using CCXT, fetching per symbol in parallel.
-        Returns:
-            list: List of trade objects from all symbols
+        Fetch trades from Coinbase using CCXT with ThreadPoolExecutor.
+        Limits concurrent requests to avoid overwhelming the connection pool.
+        
+        Yields:
+            Dict[str, Any]: Trade objects as they are fetched
         """
-        log.info("🔄 Fetching trades from Coinbase API using CCXT...")
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        log.info("🔄 Fetching trades from Coinbase API using CCXT (streaming)...")
         symbols = self.get_symbols()
         if not symbols:
             log.warning("⚠️ No symbols fetched from Coinbase")
-            return []
+            return
+
+        self.update_progress(
+            operation="Fetching symbols",
+            current=0,
+            total=len(symbols),
+            log_message=f"Starting to fetch trades for {len(symbols)} symbols",
+            fetched_count=0,
+        )
+
+        completed_count = 0
+        fetched_total = 0
 
         def fetch_symbol_trades(indexed_symbol):
-            """Helper function to fetch trades for a single symbol."""
+            """Worker function to fetch trades for a single symbol."""
             idx, symbol = indexed_symbol
             prefix = f"[{idx + 1}/{len(symbols)}]"
+            
+            if self.is_abort_requested():
+                log.debug(f"{prefix} ⚠️ Abort requested, skipping {symbol}")
+                return []
+            
             try:
-                trades = self.get_trades(symbol)
+                trades = self._fetch_with_retry(symbol)
+                
                 if trades:
                     log.info(f"{prefix} ✅ Found {len(trades)} trades for {symbol}")
-                    return trades
                 else:
                     log.debug(f"{prefix} ℹ️ No trades for {symbol}")
-                    return []
+                
+                return trades
             except Exception as e:
                 log.error(f"{prefix} ❌ Error fetching trades for {symbol}: {e}")
                 return []
 
-        # Use ThreadPoolExecutor for parallel symbol fetching
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        all_trades = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {
+        # Use ThreadPoolExecutor to limit concurrent threads
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Submit all tasks
+            future_to_symbol = {
                 executor.submit(fetch_symbol_trades, item): item
                 for item in enumerate(symbols)
             }
-            for future in as_completed(futures):
+
+            # Process completed futures as they finish
+            for future in as_completed(future_to_symbol):
+                if self.is_abort_requested():
+                    log.info("⚠️ Abort requested, stopping Coinbase symbol fetching")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                
+                indexed_symbol = future_to_symbol[future]
+                idx, symbol = indexed_symbol
+                prefix = f"[{idx + 1}/{len(symbols)}]"
+                
                 try:
                     trades = future.result()
-                    all_trades.extend(trades)
+                    completed_count += 1
+                    
+                    if trades:
+                        fetched_total += len(trades)
+                        for trade in trades:
+                            yield trade
+                    
+                    self.update_progress(
+                        operation=f"{prefix} Fetching {symbol}",
+                        current=completed_count,
+                        total=len(symbols),
+                        log_message=f"{prefix} Fetched {len(trades)} trades for {symbol}" if trades else None,
+                        fetched_count=fetched_total,
+                    )
                 except Exception as e:
-                    log.debug(f"Error processing future result: {e}")
+                    log.error(f"{prefix} ❌ Error processing result for {symbol}: {e}")
+                    completed_count += 1
 
-        return all_trades
+        self.update_progress(
+            operation="Completed",
+            current=len(symbols),
+            total=len(symbols),
+            log_message=f"✅ Total trades fetched: {fetched_total}",
+            fetched_count=fetched_total,
+        )
 
     # Inherits yield_normalized from BaseConnector
 
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
 
-# Integration tests available at:
-# pytest tests/integration/exchanges/test_connector_integration.py::TestConnectorIntegration::test_coinbase_connector -v
+    @property
+    def supports_balance(self) -> bool:
+        return not self.test_mode and self.exchange is not None
+
+    def get_balance(self):
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        balance = self.exchange.fetch_balance()
+        entries = []
+        for asset, total in (balance.get("total") or {}).items():
+            if total and float(total) > 0:
+                free = float((balance.get("free") or {}).get(asset, 0) or 0)
+                used = float((balance.get("used") or {}).get(asset, 0) or 0)
+                entries.append(BalanceEntry(
+                    asset_symbol=asset,
+                    total=Decimal(str(total)),
+                    available=Decimal(str(free)),
+                    locked=Decimal(str(used)),
+                ))
+        return entries

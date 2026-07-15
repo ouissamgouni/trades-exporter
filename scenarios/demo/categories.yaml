@@ -1,0 +1,49 @@
+# Product Demo Scenario — Categories
+# =====================================
+# Sector tags used by the Category Breakdown / Data Explorer dashboards.
+
+dimensions:
+  - label: "Sector"
+    ordinal: 0
+    categories:
+      - label: "Crypto"
+        color: "#F7931A"
+        ordinal: 10
+        assets:
+          - BTC
+          - ETH
+          - SOL
+          - USDC
+          - XRP
+          - BNB
+
+      - label: "Stocks"
+        color: "#2E86C1"
+        ordinal: 20
+        assets:
+          - AAPL
+          - MSFT
+          - GOOGL
+          - ASML
+
+      - label: "Funds"
+        color: "#16A085"
+        ordinal: 30
+        assets:
+          - CW8
+
+      - label: "Prediction Markets"
+        color: "#8B5CF6"
+        ordinal: 40
+        assets:
+          - "PM:bitcoin-200k-2025-Yes"
+          - "PM:fed-rate-cut-mar-2025-Yes"
+          - "PM:senate-control-2026-Yes"
+          - "PM:eth-etf-inflows-2026-Yes"
+
+      - label: "Cash & FX"
+        color: "#95A5A6"
+        ordinal: 50
+        assets:
+          - EUR
+          - USD

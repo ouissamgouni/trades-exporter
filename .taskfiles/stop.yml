@@ -1,20 +1,289 @@
 version: "3"
 
+vars:
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
+
 tasks:
   dev:
-    desc: Stop dev services
+    desc: Stop all dev services (db + backend + frontend)
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
+    deps: [dev:db, dev:backend, dev:frontend]
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter stop
-      - echo "✅ Dev services stopped"
+      - echo "✅ All dev services stopped"
 
-  test:
-    desc: Stop test stack
+  dev:db:
+    desc: Stop dev database
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter stop
-      - echo "✅ Test stack stopped"
+      - |
+        ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down
+        # Confirm no containers remain for this compose project
+        CONTAINERS=$(docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev ps -q || true)
+        if [ -n "$CONTAINERS" ]; then
+          echo "❌ Dev database still present: $CONTAINERS"
+          exit 1
+        else
+          echo "✅ Dev database stopped"
+        fi
 
-  prod:
+  dev:backend:
+    desc: Stop dev backend
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
+    cmds:
+      - |
+        if pkill -f "backend.api.main" 2>/dev/null; then
+          echo "✅ Backend stopped"
+          # Wait a moment and check if any processes still running
+          sleep 1
+          if pgrep -f "backend.api.main" > /dev/null 2>&1; then
+            echo "Retrying with force..."
+            pkill -9 -f "backend.api.main" 2>/dev/null
+            sleep 1
+            if pgrep -f "backend.api.main" > /dev/null 2>&1; then
+              echo "❌ Failed to stop backend completely"
+            else
+              echo "✅ Backend fully stopped"
+            fi
+          else
+            echo "✅ Backend fully stopped"
+          fi
+        else
+          echo "ℹ️  Backend not running"
+        fi
+
+  dev:frontend:
+    desc: Stop dev frontend
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
+    cmds:
+      - |
+        if pkill -f "vite" 2>/dev/null; then
+          echo "✅ Frontend stopped"
+        else
+          echo "ℹ️  Frontend not running"
+        fi
+
+  staging:local:
+    desc: Stop staging stack
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    cmds:
+      - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
+      - echo "✅ Staging stack stopped"
+
+  prod:local:
     desc: Stop prod stack
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter stop
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
       - echo "✅ Prod stack stopped"
+
+  # === Volume cleanup (data destructive) ===
+
+  dev:volumes:
+    desc: "⚠️ Remove dev containers and volumes (data lost). DRY_RUN=1 to preview."
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
+    prompt: This will DELETE dev database data. Continue?
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would remove dev containers and volumes"
+          echo "   Project: trades-exporter-dev"
+          exit 0
+        fi
+      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down -v
+      - echo "✅ Dev containers and volumes removed"
+
+  staging:local:volumes:
+    desc: "⚠️ Remove staging containers and volumes (data lost). DRY_RUN=1 to preview."
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    prompt: This will DELETE staging database data. Continue?
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would remove staging containers and volumes"
+          echo "   Project: trades-exporter-staging"
+          exit 0
+        fi
+      - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down -v
+      - echo "✅ Staging containers and volumes removed"
+
+  prod:local:volumes:
+    desc: "🚨 Remove prod containers and volumes (DANGEROUS!). DRY_RUN=1 to preview."
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
+    prompt: "🚨 This will DELETE PRODUCTION DATA. Are you absolutely sure?"
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would remove prod containers and volumes"
+          echo "   Project: trades-exporter-prod"
+          exit 0
+        fi
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down -v
+      - echo "⚠️ Prod containers and volumes removed"
+
+  # === Scenario lifecycle ===
+
+  scenario:
+    desc: "Stop a scenario instance. SCENARIO=<name> to target, or omit for default. KEEP_BROWSER=1 skips browser cleanup."
+    prompt: "This will stop and remove the scenario instance (including DB volume). Continue?"
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      SCENARIO: '{{.SCENARIO | default ""}}'
+      KEEP_BROWSER: '{{.KEEP_BROWSER | default "0"}}'
+    cmds:
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+
+        # Use persisted ports if available (overrides may have been used at start time)
+        SCENARIO_LABEL="{{.SCENARIO}}"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+        STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
+        [ -f "$STATE_FILE" ] && source "$STATE_FILE"
+
+        echo "Stopping scenario environment ($ENV_NAME)..."
+
+        # Stop Docker containers (both scenario-DB-only and unified compose)
+        docker compose -f infra/docker/docker-compose.scenario-db.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+        docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+
+        # Remove Docker images
+        docker rmi trades-exporter-backend:$ENV_NAME trades-exporter-frontend:$ENV_NAME 2>/dev/null || true
+
+        # Kill local processes (hybrid mode)
+        pkill -f "uvicorn.*--port $SC_API_PORT" 2>/dev/null || true
+        pkill -f "vite.*--port $SC_WEB_PORT" 2>/dev/null || true
+
+        # Cleanup env symlink
+        rm -f "{{.ROOT_DIR}}/config/${ENV_NAME}.env" 2>/dev/null || true
+
+        # Cleanup persisted port state
+        rm -f "$STATE_FILE" 2>/dev/null || true
+
+        # Cleanup isolated browser sessions unless explicitly kept.
+        if [ "{{.KEEP_BROWSER}}" != "1" ]; then
+          SCENARIO_LABEL="{{.SCENARIO}}"
+          [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+          {{.ROOT_DIR}}/.taskfiles/_browser_cleanup.sh "scenario-$SCENARIO_LABEL" || true
+        fi
+
+        echo ""
+        echo "✅ Scenario environment stopped ($ENV_NAME)"
+        echo "   Containers: removed"
+        echo "   DB volume:  removed"
+        echo "   Ports:      $SC_DB_PORT, $SC_API_PORT, $SC_WEB_PORT freed"
+
+  scenario:all:
+    desc: "Stop ALL running scenario instances. KEEP_BROWSER=1 skips browser cleanup."
+    prompt: "This will stop ALL running scenario instances. Continue?"
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      KEEP_BROWSER: '{{.KEEP_BROWSER | default "0"}}'
+    cmds:
+      - |
+        echo "Scanning for running scenario instances..."
+        FOUND=0
+
+        # Find all scenario database containers (trades_db_scenario-default, trades_db_scenario-<name>)
+        for CONTAINER in $(docker ps --filter "name=trades_db_scenario-" --format '{{`{{.Names}}`}}' 2>/dev/null); do
+          FOUND=$((FOUND + 1))
+          # Extract scenario from container name
+          SCENARIO="${CONTAINER#trades_db_scenario-}"
+
+          source {{.SCENARIO_PORTS_SH}} "$SCENARIO"
+
+          # Use persisted ports if available (overrides may have been used at start time)
+          SCENARIO_LABEL="$SCENARIO"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+          STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
+          [ -f "$STATE_FILE" ] && source "$STATE_FILE"
+
+          echo "Stopping $ENV_NAME (DB: $SC_DB_PORT, API: $SC_API_PORT, WEB: $SC_WEB_PORT)..."
+
+          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+          docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+          docker rmi trades-exporter-backend:$ENV_NAME trades-exporter-frontend:$ENV_NAME 2>/dev/null || true
+          pkill -f "uvicorn.*--port $SC_API_PORT" 2>/dev/null || true
+          pkill -f "vite.*--port $SC_WEB_PORT" 2>/dev/null || true
+          rm -f "{{.ROOT_DIR}}/config/${ENV_NAME}.env" 2>/dev/null || true
+          rm -f "$STATE_FILE" 2>/dev/null || true
+        done
+
+        if [ "{{.KEEP_BROWSER}}" != "1" ]; then
+          {{.ROOT_DIR}}/.taskfiles/_browser_cleanup.sh "scenario-" || true
+        fi
+
+        if [ $FOUND -eq 0 ]; then
+          echo "No running scenario instances found."
+        else
+          echo ""
+          echo "✅ Stopped $FOUND scenario instance(s)"
+        fi

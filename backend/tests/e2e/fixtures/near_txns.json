@@ -1,0 +1,152 @@
+[
+  {
+    "id": "4716450001",
+    "signer_account_id": "alice.near",
+    "receiver_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
+    "transaction_hash": "9hPVtoV1yZWo5yWYYaoswxqRLDv1L55gZPo2MAV9dpCP",
+    "included_in_block_hash": "C9Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700000000000000000",
+    "receipt_conversion_tokens_burnt": "417494768750000000000",
+    "block": {
+      "block_height": 168305015
+    },
+    "actions": [
+      {
+        "action": "TRANSFER",
+        "method": null,
+        "deposit": 5000000000000000000000000,
+        "fee": 417494768750000000000,
+        "args": null
+      }
+    ],
+    "actions_agg": {
+      "deposit": 5000000000000000000000000
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 834989537500000000000
+    }
+  },
+  {
+    "id": "4716450002",
+    "signer_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
+    "receiver_account_id": "bob.near",
+    "transaction_hash": "AzWo5yWYYaoswxqRLDv1L55gZPo2MAV9dpCP9hPVtoV1",
+    "included_in_block_hash": "D8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700001000000000000",
+    "receipt_conversion_tokens_burnt": "417494768750000000000",
+    "block": {
+      "block_height": 168305020
+    },
+    "actions": [
+      {
+        "action": "TRANSFER",
+        "method": null,
+        "deposit": 2000000000000000000000000,
+        "fee": 417494768750000000000,
+        "args": null
+      }
+    ],
+    "actions_agg": {
+      "deposit": 2000000000000000000000000
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 900000000000000000000
+    }
+  },
+  {
+    "id": "4716450003",
+    "signer_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
+    "receiver_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
+    "transaction_hash": "SelfTransferHashXYZ123456789abcdef123456789abc",
+    "included_in_block_hash": "E8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700002000000000000",
+    "receipt_conversion_tokens_burnt": "100000000000000000000",
+    "block": {
+      "block_height": 168305030
+    },
+    "actions": [
+      {
+        "action": "TRANSFER",
+        "method": null,
+        "deposit": 1000000000000000000000000,
+        "fee": 100000000000000000000,
+        "args": null
+      }
+    ],
+    "actions_agg": {
+      "deposit": 1000000000000000000000000
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 200000000000000000000
+    }
+  },
+  {
+    "id": "4716450004",
+    "signer_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
+    "receiver_account_id": "contract.near",
+    "transaction_hash": "FailedTxHash123456789abcdefghijklmnopqrstuvwx",
+    "included_in_block_hash": "F8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700003000000000000",
+    "receipt_conversion_tokens_burnt": "100000000000000000000",
+    "block": {
+      "block_height": 168305040
+    },
+    "actions": [
+      {
+        "action": "TRANSFER",
+        "method": null,
+        "deposit": 3000000000000000000000000,
+        "fee": 100000000000000000000,
+        "args": null
+      }
+    ],
+    "actions_agg": {
+      "deposit": 3000000000000000000000000
+    },
+    "outcomes": {
+      "status": false
+    },
+    "outcomes_agg": {
+      "transaction_fee": 500000000000000000000
+    }
+  },
+  {
+    "id": "4716450005",
+    "signer_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
+    "receiver_account_id": "staking.pool.near",
+    "transaction_hash": "FunctionCallHashABCDEF123456789abcdef12345678",
+    "included_in_block_hash": "G8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700004000000000000",
+    "receipt_conversion_tokens_burnt": "200000000000000000000",
+    "block": {
+      "block_height": 168305050
+    },
+    "actions": [
+      {
+        "action": "FUNCTION_CALL",
+        "method": "deposit_and_stake",
+        "deposit": 10000000000000000000000000,
+        "fee": 200000000000000000000,
+        "args": null
+      }
+    ],
+    "actions_agg": {
+      "deposit": 10000000000000000000000000
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 400000000000000000000
+    }
+  }
+]

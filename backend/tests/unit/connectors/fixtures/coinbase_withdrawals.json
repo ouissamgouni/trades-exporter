@@ -1,0 +1,56 @@
+[
+    {
+        "id": "with_test_1",
+        "txid": "0xdef789abc012345",
+        "timestamp": 1640995200000,
+        "datetime": "2022-01-01T00:00:00.000Z",
+        "currency": "ETH",
+        "amount": 2.0,
+        "address": "0xrecipientaddress123",
+        "addressTo": "0xrecipientaddress123",
+        "addressFrom": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+        "tag": null,
+        "status": "ok",
+        "fee": {
+            "currency": "ETH",
+            "cost": 0.002
+        },
+        "network": "ethereum",
+        "info": {}
+    },
+    {
+        "id": "with_test_2",
+        "txid": "bc1qwithdrawal123456",
+        "timestamp": 1641081600000,
+        "datetime": "2022-01-02T00:00:00.000Z",
+        "currency": "BTC",
+        "amount": 0.1,
+        "address": "bc1qrecipient456",
+        "addressTo": "bc1qrecipient456",
+        "addressFrom": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+        "tag": null,
+        "status": "ok",
+        "fee": {
+            "currency": "BTC",
+            "cost": 0.0002
+        },
+        "network": "bitcoin",
+        "info": {}
+    },
+    {
+        "id": "with_test_3",
+        "txid": "0xusdcwithdrawal789",
+        "timestamp": 1641168000000,
+        "datetime": "2022-01-03T00:00:00.000Z",
+        "currency": "USDC",
+        "amount": 500.0,
+        "address": "0xusdcrecipient",
+        "addressTo": "0xusdcrecipient",
+        "addressFrom": "0xmyusdcaddress",
+        "tag": null,
+        "status": "ok",
+        "fee": 1.0,
+        "network": "ethereum",
+        "info": {}
+    }
+]

@@ -1,0 +1,353 @@
+# Product Demo Scenario — Accounts
+# ==================================
+# Fake but realistic multi-account portfolio for customer-facing demos.
+# Covers every AccountType (cex, dex, broker, wallet, bank, investment) and a
+# broad spread of connector families. All connectors are seeded as *disabled*
+# decorative entries (no real API credentials in a demo environment) — every
+# transaction shown comes from transactions.yaml so the demo works fully
+# offline and reproducibly. Use with: task start:scenario SCENARIO=demo
+
+accounts:
+  # =========================================================================
+  # CEX Accounts
+  # =========================================================================
+
+  - name: "Binance"
+    account_type: "cex"
+    owned: true
+    group: "Trading"
+    color: "#F0B90B"
+    address_or_identifier: "binance_demo"
+    tags:
+      - trading: true
+      - spot: true
+    connectors:
+      - connector_type: "binance-transactions"
+        color: "#1A4971"
+        enabled: false
+        sync_priority: 10
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "binance-deposits"
+        color: "#1E7A6D"
+        enabled: false
+        sync_priority: 20
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "binance-withdrawals"
+        color: "#3A7D44"
+        enabled: false
+        sync_priority: 30
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+  - name: "Coinbase"
+    account_type: "cex"
+    owned: true
+    group: "On-Ramp"
+    color: "#0052FF"
+    address_or_identifier: "coinbase_demo"
+    tags:
+      - on-ramp: true
+      - fiat-gateway: true
+    connectors:
+      - connector_type: "coinbase-transactions"
+        color: "#3B7A3E"
+        enabled: false
+        sync_priority: 10
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "coinbase-deposits"
+        color: "#217A6E"
+        enabled: false
+        sync_priority: 20
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "coinbase-withdrawals"
+        color: "#8B7A00"
+        enabled: false
+        sync_priority: 30
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+  - name: "OKX"
+    account_type: "cex"
+    owned: true
+    group: "Trading"
+    color: "#565EB8"
+    address_or_identifier: "okx_demo"
+    tags:
+      - trading: true
+      - convert: true
+    connectors:
+      - connector_type: "okx-transactions"
+        color: "#5B2C6F"
+        enabled: false
+        sync_priority: 10
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "okx-convert"
+        color: "#7D3C98"
+        enabled: false
+        sync_priority: 20
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "okx-deposits"
+        color: "#4A4543"
+        enabled: false
+        sync_priority: 30
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "okx-withdrawals"
+        color: "#4A5568"
+        enabled: false
+        sync_priority: 40
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+  - name: "MEXC"
+    account_type: "cex"
+    owned: true
+    group: "Trading"
+    color: "#2CA58D"
+    address_or_identifier: "mexc_demo"
+    tags:
+      - trading: true
+      - spot: true
+    connectors:
+      - connector_type: "mexc-transactions"
+        color: "#2D6A30"
+        enabled: false
+        sync_priority: 10
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "mexc-deposits"
+        color: "#7D6608"
+        enabled: false
+        sync_priority: 20
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+      - connector_type: "mexc-withdrawals"
+        color: "#9A7B00"
+        enabled: false
+        sync_priority: 30
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+
+  # =========================================================================
+  # DEX Account (Perps)
+  # =========================================================================
+
+  - name: "Hyperliquid"
+    account_type: "dex"
+    owned: true
+    group: "Trading"
+    color: "#50C878"
+    address_or_identifier: "0x5555555555555555555555555555555555555555"
+    tags:
+      - trading: true
+      - perps: true
+    connectors:
+      - connector_type: "hyperliquid-perps"
+        color: "#3A7D44"
+        enabled: false
+        sync_priority: 10
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+          wallet_address: "0x5555555555555555555555555555555555555555"
+
+      - connector_type: "hyperliquid-funding"
+        color: "#1E7A6D"
+        enabled: false
+        sync_priority: 20
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+          wallet_address: "0x5555555555555555555555555555555555555555"
+
+      - connector_type: "hyperliquid-transfers"
+        color: "#4A90D9"
+        enabled: false
+        sync_priority: 30
+        config:
+          start_datetime: "2024-01-01T00:00:00"
+          wallet_address: "0x5555555555555555555555555555555555555555"
+
+  # =========================================================================
+  # Broker Account
+  # =========================================================================
+
+  - name: "Degiro"
+    account_type: "broker"
+    owned: true
+    group: "Stock Brokers"
+    color: "#C56A00"
+    address_or_identifier: "degiro_demo"
+    envelope: "cto"
+    tags:
+      - stocks: true
+      - etf: true
+    connectors:
+      - connector_type: "degiro-file"
+        color: "#C56A00"
+        enabled: false
+        sync_priority: 10
+        config: {}
+
+  # =========================================================================
+  # Investment Account (tax-advantaged wrapper)
+  # =========================================================================
+
+  - name: "Linxea Vie"
+    account_type: "investment"
+    owned: true
+    group: "Investing"
+    color: "#9C27B0"
+    address_or_identifier: "linxea_demo"
+    envelope: "av"
+    tags:
+      - long-term: true
+
+  # =========================================================================
+  # Bank Account (fiat / FX)
+  # =========================================================================
+
+  - name: "Revolut"
+    account_type: "bank"
+    owned: true
+    group: "Cash"
+    color: "#0666EB"
+    address_or_identifier: "revolut_demo"
+    tags:
+      - fiat: true
+      - fx: true
+
+  # =========================================================================
+  # Wallet Accounts (On-chain, self-custody)
+  # =========================================================================
+
+  - name: "Ledger Ethereum"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#6C3483"
+    address_or_identifier: "0x1111111111111111111111111111111111111111"
+    connectors:
+      - connector_type: "blockscout"
+        color: "#7D3C98"
+        enabled: false
+        sync_priority: 10
+        config:
+          chain: "ethereum"
+          include_internal_txs: true
+          include_token_transfers: true
+
+      - connector_type: "etherscan"
+        color: "#9A7B00"
+        enabled: false
+        credentials_ref: "env:ETHERSCAN_API_KEY"
+        sync_priority: 20
+        config:
+          chain: "ethereum"
+          include_internal_txs: true
+          include_token_transfers: true
+
+  - name: "Ledger Base"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#1E7A6D"
+    address_or_identifier: "0x2222222222222222222222222222222222222222"
+    connectors:
+      - connector_type: "blockscout"
+        color: "#A93226"
+        enabled: false
+        sync_priority: 10
+        config:
+          chain: "base"
+          include_internal_txs: true
+          include_token_transfers: true
+
+  - name: "Ledger BSC"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#C0392B"
+    address_or_identifier: "0x3333333333333333333333333333333333333333"
+    connectors:
+      - connector_type: "moralis"
+        color: "#76448A"
+        enabled: false
+        credentials_ref: "env:MORALIS_API_KEY"
+        sync_priority: 10
+        config:
+          chain: "bsc"
+
+  - name: "Ledger Polygon"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#7D6608"
+    address_or_identifier: "0x4444444444444444444444444444444444444444"
+    tags:
+      - prediction-markets: true
+    connectors:
+      - connector_type: "polymarket"
+        color: "#4A90D9"
+        enabled: false
+        sync_priority: 10
+        config:
+          chain: "polygon"
+
+  - name: "Ledger Bitcoin"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#D46B08"
+    address_or_identifier: "bc1qdemo000000000000000000000000000000001"
+    tags:
+      - bitcoin: true
+      - segwit: true
+    connectors:
+      - connector_type: "bitcoin_esplora"
+        color: "#3B7A3E"
+        enabled: false
+        sync_priority: 10
+        config: {}
+
+  - name: "Ledger Solana"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#1B7D72"
+    address_or_identifier: "DemoSoLLedgerWaLLet1111111111111111111111"
+    tags:
+      - solana: true
+    connectors:
+      - connector_type: "solana"
+        color: "#4A5568"
+        enabled: false
+        credentials_ref: "env:HELIUS_API_KEY"
+        sync_priority: 10
+
+  - name: "Ledger XRP"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#1A4971"
+    address_or_identifier: "rDEMOLedgerXRPWaLLet00000000000X"
+    tags:
+      - xrp: true
+    connectors:
+      - connector_type: "xrp"
+        color: "#4A4543"
+        enabled: false
+        sync_priority: 10

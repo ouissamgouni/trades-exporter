@@ -1,23 +1,20 @@
 import React, { useState, useEffect } from "react";
 import {
-  Box,
-  Heading,
-  VStack,
-  Container,
-  Badge,
-  HStack,
-  Text,
-  Collapsible,
-  Icon,
-} from "@chakra-ui/react";
-import { FiChevronDown, FiChevronRight } from "react-icons/fi";
+  FiUser,
+  FiDollarSign,
+  FiBarChart2,
+  FiLink,
+  FiTag,
+} from "react-icons/fi";
 import AccountsManagement from "./AccountsManagement";
 import { RawAccountsEditor } from "./RawAccountsEditor";
 import { AssetsEditor } from "./AssetsEditor";
 import { RawAssetsEditor } from "./RawAssetsEditor";
 import { CategoriesEditor } from "./CategoriesEditor";
-import { BaseCurrencySelector } from "./BaseCurrencySelector";
+import { PnLDefaultsEditor } from "./PnLDefaultsEditor";
 import { API_URL } from "../types";
+import { Badge, Tabs, TabsList, TabsTrigger } from "./ui/primitives";
+import { PANEL, PANEL_BODY } from "../lib/ui";
 
 interface SetupStatus {
   accounts_configured: boolean;
@@ -32,26 +29,33 @@ interface SetupStatus {
   unmapped_raw_accounts_count?: number;
 }
 
-// Flattened navigation structure - all items at one level with optional grouping
 interface NavItem {
   id: string;
   label: string;
-  icon: string;
+  icon: React.ElementType;
   component: React.FC;
   group?: string;
-  status?: boolean;
   badge?: string | number;
-  description: string;
 }
 
-const UnifiedSetupView: React.FC = () => {
+interface PrimaryTab {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+}
+
+const UnifiedSetupView: React.FC<{
+  isActive?: boolean;
+  activePrimaryTab: string;
+  onPrimaryTabChange: (tabId: string) => void;
+}> = ({ isActive = true, activePrimaryTab, onPrimaryTabChange }) => {
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
-  const [activeItem, setActiveItem] = useState<string>("base-currency");
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["accounts", "assets"]));
+  const [activeItem, setActiveItem] = useState<string>("accounts");
 
   useEffect(() => {
+    if (!isActive) return;
     fetchSetupStatus();
-  }, []);
+  }, [isActive]);
 
   const fetchSetupStatus = async () => {
     try {
@@ -63,254 +67,152 @@ const UnifiedSetupView: React.FC = () => {
     }
   };
 
-  // Flattened navigation items - direct access to all configuration areas
   const navItems: NavItem[] = [
-    {
-      id: "base-currency",
-      label: "Base Currency",
-      icon: "💵",
-      component: BaseCurrencySelector,
-      status: setupStatus?.base_currency_set,
-      badge: setupStatus?.base_currency_symbol || undefined,
-      description: "Set currency for P&L calculations",
-    },
     {
       id: "accounts",
       label: "Accounts & Connectors",
-      icon: "👤",
+      icon: FiUser,
       group: "accounts",
       component: AccountsManagement,
-      status: setupStatus?.accounts_configured && setupStatus?.connectors_configured,
       badge: setupStatus?.accounts_count ? `${setupStatus.accounts_count}` : undefined,
-      description: "Manage trading accounts with inline connectors",
     },
     {
       id: "raw-accounts",
       label: "Account Mappings",
-      icon: "🔗",
+      icon: FiLink,
       group: "accounts",
       component: RawAccountsEditor,
-      status: !setupStatus?.unmapped_raw_accounts_count,
       badge: setupStatus?.unmapped_raw_accounts_count ? `${setupStatus.unmapped_raw_accounts_count} unmapped` : undefined,
-      description: "Link source accounts to normalized accounts",
     },
     {
       id: "assets",
       label: "Assets",
-      icon: "💰",
+      icon: FiDollarSign,
       group: "assets",
       component: AssetsEditor,
-      status: setupStatus?.assets_configured,
       badge: setupStatus?.assets_count ? `${setupStatus.assets_count}` : undefined,
-      description: "Configure tradable assets and price sources",
     },
     {
       id: "raw-assets",
       label: "Asset Mappings",
-      icon: "🔗",
+      icon: FiLink,
       group: "assets",
       component: RawAssetsEditor,
-      status: !setupStatus?.unmapped_raw_assets_count,
       badge: setupStatus?.unmapped_raw_assets_count ? `${setupStatus.unmapped_raw_assets_count} unmapped` : undefined,
-      description: "Link source symbols to normalized assets",
     },
     {
       id: "categories",
       label: "Categories",
-      icon: "🏷️",
+      icon: FiTag,
       group: "assets",
       component: CategoriesEditor,
-      status: true,
-      description: "Organize assets by sector, region, etc.",
+    },
+    {
+      id: "pnl-defaults",
+      label: "P&L Defaults",
+      icon: FiBarChart2,
+      component: PnLDefaultsEditor,
+      badge: setupStatus?.base_currency_symbol || undefined,
     },
   ];
 
-  // Group items for collapsible sections
-  const groups = [
-    { id: "accounts", label: "Accounts", icon: "👤" },
-    { id: "assets", label: "Assets", icon: "💰" },
+  const primaryTabs: PrimaryTab[] = [
+    {
+      id: "accounts",
+      label: "Accounts",
+      icon: FiUser,
+    },
+    {
+      id: "assets",
+      label: "Assets",
+      icon: FiDollarSign,
+    },
+    {
+      id: "pnl-defaults",
+      label: "P&L Settings",
+      icon: FiBarChart2,
+    },
   ];
 
-  const toggleGroup = (groupId: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
-      return next;
+  const getSecondaryItems = () => {
+    if (activePrimaryTab === "pnl-defaults") return [];
+    return navItems.filter((item) => item.group === activePrimaryTab);
+  };
+
+  const secondaryItems = getSecondaryItems();
+  const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || PnLDefaultsEditor;
+
+  // Keep the 2nd-level item in sync when the primary tab changes externally
+  // (route navigation, browser back/forward), replicating the old
+  // handlePrimaryTabChange reset-to-first-item behavior.
+  useEffect(() => {
+    if (activePrimaryTab === "pnl-defaults") {
+      setActiveItem("pnl-defaults");
+      return;
+    }
+    setActiveItem((prev) => {
+      const stillValid = navItems.some((item) => item.group === activePrimaryTab && item.id === prev);
+      if (stillValid) return prev;
+      const firstItem = navItems.find((item) => item.group === activePrimaryTab);
+      return firstItem ? firstItem.id : prev;
     });
-  };
-
-  const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || BaseCurrencySelector;
-
-  // Calculate completion percentage based on actual setup status
-  // Items that contribute to completeness:
-  // 1. Base currency set (25%)
-  // 2. At least one account configured (25%)
-  // 3. No unmapped raw accounts (25%)
-  // 4. No unmapped raw assets (25%)
-  const completionPercentage = setupStatus
-    ? Math.round(
-        ((setupStatus.base_currency_set ? 25 : 0) +
-          (setupStatus.accounts_count > 0 ? 25 : 0) +
-          (!setupStatus.unmapped_raw_accounts_count ? 25 : 0) +
-          (!setupStatus.unmapped_raw_assets_count ? 25 : 0))
-      )
-    : 0;
-
-  // Check if there are setup issues (for tab badge in App.tsx via callback)
-  const hasSetupIssues = setupStatus && (
-    !setupStatus.base_currency_set ||
-    setupStatus.accounts_count === 0 ||
-    (setupStatus.unmapped_raw_accounts_count ?? 0) > 0 ||
-    (setupStatus.unmapped_raw_assets_count ?? 0) > 0
-  );
-
-  // Render a single nav item
-  const renderNavItem = (item: NavItem, indent: boolean = false) => {
-    const isActive = activeItem === item.id;
-    const hasWarning = item.status === false || (typeof item.badge === 'string' && item.badge.includes('unmapped'));
-
-    return (
-      <Box
-        key={item.id}
-        p={2}
-        pl={indent ? 6 : 2}
-        borderRadius="md"
-        cursor="pointer"
-        bg={isActive ? "blue.50" : "transparent"}
-        borderWidth={1}
-        borderColor={isActive ? "blue.300" : "transparent"}
-        _hover={{ bg: isActive ? "blue.50" : "gray.50" }}
-        onClick={() => setActiveItem(item.id)}
-        transition="all 0.15s"
-      >
-        <HStack justify="space-between">
-          <HStack gap={2}>
-            <Text fontSize="sm">{item.icon}</Text>
-            <Text fontWeight={isActive ? "semibold" : "medium"} fontSize="sm">
-              {item.label}
-            </Text>
-          </HStack>
-          <HStack gap={1}>
-            {item.badge && (
-              <Badge
-                size="sm"
-                colorScheme={hasWarning ? "orange" : "gray"}
-                variant={hasWarning ? "solid" : "subtle"}
-              >
-                {item.badge}
-              </Badge>
-            )}
-            {item.status !== undefined && !item.badge && (
-              <Text fontSize="xs" color={item.status ? "green.500" : "orange.400"}>
-                {item.status ? "✓" : "⚠"}
-              </Text>
-            )}
-          </HStack>
-        </HStack>
-        <Text fontSize="xs" color="gray.500" ml={6} mt={0.5}>
-          {item.description}
-        </Text>
-      </Box>
-    );
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePrimaryTab]);
 
   return (
-    <Container maxW="container.xl" py={8}>
-      <VStack align="stretch" gap={6}>
-        {/* Header with overall progress */}
-        <Box>
-          <HStack justify="space-between" mb={2}>
-            <Heading size="lg">Setup & Configuration</Heading>
-            <Badge
-              colorScheme={completionPercentage === 100 ? "green" : "orange"}
-              fontSize="md"
-              px={3}
-              py={1}
-              borderRadius="md"
-            >
-              {completionPercentage}% Complete
-            </Badge>
-          </HStack>
-          <Text color="gray.600">
-            Configure your accounts, connectors, and assets to get started
-          </Text>
-        </Box>
+    <div className="mx-auto max-w-7xl px-4 py-1">
+      <div className="flex flex-col gap-2">
+        {/* Primary navigation (matches app-level tab style) */}
+        <Tabs value={activePrimaryTab} onValueChange={onPrimaryTabChange}>
+          <TabsList>
+            {primaryTabs.map((tab) => {
+              const TabIcon = tab.icon;
+              return (
+                <TabsTrigger key={tab.id} value={tab.id}>
+                  <span className="inline-flex items-center gap-1.5">
+                    <TabIcon size={14} />
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </span>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </Tabs>
 
-        {/* Two-column layout: Flat Navigation Sidebar + Content */}
-        <Box display="flex" gap={6}>
-          {/* Left Sidebar - Flattened Tree Navigation */}
-          <Box
-            width="280px"
-            flexShrink={0}
-            borderWidth={1}
-            borderRadius="lg"
-            p={3}
-            bg="white"
-            height="fit-content"
-          >
-            <VStack align="stretch" gap={1}>
-              {/* Standalone items (no group) */}
-              {navItems
-                .filter((item) => !item.group)
-                .map((item) => renderNavItem(item))}
-
-              {/* Grouped items with collapsible headers */}
-              {groups.map((group) => {
-                const groupItems = navItems.filter((item) => item.group === group.id);
-                const isExpanded = expandedGroups.has(group.id);
-                const groupHasWarning = groupItems.some(
-                  (item) => item.status === false || (typeof item.badge === 'string' && item.badge.includes('unmapped'))
-                );
-
+        {/* Secondary sub-navigation (subordinate segment style) */}
+        {secondaryItems.length > 0 && (
+          <Tabs value={activeItem} onValueChange={setActiveItem} variant="segment">
+            <TabsList>
+              {secondaryItems.map((item) => {
+                const ItemIcon = item.icon;
+                const hasWarning = typeof item.badge === 'string' && item.badge.includes('unmapped');
                 return (
-                  <Box key={group.id}>
-                    {/* Group Header */}
-                    <Box
-                      p={2}
-                      borderRadius="md"
-                      cursor="pointer"
-                      _hover={{ bg: "gray.50" }}
-                      onClick={() => toggleGroup(group.id)}
-                    >
-                      <HStack justify="space-between">
-                        <HStack gap={2}>
-                          <Icon as={isExpanded ? FiChevronDown : FiChevronRight} boxSize={4} color="gray.500" />
-                          <Text fontSize="sm">{group.icon}</Text>
-                          <Text fontWeight="semibold" fontSize="sm" color="gray.700">
-                            {group.label}
-                          </Text>
-                        </HStack>
-                        {groupHasWarning && (
-                          <Text fontSize="xs" color="orange.400">⚠</Text>
-                        )}
-                      </HStack>
-                    </Box>
-
-                    {/* Group Items */}
-                    <Collapsible.Root open={isExpanded}>
-                      <Collapsible.Content>
-                        <VStack align="stretch" gap={0.5} mt={1}>
-                          {groupItems.map((item) => renderNavItem(item, true))}
-                        </VStack>
-                      </Collapsible.Content>
-                    </Collapsible.Root>
-                  </Box>
+                  <TabsTrigger key={item.id} value={item.id}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <ItemIcon size={12} />
+                      {item.label}
+                      {item.badge && (
+                        <Badge
+                          colorScheme={hasWarning ? 'orange' : 'gray'}
+                          className="px-1.5 py-0 text-[10px] font-medium"
+                        >
+                          {item.badge}
+                        </Badge>
+                      )}
+                    </span>
+                  </TabsTrigger>
                 );
               })}
-            </VStack>
-          </Box>
+            </TabsList>
+          </Tabs>
+        )}
 
-          {/* Right Content Area */}
-          <Box flex={1} borderWidth={1} borderRadius="lg" p={6} bg="white" minH="500px">
-            <ActiveComponent />
-          </Box>
-        </Box>
-      </VStack>
-    </Container>
+        {/* Content Area */}
+        <div className={`min-h-[500px] ${PANEL} ${PANEL_BODY}`}>
+          <ActiveComponent />
+        </div>
+      </div>
+    </div>
   );
 };
 

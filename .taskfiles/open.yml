@@ -1,0 +1,199 @@
+version: "3"
+
+vars:
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
+
+tasks:
+  _open:
+    internal: true
+    cmds:
+      - |
+        URL="{{.URL}}"
+        MODE="{{.MODE | default `isolated`}}"
+        COUNT="{{.COUNT | default `1`}}"
+        LABEL="{{.LABEL | default `session`}}"
+        RESET="{{.RESET_BROWSER | default `0`}}"
+        {{.ROOT_DIR}}/.taskfiles/open-browsers.sh "$URL" "$MODE" "$COUNT" "$LABEL" "$RESET"
+
+  shared:dev:
+    desc: Focus or open dev in the default Chrome profile
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/dev.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:${FRONTEND_PORT:-5173}"
+          MODE: shared
+          LABEL: dev
+
+  shared:scenario:
+    desc: Focus or open a scenario in the default Chrome profile
+    vars:
+      SCENARIO: '{{.SCENARIO | default "default"}}'
+      SC_WEB_PORT:
+        sh: source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"; STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/{{.SCENARIO}}.env"; [ -f "$STATE_FILE" ] && source "$STATE_FILE"; echo "$SC_WEB_PORT"
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:{{.SC_WEB_PORT}}"
+          MODE: shared
+          LABEL: "scenario-{{.SCENARIO}}"
+
+  shared:staging:local:
+    desc: Focus or open local staging in the default Chrome profile
+    dotenv:
+      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/staging.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:${FRONTEND_PORT:-3001}"
+          MODE: shared
+          LABEL: staging-local
+
+  shared:staging:remote:
+    desc: Focus or open remote staging in the default Chrome profile
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/staging.remote.env",
+      ]
+    cmds:
+      - task: _open
+        vars:
+          URL: "${CLOUDFLARE_PAGES_URL:-https://develop.trades-exporter.pages.dev}"
+          MODE: shared
+          LABEL: staging-remote
+
+  shared:prod:local:
+    desc: Focus or open local prod in the default Chrome profile
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:${FRONTEND_PORT:-3000}"
+          MODE: shared
+          LABEL: prod-local
+
+  shared:prod:remote:
+    desc: Focus or open remote prod in the default Chrome profile
+    dotenv:
+      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.remote.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "${CLOUDFLARE_PAGES_URL:-https://trades-exporter.pages.dev}"
+          MODE: shared
+          LABEL: prod-remote
+
+  isolated:dev:
+    desc: Open isolated dev Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/dev.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:${FRONTEND_PORT:-5173}"
+          MODE: isolated
+          LABEL: dev
+          COUNT: '{{.COUNT | default "1"}}'
+          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+
+  isolated:scenario:
+    desc: Open isolated scenario Chrome session(s). SCENARIO=name COUNT=N RESET_BROWSER=1 supported.
+    vars:
+      SCENARIO: '{{.SCENARIO | default "default"}}'
+      SC_WEB_PORT:
+        sh: source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"; STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/{{.SCENARIO}}.env"; [ -f "$STATE_FILE" ] && source "$STATE_FILE"; echo "$SC_WEB_PORT"
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:{{.SC_WEB_PORT}}"
+          MODE: isolated
+          LABEL: "scenario-{{.SCENARIO}}"
+          COUNT: '{{.COUNT | default "1"}}'
+          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+
+  isolated:staging:local:
+    desc: Open isolated local staging Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
+    dotenv:
+      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/staging.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:${FRONTEND_PORT:-3001}"
+          MODE: isolated
+          LABEL: staging-local
+          COUNT: '{{.COUNT | default "1"}}'
+          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+
+  isolated:staging:remote:
+    desc: Open isolated remote staging Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/staging.remote.env",
+      ]
+    cmds:
+      - task: _open
+        vars:
+          URL: "${CLOUDFLARE_PAGES_URL:-https://develop.trades-exporter.pages.dev}"
+          MODE: isolated
+          LABEL: staging-remote
+          COUNT: '{{.COUNT | default "1"}}'
+          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+
+  isolated:prod:local:
+    desc: Open isolated local prod Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "http://localhost:${FRONTEND_PORT:-3000}"
+          MODE: isolated
+          LABEL: prod-local
+          COUNT: '{{.COUNT | default "1"}}'
+          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+
+  isolated:prod:remote:
+    desc: Open isolated remote prod Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
+    dotenv:
+      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.remote.env"]
+    cmds:
+      - task: _open
+        vars:
+          URL: "${CLOUDFLARE_PAGES_URL:-https://trades-exporter.pages.dev}"
+          MODE: isolated
+          LABEL: prod-remote
+          COUNT: '{{.COUNT | default "1"}}'
+          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+
+  clean:
+    desc: Remove all isolated Chrome profile dirs created by open:isolated:*
+    cmds:
+      - |
+        ROOT="/tmp/chrome-profiles"
+        if [ ! -d "$ROOT" ]; then
+          echo "No isolated profile root at $ROOT."
+          exit 0
+        fi
+        if ! find "$ROOT" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+          echo "No isolated Chrome profile dirs found."
+          exit 0
+        fi
+        find "$ROOT" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+        echo "Done."
+
+  clean:dev:
+    desc: Remove only dev isolated Chrome profile dirs
+    cmds:
+      - "{{.ROOT_DIR}}/.taskfiles/_browser_cleanup.sh dev"
+
+  clean:scenario:
+    desc: Remove scenario isolated Chrome profile dirs. SCENARIO=name or omit for all scenarios.
+    vars:
+      SCENARIO: '{{.SCENARIO | default ""}}'
+    cmds:
+      - |
+        if [ -n "{{.SCENARIO}}" ]; then
+          {{.ROOT_DIR}}/.taskfiles/_browser_cleanup.sh "scenario-{{.SCENARIO}}"
+        else
+          {{.ROOT_DIR}}/.taskfiles/_browser_cleanup.sh "scenario-"
+        fi

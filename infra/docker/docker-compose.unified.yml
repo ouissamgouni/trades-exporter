@@ -1,0 +1,82 @@
+# Docker Compose - Unified Configuration (Staging/Prod)
+# Environment-agnostic service definitions.
+# Uses ENV_NAME and IMAGE_TAG from config/*.env files.
+#
+# Usage (via Taskfile):
+#   task start:staging  # config/base.env + config/staging.env + config/secrets*.env
+#   task start:prod     # config/base.env + config/prod.env    + config/secrets*.env
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: trades_db_${ENV_NAME}
+    env_file:
+      - ../../config/base.env
+      - path: ../../config/${ENV_NAME}.env
+        required: false
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app_network
+
+  backend:
+    image: trades-exporter-backend:${IMAGE_TAG}
+    container_name: trades_backend_${ENV_NAME}
+    env_file:
+      - ../../config/base.env
+      - path: ../../config/${ENV_NAME}.env
+        required: false
+      - path: ../../config/secrets.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CORS_ORIGINS: http://localhost:${FRONTEND_PORT},http://frontend:80
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/v1/health\")' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - app_network
+
+  frontend:
+    image: trades-exporter-frontend:${IMAGE_TAG}
+    container_name: trades_frontend_${ENV_NAME}
+    ports:
+      - "${FRONTEND_PORT}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - app_network
+
+volumes:
+  postgres_data:
+    name: trades_${ENV_NAME}_data
+
+networks:
+  app_network:
+    name: trades_${ENV_NAME}_network

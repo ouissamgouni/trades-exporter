@@ -9,14 +9,20 @@
  * - Supports onClick for inline editing scenarios
  */
 
-import React from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import React, { useContext } from 'react';
+import { LuInfo } from 'react-icons/lu';
+import { Badge, type BadgeColorScheme } from './ui/primitives';
 import { Tooltip } from './ui/tooltip';
-import { TransactionAssetRef } from '../types';
+import { AssetRef } from '../types';
+import { AssetDetailPanelContext } from '../contexts/AssetDetailPanelContext';
+
+const BADGE_SCHEMES = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
+const toScheme = (c?: string, fallback: BadgeColorScheme = 'gray'): BadgeColorScheme =>
+    (c && BADGE_SCHEMES.includes(c) ? c : fallback) as BadgeColorScheme;
 
 export interface AssetBadgeProps {
     /** Nested asset reference with id, symbol, and label */
-    asset?: TransactionAssetRef | null;
+    asset?: AssetRef | null;
     /** Fallback source symbol when asset is not linked (shows warning state) */
     sourceSymbol?: string | null;
     /** Badge size */
@@ -31,6 +37,8 @@ export interface AssetBadgeProps {
     showWarning?: boolean;
     /** Custom fallback text when no asset and no sourceSymbol */
     fallback?: string;
+    /** Hide the info icon that opens the asset detail panel */
+    hideInfoIcon?: boolean;
 }
 
 /**
@@ -51,17 +59,11 @@ export const formatAssetDisplay = (
         return { display: sym, truncated: false, fullText: sym };
     }
 
-    const fullText = `${label} (${sym})`;
+    const fullText = label;
 
-    if (maxLength && fullText.length > maxLength) {
-        // Truncate the label, keep the symbol visible
-        const availableForLabel = maxLength - sym.length - 4; // account for " ()" and "…"
-        if (availableForLabel > 3) {
-            const truncatedLabel = label.slice(0, availableForLabel) + '…';
-            return { display: `${truncatedLabel} (${sym})`, truncated: true, fullText };
-        }
-        // If there's not enough room, just show symbol
-        return { display: sym, truncated: true, fullText };
+    if (maxLength && label.length > maxLength) {
+        const truncatedLabel = label.slice(0, maxLength - 1) + '…';
+        return { display: truncatedLabel, truncated: true, fullText };
     }
 
     return { display: fullText, truncated: false, fullText };
@@ -78,8 +80,13 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
     maxLength = 20,
     onClick,
     showWarning = true,
+    hideInfoIcon = false,
     fallback = '-',
 }) => {
+    // Use context directly (before early returns — rules of hooks)
+    const panelCtx = useContext(AssetDetailPanelContext);
+    const openAssetPanel = panelCtx?.openAssetPanel ?? null;
+
     // Determine what to display
     const hasLinkedAsset = asset && (asset.symbol || asset.label);
     const hasSourceSymbol = !!sourceSymbol;
@@ -89,24 +96,22 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
         return (
             <Tooltip
                 content={
-                    <Box p={2} fontSize="xs">
-                        <Text color="orange.300" fontWeight="bold" mb={1}>⚠ Unlinked Asset</Text>
-                        <Flex justify="space-between" gap={4}>
-                            <Text color="gray.400">Source Symbol</Text>
-                            <Text color="white">{sourceSymbol}</Text>
-                        </Flex>
-                        <Text color="gray.400" mt={1} fontSize="2xs">
+                    <div className="p-2 text-xs">
+                        <div className="mb-1 font-bold text-orange-300">⚠ Unlinked Asset</div>
+                        <div className="flex justify-between gap-4">
+                            <span className="text-slate-400">Source Symbol</span>
+                            <span className="text-white">{sourceSymbol}</span>
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-400">
                             Click to link to an asset
-                        </Text>
-                    </Box>
+                        </div>
+                    </div>
                 }
                 openDelay={200}
             >
                 <Badge
-                    size={size}
-                    colorPalette="orange"
-                    variant="subtle"
-                    cursor={onClick ? 'pointer' : 'default'}
+                    colorScheme="orange"
+                    className={onClick ? 'cursor-pointer' : 'cursor-default'}
                     onClick={onClick}
                 >
                     ⚠ {sourceSymbol}
@@ -115,12 +120,25 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
         );
     }
 
+    // Unlinked state without warning: show raw source symbol in gray badge
+    if (!hasLinkedAsset && hasSourceSymbol && !showWarning) {
+        return (
+            <Badge
+                colorScheme="gray"
+                className={onClick ? 'cursor-pointer' : 'cursor-default'}
+                onClick={onClick}
+            >
+                {sourceSymbol}
+            </Badge>
+        );
+    }
+
     // No asset and no source symbol
     if (!hasLinkedAsset) {
         return (
-            <Text fontSize={size === 'xs' ? '9px' : size === 'sm' ? '11px' : '13px'} color="gray.400">
+            <span className="text-slate-400" style={{ fontSize: size === 'xs' ? '9px' : size === 'sm' ? '11px' : '13px' }}>
                 {fallback}
-            </Text>
+            </span>
         );
     }
 
@@ -133,39 +151,55 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
 
     // Build tooltip content
     const tooltipContent = (
-        <Box p={2} fontSize="xs" minW="150px">
+        <div className="min-w-[150px] p-2 text-xs">
             {asset?.label && (
-                <Flex justify="space-between" mb={1} gap={4}>
-                    <Text color="gray.400">Name</Text>
-                    <Text color="white" fontWeight="medium">{asset.label}</Text>
-                </Flex>
+                <div className="mb-1 flex justify-between gap-4">
+                    <span className="text-slate-400">Name</span>
+                    <span className="font-medium text-white">{asset.label}</span>
+                </div>
             )}
-            <Flex justify="space-between" mb={1} gap={4}>
-                <Text color="gray.400">Symbol</Text>
-                <Text color="white" fontFamily="mono">{asset?.symbol || '?'}</Text>
-            </Flex>
-            {asset?.asset_id && (
-                <Flex justify="space-between" gap={4}>
-                    <Text color="gray.400">ID</Text>
-                    <Text color="gray.300">#{asset.asset_id}</Text>
-                </Flex>
+            <div className="mb-1 flex justify-between gap-4">
+                <span className="text-slate-400">Symbol</span>
+                <span className="font-mono text-white">{asset?.symbol || '?'}</span>
+            </div>
+            {asset?.id && (
+                <div className="flex justify-between gap-4">
+                    <span className="text-slate-400">ID</span>
+                    <span className="text-slate-300">#{asset.id}</span>
+                </div>
             )}
-        </Box>
+        </div>
     );
 
+    const showInfoBtn = !hideInfoIcon && openAssetPanel && asset?.id;
+
     return (
-        <Tooltip content={tooltipContent} openDelay={200}>
-            <Badge
-                size={size}
-                colorPalette={colorPalette}
-                variant="subtle"
-                cursor={onClick ? 'pointer' : 'default'}
-                onClick={onClick}
-                title={truncated ? fullText : undefined}
-            >
-                {display}
-            </Badge>
-        </Tooltip>
+        <span className="group relative inline-flex items-center">
+            <Tooltip content={tooltipContent} openDelay={200}>
+                <Badge
+                    colorScheme={toScheme(colorPalette, 'purple')}
+                    className={onClick ? 'cursor-pointer' : 'cursor-default'}
+                    onClick={onClick}
+                    title={truncated ? fullText : undefined}
+                >
+                    {display}
+                </Badge>
+            </Tooltip>
+            {showInfoBtn && (
+                <Tooltip content="View asset details" openDelay={100}>
+                    <button
+                        type="button"
+                        className="ml-0.5 inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-500 group-hover:opacity-100"
+                        onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            openAssetPanel!(asset!.id!);
+                        }}
+                    >
+                        <LuInfo size={12} />
+                    </button>
+                </Tooltip>
+            )}
+        </span>
     );
 };
 

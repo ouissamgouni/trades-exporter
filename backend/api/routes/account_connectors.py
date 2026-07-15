@@ -6,12 +6,13 @@ import os
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlmodel import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from backend.db.models import Account, AccountConnector
 from backend.db.database import get_session_dependency
 from backend.db.repositories import AccountConnectorRepository
 from backend.connectors.connector_registry import get_connector_registry
+from backend.services.data_cleanup_service import DataCleanupService
 
 router = APIRouter(
     prefix="/accounts/{account_id}/connectors", tags=["account-connectors"]
@@ -40,8 +41,7 @@ class ConnectorConfigBase(BaseModel):
     include_token_transfers: Optional[bool] = None
     token_filter: Optional[List[str]] = None
 
-    class Config:
-        extra = "allow"  # Allow additional fields
+    model_config = ConfigDict(extra="allow")  # Allow additional fields
 
 
 class AccountConnectorCreate(BaseModel):
@@ -52,6 +52,7 @@ class AccountConnectorCreate(BaseModel):
     config: Dict[str, Any] = {}
     credentials_ref: Optional[str] = None
     sync_priority: int = 100
+    color: Optional[str] = None
 
 
 class AccountConnectorUpdate(BaseModel):
@@ -61,6 +62,7 @@ class AccountConnectorUpdate(BaseModel):
     config: Optional[Dict[str, Any]] = None
     credentials_ref: Optional[str] = None
     sync_priority: Optional[int] = None
+    color: Optional[str] = None
 
 
 class AccountConnectorResponse(BaseModel):
@@ -76,11 +78,11 @@ class AccountConnectorResponse(BaseModel):
     last_sync_at: Optional[str]
     last_sync_status: Optional[str]
     last_error: Optional[str]
+    color: Optional[str] = None
     created_at: str
     updated_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConnectorTypeInfo(BaseModel):
@@ -92,6 +94,7 @@ class ConnectorTypeInfo(BaseModel):
     supported_chains: Optional[List[str]] = None
     required_config: List[str]
     optional_config: List[str]
+    is_file_connector: bool = False
 
 
 # ============================================================================
@@ -113,6 +116,7 @@ def get_available_connectors() -> Dict[str, ConnectorTypeInfo]:
                 supported_chains=info.supported_chains,
                 required_config=info.required_config,
                 optional_config=info.optional_config,
+                is_file_connector=info.is_file_connector,
             )
     return available
 
@@ -171,6 +175,7 @@ def connector_to_response(connector: AccountConnector) -> AccountConnectorRespon
         else None,
         last_sync_status=connector.last_sync_status,
         last_error=connector.last_error,
+        color=connector.color,
         created_at=connector.created_at.isoformat(),
         updated_at=connector.updated_at.isoformat(),
     )
@@ -267,11 +272,21 @@ def create_account_connector(
 
     # Validate required config
     connector_info = available_connectors[connector_data.connector_type]
+    
+    # Get the account to check for address inheritance
+    account = session.get(Account, account_id)
+    
     missing_config = [
         field
         for field in connector_info.required_config
         if field not in connector_data.config or connector_data.config[field] is None
     ]
+    
+    # Allow missing 'address' for onchain connectors if account has address_or_identifier
+    if "address" in missing_config and connector_info.category == "onchain":
+        if account and account.address_or_identifier:
+            missing_config.remove("address")
+    
     if missing_config:
         raise HTTPException(
             status_code=400,
@@ -294,6 +309,7 @@ def create_account_connector(
         config=connector_data.config,
         credentials_ref=connector_data.credentials_ref,
         sync_priority=connector_data.sync_priority,
+        color=connector_data.color,
     )
 
     created = repo.create(connector)
@@ -332,6 +348,8 @@ def update_account_connector(
         connector.credentials_ref = connector_data.credentials_ref
     if connector_data.sync_priority is not None:
         connector.sync_priority = connector_data.sync_priority
+    if connector_data.color is not None:
+        connector.color = connector_data.color
 
     updated = repo.update(connector)
     session.commit()
@@ -374,8 +392,8 @@ def delete_account_connector(
     session: Session = Depends(get_session_dependency),
 ):
     """
-    Delete a connector from an account.
-    Also deletes any associated test fixture file.
+    Delete a connector from an account and all its associated data.
+    Uses DataCleanupService to handle the full FK dependency tree.
     """
     get_account_or_404(session, account_id)
     repo = get_repo(session)
@@ -388,11 +406,8 @@ def delete_account_connector(
             detail=f"Connector '{connector_type}' not found for account {account_id}",
         )
 
-    # Delete associated test fixture file if it exists
-    from backend.api.routes.fixtures import delete_fixture_file
-    delete_fixture_file(connector.id)
-
-    repo.delete(connector.id)
+    service = DataCleanupService(session)
+    service.execute_connector_cleanup([connector.id], delete_connectors=True)
     session.commit()
 
     return None

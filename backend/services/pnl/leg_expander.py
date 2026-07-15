@@ -25,7 +25,7 @@ from datetime import datetime
 import uuid
 
 from backend.config.loader import configure_logging
-from backend.db.models import Account, Asset, CalculationUnitLeg, CalculationVersion, NormalizedTransaction
+from backend.db.models import Account, Asset, CalculationUnitLeg, CalculationVersion, LegType, NormalizedTransaction, TransactionType
 
 log = configure_logging("leg_expander")
 
@@ -48,7 +48,7 @@ def should_expand_as_trade(tx: NormalizedTransaction) -> bool:
     """
     # Check transaction_type instead of source_transaction_type
     tx_type = (tx.transaction_type or "").lower()
-    if tx_type != "trade":
+    if tx_type != TransactionType.TRADE.value:
         return False
     
     # Ensure valid direction for trade expansion
@@ -80,25 +80,31 @@ def should_expand_as_trade(tx: NormalizedTransaction) -> bool:
 
 
 def has_fee(tx: NormalizedTransaction) -> bool:
-    """Check if transaction has a non-zero fee with a valid fee asset."""
+    """Check if transaction has a non-zero fee with a valid fee asset AND should be included in P&L."""
     fee = tx.fee
     fee_asset_id = tx.fee_quote_asset_id
-    return bool(fee and fee > 0 and fee_asset_id)
+    include_fee = getattr(tx, 'include_fee', True)  # Default True for backward compatibility
+    return bool(fee and fee > 0 and fee_asset_id and include_fee)
+
+
+def is_cost_transaction(tx: NormalizedTransaction) -> bool:
+    """Check if transaction is a cost (fee-only) transaction."""
+    return (tx.transaction_type or "").lower() == "cost"
 
 
 def is_neutral_transaction(tx: NormalizedTransaction) -> bool:
     """
     Check if transaction is neutral (no value movement, just fee).
     Examples: Token approval, failed transaction, contract interaction.
+    Cost transactions are handled separately by is_cost_transaction.
     """
-    # Check transaction_type for technical transactions
     tx_type = (tx.transaction_type or "").lower()
-    is_technical = tx_type == "technical"
+    is_neutral_type = tx_type == "memo"
     
     quantity = tx.quantity or 0
     is_zero_quantity = float(quantity) == 0
     
-    return is_technical or (is_zero_quantity and has_fee(tx))
+    return is_neutral_type or (is_zero_quantity and has_fee(tx))
 
 
 # =============================================================================
@@ -117,7 +123,7 @@ def _convert_to_leg(tx: NormalizedTransaction) -> CalculationUnitLeg:
     quantity = Decimal(str(tx.quantity)) if tx.quantity else Decimal("0")
     
     # Determine leg type from direction
-    leg_type = "inflow" if direction == "inflow" else "outflow"
+    leg_type = LegType.INFLOW if direction == "inflow" else LegType.OUTFLOW
     
     # Use relationships if available, otherwise create from IDs
     asset_rel = tx.asset
@@ -154,11 +160,45 @@ def _create_fee_leg(tx: NormalizedTransaction) -> CalculationUnitLeg:
         unit_id=tx.user_calculation_unit_id,  # FK to calculation_unit (will be set by parent)
         transaction_id=tx.id,
         asset_id=tx.fee_quote_asset_id,
-        leg_type="fee",
+        leg_type=LegType.FEE,
         quantity=Decimal(str(tx.fee)),
         transaction=tx,  # Set relationship for property access
         asset=fee_asset,  # Set relationship for property access
     )
+
+
+def _create_cost_leg(tx: NormalizedTransaction) -> Optional[CalculationUnitLeg]:
+    """
+    Create a fee leg from a COST transaction.
+
+    New format: qty>0, price_quote_asset_id holds the fee currency.
+    Old format (backward compat): qty=0, fee>0, fee_quote_asset_id holds the fee currency.
+    """
+    quantity = tx.quantity or Decimal(0)
+
+    # New format: qty holds the fee amount, price_quote_asset_id is the fee currency
+    if quantity > 0 and tx.price_quote_asset_id:
+        cost_asset = tx.price_quote_asset
+        if cost_asset is None:
+            cost_asset = Asset(
+                asset_id=tx.price_quote_asset_id,
+                symbol=tx.source_price_quote_asset_symbol or f"#{tx.price_quote_asset_id}",
+            )
+        return CalculationUnitLeg(
+            unit_id=tx.user_calculation_unit_id,
+            transaction_id=tx.id,
+            asset_id=tx.price_quote_asset_id,
+            leg_type=LegType.FEE,
+            quantity=Decimal(str(quantity)),
+            transaction=tx,
+            asset=cost_asset,
+        )
+
+    # Old format (backward compat): fee fields hold the cost
+    if has_fee(tx):
+        return _create_fee_leg(tx)
+
+    return None
 
 
 def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
@@ -192,7 +232,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.price_quote_asset_id,
-            leg_type="outflow",
+            leg_type=LegType.OUTFLOW,
             quantity=total or Decimal("0"),
             transaction=tx,
             asset=quote_rel,
@@ -201,7 +241,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.asset_id,
-            leg_type="inflow",
+            leg_type=LegType.INFLOW,
             quantity=quantity,
             transaction=tx,
             asset=base_rel,
@@ -212,7 +252,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.asset_id,
-            leg_type="outflow",
+            leg_type=LegType.OUTFLOW,
             quantity=quantity,
             transaction=tx,
             asset=base_rel,
@@ -221,7 +261,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.price_quote_asset_id,
-            leg_type="inflow",
+            leg_type=LegType.INFLOW,
             quantity=total or Decimal("0"),
             transaction=tx,
             asset=quote_rel,
@@ -282,6 +322,20 @@ def expand_transaction(tx: NormalizedTransaction) -> Optional[ExpansionResult]:
             expansion_type="trade",
         )
     
+    # Case 1b: COST transaction — explicit fee-only (new or old format)
+    if is_cost_transaction(tx):
+        cost_leg = _create_cost_leg(tx)
+        tx_type = tx.source_transaction_type or "fee"
+        if cost_leg:
+            return ExpansionResult(
+                outflow=None,
+                inflow=None,
+                fee_leg=cost_leg,
+                label=f"{tx_type} fee",
+                expansion_type="fee_only",
+            )
+        return None
+    
     # Case 2: Neutral transaction with fee (approval, failed, etc.)
     if is_neutral_transaction(tx) and has_fee(tx):
         fee_leg = _create_fee_leg(tx)
@@ -293,6 +347,10 @@ def expand_transaction(tx: NormalizedTransaction) -> Optional[ExpansionResult]:
             label=f"{tx_type} fee",
             expansion_type="fee_only",
         )
+    
+    # Case 2b: Neutral transaction without fee (memo/audit-only) — no PnL impact
+    if is_neutral_transaction(tx):
+        return None
     
     # No expansion needed
     return None
@@ -309,9 +367,18 @@ def expand_transaction_to_list(tx: NormalizedTransaction) -> List[CalculationUni
     if should_expand_as_trade(tx):
         return _expand_trade(tx)
     
+    # Case 1b: COST transaction — explicit fee-only (new or old format)
+    if is_cost_transaction(tx):
+        leg = _create_cost_leg(tx)
+        return [leg] if leg else []
+    
     # Case 2: Neutral transaction with fee only (approval, failed, etc.)
     if is_neutral_transaction(tx) and has_fee(tx):
         return [_create_fee_leg(tx)]
+    
+    # Case 2b: Neutral transaction without fee (memo/audit-only) — no legs, no PnL impact
+    if is_neutral_transaction(tx):
+        return []
     
     # Case 3: Regular transaction - convert to CalculationUnitLeg, add fee leg if present
     legs: List[CalculationUnitLeg] = [_convert_to_leg(tx)]

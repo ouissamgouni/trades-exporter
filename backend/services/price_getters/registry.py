@@ -23,6 +23,9 @@ Adding New Price Getters:
     3. Set `name` class attribute
     4. Implement get_current_price and get_historical_price
     5. Add to PRICE_GETTER_CLASSES below
+
+Mock Price Getter for Testing:
+    MockPriceGetter is always registered; enabled/disabled per-asset via the DB mock_mode_enabled toggle.
 """
 
 from typing import Dict, List, Type, Optional
@@ -61,19 +64,27 @@ def _get_price_getter_classes() -> List[Type["BasePriceGetter"]]:
     Add new price getter classes to this list.
     """
     from backend.services.price_getters.yahoo import YahooPriceGetter
+    from backend.services.price_getters.yahoo_direct import YahooDirectPriceGetter
     from backend.services.price_getters.coingecko import CoinGeckoPriceGetter
     from backend.services.price_getters.datareader import DataReaderPriceGetter
     from backend.services.price_getters.forex import ForexPriceGetter
+    from backend.services.price_getters.alphavantage import AlphaVantagePriceGetter
+    from backend.services.price_getters.marketstack import MarketstackPriceGetter
 
-    return [
+    from backend.services.price_getters.mock_getter import MockPriceGetter
+
+    classes = [
         DataReaderPriceGetter,  # Default for stocks - uses pandas_datareader with Stooq
-        YahooPriceGetter,
+        YahooPriceGetter,       # Yahoo via yfinance (requires fc.yahoo.com DNS)
+        YahooDirectPriceGetter, # Yahoo via Chart API v8 (no yfinance, no crumb needed)
         CoinGeckoPriceGetter,
         ForexPriceGetter,  # For fiat currency conversion
-        # Add new price getters here:
-        # BinancePriceGetter,
-        # KrakenPriceGetter,
+        AlphaVantagePriceGetter,  # Alpha Vantage (free tier: 25 req/day)
+        MarketstackPriceGetter,  # Marketstack (free tier: 100 req/month)
+        MockPriceGetter,  # Always registered — enabled/disabled per-asset via DB
     ]
+    
+    return classes
 
 
 def _initialize_registry() -> None:

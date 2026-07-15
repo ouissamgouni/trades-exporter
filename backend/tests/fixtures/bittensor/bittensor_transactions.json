@@ -1,0 +1,58 @@
+{
+    "transfers": [
+        {
+            "id": "finney-5452109-0041",
+            "to": {
+                "ss58": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+                "hex": "0x8c2b3abcd1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+            },
+            "from": {
+                "ss58": "5GGe5VYiBBNYL2rHA77wviRkWDCrV2FubZr81QqxA27qn4Ch",
+                "hex": "0xba0b28643493786230b3d310eb1642a74fa056294ab76f9259825724563510c7"
+            },
+            "network": "finney",
+            "block_number": 5452109,
+            "timestamp": "2025-04-28T18:15:24Z",
+            "amount": "6500000000",
+            "fee": "135263",
+            "transaction_hash": "0x20c70d9f8205ae781e482166ab9e07ecb5579931f680bf839c483b49c6ad3bcf",
+            "extrinsic_id": "5452109-0013"
+        },
+        {
+            "id": "finney-5500200-0025",
+            "to": {
+                "ss58": "5D8J4g7A1j2LHBMbBoB6aseaUnYLY6T1qUHhXKTP5My6FbKx",
+                "hex": "0x2ef91ee6e48da1933ddacbc8d5add110ab7ba7c51c546b9dc2b04f463cf86907"
+            },
+            "from": {
+                "ss58": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+                "hex": "0x8c2b3abcd1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+            },
+            "network": "finney",
+            "block_number": 5500200,
+            "timestamp": "2025-05-10T12:30:00Z",
+            "amount": "2000000000",
+            "fee": "125000",
+            "transaction_hash": "0xaabb1122ccdd3344eeff5566778899001122334455667788aabbccddeeff0011",
+            "extrinsic_id": "5500200-0007"
+        },
+        {
+            "id": "finney-5600300-0010",
+            "to": {
+                "ss58": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+                "hex": "0x8c2b3abcd1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+            },
+            "from": {
+                "ss58": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+                "hex": "0x8c2b3abcd1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+            },
+            "network": "finney",
+            "block_number": 5600300,
+            "timestamp": "2025-06-01T09:00:00Z",
+            "amount": "1000000000",
+            "fee": "110000",
+            "transaction_hash": "0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff",
+            "extrinsic_id": "5600300-0003"
+        }
+    ]
+}

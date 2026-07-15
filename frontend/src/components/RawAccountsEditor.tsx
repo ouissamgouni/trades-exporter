@@ -1,236 +1,14 @@
-import {
-    Badge, Box,
-    Button, Dialog, Flex,
-    Heading, Input, NativeSelect, Portal, Spinner,
-    Table, Text, HStack
-} from '@chakra-ui/react';
-import React, { useEffect, useState, useMemo } from 'react';
-import { API_URL, Account, RawAccount } from '../types';
-import { AccountSelector } from './AccountSelector';
-import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import React, { useState } from 'react';
+import { API_URL, RawAccount } from '../types';
+import { AccountMappingPanel } from './AccountMappingPanel';
 import { toaster } from './ui/toaster';
-import { Tooltip } from './ui/tooltip';
-import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
-
-// Fuzzy matching utility for smart suggestions
-const calculateSimilarity = (str1: string, str2: string): number => {
-    const s1 = str1.toLowerCase().trim();
-    const s2 = str2.toLowerCase().trim();
-
-    // Exact match
-    if (s1 === s2) return 1.0;
-
-    // Contains match
-    if (s1.includes(s2) || s2.includes(s1)) return 0.8;
-
-    // Starts/ends with match (good for addresses)
-    if (s1.startsWith(s2) || s2.startsWith(s1)) return 0.7;
-    if (s1.endsWith(s2) || s2.endsWith(s1)) return 0.6;
-
-    // For blockchain addresses, compare first and last chars
-    if (s1.length > 10 && s2.length > 10) {
-        const prefix1 = s1.slice(0, 6);
-        const prefix2 = s2.slice(0, 6);
-        const suffix1 = s1.slice(-4);
-        const suffix2 = s2.slice(-4);
-        if (prefix1 === prefix2 && suffix1 === suffix2) return 0.95;
-        if (prefix1 === prefix2 || suffix1 === suffix2) return 0.5;
-    }
-
-    // Levenshtein for short strings
-    const maxLen = Math.max(s1.length, s2.length);
-    if (maxLen === 0) return 1.0;
-    if (maxLen > 20) return 0; // Skip for long addresses
-
-    const distance = levenshteinDistance(s1, s2);
-    return 1 - (distance / maxLen);
-};
-
-const levenshteinDistance = (str1: string, str2: string): number => {
-    const m = str1.length;
-    const n = str2.length;
-    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-    for (let i = 0; i <= m; i++) dp[i][0] = i;
-    for (let j = 0; j <= n; j++) dp[0][j] = j;
-
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            if (str1[i - 1] === str2[j - 1]) {
-                dp[i][j] = dp[i - 1][j - 1];
-            } else {
-                dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-            }
-        }
-    }
-    return dp[m][n];
-};
-
-interface SuggestedMatch {
-    account: Account;
-    confidence: number;
-}
+import { Button, Input } from './ui/primitives';
 
 export const RawAccountsEditor: React.FC = () => {
-    const [rawAccounts, setRawAccounts] = useState<RawAccount[]>([]);
-    const [accounts, setAccounts] = useState<Account[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [editingKey, setEditingKey] = useState<string | null>(null);
-    const [editAccountId, setEditAccountId] = useState<number | null>(null);
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [newRawAccount, setNewRawAccount] = useState<Partial<RawAccount>>({});
-    const [sourceFilter, setSourceFilter] = useState('');
-    const [linkedFilter, setLinkedFilter] = useState<string>('');
-
-    // State for creating new account from raw account
-    const [showAccountDialog, setShowAccountDialog] = useState(false);
-    const [accountPrefill, setAccountPrefill] = useState<AccountPrefill | undefined>(undefined);
-    const [pendingRawAccount, setPendingRawAccount] = useState<RawAccount | null>(null);
-
-    // Confirmation dialogs
-    const deleteConfirm = useConfirmDialog<RawAccount>();
-    const autoMapConfirm = useConfirmDialog<{ count: number; items: { rawAccount: RawAccount; accountId: number }[] }>();
-
-    useEffect(() => {
-        fetchRawAccounts();
-        fetchAccounts();
-    }, [sourceFilter, linkedFilter]);
-
-    const fetchRawAccounts = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const params = new URLSearchParams();
-            if (sourceFilter) params.append('source', sourceFilter);
-            if (linkedFilter === 'linked') params.append('has_account_id', 'true');
-            if (linkedFilter === 'unlinked') params.append('has_account_id', 'false');
-            const response = await fetch(`${API_URL}/raw-accounts?${params}`);
-            if (!response.ok) throw new Error('Failed to fetch raw accounts');
-            const data = await response.json();
-            setRawAccounts(data);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unknown error');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchAccounts = async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts`);
-            if (response.ok) {
-                const data = await response.json();
-                setAccounts(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch accounts:', err);
-        }
-    };
-
-    // Compute smart suggestions for unlinked raw accounts
-    const suggestionsMap = useMemo(() => {
-        const map = new Map<string, SuggestedMatch[]>();
-
-        rawAccounts
-            .filter(ra => ra.account_id === null || ra.account_id === undefined)
-            .forEach(rawAccount => {
-                const label = rawAccount.label;
-                const suggestions: SuggestedMatch[] = [];
-
-                for (const account of accounts) {
-                    // Compare against account name and address
-                    const nameSim = calculateSimilarity(label, account.name);
-                    const addrSim = account.address_or_identifier
-                        ? calculateSimilarity(label, account.address_or_identifier)
-                        : 0;
-                    const similarity = Math.max(nameSim, addrSim);
-
-                    if (similarity >= 0.5) {
-                        suggestions.push({ account, confidence: similarity });
-                    }
-                }
-
-                suggestions.sort((a, b) => b.confidence - a.confidence);
-                const key = `${rawAccount.source}:${rawAccount.label}`;
-                map.set(key, suggestions.slice(0, 3));
-            });
-
-        return map;
-    }, [rawAccounts, accounts]);
-
-    const getAccountName = (accountId: number | null | undefined) => {
-        if (accountId === null || accountId === undefined) return null;
-        const account = accounts.find(a => a.id === accountId);
-        return account?.name || `ID:${accountId}`;
-    };
-
-    const getEditKey = (rawAccount: RawAccount) => `${rawAccount.source}:${rawAccount.label}`;
-
-    const startEditing = (rawAccount: RawAccount) => {
-        setEditingKey(getEditKey(rawAccount));
-        setEditAccountId(rawAccount.account_id ?? null);
-    };
-
-    const saveRawAccount = async (rawAccount: RawAccount) => {
-        try {
-            const response = await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ account_id: editAccountId })
-            });
-            if (!response.ok) throw new Error('Failed to update raw account');
-            await fetchRawAccounts();
-            setEditingKey(null);
-            setEditAccountId(null);
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
-        }
-    };
-
-    // Quick accept suggestion
-    const acceptSuggestion = async (rawAccount: RawAccount, accountId: number) => {
-        try {
-            const response = await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ account_id: accountId })
-            });
-            if (!response.ok) throw new Error('Failed to update raw account');
-            await fetchRawAccounts();
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
-        }
-    };
-
-    // Bulk auto-map all high-confidence suggestions
-    const autoMapAll = () => {
-        const toMap: { rawAccount: RawAccount; accountId: number }[] = [];
-
-        rawAccounts
-            .filter(ra => ra.account_id === null || ra.account_id === undefined)
-            .forEach(rawAccount => {
-                const key = getEditKey(rawAccount);
-                const suggestions = suggestionsMap.get(key) || [];
-                if (suggestions.length > 0 && suggestions[0].confidence >= 0.9) {
-                    toMap.push({ rawAccount, accountId: suggestions[0].account.id });
-                }
-            });
-
-        if (toMap.length === 0) {
-            toaster.info({ title: 'No matches', description: 'No high-confidence matches found to auto-map' });
-            return;
-        }
-
-        autoMapConfirm.open({ count: toMap.length, items: toMap });
-    };
-
-    const executeAutoMap = async () => {
-        if (!autoMapConfirm.data) return;
-        for (const { rawAccount, accountId } of autoMapConfirm.data.items) {
-            await acceptSuggestion(rawAccount, accountId);
-        }
-    };
+    const [includeDismissed, setIncludeDismissed] = useState(false);
 
     const createRawAccount = async () => {
         if (!newRawAccount.label || !newRawAccount.source) {
@@ -247,410 +25,77 @@ export const RawAccountsEditor: React.FC = () => {
                 const errData = await response.json();
                 throw new Error(errData.detail || 'Failed to create raw account');
             }
-            await fetchRawAccounts();
             setNewRawAccount({});
             setShowCreateDialog(false);
+            toaster.success({ title: 'Raw account created' });
+            // Force refresh by reloading
+            window.location.reload();
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create' });
         }
     };
 
-    const deleteRawAccount = (rawAccount: RawAccount) => {
-        deleteConfirm.open(rawAccount);
-    };
-
-    const executeDelete = async () => {
-        if (!deleteConfirm.data) return;
-        const rawAccount = deleteConfirm.data;
-        try {
-            const response = await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`, {
-                method: 'DELETE'
-            });
-            if (!response.ok) throw new Error('Failed to delete raw account');
-            await fetchRawAccounts();
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete' });
-        }
-    };
-
-    const unlinkRawAccount = async (rawAccount: RawAccount) => {
-        try {
-            const response = await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ account_id: null })
-            });
-            if (!response.ok) throw new Error('Failed to unlink raw account');
-            await fetchRawAccounts();
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to unlink' });
-        }
-    };
-
-    // Create new account from raw account
-    const createAccountFromRaw = (rawAccount: RawAccount) => {
-        // Infer account type: wallet for 0x addresses or onchain sources, otherwise cex
-        const isWalletAddress = rawAccount.label.startsWith('0x') ||
-            rawAccount.source.toLowerCase().includes('chain') ||
-            rawAccount.source.toLowerCase().includes('scan') ||
-            rawAccount.source.toLowerCase().includes('wallet');
-
-        const accountType: 'cex' | 'broker' | 'wallet' = isWalletAddress ? 'wallet' : 'cex';
-
-        setAccountPrefill({
-            name: rawAccount.label,
-            address_or_identifier: rawAccount.label,
-            account_type: accountType,
-        });
-        setPendingRawAccount(rawAccount);
-        setShowAccountDialog(true);
-    };
-
-    const handleAccountDialogClose = async (createdAccountId?: number) => {
-        setShowAccountDialog(false);
-
-        // If account was created and we have a pending raw account, auto-link them
-        if (createdAccountId && pendingRawAccount) {
-            await acceptSuggestion(pendingRawAccount, createdAccountId);
-            toaster.success({
-                title: 'Account created & linked',
-                description: `Created account and linked to "${pendingRawAccount.label}"`
-            });
-        }
-
-        setAccountPrefill(undefined);
-        setPendingRawAccount(null);
-        await fetchAccounts();
-    };
-
-    // Truncate long labels (like blockchain addresses)
-    const truncateLabel = (label: string, maxLength: number = 20) => {
-        if (label.length <= maxLength) return label;
-        return `${label.slice(0, 8)}...${label.slice(-6)}`;
-    };
-
-    // Get unique sources for filter
-    const uniqueSources = [...new Set(rawAccounts.map(ra => ra.source))];
-
-    // Count suggestions available
-    const suggestionsAvailableCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0).length;
-    const highConfidenceCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0 && s[0].confidence >= 0.9).length;
-
-    if (loading) return (
-        <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-            <Spinner size="xl" color="blue.500" />
-            <Text mt={4}>Loading raw accounts...</Text>
-        </Box>
-    );
-
-    if (error) return (
-        <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-            <Text color="red.600">Error: {error}</Text>
-        </Box>
-    );
-
-    const linkedCount = rawAccounts.filter(ra => ra.account_id !== null && ra.account_id !== undefined).length;
-    const unlinkedCount = rawAccounts.filter(ra => ra.account_id === null || ra.account_id === undefined).length;
-
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="md" mb={1}>🔗 Raw Accounts Mapping</Heading>
-                    <Text color="gray.600" fontSize="sm">
+        <div>
+            <div className="mb-6 flex items-center justify-between border-b border-slate-200 pb-2">
+                <div>
+                    <h2 className="mb-1 text-base font-semibold">🔗 Raw Accounts Mapping</h2>
+                    <p className="text-sm text-slate-600">
                         Link source-specific account labels/addresses to normalized accounts.
-                    </Text>
-                </Box>
-                <Flex gap={2}>
-                    {highConfidenceCount > 0 && (
-                        <Button colorPalette="green" variant="outline" onClick={autoMapAll}>
-                            ✨ Auto-Map ({highConfidenceCount})
-                        </Button>
-                    )}
-                    <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    <Button colorScheme="blue" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Mapping
                     </Button>
-                    <Button onClick={fetchRawAccounts} variant="outline">
-                        🔄 Refresh
-                    </Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
-            {/* Smart Suggestions Banner */}
-            {suggestionsAvailableCount > 0 && (
-                <Box mb={4} p={3} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
-                    <HStack justify="space-between">
-                        <Text fontSize="sm" color="blue.700">
-                            💡 <strong>{suggestionsAvailableCount}</strong> unlinked account(s) have suggested matches.
-                            {highConfidenceCount > 0 && ` ${highConfidenceCount} high-confidence match(es) can be auto-mapped.`}
-                        </Text>
-                    </HStack>
-                </Box>
-            )}
-
-            <Flex gap={4} mb={6} align="center" flexWrap="wrap">
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Source:</Text>
-                    <NativeSelect.Root size="sm" width="150px">
-                        <NativeSelect.Field
-                            value={sourceFilter}
-                            onChange={e => setSourceFilter(e.target.value)}
-                        >
-                            <option value="">All Sources</option>
-                            {uniqueSources.map(source => (
-                                <option key={source} value={source}>{source}</option>
-                            ))}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Flex>
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Status:</Text>
-                    <NativeSelect.Root size="sm" width="120px">
-                        <NativeSelect.Field
-                            value={linkedFilter}
-                            onChange={e => setLinkedFilter(e.target.value)}
-                        >
-                            <option value="">All</option>
-                            <option value="linked">Linked</option>
-                            <option value="unlinked">Unlinked</option>
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Flex>
-                {(sourceFilter || linkedFilter) && (
-                    <Button size="sm" variant="outline" onClick={() => { setSourceFilter(''); setLinkedFilter(''); }}>
-                        Clear Filters
-                    </Button>
-                )}
-            </Flex>
-
-            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm">
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader>Label / Address</Table.ColumnHeader>
-                            <Table.ColumnHeader>Source</Table.ColumnHeader>
-                            <Table.ColumnHeader>Linked Account</Table.ColumnHeader>
-                            <Table.ColumnHeader>Suggestions</Table.ColumnHeader>
-                            <Table.ColumnHeader>Actions</Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                        {rawAccounts.length === 0 ? (
-                            <Table.Row>
-                                <Table.Cell colSpan={5}>
-                                    <Text textAlign="center" py={8} color="gray.500">
-                                        No raw accounts found
-                                    </Text>
-                                </Table.Cell>
-                            </Table.Row>
-                        ) : (
-                            rawAccounts.map(rawAccount => {
-                                const key = getEditKey(rawAccount);
-                                const isEditing = editingKey === key;
-                                const suggestions = suggestionsMap.get(key) || [];
-                                const isUnlinked = rawAccount.account_id === null || rawAccount.account_id === undefined;
-
-                                return (
-                                    <Table.Row key={key} bg={isUnlinked ? 'orange.50' : undefined}>
-                                        <Table.Cell>
-                                            <Text
-                                                fontWeight="medium"
-                                                fontSize="sm"
-                                                fontFamily="mono"
-                                                title={rawAccount.label}
-                                            >
-                                                {truncateLabel(rawAccount.label)}
-                                            </Text>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Badge colorPalette="purple">{rawAccount.source}</Badge>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            {isEditing ? (
-                                                <Box width="200px">
-                                                    <AccountSelector
-                                                        value={editAccountId}
-                                                        onChange={setEditAccountId}
-                                                        accounts={accounts}
-                                                        onAccountCreated={fetchAccounts}
-                                                        defaultName={rawAccount.label}
-                                                        rawAccountSource={rawAccount.source}
-                                                        rawAccountLabel={rawAccount.label}
-                                                        placeholder="Search accounts..."
-                                                    />
-                                                </Box>
-                                            ) : (
-                                                rawAccount.account_id ? (
-                                                    <Badge colorPalette="green">{getAccountName(rawAccount.account_id)}</Badge>
-                                                ) : (
-                                                    <Text fontSize="sm" color="gray.400">Not linked</Text>
-                                                )
-                                            )}
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            {/* Smart Suggestions Column */}
-                                            {isUnlinked && suggestions.length > 0 && !isEditing ? (
-                                                <HStack gap={1} flexWrap="wrap">
-                                                    {suggestions.map((s, idx) => (
-                                                        <Tooltip key={idx} content={`${Math.round(s.confidence * 100)}% match - Click to accept`}>
-                                                            <Button
-                                                                size="xs"
-                                                                variant={s.confidence >= 0.9 ? "solid" : "outline"}
-                                                                colorPalette={s.confidence >= 0.9 ? "green" : s.confidence >= 0.7 ? "blue" : "gray"}
-                                                                onClick={() => acceptSuggestion(rawAccount, s.account.id)}
-                                                            >
-                                                                {s.account.name}
-                                                                {s.confidence >= 0.9 && " ✓"}
-                                                            </Button>
-                                                        </Tooltip>
-                                                    ))}
-                                                </HStack>
-                                            ) : isUnlinked && !isEditing ? (
-                                                <Text fontSize="xs" color="gray.400">No matches</Text>
-                                            ) : (
-                                                <Text fontSize="xs" color="gray.400">—</Text>
-                                            )}
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Flex gap={1}>
-                                                {isEditing ? (
-                                                    <>
-                                                        <Button size="xs" colorPalette="blue" onClick={() => saveRawAccount(rawAccount)}>
-                                                            💾
-                                                        </Button>
-                                                        <Button size="xs" variant="outline" onClick={() => { setEditingKey(null); setEditAccountId(null); }}>
-                                                            ✗
-                                                        </Button>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Tooltip content="Link to existing account">
-                                                            <Button size="xs" variant="outline" onClick={() => startEditing(rawAccount)}>
-                                                                🔗
-                                                            </Button>
-                                                        </Tooltip>
-                                                        {(rawAccount.account_id === null || rawAccount.account_id === undefined) && (
-                                                            <Tooltip content="Create new account from this">
-                                                                <Button
-                                                                    size="xs"
-                                                                    colorPalette="green"
-                                                                    variant="outline"
-                                                                    onClick={() => createAccountFromRaw(rawAccount)}
-                                                                >
-                                                                    ➕
-                                                                </Button>
-                                                            </Tooltip>
-                                                        )}
-                                                        {rawAccount.account_id !== null && rawAccount.account_id !== undefined && (
-                                                            <Button size="xs" colorPalette="orange" variant="outline" onClick={() => unlinkRawAccount(rawAccount)}>
-                                                                ⛓️‍💥
-                                                            </Button>
-                                                        )}
-                                                        <Button size="xs" colorPalette="red" variant="outline" onClick={() => deleteRawAccount(rawAccount)}>
-                                                            🗑️
-                                                        </Button>
-                                                    </>
-                                                )}
-                                            </Flex>
-                                        </Table.Cell>
-                                    </Table.Row>
-                                );
-                            })
-                        )}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
-
-            <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                <Text fontSize="sm" color="gray.600">
-                    <strong>Total:</strong> {rawAccounts.length} raw accounts
-                    {' • '}<Badge colorPalette="green" size="sm">{linkedCount} linked</Badge>
-                    {' • '}<Badge colorPalette="orange" size="sm">{unlinkedCount} unlinked</Badge>
-                </Text>
-            </Box>
+            <AccountMappingPanel
+                mode="full"
+                includeDismissed={includeDismissed}
+                onDismissedChange={setIncludeDismissed}
+            />
 
             {/* Create Raw Account Dialog */}
-            <Dialog.Root open={showCreateDialog} onOpenChange={(e) => setShowCreateDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Add Raw Account Mapping</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Source *</Text>
-                                        <Input
-                                            placeholder="e.g., blockscout_base, etherscan"
-                                            value={newRawAccount.source || ''}
-                                            onChange={e => setNewRawAccount({ ...newRawAccount, source: e.target.value })}
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Label / Address *</Text>
-                                        <Input
-                                            placeholder="e.g., 0x1234... or account name"
-                                            value={newRawAccount.label || ''}
-                                            onChange={e => setNewRawAccount({ ...newRawAccount, label: e.target.value })}
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Link to Account (optional)</Text>
-                                        <AccountSelector
-                                            value={newRawAccount.account_id ?? null}
-                                            onChange={(id) => setNewRawAccount({ ...newRawAccount, account_id: id ?? undefined })}
-                                            accounts={accounts}
-                                            onAccountCreated={fetchAccounts}
-                                            placeholder="Search or create account..."
-                                        />
-                                    </Box>
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => { setShowCreateDialog(false); setNewRawAccount({}); }}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="blue" onClick={createRawAccount}>
-                                        Create Mapping
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Delete Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={deleteConfirm.isOpen}
-                onClose={deleteConfirm.close}
-                onConfirm={executeDelete}
-                title="Delete Raw Account"
-                message={deleteConfirm.data ? `Delete raw account "${deleteConfirm.data.label}" from ${deleteConfirm.data.source}?` : ''}
-                confirmLabel="Delete"
-                isDestructive
-            />
-
-            {/* Auto-Map Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={autoMapConfirm.isOpen}
-                onClose={autoMapConfirm.close}
-                onConfirm={executeAutoMap}
-                title="Auto-Map Raw Accounts"
-                message={autoMapConfirm.data ? `Auto-map ${autoMapConfirm.data.count} raw account(s) with high confidence matches?` : ''}
-                confirmLabel="Auto-Map"
-            />
-
-            {/* Create Account from Raw Account Dialog */}
-            <AccountFormDialog
-                isOpen={showAccountDialog}
-                onClose={handleAccountDialogClose}
-                account={null}
-                prefill={accountPrefill}
-            />
-        </Box>
+            <RadixDialog.Root open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                <RadixDialog.Portal>
+                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-100 px-5 py-4">
+                            <RadixDialog.Title className="text-base font-semibold text-slate-900">
+                                Add Raw Account Mapping
+                            </RadixDialog.Title>
+                        </div>
+                        <div className="flex flex-col gap-4 px-5 py-4">
+                            <div>
+                                <p className="mb-1 font-medium">Source</p>
+                                <Input
+                                    value={newRawAccount.source || ''}
+                                    onChange={(e) => setNewRawAccount({ ...newRawAccount, source: e.target.value })}
+                                    placeholder="e.g., binance_trx, solana_helius"
+                                />
+                            </div>
+                            <div>
+                                <p className="mb-1 font-medium">Label</p>
+                                <Input
+                                    value={newRawAccount.label || ''}
+                                    onChange={(e) => setNewRawAccount({ ...newRawAccount, label: e.target.value })}
+                                    placeholder="e.g., spot, 0x1234..."
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-slate-100 px-5 py-4">
+                            <RadixDialog.Close asChild>
+                                <Button variant="outline">Cancel</Button>
+                            </RadixDialog.Close>
+                            <Button colorScheme="blue" onClick={createRawAccount}>
+                                Create
+                            </Button>
+                        </div>
+                    </RadixDialog.Content>
+                </RadixDialog.Portal>
+            </RadixDialog.Root>
+        </div>
     );
 };

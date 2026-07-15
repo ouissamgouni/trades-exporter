@@ -123,9 +123,9 @@ class TestCoinGeckoPriceGetterIntegration:
         self, coingecko_getter, mock_asset_btc, config_bitcoin_coingecko
     ):
         """Should fetch historical BTC price and return PriceResult."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        target_date = datetime.utcnow() - timedelta(days=7)
+        target_date = datetime.now(timezone.utc) - timedelta(days=7)
 
         result = coingecko_getter.get_historical_price(
             mock_asset_btc, target_date, config=config_bitcoin_coingecko
@@ -137,9 +137,11 @@ class TestCoinGeckoPriceGetterIntegration:
 
     def test_invalid_coin_id_raises_error(self, coingecko_getter):
         """Should raise error for invalid CoinGecko ID."""
+        from backend.services.price_getters.base import PriceGetterError
+        
         invalid_asset = MagicMock()
         invalid_asset.symbol = "INVALID"
         invalid_config = PriceGetterConfig(asset_id="zzzinvalidcoinxyz999")
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(PriceGetterError):
             coingecko_getter.get_current_price(invalid_asset, config=invalid_config)

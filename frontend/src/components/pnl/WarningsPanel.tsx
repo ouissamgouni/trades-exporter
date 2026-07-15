@@ -6,18 +6,12 @@
  */
 
 import React, { useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Flex,
-    Text,
-} from '@chakra-ui/react';
 import { FiExternalLink, FiAlertTriangle, FiAlertCircle, FiInfo, FiPlus } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { PnLWarningItem, WarningLevel } from './types';
-import { AddManualPriceDialog } from './AddManualPriceDialog';
+import { PriceSetterDialog } from './PriceSetterDialog';
+import { getWarningTypeConfig } from './warningStyles';
+import { Badge, type BadgeColorScheme, Button } from '../ui/primitives';
 
 interface WarningsPanelProps {
     warnings: PnLWarningItem[];
@@ -47,12 +41,12 @@ const getWarningIcon = (level: WarningLevel) => {
 const getWarningColor = (level: WarningLevel) => {
     switch (level) {
         case 'error':
-            return { bg: 'red.50', border: 'red.200' };
+            return { bg: 'bg-red-50', border: 'border-red-200' };
         case 'warning':
-            return { bg: 'orange.50', border: 'orange.200' };
+            return { bg: 'bg-orange-50', border: 'border-orange-200' };
         case 'info':
         default:
-            return { bg: 'blue.50', border: 'blue.200' };
+            return { bg: 'bg-blue-50', border: 'border-blue-200' };
     }
 };
 
@@ -131,7 +125,7 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
             width="600px"
         >
             {/* Summary */}
-            <Flex gap={2} mb={4}>
+            <div className="mb-4 flex gap-2">
                 <Button
                     size="sm"
                     variant={levelFilter === 'all' ? 'solid' : 'outline'}
@@ -142,7 +136,7 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                 {errorCount > 0 && (
                     <Button
                         size="sm"
-                        colorPalette="red"
+                        colorScheme="red"
                         variant={levelFilter === 'error' ? 'solid' : 'outline'}
                         onClick={() => setLevelFilter('error')}
                     >
@@ -152,8 +146,8 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                 {warningCount > 0 && (
                     <Button
                         size="sm"
-                        colorPalette="orange"
                         variant={levelFilter === 'warning' ? 'solid' : 'outline'}
+                        className={levelFilter === 'warning' ? 'border-orange-600 bg-orange-600 hover:bg-orange-700' : 'border-orange-300 text-orange-700 hover:bg-orange-50'}
                         onClick={() => setLevelFilter('warning')}
                     >
                         <FiAlertTriangle /> Warnings ({warningCount})
@@ -162,130 +156,125 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                 {infoCount > 0 && (
                     <Button
                         size="sm"
-                        colorPalette="blue"
+                        colorScheme="blue"
                         variant={levelFilter === 'info' ? 'solid' : 'outline'}
                         onClick={() => setLevelFilter('info')}
                     >
                         <FiInfo /> Info ({infoCount})
                     </Button>
                 )}
-            </Flex>
+            </div>
 
             {/* Warnings grouped by type */}
             {Object.entries(grouped).length === 0 ? (
-                <Card.Root>
-                    <Card.Body>
-                        <Flex direction="column" align="center" py={8}>
-                            <Text fontSize="4xl" mb={2}>✅</Text>
-                            <Text fontWeight="bold" color="green.600">All Clear!</Text>
-                            <Text color="gray.500">No warnings to display</Text>
-                        </Flex>
-                    </Card.Body>
-                </Card.Root>
+                <div className="border border-slate-200 bg-white">
+                    <div className="px-4 py-2">
+                        <div className="flex flex-col items-center py-8">
+                            <span className="mb-2 block text-4xl">✅</span>
+                            <span className="block font-bold text-green-600">All Clear!</span>
+                            <span className="block text-slate-500">No warnings to display</span>
+                        </div>
+                    </div>
+                </div>
             ) : (
-                Object.entries(grouped).map(([type, items]) => (
-                    <Card.Root key={type} mb={4}>
-                        <Card.Header py={2}>
-                            <Flex align="center" gap={2}>
-                                <Badge
-                                    colorPalette={
-                                        items[0].level === 'error' ? 'red' :
-                                            items[0].level === 'warning' ? 'orange' : 'blue'
-                                    }
-                                >
-                                    {type}
-                                </Badge>
-                                <Text fontSize="sm" color="gray.500">
-                                    ({items.length} {items.length === 1 ? 'issue' : 'issues'})
-                                </Text>
-                            </Flex>
-                        </Card.Header>
-                        <Card.Body py={2}>
-                            {items.map((warning) => {
-                                const colors = getWarningColor(warning.level);
-                                return (
-                                    <Box
-                                        key={warning.id}
-                                        p={3}
-                                        mb={2}
-                                        bg={colors.bg}
-                                        borderWidth="1px"
-                                        borderColor={colors.border}
-                                        borderRadius="md"
-                                    >
-                                        <Flex gap={3}>
-                                            <Box mt={1}>
-                                                {getWarningIcon(warning.level)}
-                                            </Box>
-                                            <Box flex="1">
-                                                <Text fontSize="sm" mb={1}>
-                                                    {warning.message}
-                                                </Text>
-                                                <Flex gap={2} wrap="wrap">
-                                                    {warning.transaction_id && onTransactionClick && (
-                                                        <Button
-                                                            size="xs"
-                                                            variant="ghost"
-                                                            onClick={() => onTransactionClick(warning.transaction_id!)}
-                                                        >
-                                                            TX #{warning.transaction_id}
-                                                            <FiExternalLink size={12} />
-                                                        </Button>
-                                                    )}
-                                                    {warning.unit_id && onUnitClick && (
-                                                        <Button
-                                                            size="xs"
-                                                            variant="ghost"
-                                                            onClick={() => onUnitClick(warning.unit_id!)}
-                                                        >
-                                                            Unit #{warning.unit_id}
-                                                            <FiExternalLink size={12} />
-                                                        </Button>
-                                                    )}
-                                                    {warning.action_label && warning.action_link && (
-                                                        <Button size="xs" colorPalette="blue">
-                                                            {warning.action_label}
-                                                        </Button>
-                                                    )}
-                                                    {/* Add Price button for price-related warnings */}
-                                                    {isPriceWarning(warning) && quoteAssetId && baseCurrency && (
-                                                        <Button
-                                                            size="xs"
-                                                            colorPalette="green"
-                                                            onClick={() => handleAddPriceClick(warning)}
-                                                        >
-                                                            <FiPlus size={12} />
-                                                            <Text ml={1}>Add Price</Text>
-                                                        </Button>
-                                                    )}
-                                                </Flex>
-                                            </Box>
-                                        </Flex>
-                                    </Box>
-                                );
-                            })}
-                        </Card.Body>
-                    </Card.Root>
-                ))
+                Object.entries(grouped).map(([type, items]) => {
+                    const typeConfig = getWarningTypeConfig(type);
+                    return (
+                        <div key={type} className="mb-4 border border-slate-200 bg-white">
+                            <div className="border-b border-slate-100 px-4 py-2">
+                                <div className="flex items-center gap-2">
+                                    <Badge colorScheme={typeConfig.colorPalette as BadgeColorScheme}>
+                                        {typeConfig.icon} {type}
+                                    </Badge>
+                                    <span className="text-sm text-slate-500">
+                                        ({items.length} {items.length === 1 ? 'issue' : 'issues'})
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="px-4 py-2">
+                                {items.map((warning) => {
+                                    const colors = getWarningColor(warning.level);
+                                    return (
+                                        <div
+                                            key={warning.id}
+                                            className={`mb-2 border p-3 ${colors.bg} ${colors.border}`}
+                                        >
+                                            <div className="flex gap-3">
+                                                <div className="mt-1">
+                                                    {getWarningIcon(warning.level)}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <p className="mb-1 text-sm">
+                                                        {warning.message}
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {warning.transaction_id && onTransactionClick && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                onClick={() => onTransactionClick(warning.transaction_id!)}
+                                                            >
+                                                                TX #{warning.transaction_id}
+                                                                <FiExternalLink size={12} />
+                                                            </Button>
+                                                        )}
+                                                        {warning.unit_id && onUnitClick && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                onClick={() => onUnitClick(warning.unit_id!)}
+                                                            >
+                                                                Unit #{warning.unit_id}
+                                                                <FiExternalLink size={12} />
+                                                            </Button>
+                                                        )}
+                                                        {warning.action_label && warning.action_link && (
+                                                            <Button size="sm" colorScheme="blue">
+                                                                {warning.action_label}
+                                                            </Button>
+                                                        )}
+                                                        {/* Add Price button for price-related warnings */}
+                                                        {isPriceWarning(warning) && quoteAssetId && baseCurrency && (
+                                                            <Button
+                                                                size="sm"
+                                                                colorScheme="green"
+                                                                onClick={() => handleAddPriceClick(warning)}
+                                                            >
+                                                                <FiPlus size={12} />
+                                                                <span className="ml-1">Add Price</span>
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                })
             )}
 
             {/* Manual Price Dialog */}
-            {selectedWarning && selectedWarning.asset_id && quoteAssetId && baseCurrency && (
-                <AddManualPriceDialog
-                    isOpen={dialogOpen}
-                    onClose={() => {
-                        setDialogOpen(false);
-                        setSelectedWarning(null);
-                    }}
-                    onSave={handlePriceSaved}
-                    assetId={selectedWarning.asset_id}
-                    assetName={getAssetName(selectedWarning.asset_id)}
-                    defaultDate={getDefaultDateFromWarning(selectedWarning)}
-                    quoteAssetId={quoteAssetId}
-                    quoteAssetName={baseCurrency}
-                />
-            )}
-        </SlidePanel>
+            {
+                selectedWarning && selectedWarning.asset_id && quoteAssetId && baseCurrency && (
+                    <PriceSetterDialog
+                        isOpen={dialogOpen}
+                        onClose={() => {
+                            setDialogOpen(false);
+                            setSelectedWarning(null);
+                        }}
+                        onSave={handlePriceSaved}
+                        assetId={selectedWarning.asset_id}
+                        assetName={getAssetName(selectedWarning.asset_id)}
+                        defaultDate={getDefaultDateFromWarning(selectedWarning)}
+                        quoteAssetId={quoteAssetId}
+                        quoteAssetName={baseCurrency}
+                    />
+                )
+            }
+        </SlidePanel >
     );
 };
 

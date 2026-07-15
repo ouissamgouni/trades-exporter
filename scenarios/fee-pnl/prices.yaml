@@ -1,0 +1,50 @@
+# Fee PnL Scenario — Prices
+# ==========================
+# Mock prices for deterministic PnL. All timestamps within ±15 min of tx date_time.
+
+prices:
+  # ── ETH → EUR ──────────────────────────────────────────────
+  - asset_symbol: ETH
+    quote_currency: EUR
+    entries:
+      - at: "2024-01-10T10:00:00"   # Case 1: BUY 10 ETH
+        price: "2000"
+      - at: "2024-01-15T10:00:00"   # Case 2: Gas fee (ETH)
+        price: "2100"
+      - at: "2024-02-01T10:00:00"   # Case 4: SELL 5 ETH
+        price: "2500"
+      - at: "2024-03-01T10:00:00"   # Case 6: BUY ETH with BTC
+        price: "2200"
+      - at: current
+        price: "2300"
+
+  # ── BTC → EUR ──────────────────────────────────────────────
+  - asset_symbol: BTC
+    quote_currency: EUR
+    entries:
+      - at: "2024-01-05T10:00:00"   # Pre-seed: BUY BTC
+        price: "40000"
+      - at: "2024-03-01T10:00:00"   # Case 6: crypto-to-crypto trade
+        price: "45000"
+      - at: current
+        price: "46000"
+
+  # ── USDC → EUR ─────────────────────────────────────────────
+  - asset_symbol: USDC
+    quote_currency: EUR
+    entries:
+      - at: "2024-01-08T10:00:00"   # Pre-seed: BUY USDC
+        price: "0.92"
+      - at: "2024-02-15T10:00:00"   # Case 5: Transfer USDC
+        price: "0.92"
+      - at: current
+        price: "0.92"
+
+  # ── APTIV → EUR (for ADR fee attribution display) ──────────
+  - asset_symbol: "APTIV PLC (JE00BTDN8H13)"
+    quote_currency: EUR
+    entries:
+      - at: "2024-02-01T10:00:00"   # Case 3: ADR custody fee date
+        price: "95.00"
+      - at: current
+        price: "98.00"

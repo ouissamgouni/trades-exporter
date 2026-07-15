@@ -2,33 +2,32 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/*]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 env:
-  PYTHON_VERSION: "3.12"
+  PYTHON_VERSION: "3.13"
   NODE_VERSION: "20"
 
 jobs:
-  # ========== BACKEND TESTS ==========
-  backend-tests:
+  # ========== SECRET SCANNING ==========
+  secret-scan:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    services:
-      postgres:
-        image: postgres:16-alpine
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
         env:
-          POSTGRES_USER: trades_user
-          POSTGRES_PASSWORD: trades_password
-          POSTGRES_DB: trades_db_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ========== BACKEND UNIT TESTS ==========
+  backend-unit-tests:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -41,25 +40,122 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
 
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
       - name: Install dependencies
-        working-directory: backend
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install pytest pytest-cov pytest-mock pytest-xdist pytest-timeout
 
-      - name: Run database migrations
+      - name: Run unit tests (task test:backend:unit)
+        run: task test:backend:unit
+
+  # ========== BACKEND LINTING ==========
+  backend-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies and linters
         working-directory: backend
-        env:
-          DATABASE_URL: postgresql://trades_user:trades_password@localhost:5432/trades_db_test
         run: |
-          .venv/bin/alembic upgrade head || true
+          python -m pip install --upgrade pip
+          pip install ruff black mypy
+          pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run Ruff (linter)
         working-directory: backend
-        env:
-          DATABASE_URL: postgresql://trades_user:trades_password@localhost:5432/trades_db_test
-        run: .venv/bin/python -m pytest -v --tb=short
+        run: |
+          ruff check . --output-format=github
+        continue-on-error: true
+
+      - name: Check Black formatting
+        working-directory: backend
+        run: |
+          black --check --diff .
+        continue-on-error: true
+
+      - name: Run mypy (type checker)
+        working-directory: backend
+        run: |
+          mypy . --ignore-missing-imports --check-untyped-defs
+        continue-on-error: true
+
+  # ========== BACKEND INTEGRATION TESTS ==========
+  # `task test:backend:int` is fully self-contained: it provisions its own
+  # dedicated scenario database (SCENARIO=backend-integration-tests, Dockerized
+  # Postgres via .taskfiles/start.yml `scenario:db`) before running pytest, so
+  # no separate DB-setup step is needed here.
+  backend-integration-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install pytest pytest-cov pytest-mock pytest-xdist pytest-timeout
+
+      - name: Run integration tests (task test:backend:int)
+        run: task test:backend:int
+
+  # ========== BACKEND E2E TESTS ==========
+  # Separate job/runner from backend-integration-tests. `task test:backend:e2e`
+  # is likewise self-contained: it provisions its own dedicated scenario
+  # database (SCENARIO=backend-e2e-tests), independent of the integration-tests
+  # job's scenario, so there's no shared state or job-ordering dependency.
+  backend-e2e-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install pytest pytest-cov pytest-mock pytest-xdist pytest-timeout
+
+      - name: Run e2e tests (task test:backend:e2e)
+        run: task test:backend:e2e
 
   # ========== FRONTEND BUILD ==========
   frontend-build:
@@ -80,13 +176,11 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Type check
-        working-directory: frontend
-        run: npx tsc --noEmit || true
+      - name: Install Task
+        uses: arduino/setup-task@v2
 
-      - name: Build
-        working-directory: frontend
-        run: npm run build
+      - name: Build, type check, and unit test (task test:frontend:unit)
+        run: task test:frontend:unit
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -95,9 +189,48 @@ jobs:
           path: frontend/dist
           retention-days: 7
 
-  # ========== LINT & FORMAT ==========
-  lint:
+  # ========== FRONTEND E2E (PLAYWRIGHT SMOKE, NO BACKEND) ==========
+  frontend-e2e:
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Run Playwright smoke tests (task test:frontend:e2e)
+        run: task test:frontend:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  # ========== FRONTEND E2E AGAINST REAL BACKEND (PLAYWRIGHT + dedicated scenario) ==========
+  # Uses `task test:e2e` (full-stack: db + backend + frontend), which spins up
+  # the `frontend_e2e`
+  # scenario (its own dockerized Postgres + backend, see .taskfiles/start.yml)
+  # via Playwright's globalSetup/globalTeardown — no GH-native `services:` DB
+  # needed here since the scenario tooling manages its own Postgres container.
+  frontend-e2e-backend:
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -106,33 +239,36 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
 
-      - name: Install linters
-        run: pip install ruff black
-
-      - name: Run Ruff (Python linter)
-        working-directory: backend
-        run: ruff check . --output-format=github || true
-
-      - name: Check Black formatting
-        working-directory: backend
-        run: black --check --diff . || true
-
-  # ========== SECURITY SCAN ==========
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install safety
-        run: pip install safety
+      - name: Install Task
+        uses: arduino/setup-task@v2
 
-      - name: Check for vulnerabilities
-        working-directory: backend
-        run: safety check -r requirements.txt || true
+      - name: Install backend dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend backend-e2e tests (task test:e2e)
+        run: task test:e2e
+
+      - name: Upload Playwright backend-e2e report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-backend-e2e-report
+          path: frontend/playwright-report
+          retention-days: 7

@@ -1,0 +1,22 @@
+# Frontend Backend-E2E Fixture — Transactions
+# ============================================
+# A single deterministic BTC buy so the UI has real backend-rendered
+# data to assert against (e.g. transactions list, holdings).
+
+transactions:
+  - source: "seed-frontend-e2e"
+    source_transaction_id: "frontend_e2e_001_btc_buy"
+    account_name: "Playwright Wallet"
+    asset_symbol: BTC
+    quantity: "0.100000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-01-15T09:00:00"
+    price: "40000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "1.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - goal: playwright-e2e

@@ -5,7 +5,7 @@ Parses CSV files containing asset definitions with multi-source price getter
 configurations and category assignments.
 
 Expected CSV format:
-    Unique Label,Ticker / Symbol,Label,Source 1,Symbol 1,Source 2,Symbol 2,Source 3,Symbol 3,Currency,Investment Category 2,Investment Category 1
+    Ticker / Symbol,Label,Source 1,Symbol 1,Source 2,Symbol 2,Source 3,Symbol 3,Currency,Investment Category 2,Investment Category 1
 
 Usage:
     from backend.file_loaders.asset_csv_loader import AssetCSVLoader
@@ -33,13 +33,13 @@ log = configure_logging("asset_csv_loader")
 # Mapping from CSV source names to internal price getter names
 SOURCE_TO_GETTER_MAP = {
     "coingecko": "coingecko",
-    "yahoo": "yahoo",
-    "yahoo to eur": "yahoo",  # Yahoo with EUR conversion
-    "alphavantage": "datareader",  # Use datareader as fallback
-    "marketstack": "datareader",  # Use datareader as fallback
-    "eodhd": "datareader",  # Use datareader as fallback
-    "google finance": "yahoo",  # Use yahoo as fallback
-    "manual": None,  # No automatic price fetching
+    "yahoo": "yahoo_direct",            # Yahoo Chart API v8 (direct HTTP, no yfinance)
+    "yahoo to eur": "yahoo_direct",      # Yahoo with EUR conversion
+    "alphavantage": "datareader",        # Use datareader as fallback
+    "marketstack": "datareader",         # Use datareader as fallback
+    "eodhd": "datareader",              # Use datareader as fallback
+    "google finance": "yahoo_direct",    # Use yahoo_direct as fallback
+    "manual": None,                      # No automatic price fetching
 }
 
 
@@ -70,7 +70,7 @@ class ParsedAsset:
     price_type: str
     currency: str
     price_getters: List[PriceGetterConfig]
-    category_keys: List[Tuple[str, str, Optional[str]]]  # (dimension_label, category_label, parent_label) tuples
+    category_keys: List[Tuple[str, str]]  # (dimension_label, category_label) tuples
     raw_row: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -95,7 +95,6 @@ class AssetCSVLoader:
     COLUMN_MAPPINGS = {
         "symbol": ["Ticker / Symbol", "Symbol", "Ticker", "symbol"],
         "label": ["Label", "Name", "label", "name"],
-        "unique_label": ["Unique Label", "unique_label"],
         "currency": ["Currency", "currency", "Base Currency"],
         "category_1": ["Investment Category 1", "Category 1", "Asset Class"],
         "category_2": ["Investment Category 2", "Category 2", "Sector"],
@@ -196,7 +195,7 @@ class AssetCSVLoader:
                     assets.append(parsed)
                     
                     # Collect category definitions (now flat, no hierarchy)
-                    for dim_label, cat_label, _ in parsed.category_keys:
+                    for dim_label, cat_label in parsed.category_keys:
                         if cat_label:
                             categories_set.add((dim_label, cat_label))
                             
@@ -388,10 +387,10 @@ class AssetCSVLoader:
         
         return external_id, params
     
-    def _parse_categories(self, row: pd.Series, column_map: Dict[str, str]) -> List[Tuple[str, str, Optional[str]]]:
+    def _parse_categories(self, row: pd.Series, column_map: Dict[str, str]) -> List[Tuple[str, str]]:
         """Parse category assignments from Investment Category columns.
         
-        Returns (dimension_label, category_label, parent_label) tuples.
+        Returns (dimension_label, category_label) tuples.
         Investment Category 1 -> 'Sector' dimension
         Investment Category 2 -> 'Sub-Sector' dimension
         """
@@ -400,12 +399,12 @@ class AssetCSVLoader:
         # Investment Category 1 -> Sector dimension
         cat_1 = str(row.get(column_map.get("category_1", ""), "")).strip()
         if cat_1:
-            categories.append(("Sector", cat_1, None))
+            categories.append(("Sector", cat_1))
         
         # Investment Category 2 -> Sub-Sector dimension
         cat_2 = str(row.get(column_map.get("category_2", ""), "")).strip()
         if cat_2:
-            categories.append(("Sub-Sector", cat_2, None))
+            categories.append(("Sub-Sector", cat_2))
         
         return categories
     

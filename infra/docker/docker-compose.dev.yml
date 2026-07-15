@@ -2,22 +2,21 @@
 # Only runs database, code runs locally with VSCode debugger
 #
 # Usage: docker compose -f docker-compose.dev.yml up -d
-#        or: task start:dev
+#        or: task start:dev:db
 
 services:
   postgres_dev:
     image: postgres:15-alpine
-    container_name: trades_db_dev
-    environment:
-      POSTGRES_USER: trades_user
-      POSTGRES_PASSWORD: trades_password
-      POSTGRES_DB: trades_db_dev
+    container_name: trades_db_${ENV_NAME}
+    env_file:
+      - ../../config/base.env
+      - ../../config/dev.env
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
-      - trades_dev_data:/var/lib/postgresql/data
+      - trades_${ENV_NAME}_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trades_user -d trades_db_dev"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -25,4 +24,4 @@ services:
 
 volumes:
   trades_dev_data:
-    name: trades_dev_data
+    name: trades_${ENV_NAME}_data

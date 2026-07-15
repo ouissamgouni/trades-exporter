@@ -37,7 +37,12 @@ export function parseApiDate(value: string | number | Date | null | undefined): 
 
     if (typeof value === 'string') {
         // ISO 8601 string (e.g., "2024-01-15T10:30:00Z" or "2024-01-15T10:30:00+00:00")
-        const date = new Date(value);
+        // If no timezone marker is present, treat as UTC (backend stores all datetimes in UTC)
+        let normalized = value;
+        if (!value.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(value)) {
+            normalized = value + 'Z';
+        }
+        const date = new Date(normalized);
         return isNaN(date.getTime()) ? null : date;
     }
 
@@ -49,7 +54,7 @@ export function parseApiDate(value: string | number | Date | null | undefined): 
 // ============================================================================
 
 /**
- * Format a date for compact display (MM/DD HH:mm)
+ * Format a date for compact display (MM/DD/YY HH:mm)
  * Used in transaction tables where space is limited.
  */
 export function formatDateTimeCompact(value: string | number | Date | null | undefined): string {
@@ -58,10 +63,11 @@ export function formatDateTimeCompact(value: string | number | Date | null | und
 
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
+    const year = String(date.getFullYear()).slice(-2);
     const hours = String(date.getHours()).padStart(2, '0');
     const mins = String(date.getMinutes()).padStart(2, '0');
 
-    return `${month}/${day} ${hours}:${mins}`;
+    return `${month}/${day}/${year} ${hours}:${mins}`;
 }
 
 /**
@@ -115,6 +121,24 @@ export function formatDateTimeLocale(value: string | number | Date | null | unde
     if (!date) return '-';
 
     return date.toLocaleString();
+}
+
+/**
+ * Format a date/time as a human-friendly relative string (e.g. "5m ago", "2h ago", "3d ago").
+ */
+export function formatRelativeTime(value: string | number | Date | null | undefined): string {
+    const date = parseApiDate(value);
+    if (!date) return 'Never';
+    const diffMs = Date.now() - date.getTime();
+    const mins = Math.floor(diffMs / 60_000);
+    const hrs = Math.floor(diffMs / 3_600_000);
+    const days = Math.floor(diffMs / 86_400_000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    if (hrs < 24) return `${hrs}h ago`;
+    if (days < 30) return `${days}d ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
 }
 
 /**

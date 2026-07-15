@@ -433,18 +433,16 @@ class TradeImportService:
         
         # Determine direction and transaction_type
         if parsed.is_fee_transaction:
-            # FEES transactions: technical with neutral direction
+            # FEES transactions: cost type with outflow direction
             # These represent account-level fees (frais de gestion) that the broker
-            # collects by liquidating a portion of held assets. We track the fee
-            # amount in the fee field for P&L purposes, with quantity=0 since we
-            # don't know which specific assets were consumed.
-            # Fee is paid in EUR - resolved to fee_quote_asset_id if EUR asset exists.
-            direction = "neutral"
-            transaction_type = "technical"
-            quantity = Decimal(0)
-            fee = parsed.quantity  # Fee amount from quantity field in CSV
-            source_fee_quote_asset_symbol = "EUR"
-            fee_quote_asset_id = self._eur_asset_id  # Resolved EUR asset ID (may be None)
+            # collects by liquidating a portion of held assets.
+            # qty=fee_amount, price=1, price_quote=EUR (the fee currency).
+            direction = "outflow"
+            transaction_type = "cost"
+            quantity = parsed.quantity  # Fee amount promoted to quantity
+            fee = None
+            source_fee_quote_asset_symbol = ""
+            fee_quote_asset_id = None
         else:
             # Regular trades
             if parsed.transaction_type.lower() == "buy":
@@ -466,13 +464,17 @@ class TradeImportService:
             review_status = "pending"
         
         # Build transaction
-        # For FEES transactions: no price, no quantity, no price_quote - only fee fields
         if parsed.is_fee_transaction:
-            tx_price = None
-            tx_source_price_quote = ""
+            # COST: price=1, price_quote=EUR, no asset_id
+            tx_price = Decimal(1)
+            tx_source_price_quote = "EUR"
+            tx_asset_id = None  # COST transactions have no base asset
+            tx_price_quote_asset_id = self._eur_asset_id
         else:
             tx_price = parsed.price
             tx_source_price_quote = "EUR" if parsed.price else ""
+            tx_asset_id = asset_id
+            tx_price_quote_asset_id = None
         
         tx = NormalizedTransaction(
             # Source traceability
@@ -490,17 +492,18 @@ class TradeImportService:
             direction=direction,
             transaction_type=transaction_type,
             
-            # Asset and quantity (may be None if unmapped)
-            asset_id=asset_id,
+            # Asset and quantity
+            asset_id=tx_asset_id,
             quantity=quantity,
             
-            # Pricing (not set for FEES transactions)
+            # Pricing
             price=tx_price,
             source_price_quote_asset_symbol=tx_source_price_quote,
+            price_quote_asset_id=tx_price_quote_asset_id,
             
             # Fees
             fee=fee,
-            fee_quote_asset_id=fee_quote_asset_id,  # Resolved EUR asset ID
+            fee_quote_asset_id=fee_quote_asset_id,
             source_fee_quote_asset_symbol=source_fee_quote_asset_symbol,
             include_fee=True if fee else False,
             

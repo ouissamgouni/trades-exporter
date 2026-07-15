@@ -1,32 +1,13 @@
 version: "3"
 
 tasks:
-  prepare:
-    desc: Create release PR (develop → main)
+  default:
+    desc: "Tag + deploy to prod (e.g., task release -- v1.2.0)"
+    aliases: [release]
+    vars:
+      VERSION: "{{if .VERSION}}{{.VERSION}}{{else}}{{.CLI_ARGS}}{{end}}"
     cmds:
-      - git checkout develop
-      - git pull origin develop
-      - gh pr create --base main --head develop --title "Release $(date +%Y-%m-%d)" --body "Release candidate from develop branch"
-      - echo "✅ Release PR created. Review and merge when ready."
-
-  tag:
-    desc: Tag a release and build images (e.g., task release:tag v1.2.0)
-    cmds:
-      - |
-        VERSION={{.CLI_ARGS}}
-        if [ -z "$VERSION" ]; then
-          echo "❌ Usage: task release:tag v1.2.0"
-          exit 1
-        fi
-        git checkout main
-        git pull origin main
-        git tag -a $VERSION -m "Release $VERSION"
-        git push origin $VERSION
-        echo "✅ Tagged $VERSION"
-      - task: build:prod
-        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
-
-  list:
-    desc: List all release tags
-    cmds:
-      - git tag -l "v*" --sort=-version:refname
+      - task: ":git:release:tag"
+        vars: { VERSION: "{{.VERSION}}" }
+      - task: ":deploy:prod:local"
+        vars: { CLI_ARGS: "{{.VERSION}}" }

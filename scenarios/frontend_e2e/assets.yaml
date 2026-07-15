@@ -1,0 +1,14 @@
+# Frontend Backend-E2E Fixture — Assets
+# ======================================
+# Minimal, deterministic asset set for Playwright tests that exercise
+# real backend-rendered data (frontend/e2e-backend/). Keep this small:
+# only what the fixture's accounts/transactions actually reference.
+
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: BTC
+    label: Bitcoin
+    price_type: crypto

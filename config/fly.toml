@@ -1,0 +1,34 @@
+# Fly.io app configuration — production
+# https://fly.io/docs/reference/configuration/
+# Always pass -c config/fly.toml to flyctl commands.
+
+app = "trades-exporter"
+primary_region = "cdg"
+
+[build]
+  # Path is relative to this toml file (config/ → repo root → backend/Dockerfile)
+  dockerfile = "../backend/Dockerfile"
+
+[env]
+  PYTHONPATH = "/app"
+  PYTHONUNBUFFERED = "1"
+  ENV_NAME = "prod"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/v1/health"
+    protocol = "http"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

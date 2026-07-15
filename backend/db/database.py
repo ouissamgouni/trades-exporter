@@ -5,24 +5,26 @@ This module provides:
 - Database engine configuration
 - Session factory and dependency injection for FastAPI
 - Database initialization and table creation
+- P&L invalidation via after_flush event listener
 """
 
 import os
+from collections import defaultdict
 from typing import Generator
 from contextlib import contextmanager
 
 from sqlmodel import SQLModel, Session, create_engine
-from dotenv import load_dotenv
+from sqlalchemy import event
 from backend.config.loader import get_database_url, configure_logging
-
-# Load environment variables
-load_dotenv()
 
 log = configure_logging("database")
 
 
 # Global engine instance (created lazily)
 _engine = None
+
+# Whether the after_flush listener has been registered
+_pnl_listener_registered = False
 
 
 def get_engine():
@@ -63,9 +65,6 @@ def init_db():
 def drop_all_tables():
     """
     Drop all tables. USE WITH CAUTION - mainly for testing.
-
-    Args:
-        test_mode: Override test mode. If None, uses environment variable.
     """
     engine = get_engine()
     SQLModel.metadata.drop_all(engine)
@@ -81,9 +80,6 @@ def get_session() -> Generator[Session, None, None]:
         with get_session() as session:
             session.add(model)
             session.commit()
-
-    Args:
-        test_mode: Override test mode. If None, uses environment variable.
 
     Yields:
         SQLModel Session
@@ -106,9 +102,6 @@ def get_session_dependency() -> Generator[Session, None, None]:
         @app.get("/items")
         def get_items(session: Session = Depends(get_session_dependency)):
             return session.exec(select(Item)).all()
-
-    Args:
-        test_mode: Override test mode. If None, uses environment variable.
 
     Yields:
         SQLModel Session
@@ -175,3 +168,115 @@ class DatabaseManager:
             self.commit()
         self.close()
         return False
+
+
+# =============================================================================
+# P&L Invalidation Listener
+# =============================================================================
+
+# Models whose changes should invalidate P&L results
+_PNL_RELEVANT_MODELS = None  # Lazy-loaded to avoid circular imports
+
+# Models that are P&L OUTPUT — changes to these must NOT trigger invalidation
+_PNL_OUTPUT_MODELS = None
+
+
+def _get_pnl_model_sets():
+    """Lazy-load model sets to avoid circular imports."""
+    global _PNL_RELEVANT_MODELS, _PNL_OUTPUT_MODELS
+    if _PNL_RELEVANT_MODELS is None:
+        from backend.db.models import (
+            NormalizedTransaction, UserCalculationBundle, Asset, Account,
+            AppSettings, AssetPriceGetter,
+            # P&L output models (must be excluded)
+            CalculationVersion, CalculationUnit, CalculationUnitLeg,
+            CostLot, ConsumedLotSlice, RealizedPnl, FeeEntry,
+            PnlWarning, CostLotEvent, LotSettlement,
+        )
+        _PNL_RELEVANT_MODELS = {
+            NormalizedTransaction, UserCalculationBundle, Asset, Account,
+            AppSettings, AssetPriceGetter,
+        }
+        _PNL_OUTPUT_MODELS = {
+            CalculationVersion, CalculationUnit, CalculationUnitLeg,
+            CostLot, ConsumedLotSlice, RealizedPnl, FeeEntry,
+            PnlWarning, CostLotEvent, LotSettlement,
+        }
+    return _PNL_RELEVANT_MODELS, _PNL_OUTPUT_MODELS
+
+
+def _pnl_after_flush(session, flush_context):
+    """
+    SQLAlchemy after_flush event listener.
+    
+    Inspects session.new, session.dirty, session.deleted for P&L-relevant models.
+    If any are found, marks the PnLCalculationService as stale.
+    
+    This fires INSIDE the flush (before commit), so it catches all ORM changes
+    regardless of source (API routes, sync jobs, scripts).
+    """
+    relevant_models, output_models = _get_pnl_model_sets()
+    
+    # Collect changes by model class and operation
+    changes: dict[str, int] = defaultdict(int)
+    
+    for obj in session.new:
+        model_class = type(obj)
+        if model_class in relevant_models:
+            changes[f"{model_class.__name__} created"] += 1
+    
+    for obj in session.dirty:
+        model_class = type(obj)
+        if model_class in relevant_models:
+            # Only count truly modified objects — SQLAlchemy marks objects as
+            # "dirty" even on read when defaults are populated or lazy attrs
+            # are accessed.  is_modified() compares against the committed state.
+            if session.is_modified(obj, include_collections=False):
+                changes[f"{model_class.__name__} updated"] += 1
+    
+    for obj in session.deleted:
+        model_class = type(obj)
+        if model_class in relevant_models:
+            changes[f"{model_class.__name__} deleted"] += 1
+    
+    if not changes:
+        return
+    
+    # Build human-readable reason
+    parts = []
+    for desc, count in changes.items():
+        if count > 1:
+            parts.append(f"{desc} (×{count})")
+        else:
+            parts.append(desc)
+    reason = ", ".join(parts)
+    
+    # Mark stale (lazy import to avoid circular dependency)
+    try:
+        from backend.services.pnl_calculation_service import PnLCalculationService
+        service = PnLCalculationService.get_instance()
+        service.mark_stale(reason)
+    except Exception as e:
+        # Don't let listener errors break the flush
+        log.warning("pnl_invalidation_listener_error", error=str(e))
+
+
+def register_pnl_invalidation_listener():
+    """
+    Register the after_flush event listener on the SQLAlchemy engine.
+    
+    Should be called once during application startup (in FastAPI lifespan).
+    Idempotent — safe to call multiple times.
+    """
+    global _pnl_listener_registered
+    if _pnl_listener_registered:
+        return
+    
+    engine = get_engine()
+    
+    # Listen on Session class events — fires for ALL sessions using this engine
+    from sqlalchemy.orm import Session as SASession
+    event.listen(SASession, "after_flush", _pnl_after_flush)
+    
+    _pnl_listener_registered = True
+    log.info("pnl_invalidation_listener_registered")

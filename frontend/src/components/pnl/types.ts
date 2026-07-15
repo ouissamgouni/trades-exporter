@@ -7,21 +7,24 @@
  * - Principle 3: Everything must be traceable
  */
 
-import { CostMethod, LotMode, TransactionAssetRef } from '../../types';
+import { CostMethod, LotMode, AssetRef, Asset } from '../../types';
+
 
 // ============================================================================
-// Core Reference Types
+// P&L Calculation Service Status (polling endpoint)
 // ============================================================================
 
-/**
- * Asset reference containing both ID and display name.
- * Used throughout P&L responses for asset identification.
- * Note: Different from TransactionAssetRef which uses (asset_id, symbol, label)
- */
-export interface AssetRef {
-    id: number;
-    name: string;  // Asset symbol/name for display
+export type PnLCalcStatus = 'idle' | 'stale' | 'calculating' | 'completed' | 'error';
+
+export interface PnLCalculationStatusResponse {
+    status: PnLCalcStatus;
+    stale_since: string | null;
+    stale_reasons: string[];
+    current_version_id: number | null;
+    last_calculated_at: string | null;
+    error: string | null;
 }
+
 
 // ============================================================================
 // Calculation Context Types
@@ -83,6 +86,7 @@ export interface VersionListItem {
     created_at?: string;
     expires_at?: string;
     status: 'draft' | 'committed' | 'active';
+    trigger?: 'auto' | 'manual' | 'refresh';
     // Config fields
     lot_method: string;
     lot_mode: string;
@@ -90,6 +94,12 @@ export interface VersionListItem {
     base_currency_symbol?: string;
     allow_negative_balances: boolean;
     residual_tolerance_pct: number;
+    compute_residuals?: boolean;
+    // Full config for history display
+    crypto_swap_taxable?: boolean;
+    fee_taxable?: boolean;
+    use_price_fallback?: boolean;
+    price_staleness_window_days?: number;
 }
 
 /**
@@ -109,6 +119,7 @@ export interface PnLVersionResponse {
     created_at?: string;  // Optional for fresh calculation
     expires_at?: string;
     status: 'draft' | 'committed' | 'active' | 'not_persisted';
+    trigger?: 'auto' | 'manual' | 'refresh';
 
     // Config
     lot_method: string;
@@ -117,22 +128,30 @@ export interface PnLVersionResponse {
     base_currency_symbol?: string;
     allow_negative_balances: boolean;
     residual_tolerance_pct: number;
+    compute_residuals?: boolean;
+    // Full config for reproducibility
+    crypto_swap_taxable?: boolean;
+    fee_taxable?: boolean;
+    use_price_fallback?: boolean;
+    price_staleness_window_days?: number;
 
-    // Summary
+    // Summary (from metrics_service — authoritative)
     total_realized_pnl: number;
+    current_value: number;
+    cost_basis: number;
+    unrealized_pnl: number;
+    taxable_realized_pnl: number;
 
     // Fee summary (populated for /calculate, for immediate summary card display)
     total_fees_in_base: number;
     fee_entry_count: number;
 
-    // ID arrays for tab title counts (derive count from length)
-    // Populated for /calculate, empty for version retrieval
-    unit_ids: number[];
-    cost_lot_ids: number[];
-    consumed_slice_ids: number[];
-    realized_pnl_ids: number[];
+    // Entity ID lists for frontend count displays (populated for /calculate and /versions/{id})
+    calculation_unit_ids: number[];
     warning_ids: number[];
-    settlement_ids: number[];
+    cost_lot_ids: number[];
+    realized_pnl_ids: number[];
+    fee_ids: number[];
     cost_lot_event_ids: number[];
 }
 
@@ -141,18 +160,24 @@ export interface PnLVersionResponse {
  * Aggregated balance data per asset with realized P&L.
  */
 export interface AggregatedBalanceItem {
-    asset: { id: number; name: string };
+    asset: AssetRef;
     account_ids: number[];  // All account IDs holding this asset (for filtering)
     qty: number;
     cost_basis_in_base: number;
+    total_invested_in_base?: number;  // Cash actually spent (excludes spinoffs/transfers)
     avg_unit_cost_in_base: number;
     lot_count: number;
     realized_pnl_in_base: number;
+    taxable_realized_pnl_in_base?: number;  // Taxable portion of realized P&L
     realized_event_count: number;
     warning_count: number;
     unsettled_negative_count: number;  // Count of unsettled negative lots (excluded when filter active)
     total_fees_in_base?: number;  // Total fees at FMV (proceeds from fee disposals)
     category_ids: number[];  // Category IDs assigned to this asset (for client-side filtering)
+    has_open_position?: boolean;
+    price_fetch_eligible?: boolean;
+    valuation_status?: string;
+    valuation_note?: string | null;
 }
 
 // ============================================================================
@@ -183,9 +208,7 @@ export interface PnLSummary {
 // ============================================================================
 
 export interface AssetPnLRow {
-    asset_id: number;
-    asset_symbol: string;
-    asset_label?: string;
+    asset: AssetRef
 
     // Account tracking for filtering
     account_ids: number[];  // All accounts holding this asset
@@ -197,11 +220,13 @@ export interface AssetPnLRow {
     quantity: number;
     market_value: number;
     cost_basis: number;
+    total_invested?: number;  // Cash actually spent (excludes spinoffs/transfers)
 
     // P&L
     unrealized_pnl: number;
     unrealized_pnl_pct: number;
     realized_pnl: number;
+    taxable_realized_pnl: number;  // Taxable portion of realized P&L
 
     // Fees for this asset
     total_fees: number;
@@ -210,6 +235,16 @@ export interface AssetPnLRow {
     lot_count: number;
     realized_event_count: number;
     warning_count: number;
+
+    // Whether this asset has cost lots in the P&L calculation
+    has_lots?: boolean;
+    has_open_position?: boolean;
+    price_fetch_eligible?: boolean;
+    valuation_status?: string;
+    valuation_note?: string | null;
+
+    // Whether this asset is unmapped (appears in live balance but has no DB entry)
+    is_unmapped?: boolean;
 
     // Unit values
     unit_cost?: number;              // Average cost basis per unit (from lots)
@@ -245,7 +280,9 @@ export interface CostLot {
 
     // Origin traceability (Principle 3)
     acquired_at: string;
+    created_at?: string;  // When the lot record was created in the PnL engine
     origin_transaction_id?: number;
+    last_updated_by_tx_id?: number;  // Transaction that last modified this lot (consumption/settlement)
     origin_unit_id?: number;  // CalculationUnit that created this lot
     origin_unit_label?: string;  // Human-readable label of origin unit
     origin_label?: string;
@@ -263,9 +300,45 @@ export interface CostLot {
     holding_days?: number;
     is_long_term?: boolean;
 
+    // Cost provenance
+    cost_source?: string;  // "fmv" | "proceeds" | "inherited" | "provisional" | "base_currency"
+    cost_fmv_price?: number;  // FMV unit price used (if cost_source is fmv/provisional)
+    cost_fmv_source?: string;  // Price source (e.g., "coingecko", "fallback:cached")
+    cost_fmv_timestamp?: string;  // When the FMV price was snapped
+    cost_fmv_stale?: boolean;  // Whether the FMV price was flagged stale
+
     // Settlement tracking for negative lots
     total_settled?: number;  // Amount already settled
     settlement_count?: number;  // Number of settlements
+
+    // Cost basis chain (for transfers/splits — links to source lot)
+    source_lot_id?: number;  // The lot this was created from (if inherited/split)
+}
+
+// ============================================================================
+// Cost Basis Chain Types (Backward Provenance Trail)
+// ============================================================================
+
+export interface CostBasisChainNode {
+    lot_id: number;
+    transaction_id?: number;
+    transaction_type?: string;        // e.g. "buy", "transfer", "swap", "split"
+    transaction_source_type?: string; // Source-level type
+    timestamp?: string;               // TX date or lot acquired_at
+    asset_symbol?: string;
+    asset_id?: number;
+    account_name?: string;
+    account_id?: number;
+    qty: number;
+    unit_cost: number;
+    cost_source?: string;             // "fmv", "inherited", "proceeds", "provisional", "base_currency"
+    unit_pattern?: string;            // "transfer", "swap", "split", "flow"
+    children: CostBasisChainNode[];   // Source lots (backward, toward origin)
+}
+
+export interface CostBasisChainResponse {
+    chain: CostBasisChainNode[];
+    depth: number;                     // Maximum depth reached
 }
 
 // ============================================================================
@@ -292,10 +365,7 @@ export interface Settlement {
 
 export interface RealizedPnLRow {
     id: string;
-    asset: AssetRef;  // Asset reference with id and name
-    // Deprecated: use asset.id and asset.name instead
-    asset_id?: number;
-    asset_symbol?: string;
+    asset: AssetRef;
 
     // Event details
     realized_at: string;
@@ -313,7 +383,7 @@ export interface RealizedPnLRow {
     cost_price_in_base?: number;
 
     // Proceeds tracking - how FMV was determined (for transparency)
-    proceeds_source?: 'fmv_lookup' | 'base_currency' | 'transfer';
+    proceeds_source?: 'fmv_lookup' | 'fmv' | 'provisional' | 'base_currency' | 'transfer';
     proceeds_price?: number;  // Unit price used (if applicable)
     proceeds_price_source?: string;  // 'price_service', 'coingecko', 'manual', 'fallback'
     proceeds_price_timestamp?: string;  // When price was fetched/valid
@@ -338,6 +408,9 @@ export interface RealizedPnLRow {
 
     // Notes
     notes?: string;
+
+    // Attributed asset - underlying asset for derivative settlements
+    attributed_asset?: AssetRef;
 }
 
 // ============================================================================
@@ -422,6 +495,8 @@ export interface FeeEntry {
     // Used for linking fee P&L to asset-level P&L summary
     related_asset_id?: number;
     related_asset_symbol?: string;
+    // Attributed asset - the underlying asset for derivative settlements
+    attributed_asset?: AssetRef;
 }
 
 export interface FeeSummary {
@@ -477,7 +552,14 @@ export interface ConsumedSliceDetail {
 // Cost Lot Event (audit trail for lot lifecycle)
 // ============================================================================
 
-export type LotEventType = 'created' | 'consumed' | 'settled' | 'transferred' | 'adjusted';
+export type LotEventType =
+    | 'created'           // Positive lot created
+    | 'created-negative'  // Negative lot created (short)
+    | 'consumed'          // Lot partially/fully consumed
+    | 'settled'           // Lot exhausted (zero balance)
+    | 'transferred'       // Lot moved between accounts
+    | 'adjusted'          // Manual cost basis adjustment
+    | 'merged';           // Multiple lots combined (future)
 
 export interface CostLotEventEntry {
     event_id: number;
@@ -493,13 +575,24 @@ export interface CostLotEventEntry {
     qty_remaining_after: number;
     cost_basis_remaining_after?: number;
 
+    // Asset and account-level balances after this event
+    balance_after?: number;  // Total asset balance across all accounts
+    account_balance_after?: number;  // Balance for this specific account
+
     related_lot_id?: number;
     triggered_by_transaction_id?: number;
     triggered_by_unit_id?: number;
     triggered_by_unit_label?: string;
+    triggered_by_unit_pattern?: string;
 
     timestamp: string;
-    event_metadata?: Record<string, any>;
+
+    // FMV details for 'created' events where cost basis used FMV
+    cost_source?: string;  // 'fmv' | 'provisional' | 'inherited' | 'proceeds' | 'base_currency'
+    cost_fmv_price?: number;  // FMV unit price used
+    cost_fmv_source?: string;  // Price provider (e.g., 'coingecko', 'fallback')
+    cost_fmv_timestamp?: string;  // When price was snapped
+    cost_fmv_stale?: boolean;  // Whether the FMV price was flagged stale
 }
 
 // ============================================================================
@@ -514,6 +607,12 @@ export interface RealizedEntryDetail {
     pnl_in_base: number;
     disposal_taxable: boolean;
     is_fee?: boolean;  // True if this entry is from a fee disposal
+
+    // Proceeds tracking - how FMV was determined (for transparency)
+    proceeds_source?: 'fmv_lookup' | 'fmv' | 'provisional' | 'base_currency' | 'transfer';
+    proceeds_price?: number;  // Unit price used
+    proceeds_price_source?: string;  // 'coingecko', 'manual', 'fallback'
+    proceeds_price_timestamp?: string;  // When price was fetched/valid
 }
 
 // ============================================================================
@@ -565,6 +664,45 @@ export interface SavedPnLVersion {
 }
 
 // ============================================================================
+// Paginated Response Types (for P&L Audit tabs)
+// ============================================================================
+
+/**
+ * Generic paginated response wrapper.
+ * Backend returns { items, total, page, limit } for paginated endpoints.
+ */
+export interface PaginatedResponse<T> {
+    items: T[];
+    total: number;
+    page: number;
+    limit: number;
+}
+
+/** Paginated calculation units response */
+export type PaginatedUnitsResponse = PaginatedResponse<PnLCalculationUnit>;
+
+/** Paginated cost lots response */
+export type PaginatedLotsResponse = PaginatedResponse<CostLot>;
+
+/** Paginated consumed slices response */
+export type PaginatedConsumedSlicesResponse = PaginatedResponse<ConsumedSliceDetail>;
+
+/** Paginated realized P&L entries response */
+export type PaginatedRealizedPnLResponse = PaginatedResponse<RealizedPnLRow>;
+
+/** Paginated fee entries response */
+export type PaginatedFeesResponse = PaginatedResponse<FeeEntry>;
+
+/** Paginated warnings response */
+export type PaginatedWarningsResponse = PaginatedResponse<PnLWarningItem>;
+
+/** Paginated cost lot events response */
+export type PaginatedEventsResponse = PaginatedResponse<CostLotEventEntry>;
+
+/** Paginated settlements response */
+export type PaginatedSettlementsResponse = PaginatedResponse<Settlement>;
+
+// ============================================================================
 // Data Explorer Types (Calculation Units, Bundles, Transactions)
 // ============================================================================
 
@@ -588,14 +726,14 @@ export interface OriginTransactionDetail {
     source_to_account?: string;
 
     // Base asset - nested ref (preferred) + legacy flat fields
-    linked_asset?: TransactionAssetRef | null;
+    linked_asset?: AssetRef | null;
     asset_id?: number;
     asset_symbol?: string;
     source_asset_symbol?: string;
     quantity?: number;
 
     // Pricing - nested ref (preferred) + legacy flat fields
-    price_quote_asset?: TransactionAssetRef | null;
+    price_quote_asset?: AssetRef | null;
     price?: number;
     price_quote_asset_id?: number;
     price_quote_asset_symbol?: string;
@@ -603,74 +741,130 @@ export interface OriginTransactionDetail {
     total?: number;
 
     // Fee - nested ref (preferred) + legacy flat fields
-    fee_quote_asset?: TransactionAssetRef | null;
+    fee_quote_asset?: AssetRef | null;
     fee?: number;
     fee_quote_asset_id?: number;
     fee_quote_asset_symbol?: string;
     source_fee_quote_asset_symbol?: string;
 }
 
-export interface CalculationUnit {
+/**
+ * Minimal leg detail for embedded display in transactions.
+ * Also exported as LegSummary for backward compatibility with backend naming.
+ */
+export interface LegDetail {
+    asset: AssetRef;
+    qty: number;
+    leg_type: 'inflow' | 'outflow' | 'fee';
+    transaction_id: number;
+}
+
+
+
+/**
+ * Full transaction with embedded legs for Unit → Transaction → Legs structure.
+ * Display format: [TX#1234] 01/08 10:30 [Account] [source] [source_tx_type] [BTC] 0.5 → 24K [USD] | Fee 0.001 [BTC]
+ */
+export interface PnLTransaction {
+    transaction_id: number;
+    date_time?: string;
+
+    // Account
+    account_id?: number;
+    account_name?: string;
+
+    // Source info
+    source?: string;
+    transaction_type?: string;  // "trade", "transfer", "margin", "cost"
+    source_transaction_type?: string;  // From source: "SPOT_TRADE", "deposit", etc.
+    direction?: string;  // "inflow", "outflow", "neutral"
+
+    // Primary asset (from transaction)
+    asset?: AssetRef;
+    quantity?: number;
+
+    // Pricing
+    price?: number;
+    total?: number;
+    price_quote_asset?: AssetRef;
+
+    // Fee (from origin transaction)
+    fee?: number;
+    fee_quote_asset?: AssetRef;
+}
+
+
+
+/**
+ * P&L Calculation Unit (display model for P&L panels).
+ * Different from global CalculationUnit which represents user-created bundles.
+ * Mapped from backend ProcessedUnitResponse via mapProcessedUnitToCalculationUnit().
+ */
+export interface AssetBalanceSnapshot {
+    asset: { id: number; symbol: string };
+    balance: number;
+    accounts?: Array<{ account_id: number; account_name: string; balance: number }>;
+}
+
+export interface PnLCalculationUnit {
+    // Core fields (from backend)
     unit_id: number;
     unit_label?: string;  // Human-readable label (e.g., "SWAP BTC → ETH")
     pattern?: string | null;    // Pattern: transfer, swap, split, unknown
-    date: string;
+    date: string;  // Mapped from backend's timestamp field
 
-    // Primary asset (for display - first outflow or inflow)
-    asset_id: number;
-    asset_symbol: string;
+    // Transaction structure (from backend)
+    transactions: Array<{
+        id: number;
+        date_time?: string | null;
+        account_id?: number | null;
+        account_name?: string | null;
+        source?: string | null;
+        transaction_type?: string | null;
+        source_transaction_type?: string | null;
+        source_transaction_id?: string | null;
+        direction?: string | null;
+        asset_symbol?: string | null;
+        symbol?: string | null;
+        quantity?: number | null;
+        price?: number | null;
+        price_quote_asset_symbol?: string | null;
+        total?: number | null;
+        fee?: number | null;
+        fee_quote_asset_symbol?: string | null;
+        from_account_name?: string | null;
+        to_account_name?: string | null;
+        source_from_account?: string | null;
+        source_to_account?: string | null;
+        network?: string | null;
+        network_transaction_id?: string | null;
+        source_asset_symbol?: string | null;
+    }>;
+    legs: LegDetail[];
 
-    // All assets involved
-    outflow_asset_ids?: number[];
-    inflow_asset_ids?: number[];
-    fee_asset_ids?: number[];
-    outflow_asset_symbols?: string[];
-    inflow_asset_symbols?: string[];
-    fee_asset_symbols?: string[];
-
-    // Transaction references (all transactions that make up this unit)
-    transaction_ids?: number[];
-
-    // Lot references (for audit linking)
-    lots_created_uuids?: string[];
-    lots_consumed_uuids?: string[];
-
-    // Detailed consumption info (for audit drill-down)
-    consumed_slices?: ConsumedSliceDetail[];
+    // P&L results (from backend)
     realized_entries?: RealizedEntryDetail[];
-    settlements?: Settlement[];  // Unit-level settlements for negative lots
-
-    // P&L impact
     realized_pnl_in_base?: number;
     is_disposal_taxable?: boolean;
 
-    // Fee indicator
-    has_fees?: boolean;  // True if unit has fee legs
-    fee_count?: number;  // Number of fee entries in this unit
+    // Fee indicator (from backend)
+    has_fees?: boolean;
     total_fees_in_base?: number;  // Total fee value in base currency
 
-    // Warnings specific to this unit
+    // Warnings (from backend)
     warnings?: PnLWarningItem[];
 
-    // Counts for summary
-    member_count?: number;
-    lots_created_count?: number;
-    lots_consumed_count?: number;
-    realized_entry_count?: number;
-
-    // Event IDs for counting (avoids loading full lot events)
+    // Event IDs (from backend - for lazy loading)
     event_ids?: number[];
 
-    // Legacy fields (for backward compat with old transaction display)
-    quantity?: number;
-    value_in_base?: number;
-    account_id?: number;
-    account_name?: string;
-    transaction_id?: number;
-    cost_lot_id?: number;
+    // Balance snapshots (computed client-side for Activity Feed)
+    balance_snapshots?: AssetBalanceSnapshot[];
 }
 
-// Deprecated - use CalculationUnit instead
+// Backward compatibility alias
+export type CalculationUnit = PnLCalculationUnit;
+
+// Deprecated - use PnLCalculationUnit instead
 export interface BundleSummary {
     bundle_id: number;  // Legacy - maps to calculation_unit_id
     pattern?: string;
@@ -717,7 +911,7 @@ export interface PieChartDataPoint {
 
 /**
  * Aggregates market value by category within a selected dimension.
- * 
+ *
  * @param assets - Array of AssetPnLRow with market_value and category_ids
  * @param dimensionId - The dimension to group by (e.g., "Asset Class")
  * @param categories - All categories (will be filtered to the selected dimension)
@@ -754,25 +948,29 @@ export function aggregateMarketValueByCategory(
     const uncategorizedAssetIds = new Set<number>();
 
     // Aggregate market value by category
-    for (const asset of assets) {
+    for (const assetpnlrow of assets) {
         // Find categories for this asset within the selected dimension
-        const matchingCategoryIds = asset.category_ids.filter(catId =>
+        const matchingCategoryIds = assetpnlrow.category_ids.filter(catId =>
             dimensionCategories.some(c => c.id === catId)
         );
 
         if (matchingCategoryIds.length === 0) {
             // Asset has no category in this dimension -> uncategorized
-            uncategorizedValue += asset.market_value;
-            uncategorizedAssetIds.add(asset.asset_id);
+            uncategorizedValue += assetpnlrow.market_value;
+            if (assetpnlrow.asset.id != null) {
+                uncategorizedAssetIds.add(assetpnlrow.asset.id);
+            }
         } else {
             // Asset belongs to one or more categories in this dimension
             // Split value evenly if multiple categories (rare edge case)
-            const valuePerCategory = asset.market_value / matchingCategoryIds.length;
+            const valuePerCategory = assetpnlrow.market_value / matchingCategoryIds.length;
             for (const catId of matchingCategoryIds) {
                 const entry = categoryMap.get(catId);
                 if (entry) {
                     entry.value += valuePerCategory;
-                    entry.assetIds.add(asset.asset_id);
+                    if (assetpnlrow.asset.id != null) {
+                        entry.assetIds.add(assetpnlrow.asset.id);
+                    }
                 }
             }
         }
@@ -815,3 +1013,302 @@ export function aggregateMarketValueByCategory(
 
     return result;
 }
+
+// Currency color palette for "group by currency" views
+const CURRENCY_COLORS: Record<string, string> = {
+    USD: '#22C55E',  // Green
+    EUR: '#3B82F6',  // Blue
+    GBP: '#A855F7',  // Purple
+    JPY: '#EF4444',  // Red
+    CHF: '#F97316',  // Orange
+    CAD: '#EC4899',  // Pink
+    AUD: '#14B8A6',  // Teal
+    CNY: '#EAB308',  // Yellow
+};
+
+/**
+ * Aggregates market value by denomination currency.
+ *
+ * @param assets - Array of AssetPnLRow with market_value
+ * @param assetCurrencyMap - Map of asset_id → currency symbol (from denomination_currency)
+ * @returns Array of PieChartDataPoint sorted by value descending
+ */
+export function aggregateMarketValueByCurrency(
+    assets: AssetPnLRow[],
+    assetCurrencyMap: Record<number, string>,
+): PieChartDataPoint[] {
+    const currencyBuckets = new Map<string, { value: number; assetIds: Set<number> }>();
+    let unknownValue = 0;
+    const unknownAssetIds = new Set<number>();
+
+    for (const row of assets) {
+        const assetId = row.asset.id;
+        const ccy = assetId != null ? assetCurrencyMap[assetId] : undefined;
+
+        if (ccy) {
+            const bucket = currencyBuckets.get(ccy) || { value: 0, assetIds: new Set() };
+            bucket.value += row.market_value;
+            if (assetId != null) bucket.assetIds.add(assetId);
+            currencyBuckets.set(ccy, bucket);
+        } else {
+            unknownValue += row.market_value;
+            if (assetId != null) unknownAssetIds.add(assetId);
+        }
+    }
+
+    const totalValue = assets.reduce((s, a) => s + a.market_value, 0);
+    const result: PieChartDataPoint[] = [];
+
+    for (const [ccy, bucket] of currencyBuckets.entries()) {
+        if (bucket.value > 0) {
+            result.push({
+                categoryId: null,
+                label: ccy,
+                color: CURRENCY_COLORS[ccy] || '#6B7280',
+                value: bucket.value,
+                percentage: totalValue > 0 ? (bucket.value / totalValue) * 100 : 0,
+                assetCount: bucket.assetIds.size,
+            });
+        }
+    }
+
+    if (unknownValue > 0) {
+        result.push({
+            categoryId: null,
+            label: 'Unknown',
+            color: '#9CA3AF',
+            value: unknownValue,
+            percentage: totalValue > 0 ? (unknownValue / totalValue) * 100 : 0,
+            assetCount: unknownAssetIds.size,
+        });
+    }
+
+    result.sort((a, b) => b.value - a.value);
+    return result;
+}
+
+/**
+ * Backend response model for processed calculation units (NEW refactored structure).
+ * Matches ProcessedUnitResponse from backend/api/routes/pnl.py
+ */
+export interface ProcessedUnitResponse {
+    unit_id?: number;
+    unit_label: string;
+    pattern?: string;
+    timestamp: string;  // ISO string from backend
+
+    // NEW: Deduplicated transaction structure
+    transactions: Array<{
+        id: number;
+        date_time?: string | null;
+        account_id?: number | null;
+        account_name?: string | null;
+        source?: string | null;
+        transaction_type?: string | null;
+        source_transaction_type?: string | null;
+        source_transaction_id?: string | null;
+        direction?: string | null;
+        asset_symbol?: string | null;
+        symbol?: string | null;
+        quantity?: number | null;
+        price?: number | null;
+        price_quote_asset_symbol?: string | null;
+        total?: number | null;
+        fee?: number | null;
+        fee_quote_asset_symbol?: string | null;
+        from_account_name?: string | null;
+        to_account_name?: string | null;
+        source_from_account?: string | null;
+        source_to_account?: string | null;
+        network?: string | null;
+        network_transaction_id?: string | null;
+        source_asset_symbol?: string | null;
+    }>;  // Dict keyed by transaction ID
+    legs: LegDetail[];
+    has_fees: boolean;
+    total_fees_in_base?: number;  // Total fee value in base currency
+
+    // Cost basis tracking
+    cost_basis?: {
+        lots?: Array<{ cost_lot_id: string }>;
+        consumed?: ConsumedSliceDetail[];
+        settlements?: Settlement[];
+    };
+
+    // P&L results
+    realized_entries: RealizedEntryDetail[];
+    warnings: PnLWarningItem[];
+    event_ids: number[];
+    realized_pnl_in_base: number;
+    is_disposal_taxable: boolean;
+}
+
+/**
+ * Helper function to map backend ProcessedUnitResponse to frontend PnLCalculationUnit.
+ * Directly maps the NEW backend structure (transactions dict + legs array).
+ */
+export function mapProcessedUnitToCalculationUnit(unit: ProcessedUnitResponse): PnLCalculationUnit {
+    return {
+        unit_id: unit.unit_id ?? 0,
+        unit_label: unit.unit_label || '',
+        pattern: unit.pattern || 'unknown',
+        date: unit.timestamp,
+        transactions: unit.transactions,
+        legs: unit.legs,
+        has_fees: unit.has_fees,
+        total_fees_in_base: unit.total_fees_in_base,
+        realized_entries: unit.realized_entries || [],
+        warnings: unit.warnings || [],
+        realized_pnl_in_base: unit.realized_pnl_in_base || 0,
+        is_disposal_taxable: unit.is_disposal_taxable || false,
+        event_ids: unit.event_ids || [],
+    };
+}
+
+// ============================================================================
+// Filter Types (Display-time filtering in Portfolio View)
+// ============================================================================
+
+/**
+ * State for P&L display-time filters.
+ * Applied client-side to filter the Portfolio View (summary, charts, table).
+ * Does not affect Full Audit view.
+ */
+export interface PnLFilterState {
+    selectedAccountIds: number[];    // Empty = all accounts (no filter)
+    selectedCategoryIds: number[];   // Empty = all categories (no filter)
+    includeUnsettledNegative: boolean;
+}
+
+/**
+ * Per-account balance breakdown for a single asset.
+ * Used for expandable rows in the Asset P&L table.
+ */
+export interface AccountBalanceBreakdown {
+    account_id: number;
+    account_name: string;
+    qty: number;
+    cost_basis_in_base: number;
+    avg_unit_cost_in_base: number;
+    lot_count: number;
+    // Computed with live prices
+    market_value?: number;
+    unrealized_pnl?: number;
+    unrealized_pnl_pct?: number;
+}
+
+/**
+ * Raw balance response from GET /versions/{id}/balances?group_by_asset=false
+ * One entry per (asset, account) pair.
+ */
+export interface PerAccountBalanceItem {
+    asset: AssetRef;
+    account_id: number;
+    account_name: string;
+    qty: number;
+    cost_basis_in_base: number;
+    total_invested_in_base?: number;  // Cash actually spent (excludes spinoffs/transfers)
+    avg_unit_cost_in_base: number;
+    lot_count: number;
+    realized_pnl_in_base: number;
+    realized_event_count: number;
+    warning_count: number;
+    unsettled_negative_count: number;
+    total_fees_in_base?: number;
+    category_ids: number[];
+    has_open_position?: boolean;
+    price_fetch_eligible?: boolean;
+    valuation_status?: string;
+    valuation_note?: string | null;
+}
+
+// ============================================================================
+// Live Balance Comparison Types
+// ============================================================================
+
+/**
+ * An asset that appears in live connector balances but has no matching
+ * AssetPnLRow (no P&L data). Typically dust, spam, or un-imported tokens.
+ */
+export interface UnmappedLiveAsset {
+    symbol: string;
+    totalQty: number;
+    /** Market value in base currency, null if no price available */
+    marketValue: number | null;
+    /** Per-account/connector breakdown of this unmapped asset's live balance */
+    accounts?: { accountName: string; connectorType: string; chain: string | null; qty: number }[];
+}
+
+
+// ============================================================================
+// Enriched Transaction Types (PnL Audit — Transaction-level view)
+// ============================================================================
+
+export interface EnrichedTransactionFeeDetail {
+    fee_amount: number;
+    fee_in_base: number;
+    asset?: AssetRef | null;
+}
+
+export interface CostLotEventSummaryItem {
+    event_type: string;
+    quantity_delta: number;
+    lot_id?: number | null;
+}
+
+/** Transaction extended with P&L enrichment data from the enriched-transactions endpoint. */
+export interface EnrichedTransaction {
+    // All standard Transaction fields
+    id: number;
+    source?: string;
+    source_transaction_id?: string;
+    source_transaction_type?: string;
+    source_asset_symbol?: string;
+    account_id?: number;
+    asset_id?: number;
+    price_quote_asset_id?: number;
+    fee_quote_asset_id?: number;
+    date_time?: string;
+    direction?: string;
+    transaction_type?: string;
+    quantity?: number;
+    price?: number;
+    total?: number;
+    fee?: number;
+    include_fee?: boolean;
+    from_account_id?: number;
+    to_account_id?: number;
+    network?: string;
+    network_transaction_id?: string;
+    review_status?: string;
+    taxability_status?: string;
+    tags?: Array<Record<string, unknown>>;
+    linked_asset?: AssetRef | null;
+    price_quote_asset?: AssetRef | null;
+    fee_quote_asset?: AssetRef | null;
+    account_name?: string;
+    from_account_name?: string;
+    to_account_name?: string;
+    connector_name?: string;
+
+    // P&L enrichment fields
+    unit_id?: number | null;
+    unit_pattern?: string | null;
+    unit_label?: string | null;
+    realized_entries?: RealizedEntryDetail[];
+    realized_pnl_in_base?: number | null;
+    fee_entries?: EnrichedTransactionFeeDetail[];
+    total_fees_in_base?: number | null;
+    cost_lot_event_summary?: CostLotEventSummaryItem[];
+    is_disposal_taxable?: boolean | null;
+}
+
+export interface EnrichedTransactionsFilterOptions {
+    patterns: Array<{ value: string; label?: string; count: number }>;
+    total_transactions: number;
+    has_warnings_count: number;
+    has_realized_pnl_count: number;
+    has_fees_count: number;
+    warning_types: Array<{ value: string; label?: string; count: number }>;
+}
+

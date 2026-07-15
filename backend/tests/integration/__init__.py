@@ -1,4 +1,4 @@
 """
-Integration tests for the trades-exporter project.
+Integration tests for TradeTrail.
 Tests that interact with external APIs and services.
 """

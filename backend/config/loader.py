@@ -26,9 +26,6 @@ load_dotenv()
 
 CONFIG_DIR = Path(__file__).parent
 
-# Default database URL for local development
-DEFAULT_DATABASE_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
-
 
 def get_database_url() -> str:
     """
@@ -36,7 +33,10 @@ def get_database_url() -> str:
 
     Priority:
     1. DATABASE_URL environment variable (recommended)
-    2. Constructed from individual POSTGRES_* vars (legacy support)
+    2. Constructed from individual POSTGRES_* vars
+
+    Raises ValueError if no database configuration is found.
+    Set DATABASE_URL or POSTGRES_* env vars (via .env file or environment).
 
     Returns:
         PostgreSQL connection URL
@@ -46,12 +46,19 @@ def get_database_url() -> str:
     if database_url:
         return database_url
 
-    # Fallback: Construct from individual vars (legacy support)
-    user = os.getenv("POSTGRES_USER", "trades_user")
-    password = os.getenv("POSTGRES_PASSWORD", "trades_password")
+    # Fallback: Construct from individual vars
+    user = os.getenv("POSTGRES_USER")
+    password = os.getenv("POSTGRES_PASSWORD")
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
-    db_name = os.getenv("POSTGRES_DB", "trades_db_dev")
+    db_name = os.getenv("POSTGRES_DB")
+
+    if not all([user, password, db_name]):
+        raise ValueError(
+            "Database not configured. Set DATABASE_URL or "
+            "POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB environment variables. "
+            "See .env.example for reference."
+        )
 
     return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
 
@@ -67,44 +74,27 @@ def get_database_path() -> str:
     return get_database_url()
 
 
-# Legacy functions for backward compatibility during migration
-# TODO: Remove these after full migration to DATABASE_URL
-
-_test_mode_override: bool | None = None
-
-
-def set_test_mode(enabled: bool):
+def get_uvicorn_access_log_exclude_paths() -> Optional[List[str]]:
     """
-    DEPRECATED: Use DATABASE_URL environment variable instead.
-    Set global test mode override.
-    """
-    global _test_mode_override
-    _test_mode_override = enabled
-    # Log deprecation warning
-    logging.warning(
-        "set_test_mode() is deprecated. Use DATABASE_URL environment variable instead."
-    )
+    Get uvicorn access log exclude paths configuration.
 
-
-def is_test_mode() -> bool:
+    Returns:
+        - None: Access logs fully disabled (default)
+        - []: Access logs enabled for all endpoints
+        - List[str]: Access logs enabled, excluding specified paths
     """
-    DEPRECATED: Use DATABASE_URL environment variable instead.
-    Check if test mode is enabled (via override, env var, or settings).
-    """
-    global _test_mode_override
-    if _test_mode_override is not None:
-        return _test_mode_override
-
-    # Check environment variable first
-    env_test_mode = os.getenv("TEST_MODE", "").lower()
-    if env_test_mode in ("true", "1", "yes"):
-        return True
-    if env_test_mode in ("false", "0", "no"):
-        return False
+    # Check environment variable first (expects JSON list)
+    env_paths = os.getenv("UVICORN_ACCESS_LOG_EXCLUDE_PATHS")
+    if env_paths:
+        try:
+            return json.loads(env_paths)
+        except (json.JSONDecodeError, TypeError):
+            # Invalid JSON, fall back to settings
+            pass
 
     # Fall back to settings.yaml
     settings = load_settings()
-    return settings.get("test_mode", False)
+    return settings.get("uvicorn_access_log_exclude_paths")
 
 
 def load_settings(path: str | None = None) -> dict:
@@ -138,6 +128,27 @@ def get_coingecko_api_keys() -> List[str]:
 
     settings = load_settings()
     return settings.get("coingecko_api_keys", [])
+
+
+def get_connectors_output_path() -> str:
+    """
+    Get the base output path for connector logs and raw data.
+
+    Priority:
+    1. CONNECTORS_OUTPUT_PATH environment variable
+    2. Default: backend/data/output/connectors
+
+    Returns:
+        Absolute path to connectors output directory
+    """
+    env_path = os.getenv("CONNECTORS_OUTPUT_PATH")
+    if env_path:
+        return os.path.abspath(env_path)
+
+    # Default to backend/data/output/connectors
+    # Get backend directory (parent of config directory)
+    backend_dir = Path(__file__).parent.parent
+    return str(backend_dir / "data" / "output" / "connectors")
 
 
 def load_credentials(exchange_name: str) -> dict:
@@ -200,6 +211,22 @@ def load_credentials(exchange_name: str) -> dict:
     }
 
 
+def has_exchange_credentials(exchange_name: str) -> bool:
+    """Check whether usable credentials exist for an exchange.
+
+    Mirrors load_credentials() resolution (env vars, then settings.yaml)
+    without raising. Intended for test-collection-time skip conditions
+    (e.g. `pytest.mark.skipif(not has_exchange_credentials("binance"), ...)`)
+    so live-API integration tests skip cleanly instead of failing when a
+    developer/CI environment has no secrets configured.
+    """
+    try:
+        load_credentials(exchange_name)
+        return True
+    except (KeyError, ValueError):
+        return False
+
+
 def get_etherscan_api_key() -> Optional[str]:
     """Get Etherscan API key from environment or settings."""
     env_key = os.getenv("ETHERSCAN_API_KEY")
@@ -209,6 +236,17 @@ def get_etherscan_api_key() -> Optional[str]:
     settings = load_settings()
     web3_config = settings.get("web3_wallets", {})
     return web3_config.get("etherscan_api_key")
+
+
+def get_bscscan_api_key() -> Optional[str]:
+    """Get BscScan API key from environment or settings."""
+    env_key = os.getenv("BSCSCAN_API_KEY")
+    if env_key:
+        return env_key
+
+    settings = load_settings()
+    web3_config = settings.get("web3_wallets", {})
+    return web3_config.get("bscscan_api_key")
 
 
 def get_web3_wallets() -> List[Dict[str, Any]]:
@@ -257,72 +295,77 @@ def get_web3_config() -> Dict[str, Any]:
 def configure_logging(logger_name: str = "backend") -> structlog.stdlib.BoundLogger:
     """
     Configure and return a structured logger.
-    
+
     Simplified design:
     - Single call to configure structlog (done once per process)
     - Returns a logger bound with the module name
     - Uses rich console for dev, JSON for production
     - Outputs to sys.stderr for compatibility with uvicorn
-    
+    - Respects LOG_LEVEL environment variable
+
     Args:
         logger_name: Name to identify the logger in output (e.g., "pnl_engine")
 
     Returns:
         structlog.stdlib.BoundLogger: Logger with module name bound
-        
+
     Usage:
         log = configure_logging("pnl_engine")
         log.info("order_created", order_id=123, total=99.99)
         log.exception("calculation_failed", unit_id=456)
-        
+
         # Bind additional context for a block of operations
         log_ctx = log.bind(request_id="abc-123")
         log_ctx.info("processing_started")
     """
     import sys
-    
+
     # Get log level from environment or settings (only once)
     settings = load_settings()
-    log_level = (
-        os.getenv("LOG_LEVEL") or settings.get("log_level", "INFO")
-    ).upper()
+    log_level = (os.getenv("LOG_LEVEL") or settings.get("log_level", "INFO")).upper()
     log_format = os.getenv("LOG_FORMAT") or settings.get("log_format", "rich")
+    numeric_level = getattr(logging, log_level, logging.INFO)
+
+    # Set stdlib logging level FIRST (structlog will use this for filtering)
+    logging.basicConfig(
+        format="%(message)s",
+        level=numeric_level,
+        force=True,  # Force reconfiguration if already configured
+    )
 
     # Configure structlog only once
     if not structlog.is_configured():
         # Shared processors for both formats
         shared_processors = [
             structlog.contextvars.merge_contextvars,
+            structlog.stdlib.filter_by_level,  # Filter based on stdlib log level
             structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso" if log_format == "json" else "%H:%M:%S"),
+            structlog.processors.TimeStamper(
+                fmt="iso" if log_format == "json" else "%H:%M:%S"
+            ),
             structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
         ]
-        
+
         # Final renderer based on format
         if log_format == "json":
+            # format_exc_info is only needed for JSON output — ConsoleRenderer
+            # below renders exceptions itself via rich_traceback and warns if
+            # format_exc_info has already consumed exc_info.
+            shared_processors.append(structlog.processors.format_exc_info)
             final_processor = structlog.processors.JSONRenderer()
         else:
             final_processor = structlog.dev.ConsoleRenderer(
                 colors=True,
                 exception_formatter=structlog.dev.rich_traceback,
             )
-        
+
         structlog.configure(
             processors=shared_processors + [final_processor],
             wrapper_class=structlog.stdlib.BoundLogger,
             context_class=dict,
-            # Use WriteLoggerFactory with sys.stderr for uvicorn compatibility
-            logger_factory=structlog.WriteLoggerFactory(file=sys.stderr),
+            logger_factory=structlog.stdlib.LoggerFactory(),  # Use stdlib for level filtering
             cache_logger_on_first_use=True,
         )
 
-    # Set stdlib logging level for compatibility
-    logging.basicConfig(
-        format="%(message)s",
-        level=getattr(logging, log_level, logging.INFO),
-        force=True,  # Force reconfiguration if already configured
-    )
-
     # Return logger bound with module name
-    return structlog.get_logger().bind(logger=logger_name)
+    return structlog.get_logger(logger_name).bind(logger=logger_name)

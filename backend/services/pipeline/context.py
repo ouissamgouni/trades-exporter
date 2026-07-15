@@ -11,6 +11,16 @@ from backend.db.models import CalculationUnit
 
 
 @dataclass
+class PersistenceResult:
+    """Result of persistence operations with detailed tracking."""
+
+    synced_ids: List[str] = field(default_factory=list)  # source_transaction_ids created
+    updated_ids: List[str] = field(default_factory=list)  # source_transaction_ids updated
+    skipped_ids: List[str] = field(default_factory=list)  # source_transaction_ids skipped
+    error_details: List[dict] = field(default_factory=list)  # {source_transaction_id, error}
+
+
+@dataclass
 class PipelineContext:
     """
     Context object passed through the pipeline.
@@ -21,6 +31,10 @@ class PipelineContext:
     session: Session
     raw_item: Optional[Dict[str, Any]] = None  # Original raw data (for sync jobs)
     source: Optional[str] = None  # Source identifier (e.g., 'binance', 'manual')
+    connector_id: Optional[int] = None  # FK to account_connectors.id (for incremental sync)
+
+    # Sync job tracking
+    sync_connector_run_id: Optional[int] = None  # FK to SyncJobConnectorRun for tracking
 
     # Options
     skip_persistence: bool = False  # Skip persistence stage (useful for dry runs)
@@ -29,6 +43,12 @@ class PipelineContext:
     skip_asset_enrichment: bool = (
         False  # Skip asset enrichment (if already has asset_ids)
     )
+    skip_onchain_enrichment: bool = (
+        False  # Skip on-chain address enrichment (from explorer APIs)
+    )
+    renormalize_mode: bool = (
+        False  # Renormalize mode: delete existing normalized before re-inserting
+    )
 
     # Metadata collected during processing
     created_units: List[CalculationUnit] = field(
@@ -36,6 +56,9 @@ class PipelineContext:
     )  # V3: units instead of bundles
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+
+    # Persistence result (populated by PersistenceStage)
+    persistence_result: Optional[PersistenceResult] = None
 
     # Statistics (populated by stages)
     new_count: int = 0

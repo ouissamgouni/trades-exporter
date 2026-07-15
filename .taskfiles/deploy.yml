@@ -1,69 +1,373 @@
 version: "3"
 
 tasks:
-  test:local:
-    desc: Build from develop and deploy to test environment
-    cmds:
-      - task: build:test
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter down
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
-      - sleep 5
-      - |
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Deployed to TEST (from develop branch)"
-        echo ""
-        echo "   Frontend: http://localhost:{{.TEST_FRONTEND_PORT}}"
-        echo "   Backend:  http://localhost:{{.TEST_BACKEND_PORT}}"
-        echo "   Database: localhost:{{.TEST_DB_PORT}}"
-        echo ""
-        echo "Next steps:"
-        echo "   task test:int:test    → Run integration tests"
-        echo "   task logs:test        → View logs"
-        echo "═══════════════════════════════════════════════════════════════"
-
-  prod:local:
-    desc: Deploy tagged version to local prod (e.g., task deploy:prod:local v1.2.0)
+  staging:local:
+    desc: Build from develop and deploy to local staging environment. DRY_RUN=1 to preview.
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
       - |
-        VERSION={{.CLI_ARGS}}
-        if [ -z "$VERSION" ]; then
-          VERSION="latest"
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would deploy to LOCAL STAGING (from develop)"
+          echo ""
+          echo "Steps:"
+          echo "  1. Build images from develop (task build:staging)"
+          echo "  2. docker compose down (trades-exporter-staging)"
+          echo "  3. docker compose up -d"
+          echo ""
+          echo "Compose config:"
+          ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging config
+          exit 0
         fi
 
-        # Check if image exists
-        if ! docker image inspect trades-exporter-backend:$VERSION > /dev/null 2>&1; then
-          echo "❌ Image trades-exporter-backend:$VERSION not found"
-          echo ""
-          echo "Available images:"
-          docker images trades-exporter-backend --format "   {{.Tag}}"
-          echo ""
-          echo "Build first with: task build:prod $VERSION"
+        task build:staging
+        ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
+        ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
+        sleep 5
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to LOCAL STAGING (from develop branch)"
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo ""
+        echo "Next steps:"
+        echo "   task logs:staging:local   → View logs"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  staging:local:ref:
+    desc: Build from any git ref and deploy to local staging. DRY_RUN=1 to preview. (e.g., task deploy:staging:local:ref -- feature/my-branch)
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ Usage:"
+          echo "   task deploy:staging:local:ref -- feature/my-branch"
+          echo "   task deploy:staging:local:ref REF=feature/my-branch"
           exit 1
         fi
 
-        echo "Deploying version: $VERSION"
-        VERSION=$VERSION docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter down
-        VERSION=$VERSION docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          SHA=$(git rev-parse --short=7 "$REF" 2>/dev/null || echo "unknown")
+          TAG="ref-$SHA"
+          echo "🔍 DRY RUN — would deploy to LOCAL STAGING (from $REF)"
+          echo ""
+          echo "Steps:"
+          echo "  1. Build images from $REF (task build:ref)"
+          echo "  2. docker compose down (trades-exporter-staging)"
+          echo "  3. docker compose up -d with tag :$TAG"
+          echo ""
+          echo "Compose config:"
+          ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging config
+          exit 0
+        fi
+
+        task build:ref REF="$REF"
+        SHA=$(git rev-parse --short=7 "$REF")
+        TAG="ref-$SHA"
+
+        echo "Deploying $TAG to staging environment..."
+
+        # Set image tag and deploy
+        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
+        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
+        sleep 5
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to LOCAL STAGING (from $REF)"
+        echo ""
+        echo "   Git ref:  $REF"
+        echo "   SHA:      $SHA"
+        echo "   Tag:      :$TAG"
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo ""
+        echo "Next steps:"
+        echo "   task logs:staging:local      → View logs"
+        echo "   task git:worktree:clean:ref  → Clean temp worktrees"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  staging:local:cwd:
+    desc: Build from current working directory and deploy to local staging. DRY_RUN=1 to preview.
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        TAG="dirty-$TIMESTAMP"
+
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would deploy to LOCAL STAGING (from working directory)"
+          echo ""
+          echo "Steps:"
+          echo "  1. Build images from current directory (task build:dirty)"
+          echo "  2. docker compose down (trades-exporter-staging)"
+          echo "  3. docker compose up -d with tag :$TAG"
+          echo ""
+          echo "Compose config:"
+          ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging config
+          exit 0
+        fi
+
+        task build:dirty TAG="$TAG"
+
+        echo "Deploying $TAG to staging environment..."
+
+        # Set image tag and deploy
+        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
+        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
+        sleep 5
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to LOCAL STAGING (from working directory)"
+        echo ""
+        echo "   ⚠️  Built from uncommitted changes"
+        echo "   Tag: :$TAG"
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  prod:local:
+    desc: "Deploy to local prod. DRY_RUN=1 to preview. (e.g., task deploy:prod:local -- v1.2.0 or task deploy:prod:local -- feature/hotfix)"
+    prompt: "This will deploy to PRODUCTION. Continue?"
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          REF="latest"
+        fi
+
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would deploy to LOCAL PROD: $REF"
+          echo ""
+          if docker image inspect trades-exporter-backend:$REF > /dev/null 2>&1; then
+            echo "Image found: trades-exporter-backend:$REF"
+          else
+            echo "No image found for :$REF — would attempt to build from git ref"
+          fi
+          echo ""
+          echo "Steps:"
+          echo "  1. docker compose down (trades-exporter-prod)"
+          echo "  2. docker compose up -d with tag :$REF"
+          echo ""
+          echo "Compose config:"
+          ENV_NAME=prod IMAGE_TAG=$REF docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod config
+          exit 0
+        fi
+
+        # Check if it's an existing image tag first
+        if docker image inspect trades-exporter-backend:$REF > /dev/null 2>&1; then
+          VERSION="$REF"
+          echo "Deploying existing image: $VERSION"
+        else
+          # Try to build from git ref
+          echo "No image found for :$REF — attempting to build from git ref..."
+          task build:ref -- "$REF" || { echo "❌ Failed to build from $REF"; exit 1; }
+          SHA=$(git rev-parse --short=7 "$REF")
+          VERSION="ref-$SHA"
+          echo "Built $REF → :$VERSION"
+        fi
+
+        ENV_NAME=prod IMAGE_TAG=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
+        ENV_NAME=prod IMAGE_TAG=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
         sleep 5
         echo ""
         echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Deployed to PROD: $VERSION"
+        echo "✅ Deployed to LOCAL PROD: $VERSION"
         echo ""
-        echo "   Frontend: http://localhost:{{.PROD_FRONTEND_PORT}}"
-        echo "   Backend:  http://localhost:{{.PROD_BACKEND_PORT}}"
-        echo "   Database: localhost:{{.PROD_DB_PORT}}"
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
         echo "═══════════════════════════════════════════════════════════════"
+  # ────────────────────────────────────────────────────────────────
+  # REMOTE DEPLOYMENTS — Fly.io (backend) + Cloudflare Pages (frontend) + Neon (DB)
+  # ────────────────────────────────────────────────────────────────
 
-  prod:cloud:
-    desc: Deploy to Render (future)
+  staging:remote:db:
+    desc: "Run Alembic migrations on Neon staging (develop branch)"
+    dotenv: [config/secrets.env, config/secrets.staging.env]
     cmds:
       - |
-        echo "🚧 Cloud deployment not yet configured"
-        echo ""
-        echo "To set up Render deployment:"
-        echo "  1. Create account at render.com"
-        echo "  2. Connect your GitHub repository"
-        echo "  3. Render will auto-detect render.yaml"
-        echo ""
-        echo "See docs/DEVELOPMENT_WORKFLOW.md for details"
+        if [ -z "${DATABASE_URL:-}" ]; then
+          echo "❌ DATABASE_URL not set — fill in config/secrets.staging.env"
+          exit 1
+        fi
+        echo "Running migrations on Neon staging: $(echo "$DATABASE_URL" | sed 's|.*@||' | cut -d'/' -f1)"
+        PYTHONPATH=. .venv/bin/alembic -c backend/alembic.ini upgrade head
+        echo "✅ Migrations applied"
+
+  staging:remote:backend:
+    desc: "Stage Fly secrets + deploy backend to trades-exporter-staging.fly.dev"
+    dotenv:
+      [
+        config/staging.remote.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    cmds:
+      - task: :fly:staging:secrets
+      - task: :fly:staging:deploy
+
+  staging:remote:frontend:
+    desc: "Build + deploy staging frontend to Cloudflare Pages (develop branch)"
+    dotenv:
+      [
+        config/staging.remote.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    vars:
+      PROJECT_NAME: '{{.PROJECT_NAME | default "trades-exporter"}}'
+    cmds:
+      - |
+        if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+          echo "❌ CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set in config/secrets.staging.env"
+          exit 1
+        fi
+        if [ -z "${VITE_API_URL:-}" ]; then
+          echo "❌ VITE_API_URL not set in config/staging.remote.env"
+          exit 1
+        fi
+        echo "Validating Cloudflare token..."
+        if ! npx --yes wrangler whoami >/dev/null 2>&1; then
+          echo "❌ Cloudflare authentication failed"
+          exit 1
+        fi
+        echo "Building staging frontend (VITE_API_URL=$VITE_API_URL)..."
+        cd frontend && VITE_API_URL="$VITE_API_URL" npm run build
+      - |
+        echo "Deploying to Cloudflare Pages (branch: develop)..."
+        npx --yes wrangler pages deploy frontend/dist \
+          --project-name={{.PROJECT_NAME}} \
+          --branch=develop
+        echo "✅ Staging frontend deployed"
+
+  staging:remote:
+    desc: "Full remote staging deploy (DB migrations + Fly backend + CF Pages frontend)"
+    dotenv:
+      [
+        config/staging.remote.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    cmds:
+      - |
+        if [ ! -f config/secrets.staging.env ]; then
+          echo "❌ config/secrets.staging.env not found — copy config/secrets.staging.env.example and fill in values"
+          exit 1
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Deploying REMOTE STAGING"
+        echo "  Backend:  https://trades-exporter-staging.fly.dev"
+        echo "  Frontend: https://develop.trades-exporter.pages.dev"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - task: staging:remote:db
+      - task: staging:remote:backend
+      - task: staging:remote:frontend
+      - echo "✅ Remote staging fully deployed"
+
+  prod:remote:db:
+    desc: "Run Alembic migrations on Neon prod (main branch)"
+    dotenv: [config/secrets.env, config/secrets.prod.env]
+    cmds:
+      - |
+        if [ -z "${DATABASE_URL:-}" ]; then
+          echo "❌ DATABASE_URL not set — fill in config/secrets.prod.env"
+          exit 1
+        fi
+        echo "Running migrations on Neon prod: $(echo "$DATABASE_URL" | sed 's|.*@||' | cut -d'/' -f1)"
+        PYTHONPATH=. .venv/bin/alembic -c backend/alembic.ini upgrade head
+
+  prod:remote:backend:
+    desc: "Stage Fly secrets + deploy backend to trades-exporter.fly.dev"
+    dotenv:
+      [config/prod.remote.env, config/secrets.env, config/secrets.prod.env]
+    cmds:
+      - task: :fly:secrets
+      - task: :fly:deploy
+
+  prod:remote:frontend:
+    desc: "Build + deploy prod frontend to Cloudflare Pages (main branch)"
+    dotenv:
+      [config/prod.remote.env, config/secrets.env, config/secrets.prod.env]
+    vars:
+      PROJECT_NAME: '{{.PROJECT_NAME | default "trades-exporter"}}'
+    cmds:
+      - |
+        if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+          echo "❌ CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set in config/secrets.prod.env"
+          exit 1
+        fi
+        if [ -z "${VITE_API_URL:-}" ]; then
+          echo "❌ VITE_API_URL not set in config/prod.remote.env"
+          exit 1
+        fi
+        cd frontend && VITE_API_URL="$VITE_API_URL" npm run build
+      - |
+        npx --yes wrangler pages deploy frontend/dist \
+          --project-name={{.PROJECT_NAME}} \
+          --branch=main
+        echo "✅ Prod frontend deployed"
+
+  prod:remote:
+    desc: "Full remote PROD deploy (DB migrations + Fly backend + CF Pages frontend)"
+    prompt: "This will deploy to PRODUCTION. Continue?"
+    dotenv:
+      [config/prod.remote.env, config/secrets.env, config/secrets.prod.env]
+    cmds:
+      - |
+        if [ ! -f config/secrets.prod.env ]; then
+          echo "❌ config/secrets.prod.env not found — copy config/secrets.prod.env.example and fill in values"
+          exit 1
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Deploying PRODUCTION"
+        echo "  Backend:  https://trades-exporter.fly.dev"
+        echo "  Frontend: https://trades-exporter.pages.dev"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - task: prod:remote:db
+      - task: prod:remote:backend
+      - task: prod:remote:frontend
+      - echo "✅ Production fully deployed"

@@ -206,10 +206,10 @@ class PnLResult:
     
     @property
     def consumed_slices(self) -> List[ConsumedLotSlice]:
-        """All consumed slices across all cost lots."""
+        """All consumed slices across all calculation units."""
         slices = []
-        for lot in self.created_lots:
-            slices.extend(lot.consumed_slices or [])
+        for unit in self.calculation_units:
+            slices.extend(unit.consumed_slices or [])
         return slices
     
     @property
@@ -240,6 +240,42 @@ class PnLResult:
             if entry.disposal_taxable and entry.pnl_in_base:
                 total += entry.pnl_in_base
         return total
+    
+    @property
+    def total_all_pnl(self) -> Decimal:
+        """Sum of ALL realized P&L (taxable + non-taxable, e.g. derivative settlements)."""
+        total = Decimal("0")
+        for entry in self.realized_pnl_entries:
+            if entry.pnl_in_base:
+                total += entry.pnl_in_base
+        return total
+
+    @property
+    def fee_entries(self) -> list:
+        """All FeeEntry records across all calculation units.
+        
+        Traverses: version → units → legs → fee_entries
+        """
+        from backend.db.models import FeeEntry
+        entries: list[FeeEntry] = []
+        for unit in self.calculation_units:
+            for leg in (unit.legs or []):
+                entries.extend(leg.fee_entries or [])
+        return entries
+
+    @property
+    def total_fee_in_base(self) -> Decimal:
+        """Sum of all fee values in base currency."""
+        total = Decimal("0")
+        for fe in self.fee_entries:
+            if fe.fee_value_in_base:
+                total += fe.fee_value_in_base
+        return total
+
+    @property
+    def fee_entry_count(self) -> int:
+        """Number of fee entries."""
+        return len(self.fee_entries)
     
 
         

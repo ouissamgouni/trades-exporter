@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { Box, Text, Button, Flex, Icon } from '@chakra-ui/react';
 import { FiUpload, FiFile, FiX, FiCheck } from 'react-icons/fi';
+import { Button } from './ui/primitives';
 
 interface FileDropzoneProps {
     onFileSelect: (file: File) => void;
@@ -89,74 +89,57 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
     // If a file is already selected, show the file info
     if (currentFileName) {
         return (
-            <Box
-                p={4}
-                borderWidth="2px"
-                borderStyle="solid"
-                borderColor="green.300"
-                borderRadius="md"
-                bg="green.50"
-            >
-                <Flex align="center" justify="space-between">
-                    <Flex align="center" gap={2}>
-                        <Icon as={FiCheck} color="green.500" />
-                        <Icon as={FiFile} color="gray.500" />
-                        <Text fontSize="sm" fontWeight="medium">
+            <div className="border-2 border-solid border-green-300 bg-green-50 p-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <FiCheck className="text-green-500" />
+                        <FiFile className="text-slate-500" />
+                        <span className="text-sm font-medium">
                             {currentFileName}
-                        </Text>
-                    </Flex>
+                        </span>
+                    </div>
                     {onRemove && (
                         <Button
                             size="sm"
                             variant="ghost"
-                            colorPalette="red"
+                            colorScheme="red"
                             onClick={onRemove}
                             disabled={disabled}
                         >
-                            <Icon as={FiX} />
+                            <FiX />
                             Remove
                         </Button>
                     )}
-                </Flex>
-            </Box>
+                </div>
+            </div>
         );
     }
 
     return (
-        <Box>
-            <Box
-                p={6}
-                borderWidth="2px"
-                borderStyle="dashed"
-                borderColor={isDragging ? 'blue.400' : error ? 'red.300' : 'gray.300'}
-                borderRadius="md"
-                bg={isDragging ? 'blue.50' : 'gray.50'}
-                textAlign="center"
-                cursor={disabled ? 'not-allowed' : 'pointer'}
-                opacity={disabled ? 0.6 : 1}
-                transition="all 0.2s"
-                _hover={!disabled ? { borderColor: 'blue.400', bg: 'blue.50' } : undefined}
+        <div>
+            <div
+                className={`border-2 border-dashed p-6 text-center transition-all ${isDragging ? 'border-blue-400 bg-blue-50' : error ? 'border-red-300 bg-slate-50' : 'border-slate-300 bg-slate-50'} ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50'}`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={handleClick}
             >
-                <Flex direction="column" align="center" gap={2}>
-                    <Icon as={FiUpload} boxSize={8} color={isDragging ? 'blue.500' : 'gray.400'} />
-                    <Text fontWeight="medium" color={isDragging ? 'blue.600' : 'gray.600'}>
+                <div className="flex flex-col items-center gap-2">
+                    <FiUpload size={32} className={isDragging ? 'text-blue-500' : 'text-slate-400'} />
+                    <span className={`font-medium ${isDragging ? 'text-blue-600' : 'text-slate-600'}`}>
                         {isDragging ? 'Drop file here' : 'Drag & drop a JSON file here'}
-                    </Text>
-                    <Text fontSize="sm" color="gray.500">
+                    </span>
+                    <span className="text-sm text-slate-500">
                         or click to browse
-                    </Text>
-                </Flex>
-            </Box>
+                    </span>
+                </div>
+            </div>
             {error && (
-                <Text color="red.500" fontSize="sm" mt={2}>
+                <span className="mt-2 block text-sm text-red-500">
                     {error}
-                </Text>
+                </span>
             )}
-        </Box>
+        </div>
     );
 };
 

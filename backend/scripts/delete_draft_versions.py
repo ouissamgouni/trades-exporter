@@ -32,9 +32,9 @@ sys.path.insert(0, str(project_root))
 from sqlalchemy import text, func
 from sqlmodel import Session, select
 
-from backend.config.loader import get_database_url, set_test_mode
-from backend.db.database import get_engine
-from backend.db.models import (
+from ..config.loader import get_database_url
+from ..db.database import get_engine
+from ..db.models import (
     CalculationVersion,
     CalculationUnit,
     CostLot,
@@ -177,9 +177,6 @@ def main():
         description="Delete all draft calculation versions and their children"
     )
     parser.add_argument(
-        "--test", action="store_true", help="Use test database"
-    )
-    parser.add_argument(
         "--force", action="store_true", help="Skip confirmation prompt"
     )
     parser.add_argument(
@@ -188,16 +185,12 @@ def main():
     
     args = parser.parse_args()
     
-    # Set test mode if requested
-    if args.test:
-        set_test_mode(True)
     
     db_url = get_database_url()
-    db_name = "TEST" if args.test else "PRODUCTION"
     
     print(f"\n{'='*60}")
     print(f"DELETE DRAFT CALCULATION VERSIONS")
-    print(f"Database: {db_name}")
+    print(f"Database: {db_url}")
     print(f"{'='*60}\n")
     
     engine = get_engine()

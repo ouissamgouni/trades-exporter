@@ -4,6 +4,27 @@
 !.env.example
 !.env.*.example
 
+# Config secrets (gitignored, kept locally only). Examples (*.example) are committed.
+config/secrets.env
+config/secrets.*.env
+!config/*.example
+
+# Per-scenario secrets (gitignored globally; commit *.example if a scenario needs them).
+scenarios/*/secrets.env
+
+# Personal scenario data (kept locally, never published). Contains real accounts,
+# wallet addresses, and transactions. Purged from history; do not re-commit.
+scenarios/private-accounts/
+
+# Runtime symlinks created by `task start:scenario:ref` (config/scenario-default.env,
+# config/scenario-<name>.env -> config/scenario.env) so docker-compose.unified.yml's
+# env_file: config/${ENV_NAME}.env lookup resolves.
+config/scenario-*.env
+
+# Persisted scenario port state (written by start:scenario/start:scenario:ref, read by
+# stop/logs/open/db tasks so overridden ports survive across separate task invocations).
+.taskfiles/.scenario-state/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -62,7 +83,6 @@ pip-delete-this-directory.txt
 .vscode/
 !.vscode/settings.json
 !.vscode/tasks.json
-!.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
 
@@ -84,11 +104,13 @@ pip-delete-this-directory.txt
 # Data files
 data/*.db
 data/*.sqlite
+data/output
 *.db
 *.sqlite
 *.sqlite3
 
 # Output data (large files)
+data/output
 backend/data
 
 # Logs
@@ -116,10 +138,16 @@ lerna-debug.log*
 # React specific
 frontend/coverage/
 frontend/*.log
+frontend/playwright-report/
+frontend/test-results/
 frontend/.env.local
 frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
+
+# Keep frontend utility modules available to git-based builds
+!frontend/src/lib/
+!frontend/src/lib/cn.ts
 
 # OS files
 .DS_Store
@@ -191,3 +219,7 @@ jspm_packages/
 
 # DynamoDB Local files
 .dynamodb/
+
+# Git worktrees for safe build/deploy operations
+.worktrees/
+

@@ -9,7 +9,7 @@ The external_id should be the CoinGecko coin ID (e.g., "bitcoin", "ethereum", "s
 
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
 from backend.config.loader import (
@@ -175,13 +175,17 @@ class CoinGeckoPriceGetter(BasePriceGetter):
                         response.raise_for_status()
 
                 response.raise_for_status()
-                log.info(f"[coingecko] ✓ Success on attempt {attempt}: {operation_desc}")
+                log.info(
+                    f"[coingecko] ✓ Success on attempt {attempt}: {operation_desc}"
+                )
                 return response.json()
 
             except Exception as e:
                 last_error = e
-                error_reason = self._classify_coingecko_error(e, response if 'response' in locals() else None)
-                
+                error_reason = self._classify_coingecko_error(
+                    e, response if "response" in locals() else None
+                )
+
                 log.warning(
                     f"[coingecko] Attempt {attempt} failed ({error_reason.value}): {e}"
                 )
@@ -193,12 +197,12 @@ class CoinGeckoPriceGetter(BasePriceGetter):
 
         # All attempts failed
         asset_symbol = asset.symbol if asset else None
-        
+
         log.error(
             f"[coingecko] ✗ Failed after {self.max_retries} attempts: {operation_desc} | "
             f"Reason: {error_reason.value} | Error: {last_error}"
         )
-        
+
         raise PriceGetterError(
             message=f"Failed to {operation_desc.lower()} after {self.max_retries} attempts",
             getter_name=self.name,
@@ -214,7 +218,7 @@ class CoinGeckoPriceGetter(BasePriceGetter):
     ) -> PriceErrorReason:
         """Classify CoinGecko-specific errors."""
         error_str = str(error).lower()
-        
+
         if response is not None:
             if response.status_code == 429:
                 return PriceErrorReason.API_RATE_LIMITED
@@ -222,7 +226,7 @@ class CoinGeckoPriceGetter(BasePriceGetter):
                 return PriceErrorReason.TICKER_NOT_FOUND
             elif response.status_code == 401:
                 return PriceErrorReason.MISSING_API_KEY
-        
+
         if "rate limit" in error_str or "429" in error_str:
             return PriceErrorReason.API_RATE_LIMITED
         elif "not found" in error_str or "404" in error_str:
@@ -231,7 +235,7 @@ class CoinGeckoPriceGetter(BasePriceGetter):
             return PriceErrorReason.TIMEOUT
         elif "connection" in error_str:
             return PriceErrorReason.NETWORK_ERROR
-            
+
         return PriceErrorReason.API_ERROR
 
     def get_current_price(
@@ -303,13 +307,15 @@ class CoinGeckoPriceGetter(BasePriceGetter):
                 details=f"Requested quote: {native_quote}, available: {list(data[coin_id].keys())}",
             )
 
-        log.info(f"[coingecko] ✓ Current price for {asset.symbol}: {price} {native_quote}")
+        log.info(
+            f"[coingecko] ✓ Current price for {asset.symbol}: {price} {native_quote}"
+        )
 
         return PriceResult(
             price=float(price),
             quote_currency=native_quote,
             source="coingecko",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             ticker_used=coin_id,
         )
 
@@ -348,10 +354,17 @@ class CoinGeckoPriceGetter(BasePriceGetter):
         )
 
         url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
+        # Use full-day window (86400s) instead of 1h — narrow windows return
+        # no data for today because CoinGecko aggregates daily prices.
+        day_start = int(
+            datetime.combine(
+                dt.date(), datetime.min.time(), tzinfo=timezone.utc
+            ).timestamp()
+        )
         params = {
             "vs_currency": quote,
-            "from": timestamp,
-            "to": timestamp + 3600,
+            "from": day_start,
+            "to": day_start + 86400,
         }
 
         data = self._fetch_from_api(

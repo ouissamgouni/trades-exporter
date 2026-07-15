@@ -1,0 +1,46 @@
+# DeGiro Dividend Lifecycle Scenario — Prices
+# ==============================================
+# FX rates for base-currency (EUR) conversion of USD and CHF dividends.
+# These approximate 2025 rates are used for PFU tax computation verification.
+#
+# In production, FX rates are fetched at runtime from the price provider.
+# Seed these if running the scenario against a test DB without network access.
+
+prices:
+  # USD/EUR rate — used to convert AAPL + MSFT dividends to EUR
+  - asset_symbol: USD
+    quote_asset_symbol: EUR
+    date: "2025-01-03"
+    price: "0.920000000000000000"
+    source: "seed"
+
+  - asset_symbol: USD
+    quote_asset_symbol: EUR
+    date: "2025-03-15"
+    price: "0.920000000000000000"
+    source: "seed"
+
+  - asset_symbol: USD
+    quote_asset_symbol: EUR
+    date: "2025-06-15"
+    price: "0.920000000000000000"
+    source: "seed"
+
+  - asset_symbol: USD
+    quote_asset_symbol: EUR
+    date: "2025-09-15"
+    price: "0.920000000000000000"
+    source: "seed"
+
+  - asset_symbol: USD
+    quote_asset_symbol: EUR
+    date: "2025-12-15"
+    price: "0.920000000000000000"
+    source: "seed"
+
+  # CHF/EUR rate — used to convert NESN dividend to EUR
+  - asset_symbol: CHF
+    quote_asset_symbol: EUR
+    date: "2025-04-10"
+    price: "0.970000000000000000"
+    source: "seed"

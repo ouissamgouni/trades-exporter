@@ -10,9 +10,11 @@ from decimal import Decimal
 from backend.db.models import CalculationUnitLeg, NormalizedTransaction
 from backend.services.pnl.leg_expander import (
     expand_transaction,
+    expand_transaction_to_list,
     should_expand_as_trade,
     has_fee,
     is_neutral_transaction,
+    is_cost_transaction,
 )
 from backend.services.pnl.trade_splitter import prepare_transactions_for_pnl
 from backend.services.pnl.models import RuntimeUnitType
@@ -31,7 +33,7 @@ def make_tx(**kwargs) -> NormalizedTransaction:
         "source_transaction_type": "buy",
         "date_time": datetime(2024, 1, 1, 12, 0, 0),
         "direction": "inflow",
-        "transaction_type": "acquisition",
+        "transaction_type": "trade",  # For buy/sell transactions
         "source_asset_symbol": "SOL",
         "source_price_quote_asset_symbol": "USDT",
         "quantity": Decimal("5.0"),
@@ -44,7 +46,7 @@ def make_tx(**kwargs) -> NormalizedTransaction:
         "price_quote_asset_id": 2,  # USDT
         "fee_quote_asset_id": 2,  # USDT
         "include_fee": True,
-        "taxable": True,
+        "taxability_status": "taxable",
     }
     defaults.update(kwargs)
     return NormalizedTransaction(**defaults)
@@ -70,17 +72,17 @@ class TestShouldExpandAsTrade:
 
     def test_should_not_expand_deposit(self):
         """Deposits should not be expanded as trades."""
-        tx = make_tx(source_transaction_type="deposit")
+        tx = make_tx(source_transaction_type="deposit", transaction_type="acquisition")
         assert should_expand_as_trade(tx) is False
 
     def test_should_not_expand_withdrawal(self):
         """Withdrawals should not be expanded as trades."""
-        tx = make_tx(source_transaction_type="withdrawal", direction="outflow")
+        tx = make_tx(source_transaction_type="withdrawal", direction="outflow", transaction_type="disposal")
         assert should_expand_as_trade(tx) is False
 
     def test_should_not_expand_transfer(self):
         """Transfers should not be expanded as trades."""
-        tx = make_tx(source_transaction_type="transfer")
+        tx = make_tx(source_transaction_type="transfer", transaction_type="transfer")
         assert should_expand_as_trade(tx) is False
 
     def test_should_not_expand_zero_quantity(self):
@@ -170,6 +172,65 @@ class TestIsNeutralTransaction:
         tx = make_tx(source_transaction_type="sell", direction="outflow")
         assert is_neutral_transaction(tx) is False
 
+    def test_memo_is_neutral(self):
+        """Memo transaction (audit-only) should be neutral."""
+        tx = make_tx(
+            transaction_type="memo",
+            source_transaction_type="redeem",
+            direction="neutral",
+            quantity=Decimal("100"),
+        )
+        assert is_neutral_transaction(tx) is True
+
+    def test_cost_detected_by_is_cost(self):
+        """Cost transaction is detected by is_cost_transaction."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="approval",
+            quantity=Decimal("0"),
+        )
+        assert is_cost_transaction(tx) is True
+
+
+class TestMemoExpansion:
+    """Memo transactions should produce no legs (no PnL impact)."""
+
+    def test_memo_no_fee_produces_no_legs(self):
+        """Memo with qty but no fee → zero legs, completely ignored by PnL."""
+        tx = make_tx(
+            transaction_type="memo",
+            source_transaction_type="redeem",
+            direction="neutral",
+            quantity=Decimal("100"),
+            fee=Decimal("0"),
+            fee_quote_asset_id=None,
+        )
+        legs = expand_transaction_to_list(tx)
+        assert legs == []
+        assert expand_transaction(tx) is None
+
+    def test_memo_with_fee_produces_fee_only_leg(self):
+        """Memo with fee → one fee leg only (fee is still deductible)."""
+        tx = make_tx(
+            transaction_type="memo",
+            source_transaction_type="redeem",
+            direction="neutral",
+            quantity=Decimal("100"),
+            fee=Decimal("5"),
+            fee_quote_asset_id=2,
+            source_fee_quote_asset_symbol="USDC",
+        )
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 1
+        assert legs[0].leg_type.value == "fee"
+
+        result = expand_transaction(tx)
+        assert result is not None
+        assert result.expansion_type == "fee_only"
+        assert result.fee_leg is not None
+        assert result.outflow is None
+        assert result.inflow is None
+
 
 # =============================================================================
 # Test: expand_transaction - Trade expansion
@@ -202,13 +263,13 @@ class TestExpandTrade:
         # Outflow: 100 USDT disposal
         assert result.outflow.asset_symbol == "USDT"
         assert result.outflow.quantity == 100.0
-        assert result.outflow.transaction_type == "disposal"
+        assert result.outflow.leg_type == "outflow"
         assert result.outflow.direction == "outflow"
 
         # Inflow: 5 SOL acquisition
         assert result.inflow.asset_symbol == "SOL"
         assert result.inflow.quantity == 5.0
-        assert result.inflow.transaction_type == "acquisition"
+        assert result.inflow.leg_type == "inflow"
         assert result.inflow.direction == "inflow"
 
     def test_expand_sell_creates_outflow_and_inflow(self):
@@ -232,12 +293,12 @@ class TestExpandTrade:
         # Outflow: 3 ETH disposal
         assert result.outflow.asset_symbol == "ETH"
         assert result.outflow.quantity == 3.0
-        assert result.outflow.transaction_type == "disposal"
+        assert result.outflow.leg_type == "outflow"
 
         # Inflow: 6000 USDT acquisition
         assert result.inflow.asset_symbol == "USDT"
         assert result.inflow.quantity == 6000.0
-        assert result.inflow.transaction_type == "acquisition"
+        assert result.inflow.leg_type == "inflow"
 
     def test_expand_trade_creates_fee_leg(self):
         """Trade with fee should include fee leg."""
@@ -255,8 +316,8 @@ class TestExpandTrade:
         assert result.fee_leg is not None
         assert result.fee_leg.quantity == 0.5
         assert result.fee_leg.asset_symbol == "USDT"
-        assert result.fee_leg.transaction_type == "fee"
-        assert result.fee_leg.direction == "outflow"
+        assert result.fee_leg.leg_type == "fee"
+        assert result.fee_leg.is_fee is True
 
     def test_expand_trade_without_fee(self):
         """Trade without fee should have no fee leg."""
@@ -277,7 +338,7 @@ class TestExpandTrade:
         tx = make_tx(
             source="coinbase",
             account_id=5,
-            taxable=True,
+            taxability_status="taxable",
             include_fee=True,
             date_time=datetime(2024, 6, 15, 10, 30),
         )
@@ -285,7 +346,7 @@ class TestExpandTrade:
         result = expand_transaction(tx)
 
         assert result.outflow.account_id == 5
-        assert result.outflow.taxable is True
+        assert result.outflow.tx_taxability_status == "taxable"  # Access via property from transaction
         assert result.outflow.date_time == datetime(2024, 6, 15, 10, 30)
 
 
@@ -317,7 +378,7 @@ class TestExpandFeeOnly:
         assert result.fee_leg is not None
         assert result.fee_leg.quantity == Decimal("0.001")
         assert result.fee_leg.asset_symbol == "ETH"
-        assert result.fee_leg.transaction_type == "fee"
+        assert result.fee_leg.leg_type == "fee"
 
     def test_expand_failed_tx_creates_fee_leg(self):
         """Failed transaction should create fee-only leg."""
@@ -339,6 +400,121 @@ class TestExpandFeeOnly:
 
 
 # =============================================================================
+# Test: expand_transaction - COST transaction expansion
+# =============================================================================
+
+
+class TestCostExpansion:
+    """Tests for COST transaction expansion (new and old formats)."""
+
+    def test_new_format_creates_fee_leg_from_qty(self):
+        """New-format COST (qty>0, price_quote_asset_id set) creates a FEE leg."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="exchange_fee",
+            direction="outflow",
+            quantity=Decimal("2.50"),
+            price=Decimal("1"),
+            asset_id=None,
+            source_asset_symbol="",
+            price_quote_asset_id=99,
+            source_price_quote_asset_symbol="EUR",
+            fee=None,
+            fee_quote_asset_id=None,
+            source_fee_quote_asset_symbol="",
+            include_fee=False,
+        )
+
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 1
+        leg = legs[0]
+        assert leg.leg_type == "fee"
+        assert leg.quantity == Decimal("2.50")
+        assert leg.asset_id == 99  # EUR from price_quote_asset_id
+
+    def test_old_format_backward_compat(self):
+        """Old-format COST (qty=0, fee>0, fee_quote_asset_id) still works."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="exchange_fee",
+            direction="neutral",
+            quantity=Decimal("0"),
+            asset_id=10,
+            fee=Decimal("3.00"),
+            fee_quote_asset_id=99,
+            source_fee_quote_asset_symbol="EUR",
+            include_fee=True,
+        )
+
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 1
+        leg = legs[0]
+        assert leg.leg_type == "fee"
+        assert leg.quantity == Decimal("3.00")
+        assert leg.asset_id == 99  # EUR from fee_quote_asset_id
+
+    def test_empty_cost_produces_no_legs(self):
+        """COST with qty=0 and no fee produces no legs."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="unknown",
+            direction="neutral",
+            quantity=Decimal("0"),
+            asset_id=None,
+            fee=None,
+            fee_quote_asset_id=None,
+            include_fee=False,
+        )
+
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 0
+
+    def test_new_format_expand_transaction_returns_expansion_result(self):
+        """expand_transaction() returns ExpansionResult for new-format COST."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="adr_custody_fee",
+            direction="outflow",
+            quantity=Decimal("5.00"),
+            price=Decimal("1"),
+            asset_id=None,
+            source_asset_symbol="",
+            price_quote_asset_id=99,
+            source_price_quote_asset_symbol="EUR",
+            fee=None,
+            fee_quote_asset_id=None,
+            source_fee_quote_asset_symbol="",
+            include_fee=False,
+        )
+
+        result = expand_transaction(tx)
+        assert result is not None
+        assert result.expansion_type == "fee_only"
+        assert result.fee_leg is not None
+        assert result.fee_leg.quantity == Decimal("5.00")
+        assert result.outflow is None
+        assert result.inflow is None
+
+    def test_cost_not_treated_as_neutral(self):
+        """COST transactions bypass neutral path entirely."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="exchange_fee",
+            direction="outflow",
+            quantity=Decimal("2.50"),
+            price=Decimal("1"),
+            asset_id=None,
+            price_quote_asset_id=99,
+            source_price_quote_asset_symbol="EUR",
+            fee=None,
+            fee_quote_asset_id=None,
+            include_fee=False,
+        )
+        assert is_cost_transaction(tx) is True
+        assert is_neutral_transaction(tx) is False
+
+
+# =============================================================================
 # Test: expand_transaction - No expansion needed
 # =============================================================================
 
@@ -350,6 +526,7 @@ class TestNoExpansion:
         """Deposit without fee should not be expanded."""
         tx = make_tx(
             source_transaction_type="deposit",
+            transaction_type="transfer",  # Deposits are transfers, not trades
             fee=None,
             fee_quote_asset_id=None,
         )
@@ -361,6 +538,7 @@ class TestNoExpansion:
         """Withdrawal without fee should not be expanded."""
         tx = make_tx(
             source_transaction_type="withdrawal",
+            transaction_type="transfer",  # Withdrawals are transfers, not trades
             direction="outflow",
             fee=None,
             fee_quote_asset_id=None,
@@ -387,17 +565,19 @@ class TestPrepareTransactionsForPnl:
         assert isinstance(units, list)
 
     def test_trade_creates_paired_unit(self):
-        """Trade should create a SWAP unit."""
+        """Trade should create a CalculationUnit with legs."""
         tx = make_tx(source_transaction_type="buy")
         _, units = prepare_transactions_for_pnl([tx])
 
         assert len(units) == 1
-        assert units[0].unit_type == RuntimeUnitType.SWAP
+        assert len(units[0].legs) >= 2  # At least outflow + inflow
+        assert units[0].unit_origin.startswith("tx:")
 
     def test_fee_only_creates_single_unit(self):
-        """Fee-only tx should create a SWAP unit."""
+        """Fee-only tx should create a CalculationUnit with fee leg."""
         tx = make_tx(
             source_transaction_type="approval",
+            transaction_type="cost",  # Approval is a technical transaction
             quantity=Decimal("0"),
             fee=Decimal("0.001"),
             fee_quote_asset_id=1,
@@ -405,12 +585,14 @@ class TestPrepareTransactionsForPnl:
         _, units = prepare_transactions_for_pnl([tx])
 
         assert len(units) == 1
-        assert units[0].unit_type == RuntimeUnitType.SWAP
+        assert len(units[0].legs) == 1  # Only fee leg
+        assert units[0].legs[0].leg_type == "fee"
 
     def test_non_expandable_goes_to_pass_through(self):
-        """Non-expandable tx should go to pass_through as ExpandedLeg."""
+        """Non-expandable tx should go to pass_through as CalculationUnitLeg."""
         tx = make_tx(
             source_transaction_type="deposit",
+            transaction_type="transfer",  # Deposits are transfers
             fee=None,
             fee_quote_asset_id=None,
         )
@@ -419,10 +601,10 @@ class TestPrepareTransactionsForPnl:
 
         assert len(pass_through) == 1
         assert len(units) == 0
-        # Pass-through is converted to ExpandedLeg to ensure origin_transaction_id exists
+        # Pass-through is converted to CalculationUnitLeg to ensure origin_transaction_id exists
         assert isinstance(pass_through[0], CalculationUnitLeg)
         assert pass_through[0].origin_transaction_id == 42
-        assert pass_through[0]._original_id == 42
+        assert pass_through[0].transaction_id == 42
 
     def test_unit_has_correct_members(self):
         """Unit should have correct members (outflow, inflow, fee_leg)."""
@@ -446,6 +628,7 @@ class TestPrepareTransactionsForPnl:
         deposit_tx = make_tx(
             source_transaction_id="deposit1",
             source_transaction_type="deposit",
+            transaction_type="transfer",  # Deposits are transfers
             fee=None,
             fee_quote_asset_id=None,
         )
@@ -477,39 +660,42 @@ class TestPrepareTransactionsForPnl:
 
 
 class TestExpandedLeg:
-    """Tests for ExpandedLeg class."""
+    """Tests for CalculationUnitLeg properties from leg expansion."""
 
-    def test_has_virtual_flag(self):
-        """ExpandedLeg should have _is_virtual=True."""
+    def test_leg_has_transaction_relationship(self):
+        """CalculationUnitLeg should have transaction relationship set."""
         tx = make_tx()
         result = expand_transaction(tx)
-        assert result.outflow._is_virtual is True
-        assert result.inflow._is_virtual is True
+        assert result.outflow.transaction is not None
+        assert result.inflow.transaction is not None
 
-    def test_has_original_id_reference(self):
-        """ExpandedLeg should reference original transaction ID."""
+    def test_leg_has_origin_transaction_id(self):
+        """CalculationUnitLeg should reference original transaction ID via transaction_id."""
         tx = make_tx()
         tx.id = 42
         result = expand_transaction(tx)
-        assert result.outflow._original_id == 42
-        assert result.inflow._original_id == 42
+        assert result.outflow.transaction_id == 42
+        assert result.inflow.transaction_id == 42
 
-    def test_id_is_leg_identifier(self):
-        """ExpandedLeg.id should be a leg identifier (for tracking)."""
+    def test_leg_id_is_none_until_persisted(self):
+        """CalculationUnitLeg.id should be None until persisted to DB."""
         tx = make_tx()
         tx.id = 123
         result = expand_transaction(tx)
-        # Leg IDs include original tx ID and leg type suffix
-        assert result.outflow.id == "123_out"
-        assert result.inflow.id == "123_in"
-        assert result.fee_leg.id == "123_fee"
+        # Leg IDs are None until persisted (auto-incremented by DB)
+        assert result.outflow.id is None
+        assert result.inflow.id is None
+        # But transaction_id should be set
+        assert result.outflow.transaction_id == 123
+        assert result.inflow.transaction_id == 123
 
-    def test_fee_is_none_on_main_legs(self):
-        """Main legs should have fee=None (fee is separate leg)."""
+    def test_leg_type_identifies_role(self):
+        """Legs should have leg_type identifying their role."""
         tx = make_tx(fee=Decimal("0.5"), fee_quote_asset_id=2)
         result = expand_transaction(tx)
-        assert result.outflow.fee is None
-        assert result.inflow.fee is None
+        assert result.outflow.leg_type == "outflow"
+        assert result.inflow.leg_type == "inflow"
+        assert result.fee_leg.leg_type == "fee"
 
 
 # =============================================================================
@@ -553,5 +739,5 @@ class TestFeeLegsAlwaysCreated:
         assert len(units) == 1
         # Should have 3 legs: outflow, inflow, fee_leg
         assert len(units[0].legs) == 3
-        fee_legs = [m for m in units[0].legs if m.transaction_type == "fee"]
+        fee_legs = [m for m in units[0].legs if m.leg_type == "fee"]
         assert len(fee_legs) == 1

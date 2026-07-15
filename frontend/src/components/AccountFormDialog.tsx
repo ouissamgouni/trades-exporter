@@ -1,21 +1,16 @@
-import {
-    Box,
-    Button,
-    Dialog,
-    Flex,
-    Input,
-    NativeSelect,
-    Portal,
-    Text,
-    Textarea,
-} from '@chakra-ui/react';
-import React, { useEffect, useState } from 'react';
+import * as RadixDialog from '@radix-ui/react-dialog';
+import { Button, Input, Textarea } from './ui/primitives';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Account, API_URL } from '../types';
+import { ComboSelect } from './ComboSelect';
+import { ColorPaletteField } from './ColorPaletteField';
+import { getNextAvailableEntityColor } from '../hooks/useEntityColors';
 
 export interface AccountPrefill {
     name?: string;
-    account_type?: 'cex' | 'broker' | 'wallet';
+    account_type?: 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment';
     address_or_identifier?: string;
+    group?: string;
 }
 
 interface AccountFormDialogProps {
@@ -33,9 +28,13 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
 }) => {
     const [formData, setFormData] = useState({
         name: '',
-        account_type: 'cex' as 'cex' | 'broker' | 'wallet',
+        account_type: 'cex' as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment',
+        envelope: '' as '' | 'cto' | 'pea' | 'av',
         address_or_identifier: '',
-        tags: [] as string[],
+        group: '',
+        tags: [] as Record<string, any>[],
+        owned: true,
+        color: null as string | null,
     });
     const [tagsInput, setTagsInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -43,7 +42,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
     const [existingAccounts, setExistingAccounts] = useState<Account[]>([]);
 
-    // Fetch existing accounts for duplicate detection
+    // Fetch existing accounts for duplicate detection and group suggestions
     useEffect(() => {
         const fetchAccounts = async () => {
             try {
@@ -61,36 +60,67 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
         }
     }, [isOpen]);
 
+    // Derive distinct group names from existing accounts
+    const existingGroups = useMemo(() => {
+        const groups = new Set<string>();
+        for (const acc of existingAccounts) {
+            if (acc.group) groups.add(acc.group);
+        }
+        return Array.from(groups).sort();
+    }, [existingAccounts]);
+
+    // Derive used colors from existing accounts for dedup
+    const usedColors = useMemo(() =>
+        existingAccounts.map(a => a.color).filter((c): c is string => !!c),
+        [existingAccounts],
+    );
+
     useEffect(() => {
         if (account) {
             setFormData({
                 name: account.name,
                 account_type: account.account_type,
+                envelope: (account.envelope as '' | 'cto' | 'pea' | 'av') || '',
                 address_or_identifier: account.address_or_identifier || '',
+                group: account.group || '',
                 tags: account.tags || [],
+                owned: account.owned,
+                color: account.color || null,
             });
-            setTagsInput((account.tags || []).join(', '));
+            // Convert [{key: val}, ...] to "key, key2, ..."
+            const tagStrings = (account.tags || []).map(tagObj => Object.keys(tagObj)[0]).filter(Boolean);
+            setTagsInput(tagStrings.join(', '));
         } else if (prefill) {
             // Use prefill data when creating from raw account
+            const suggestedColor = getNextAvailableEntityColor(usedColors);
             setFormData({
                 name: prefill.name || '',
                 account_type: prefill.account_type || 'cex',
+                envelope: '',
                 address_or_identifier: prefill.address_or_identifier || '',
+                group: prefill.group || '',
                 tags: [],
+                owned: true,
+                color: suggestedColor,
             });
             setTagsInput('');
         } else {
+            const suggestedColor = getNextAvailableEntityColor(usedColors);
             setFormData({
                 name: '',
                 account_type: 'cex',
+                envelope: '',
                 address_or_identifier: '',
+                group: '',
                 tags: [],
+                owned: true,
+                color: suggestedColor,
             });
             setTagsInput('');
         }
         setError('');
         setDuplicateWarning(null);
-    }, [account, prefill, isOpen]);
+    }, [account, prefill, isOpen, usedColors]);
 
     // Check for duplicate address_or_identifier
     useEffect(() => {
@@ -114,16 +144,21 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
         setError('');
 
         try {
-            // Parse tags from comma-separated input
-            const tags = tagsInput
+            // Parse tags from comma-separated input and convert to [{key: true}, ...]
+            const tagStrings = tagsInput
                 .split(',')
                 .map(tag => tag.trim())
                 .filter(tag => tag.length > 0);
 
+            const tags = tagStrings.map(tag => ({ [tag]: true }));
+
             const payload = {
                 ...formData,
                 tags,
+                envelope: formData.envelope || null,
                 address_or_identifier: formData.address_or_identifier || null,
+                group: formData.group || null,
+                color: formData.color || null,
             };
 
             const url = account
@@ -157,115 +192,183 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     };
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(undefined); }}>
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content>
-                        <Dialog.Header>
-                            <Dialog.Title>
-                                {account ? 'Edit Account' : 'Create New Account'}
-                            </Dialog.Title>
-                        </Dialog.Header>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(undefined); }}>
+            <RadixDialog.Portal>
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-200 px-5 py-4">
+                        <RadixDialog.Title className="text-base font-semibold">
+                            {account ? 'Edit Account' : 'Create New Account'}
+                        </RadixDialog.Title>
+                    </div>
 
-                        <form onSubmit={handleSubmit}>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    {error && (
-                                        <Text color="red.500" fontSize="sm">
-                                            {error}
-                                        </Text>
-                                    )}
+                    <form onSubmit={handleSubmit}>
+                        <div className="px-5 py-4">
+                            <div className="flex flex-col gap-4">
+                                {error && (
+                                    <span className="text-sm text-red-500">
+                                        {error}
+                                    </span>
+                                )}
 
-                                    {duplicateWarning && (
-                                        <Box bg="orange.50" p={3} borderRadius="md" borderWidth={1} borderColor="orange.200">
-                                            <Text color="orange.700" fontSize="sm">
-                                                ⚠️ {duplicateWarning}
-                                            </Text>
-                                        </Box>
-                                    )}
+                                {duplicateWarning && (
+                                    <div className="border border-orange-200 bg-orange-50 p-3">
+                                        <span className="text-sm text-orange-700">
+                                            ⚠️ {duplicateWarning}
+                                        </span>
+                                    </div>
+                                )}
 
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Name <Text as="span" color="red.500">*</Text></Text>
-                                        <Input
-                                            value={formData.name}
-                                            onChange={(e) =>
-                                                setFormData({ ...formData, name: e.target.value })
-                                            }
-                                            placeholder="My Binance Account"
-                                            required
-                                        />
-                                    </Box>
+                                <div>
+                                    <span className="mb-1 block font-medium">Name <span className="text-red-500">*</span></span>
+                                    <Input
+                                        value={formData.name}
+                                        onChange={(e) =>
+                                            setFormData({ ...formData, name: e.target.value })
+                                        }
+                                        placeholder="My Binance Account"
+                                        required
+                                    />
+                                </div>
 
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Account Type <Text as="span" color="red.500">*</Text></Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={formData.account_type}
-                                                onChange={(e) =>
-                                                    setFormData({
-                                                        ...formData,
-                                                        account_type: e.target.value as 'cex' | 'broker' | 'wallet',
-                                                    })
-                                                }
-                                            >
-                                                <option value="cex">CEX (Centralized Exchange)</option>
-                                                <option value="broker">Broker</option>
-                                                <option value="wallet">Wallet</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
+                                <div>
+                                    <span className="mb-1 block font-medium">Account Type <span className="text-red-500">*</span></span>
+                                    <select
+                                        value={formData.account_type}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                account_type: e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment',
+                                            })
+                                        }
+                                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
+                                    >
+                                        <option value="cex">CEX (Centralized Exchange)</option>
+                                        <option value="dex">DEX (Decentralized Exchange)</option>
+                                        <option value="broker">Broker</option>
+                                        <option value="wallet">Wallet</option>
+                                        <option value="bank">Bank</option>
+                                        <option value="investment">Investment</option>
+                                    </select>
+                                </div>
 
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Address or Identifier</Text>
-                                        <Input
-                                            value={formData.address_or_identifier}
+                                {(formData.account_type === 'broker' || formData.account_type === 'investment') && (
+                                    <div>
+                                        <span className="mb-1 block font-medium">Tax Envelope</span>
+                                        <select
+                                            value={formData.envelope}
                                             onChange={(e) =>
                                                 setFormData({
                                                     ...formData,
-                                                    address_or_identifier: e.target.value,
+                                                    envelope: e.target.value as '' | 'cto' | 'pea' | 'av',
                                                 })
                                             }
-                                            placeholder="0x1234... or account ID"
-                                        />
-                                    </Box>
+                                            className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
+                                        >
+                                            <option value="">None (standard taxable)</option>
+                                            <option value="cto">CTO (Compte-Titres Ordinaire)</option>
+                                            <option value="pea">PEA (Plan d'Épargne en Actions)</option>
+                                            <option value="av">AV (Assurance Vie)</option>
+                                        </select>
+                                        <span className="mt-1 block text-sm text-slate-500">
+                                            French tax envelope. PEA and AV are tax-advantaged and excluded from standard tax reporting.
+                                        </span>
+                                    </div>
+                                )}
 
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Tags</Text>
-                                        <Textarea
-                                            value={tagsInput}
-                                            onChange={(e) => setTagsInput(e.target.value)}
-                                            placeholder="trading, main, long-term"
-                                            rows={2}
-                                        />
-                                        <Text fontSize="sm" color="gray.500" mt={1}>Comma-separated tags</Text>
-                                    </Box>
-                                </Flex>
-                            </Dialog.Body>
+                                <div>
+                                    <span className="mb-1 block font-medium">Address or Identifier</span>
+                                    <Input
+                                        value={formData.address_or_identifier}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                address_or_identifier: e.target.value,
+                                            })
+                                        }
+                                        placeholder="0x1234... or account ID"
+                                    />
+                                </div>
 
-                            <Dialog.Footer>
-                                <Flex gap={3}>
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => onClose(undefined)}
-                                        disabled={loading}
+                                <div>
+                                    <span className="mb-1 block font-medium">Group</span>
+                                    <ComboSelect
+                                        value={formData.group}
+                                        onChange={(value) =>
+                                            setFormData({
+                                                ...formData,
+                                                group: value,
+                                            })
+                                        }
+                                        options={existingGroups}
+                                        placeholder="Select or type new group..."
+                                        size="md"
+                                        width="100%"
+                                    />
+                                    <span className="mt-1 block text-sm text-slate-500">
+                                        Select an existing group or type a new one
+                                    </span>
+                                </div>
+
+                                <div>
+                                    <span className="mb-1 block font-medium">Owned <span className="text-red-500">*</span></span>
+                                    <select
+                                        value={formData.owned ? 'true' : 'false'}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                owned: e.target.value === 'true',
+                                            })
+                                        }
+                                        className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
                                     >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        type="submit"
-                                        colorPalette="blue"
-                                        loading={loading}
-                                    >
-                                        {account ? 'Update' : 'Create'}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </form>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                                        <option value="true">Yes (my account)</option>
+                                        <option value="false">No (external/counterparty)</option>
+                                    </select>
+                                    <span className="mt-1 block text-sm text-slate-500">
+                                        Mark as owned if this account belongs to you. External accounts are used for tracking counterparties.
+                                    </span>
+                                </div>
+
+                                <div>
+                                    <span className="mb-1 block font-medium">Tags</span>
+                                    <Textarea
+                                        value={tagsInput}
+                                        onChange={(e) => setTagsInput(e.target.value)}
+                                        placeholder="trading, main, long-term"
+                                        rows={2}
+                                    />
+                                    <span className="mt-1 block text-sm text-slate-500">Comma-separated tags</span>
+                                </div>
+
+                                <ColorPaletteField
+                                    value={formData.color}
+                                    onChange={(color) => setFormData({ ...formData, color })}
+                                    usedColors={usedColors}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 border-t border-slate-100 px-5 py-4">
+                            <Button
+                                variant="outline"
+                                onClick={() => onClose(undefined)}
+                                disabled={loading}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                colorScheme="blue"
+                                loading={loading}
+                            >
+                                {account ? 'Update' : 'Create'}
+                            </Button>
+                        </div>
+                    </form>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

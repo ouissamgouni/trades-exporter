@@ -15,20 +15,35 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Union
 from uuid import uuid4
 
+from sqlalchemy.orm import object_session
+
 from backend.config.loader import configure_logging
 from backend.services.pnl.config import PnLConfig, WarningType
 from backend.services.pnl.models import (
     CalculationUnit,
     PnlWarning,
 )
-from backend.db.models import CalculationUnitLeg, CostLot, ConsumedLotSlice, RealizedPnl, FeeEntry, LotSettlement, ensure_utc, utc_now, UnitPattern
+from backend.db.models import CalculationUnitLeg, CostLot, ConsumedLotSlice, RealizedPnl, FeeEntry, IncomeEvent, LotSettlement, LotEventType, ensure_utc, utc_now, UnitPattern
 from backend.services.pnl.lot_manager import LotManager
 from backend.services.pnl.fmv_service import FMVService, compute_group_residual
-from backend.services.pnl.taxability import TaxabilityCalculator
+from backend.services.pnl.taxability import TaxabilityCalculator, DERIVATIVE_SETTLEMENT_TYPES
 
 
 
 log = configure_logging("pnl_group_handler")
+
+
+def _flatten_tags(tags) -> dict:
+    """Convert List[Dict] tags to flat Dict. Supports both formats."""
+    if isinstance(tags, dict):
+        return tags
+    if isinstance(tags, list):
+        flat = {}
+        for item in tags:
+            if isinstance(item, dict):
+                flat.update(item)
+        return flat
+    return {}
 
 
 def handle_unit(
@@ -83,37 +98,63 @@ def handle_unit(
             pattern=unit.pattern,
         )
 
+        # Special handling for spin-offs: no disposals, cost basis reallocation
+        if unit.is_spinoff:
+            _handle_spinoff(
+                unit=unit,
+                lot_manager=lot_manager,
+                fmv_service=fmv_service,
+                config=config,
+            )
+        # Special handling for dividends/income: create IncomeEvent, no disposal
+        elif unit.is_dividend:
+            _handle_dividend(
+                unit=unit,
+                lot_manager=lot_manager,
+                fmv_service=fmv_service,
+                config=config,
+            )
+        # Special handling for cash-in-lieu: forced disposal of fractional shares
+        elif unit.is_cash_in_lieu:
+            _handle_cash_in_lieu(
+                unit=unit,
+                lot_manager=lot_manager,
+                fmv_service=fmv_service,
+                config=config,
+            )
+        else:
 
-        disposal_legs = outflows + fees
+            disposal_legs = outflows + fees
 
-        # 2. Process disposals (outflows + fees) - consume lots and compute P&L
-        consumed_slices = _process_disposals(
-            disposals=disposal_legs,
-            inflows=inflows,
-            unit=unit,
-            lot_manager=lot_manager,
-            fmv_service=fmv_service,
-            config=config,
-        )
+            # 2. Process disposals (outflows + fees) - consume lots and compute P&L
+            consumed_slices, absorbed_fee_cost = _process_disposals(
+                disposals=disposal_legs,
+                inflows=inflows,
+                unit=unit,
+                lot_manager=lot_manager,
+                fmv_service=fmv_service,
+                config=config,
+            )
 
-        # 4. Handle inflows based on pattern
-        _process_inflows(
-            unit=unit,
-            consumed_slices=consumed_slices,
-            lot_manager=lot_manager,
-            fmv_service=fmv_service,
-            config=config,
-        )
+            # 4. Handle inflows based on pattern
+            _process_inflows(
+                unit=unit,
+                consumed_slices=consumed_slices,
+                absorbed_fee_cost=absorbed_fee_cost,
+                lot_manager=lot_manager,
+                fmv_service=fmv_service,
+                config=config,
+            )
 
-        # 5. Compute residuals (optional)
-        _compute_residuals(
-            inflows=inflows,
-            outflows=outflows,
-            fees=fees,
-            fmv_service=fmv_service,
-            config=config,
-            unit=unit,
-        )
+            # 5. Compute residuals (optional)
+            _compute_residuals(
+                inflows=inflows,
+                outflows=outflows,
+                fees=fees,
+                fmv_service=fmv_service,
+                config=config,
+                unit=unit,
+            )
     except Exception as e:
         # Catch any error, attach as a unit-level error warning
         log.error("unit_processing_exception", error=str(e), unit_id=unit_id)
@@ -153,13 +194,22 @@ def _process_disposals(
     - Lots are consumed normally
     - P&L realization is SKIPPED (no RealizedPnl created)
     - Warning is emitted with consumed slice details for user visibility
+    
+    For cost-basis transfers (transfer/split patterns):
+    - Lots are consumed normally
+    - P&L realization is SKIPPED (no RealizedPnl created)
+    - Cost basis is preserved and transferred to new lots
 
     Returns:
-        List of all consumed slices (for inflow processing)
+        Tuple of (consumed_slices, absorbed_fee_cost) where absorbed_fee_cost
+        is the total cost basis of non-taxable fee slices on cost-basis transfers
+        that should be rolled into the transferred asset's cost basis.
     """
     all_consumed_slices: List[ConsumedLotSlice] = []
+    absorbed_fee_cost: Decimal = Decimal(0)
     taxability_calculator = TaxabilityCalculator(config)
-    is_pending_transfer = unit.pattern == UnitPattern.PENDING_TRANSFER.value
+    is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
+    is_cost_basis_transfer = unit.is_cost_basis_transfer
 
     for disposal in disposals:
         asset_id = disposal.asset_id
@@ -184,7 +234,7 @@ def _process_disposals(
             account_id=account_id,
             disposal_taxable=disposal.disposal_taxable,
             is_fee=is_fee,
-            is_pending_transfer=is_pending_transfer,
+            is_unmatched_internal_transfer=is_unmatched_internal_transfer,
         )
 
         # Consume lots
@@ -193,24 +243,144 @@ def _process_disposals(
             lot_manager=lot_manager,
             config=config,
             unit=unit,
+            fmv_service=fmv_service,
         )
-        all_consumed_slices.extend(slices)
 
         if negative_lot:
             if unit.cost_lots is None:
                 unit.cost_lots = []
-            unit.cost_lots.append(negative_lot)
+            if negative_lot not in unit.cost_lots:
+                unit.cost_lots.append(negative_lot)
 
-        # For pending transfers: skip P&L realization, emit warning instead
-        if is_pending_transfer and slices:
-            _create_pending_transfer_warning(
-                unit=unit,
-                direction="outflow",
-                legs=[disposal],
-                slices=slices,
-            )
-        # Compute P&L if disposal is taxable (and not pending transfer)
-        elif slices:
+        if not slices:
+            # ═══════════════════════════════════════════════════════════
+            # FEE WITH NO LOTS — Base currency fees (EUR) and crypto fees
+            # with insufficient lots still need FeeEntry tracking.
+            # Without this, the fee is silently dropped and invisible
+            # to the /fees endpoint and total_fee_in_base.
+            # ═══════════════════════════════════════════════════════════
+            if disposal.is_fee:
+                fee_value = _compute_fee_value_no_slices(
+                    disposal=disposal,
+                    fmv_service=fmv_service,
+                    config=config,
+                )
+                _create_fee_entry(
+                    disposal=disposal,
+                    unit=unit,
+                    realized_pnl=None,
+                    base_currency_id=config.base_currency_id,
+                    fee_value_in_base=fee_value,
+                )
+                log.debug(
+                    "fee_tracked_no_slices",
+                    asset_id=disposal.asset_id,
+                    asset_symbol=disposal.asset_symbol,
+                    qty=float(qty),
+                    fee_value_in_base=float(fee_value),
+                )
+            continue
+
+        # ═══════════════════════════════════════════════════════════════
+        # FEE HANDLING - Fees are processed BEFORE pattern checks.
+        # On cost-basis transfers, fee treatment depends on config:
+        #   - fee_taxable_by_default=False: fee cost is ABSORBED into the
+        #     transferred asset's cost basis (no RealizedPnl, no phantom lots).
+        #   - fee_taxable_by_default=True: fee creates a separate RealizedPnl
+        #     and its slices are excluded from cost basis transfer.
+        # On non-transfer units, fees always create RealizedPnl.
+        # ═══════════════════════════════════════════════════════════════
+        if disposal.is_fee:
+            if is_cost_basis_transfer and not config.fee_taxable_by_default:
+                # Absorb fee cost into transfer: accumulate cost basis from
+                # fee slices, but do NOT add them to all_consumed_slices
+                # (they would create phantom lots in _handle_cost_basis_transfer).
+                absorbed_cost = sum(s.total_cost_in_base for s in slices)
+                absorbed_fee_cost += absorbed_cost
+                # Still create FeeEntry for reporting (no RealizedPnl)
+                _create_fee_entry(
+                    disposal=disposal,
+                    unit=unit,
+                    realized_pnl=None,
+                    base_currency_id=config.base_currency_id,
+                    fee_value_in_base=absorbed_cost,
+                )
+                log.debug(
+                    "fee_absorbed_into_transfer",
+                    asset_id=disposal.asset_id,
+                    asset_symbol=disposal.asset_symbol,
+                    qty=float(qty),
+                    absorbed_cost=float(absorbed_cost),
+                )
+            else:
+                # Fee creates a separate RealizedPnl disposal event.
+                # Do NOT add fee slices to all_consumed_slices when on a
+                # cost-basis transfer — they would create phantom lots.
+                if not is_cost_basis_transfer:
+                    all_consumed_slices.extend(slices)
+                # Skip RealizedPnl for base currency fees — pnl is always 0.
+                # Still create FeeEntry for reporting visibility.
+                if asset_id == config.base_currency_id:
+                    fee_value = sum(s.total_cost_in_base for s in slices)
+                    _create_fee_entry(
+                        disposal=disposal,
+                        unit=unit,
+                        realized_pnl=None,
+                        base_currency_id=config.base_currency_id,
+                        fee_value_in_base=fee_value,
+                    )
+                    log.debug(
+                        "base_currency_fee_skipped_pnl",
+                        asset_id=asset_id,
+                        asset_symbol=asset_symbol,
+                        qty=float(qty),
+                    )
+                else:
+                    _proceeds_and_pnl_entry(
+                        disposal=disposal,
+                        slices=slices,
+                        inflows=inflows,
+                        non_fee_outflows=[d for d in disposals if not d.is_fee],
+                        fmv_service=fmv_service,
+                        config=config,
+                        unit=unit,
+                    )
+            continue  # Skip pattern checks for fees
+
+        # Non-fee legs always contribute to all_consumed_slices
+        all_consumed_slices.extend(slices)
+
+        # ═══════════════════════════════════════════════════════════════
+        # PATTERN-BASED HANDLING - Only for non-fee disposals
+        # ═══════════════════════════════════════════════════════════════
+        
+        # For unmatched internal transfers: skip P&L realization, emit warning instead
+        if slices:
+            if is_unmatched_internal_transfer :
+                _create_unmatched_internal_transfer_warning(
+                    unit=unit,
+                    direction="outflow",
+                    legs=[disposal],
+                    slices=slices,
+                )
+                continue  # Skip P&L realization
+            # For cost-basis transfers (internal_transfer/split): skip P&L realization
+            # Cost basis will be preserved and transferred to new lots in _handle_cost_basis_transfer
+            if is_cost_basis_transfer :
+                continue  # No P&L realization for transfers/splits
+            
+            # Skip RealizedPnl for base currency disposals — pnl is always 0
+            # (proceeds = qty × 1.0 = cost_basis). These entries are pure noise.
+            if asset_id == config.base_currency_id:
+                log.debug(
+                    "base_currency_disposal_skipped_pnl",
+                    asset_id=asset_id,
+                    asset_symbol=asset_symbol,
+                    qty=float(qty),
+                )
+                continue
+            
+            # Compute P&L for taxable disposals (not transfers/splits)
             _proceeds_and_pnl_entry(
                 disposal=disposal,
                 slices=slices,
@@ -222,17 +392,17 @@ def _process_disposals(
             )
        
 
-    return all_consumed_slices
+    return all_consumed_slices, absorbed_fee_cost
 
 
-def _create_pending_transfer_warning(
+def _create_unmatched_internal_transfer_warning(
     unit: CalculationUnit,
     direction: str,
     legs: List[CalculationUnitLeg],
     slices: Optional[List[ConsumedLotSlice]] = None,
 ) -> None:
     """
-    Create warning for pending transfer (outflow or inflow).
+    Create warning for unmatched internal transfer (outflow or inflow).
     
     Args:
         unit: The calculation unit
@@ -285,7 +455,7 @@ def _create_pending_transfer_warning(
         
         message = (
             f"Transfer inflow missing outflow - {float(total_qty):.6g} {asset_symbol}. "
-            f"No cost lot created. Link matching withdrawal to establish cost basis."
+            f"Provisional lot created with FMV cost basis. Link matching withdrawal to establish actual cost basis."
         )
         details = {
             "transfer_direction": "inflow",
@@ -294,6 +464,8 @@ def _create_pending_transfer_warning(
             "account_id": account_id,
             "total_quantity": float(total_qty),
             "timestamp": timestamp,
+            "provisional_cost_basis": "fmv_at_acquisition",
+            "note": "Provisional lot will be replaced with actual cost basis when transfer is linked and P&L recalculated",
             "inflows": [{
                 "transaction_id": i.origin_transaction_id,
                 "quantity": float(i.quantity) if i.quantity else 0,
@@ -303,7 +475,7 @@ def _create_pending_transfer_warning(
         log_extra = {"account_id": account_id}
     
     warning = PnlWarning(
-        warning_type=WarningType.PENDING_TRANSFER.value,
+        warning_type=WarningType.UNMATCHED_INTERNAL_TRANSFER.value,
         message=message,
         transaction_id=leg.origin_transaction_id,
         asset_id=asset_id,
@@ -316,7 +488,7 @@ def _create_pending_transfer_warning(
     unit.warnings.append(warning)
     
     log.info(
-        "pending_transfer_warning_created",
+        "unmatched_internal_transfer_warning_created",
         direction=direction,
         asset_symbol=asset_symbol,
         qty=float(total_qty),
@@ -330,6 +502,7 @@ def _consume_lots(
     lot_manager: LotManager,
     config: PnLConfig,
     unit: CalculationUnit,
+    fmv_service: Optional[FMVService] = None,
 ) -> tuple[List[ConsumedLotSlice], Optional[CostLot]]:
     """Consume lots for a disposal transaction."""
     asset_id = disposal.asset_id
@@ -342,6 +515,20 @@ def _consume_lots(
     unit_id = unit.id
     disposal_dt = ensure_utc(disposal.date_time) if hasattr(disposal, 'date_time') and disposal.date_time else None
     
+    # Compute FMV for negative lot fallback cost (instead of using 0)
+    fmv_unit_cost = None
+    fmv_metadata = None
+    if fmv_service and disposal.asset_id != config.base_currency_id:
+        fmv_result = fmv_service.get_fmv_in_base(disposal, skip_on_error=True)
+        if fmv_result.success and fmv_result.price and fmv_result.price > 0:
+            fmv_unit_cost = Decimal(str(fmv_result.price))
+            fmv_metadata = {
+                "source": fmv_result.source,
+                "price": Decimal(str(fmv_result.price)),
+                "timestamp": fmv_result.timestamp,
+                "is_stale": getattr(fmv_result, 'is_stale', None),
+            }
+
     try:
         slices, negative_lot = lot_manager.consume_lots(
             account_id=account_id,
@@ -351,6 +538,8 @@ def _consume_lots(
             allow_negative=config.allow_negative_balances,
             triggered_by_transaction=disposal.transaction,
             triggered_by_unit=unit,
+            fmv_unit_cost=fmv_unit_cost,
+            fmv_metadata=fmv_metadata,
         )
     except ValueError as e:
         if unit.warnings is None:
@@ -369,6 +558,12 @@ def _consume_lots(
     for slice in slices:
         slice.consumed_at = disposal_dt
         slice.consumed_by_leg_id = disposal.id  # Link to the leg that consumed this slice
+        slice.unit_id = unit.id  # Link to the unit that consumed this slice
+        slice.unit = unit  # Set relationship for auto-population of unit.consumed_slices
+        # Manually add to unit.consumed_slices since relationship might not be bidirectional
+        if unit.consumed_slices is None:
+            unit.consumed_slices = []
+        unit.consumed_slices.append(slice)
 
     if negative_lot:
         # Set origin traceability on the negative lot
@@ -376,16 +571,50 @@ def _consume_lots(
         # Set unit_id (FK to calculation_units)
         negative_lot.unit_id = unit.id
         
-        if unit.warnings is None:
-            unit.warnings = []
-        unit.warnings.append(
-            PnlWarning(
-                warning_type=WarningType.NEGATIVE_BALANCE.value,
-                message=f"Created negative lot for {asset_symbol} (id={asset_id}) (insufficient balance)",
-                transaction_id=origin_tx_id,
-                unit=unit,
+        # Only emit warning when allow_negative_balances is off —
+        # if the user opted in, negative lots are expected and not noise.
+        if not config.allow_negative_balances:
+            if unit.warnings is None:
+                unit.warnings = []
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.NEGATIVE_BALANCE.value,
+                    message=f"Created negative lot for {asset_symbol} (id={asset_id}) (insufficient balance)",
+                    transaction_id=origin_tx_id,
+                    unit=unit,
+                )
             )
-        )
+        
+        # Emit PROVISIONAL_COST_LOT warning when negative lot has FMV-based cost
+        # (cost is an estimate that will be corrected when the acquisition arrives)
+        if negative_lot.cost_source == "fmv" and negative_lot.asset_id != config.base_currency_id:
+            if unit.warnings is None:
+                unit.warnings = []
+            fmv_value = abs(float(negative_lot.qty)) * float(negative_lot.unit_cost_in_base)
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.PROVISIONAL_COST_LOT.value,
+                    message=f"Provisional cost basis for {asset_symbol}: "
+                            f"qty={abs(float(negative_lot.qty)):.6g}, "
+                            f"FMV value={fmv_value:,.2f} {config.base_currency_symbol} "
+                            f"(unit_cost={float(negative_lot.unit_cost_in_base):.6g}, "
+                            f"source: {negative_lot.cost_fmv_source or 'unknown'}, "
+                            f"lot #{negative_lot.cost_lot_id or 'pending'}). "
+                            f"Will be corrected when acquisition transaction is processed.",
+                    transaction_id=origin_tx_id,
+                    asset_id=asset_id,
+                    unit=unit,
+                    details={
+                        "lot_id": negative_lot.cost_lot_id,
+                        "fmv_price": float(negative_lot.cost_fmv_price) if negative_lot.cost_fmv_price else None,
+                        "fmv_source": negative_lot.cost_fmv_source,
+                        "fmv_value": fmv_value,
+                        "cost_source": negative_lot.cost_source,
+                        "qty": float(negative_lot.qty),
+                        "transaction_date": disposal_dt.isoformat() if disposal_dt else None,
+                    },
+                )
+            )
 
     return slices, negative_lot
 
@@ -407,7 +636,7 @@ def _proceeds_and_pnl_entry(
     qty = Decimal(disposal.quantity) if disposal.quantity else Decimal(0)
     tx_id = disposal.origin_transaction_id
     origin_tx_id = disposal.origin_transaction_id if hasattr(disposal, 'origin_transaction_id') else tx_id
-    disposal_dt = disposal.date_time if disposal.date_time else datetime.utcnow()
+    disposal_dt = disposal.date_time if disposal.date_time else utc_now()
 
     cost_basis = sum(s.total_cost_in_base for s in slices)
     proceeds, price_error, proceeds_metadata = _compute_proceeds(
@@ -417,6 +646,17 @@ def _proceeds_and_pnl_entry(
         fmv_service=fmv_service,
         config=config,
     )
+
+    # --- Derivative settlement loss: override proceeds to 0 ---
+    # For derivative settlements (perp_close losses), the outflow is a loss event.
+    # Proceeds are 0; pnl = 0 - cost_basis = -consumed_lot_cost.
+    _deriv_attributed_asset_id = None
+    tx = disposal.origin_transaction
+    _source_type = getattr(tx, 'source_transaction_type', None) if tx else None
+    if _source_type and _source_type in DERIVATIVE_SETTLEMENT_TYPES:
+        proceeds = Decimal("0")
+        proceeds_metadata = {"source": "derivative_settlement", "price": Decimal("0")}
+        _deriv_attributed_asset_id = getattr(tx, 'attributed_asset_id', None)
     
     # Track price lookup failures as warnings
     if price_error:
@@ -464,50 +704,97 @@ def _proceeds_and_pnl_entry(
     
     pnl = proceeds - cost_basis
 
-    # Calculate holding period (now uses slice.holding_period_days property)
-    min_acquired = min(s.cost_lot.acquired_at for s in slices)
-    holding_days = (ensure_utc(disposal_dt) - ensure_utc(min_acquired)).days
-    
-    if disposal.disposal_taxable or (disposal.is_fee and disposal.asset_id != config.base_currency_id):
-        entry = RealizedPnl(
-            # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
-            # relationship objects needed for persistence when objects aren't yet persisted)
-            asset_id=asset_id,  # FK for runtime access
-            asset=disposal.asset,  # Relationship object for persistence
-            qty=qty,
-            proceeds_in_base=proceeds,
-            cost_basis_in_base=cost_basis,
-            pnl_in_base=pnl,
-            disposal_taxable=disposal.disposal_taxable,
-            transaction_id=origin_tx_id,  # FK for runtime access
-            transaction=disposal.origin_transaction,  # Relationship object for persistence
-            origin_unit=unit,  # FK to calculation_units
-            realized_at=disposal_dt,
-            holding_period_days=holding_days,
-            slices=slices,
-            # Store proceeds metadata for transparency
-            proceeds_source=proceeds_metadata.get("source"),
-            proceeds_price=proceeds_metadata.get("price"),
-            proceeds_price_source=proceeds_metadata.get("price_source"),
-            proceeds_price_timestamp=proceeds_metadata.get("timestamp"),
+    # Warn if cost basis is zero for a non-base-currency asset (likely a zero-cost lot bug)
+    is_base = config.base_currency_id and asset_id == config.base_currency_id
+    if cost_basis == Decimal(0) and qty > 0 and not is_base:
+        if unit.warnings is None:
+            unit.warnings = []
+        unit.warnings.append(
+            PnlWarning(
+                warning_type=WarningType.ZERO_COST_LOT.value,
+                message=f"Zero cost basis on disposal of {asset_symbol} (id={asset_id}): "
+                        f"{float(qty):.6g} units disposed with cost_basis=0. "
+                        f"This may indicate a missing price or an unsettled negative lot.",
+                transaction_id=origin_tx_id,
+                asset_id=asset_id,
+                unit=unit,
+                details={
+                    "qty": float(qty),
+                    "proceeds": float(proceeds),
+                    "pnl": float(pnl),
+                    "slices_count": len(slices),
+                    "slice_costs": [float(s.total_cost_in_base) for s in slices],
+                },
+            )
         )
-
-        log.info(
-            "pnl_realized",
-            tx_id=tx_id,
-            unit_id=unit.id,
+        log.warning(
+            "zero_cost_basis_on_disposal",
             asset_id=asset_id,
             asset_symbol=asset_symbol,
             qty=float(qty),
             proceeds=float(proceeds),
-            cost_basis=float(cost_basis),
             pnl=float(pnl),
-            holding_days=holding_days,
-            slices_used=len(slices),
+            slices=len(slices),
         )
 
-        # Note: origin_unit=unit relationship auto-populates realized_pnl_records
-        # No manual append needed
+    # Calculate holding period (now uses slice.holding_period_days property)
+    min_acquired = min(ensure_utc(s.cost_lot.acquired_at) for s in slices)
+    holding_days = (ensure_utc(disposal_dt) - ensure_utc(min_acquired)).days
+    
+    # Always create RealizedPnl for all real disposals.
+    # The disposal_taxable flag is preserved on each entry for downstream filtering
+    # (e.g. total_realized_pnl sums only taxable, total_all_pnl sums everything).
+    entry = RealizedPnl(
+        # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
+        # relationship objects needed for persistence when objects aren't yet persisted)
+        asset_id=asset_id,  # FK for runtime access
+        asset=disposal.asset,  # Relationship object for persistence
+        qty=qty,
+        proceeds_in_base=proceeds,
+        cost_basis_in_base=cost_basis,
+        pnl_in_base=pnl,
+        disposal_taxable=disposal.disposal_taxable,
+        transaction_id=origin_tx_id,  # FK for runtime access
+        transaction=disposal.origin_transaction,  # Relationship object for persistence
+        origin_unit=unit,  # FK to calculation_units
+        realized_at=disposal_dt,
+        holding_period_days=holding_days,
+        slices=slices,
+        # Store proceeds metadata for transparency
+        proceeds_source=proceeds_metadata.get("source"),
+        proceeds_price=proceeds_metadata.get("price"),
+        proceeds_price_source=proceeds_metadata.get("price_source"),
+        proceeds_price_timestamp=proceeds_metadata.get("timestamp"),
+        attributed_asset_id=_deriv_attributed_asset_id,
+    )
+
+    # RealizedPnl.slices is viewonly (CostLot owns slices via cascade), so
+    # setting slices= above populates the in-memory list but does NOT write
+    # pnl_id FK on the slice rows. Set it from the non-viewonly side.
+    for s in slices:
+        s.pnl = entry
+
+    log.info(
+        "pnl_realized",
+        tx_id=tx_id,
+        unit_id=unit.id,
+        asset_id=asset_id,
+        asset_symbol=asset_symbol,
+        qty=float(qty),
+        proceeds=float(proceeds),
+        cost_basis=float(cost_basis),
+        pnl=float(pnl),
+        holding_days=holding_days,
+        slices_used=len(slices),
+        disposal_taxable=disposal.disposal_taxable,
+    )
+
+    # Manual append needed - SQLAlchemy back-population doesn't work reliably
+    # for transient objects (not yet in a session)
+    if unit.realized_pnl_records is None:
+        unit.realized_pnl_records = []
+    if entry not in unit.realized_pnl_records:
+        unit.realized_pnl_records.append(entry)
 
     # Create FeeEntry index for fee disposals (links to RealizedPnl)
     if disposal.is_fee:
@@ -523,6 +810,7 @@ def _proceeds_and_pnl_entry(
 def _process_inflows(
     unit: CalculationUnit,
     consumed_slices: List[ConsumedLotSlice],
+    absorbed_fee_cost: Decimal,
     lot_manager: LotManager,
     fmv_service: FMVService,
     config: PnLConfig,
@@ -530,13 +818,17 @@ def _process_inflows(
     """
     Handle inflows based on the unit pattern.
     
-    For pending transfers (inflow-only with transfer tx_type):
-    - Lot creation is SKIPPED (no cost basis available)
-    - Warning is emitted with inflow details for user visibility
+    For unmatched internal transfers (inflow-only with internal_transfer tx_type):
+    - Provisional lot IS created using FMV as temporary cost basis
+    - Warning is emitted with FMV details for user visibility
+    - Provisional lots prevent negative lot errors when assets are later disposed
+    - When transfer is linked and P&L recalculated, provisional lots are replaced
+      with proper lots using inherited cost basis from the matching outflow
     
     Args:
         unit: The calculation unit being processed
-        consumed_slices: All consumed slices from disposals (outflows + fees)
+        consumed_slices: All consumed slices from disposals (non-fee outflows only)
+        absorbed_fee_cost: Fee cost basis to absorb into transfer lots (0 when not applicable)
         lot_manager: For creating new lots
         fmv_service: For FMV lookups
         config: P&L configuration
@@ -545,22 +837,27 @@ def _process_inflows(
     if not inflows:
         return
     
-    # For pending transfers (inflow-only): skip lot creation, emit warning
-    if unit.pattern == UnitPattern.PENDING_TRANSFER.value and unit.is_inflow_only:
-        _create_pending_transfer_warning(
+    # Check if this is an unmatched internal transfer (inflow-only)
+    is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
+    
+    if is_unmatched_internal_transfer:
+        # Create warning for user visibility (was missing for inflows)
+        _create_unmatched_internal_transfer_warning(
             unit=unit,
             direction="inflow",
             legs=inflows,
+            slices=None,
         )
-        return
         
     # Use unified is_cost_basis_transfer for non-taxable transfers
     if unit.is_cost_basis_transfer:
         _handle_cost_basis_transfer(
             inflows=inflows,
             consumed_slices=consumed_slices,
+            absorbed_fee_cost=absorbed_fee_cost,
             lot_manager=lot_manager,
             unit=unit,
+            config=config,
         )
     else:
         _handle_acquisition(
@@ -619,6 +916,37 @@ def _compute_residuals(
         )
 
 
+def _compute_fee_value_no_slices(
+    disposal: CalculationUnitLeg,
+    fmv_service: FMVService,
+    config: PnLConfig,
+) -> Decimal:
+    """
+    Compute fee value in base currency when no lots were consumed.
+    
+    This handles two cases:
+    - Base currency fees (EUR): value = quantity (1:1 with base)
+    - Non-base-currency fees with no lots: value = FMV lookup
+    
+    Args:
+        disposal: The fee leg
+        fmv_service: For FMV lookups
+        config: P&L configuration
+        
+    Returns:
+        Fee value in base currency
+    """
+    qty = Decimal(disposal.quantity) if disposal.quantity else Decimal(0)
+    
+    if disposal.asset_id == config.base_currency_id:
+        # Base currency fee: value = quantity directly
+        return qty
+    
+    # Non-base-currency fee: use FMV
+    fmv_result = fmv_service.get_fmv_in_base(disposal, skip_on_error=True)
+    return fmv_result.value
+
+
 def _create_fee_entry(
     disposal: CalculationUnitLeg,
     unit: CalculationUnit,
@@ -649,7 +977,6 @@ def _create_fee_entry(
     
     # Use relationship objects instead of IDs - SQLAlchemy will resolve IDs on flush
     # This handles the case where entities haven't been persisted yet
-    # Setting fee_leg=disposal auto-populates disposal.fee_entries via back_populates
     fee_entry = FeeEntry(
         fee_leg=disposal,
         realized_pnl=realized_pnl,
@@ -658,6 +985,14 @@ def _create_fee_entry(
         related_asset_id=related_asset_id,
         fee_value_in_base=fee_value_in_base,
     )
+
+    # Manual append needed - SQLAlchemy back-population doesn't work reliably
+    # for transient objects (not yet in a session). Same pattern as RealizedPnl above.
+    # Without this, the FeeEntry is a dangling object never reached by cascade persistence.
+    if disposal.fee_entries is None:
+        disposal.fee_entries = []
+    if fee_entry not in disposal.fee_entries:
+        disposal.fee_entries.append(fee_entry)
     
     log.debug(
         "fee_entry_created",
@@ -698,6 +1033,14 @@ def _determine_related_asset_for_fee(
         candidates.append(leg)
     
     if not candidates:
+        # Fallback: use attributed_asset_id from the fee leg's transaction
+        # This covers standalone fee units (e.g. ADR custody fee attributed to a stock)
+        for leg in unit.legs:
+            if leg.is_fee:
+                tx = leg.transaction
+                attr_id = getattr(tx, 'attributed_asset_id', None)
+                if attr_id:
+                    return attr_id
         return None
     
     # If only one candidate, return it
@@ -733,13 +1076,16 @@ def _compute_proceeds(
     Rules:
     - Fee legs: ALWAYS use FMV (fees don't receive base currency inflows)
     - Sell to base currency: proceeds = pro-rata share of base currency received
+      (only when all non-fee outflows are the same asset — i.e. a pure sell)
+    - Mixed-asset unit with base currency inflows: non-base-currency disposals
+      use FMV (the EUR inflow is not their proceeds)
     - Swap to another asset: proceeds = FMV of disposed asset
     - Payment (no inflow): proceeds = FMV of disposed asset
     
     Args:
         disposal: The leg being disposed
         inflows: All inflow legs in the unit
-        all_outflows: All non-fee outflow legs (for pro-rata calculation)
+        all_non_fee_outflows: All non-fee outflow legs (for pro-rata calculation)
         fmv_service: For FMV lookups
         config: P&L configuration
     """
@@ -772,7 +1118,14 @@ def _compute_proceeds(
     # Check if we receive base currency
     base_inflows = [i for i in inflows if i.asset_id and i.asset_id == config.base_currency_id]
 
-    if base_inflows:
+    # Only use base-currency pro-rata when all non-fee outflows are the SAME asset.
+    # In mixed-asset units (e.g. EUR + INDW.PA on both sides), the EUR inflow is
+    # NOT the proceeds of selling the non-base asset — each asset pair is independent.
+    # Non-base-currency disposals in mixed-asset units must use FMV instead.
+    non_fee_outflow_asset_ids = set(o.asset_id for o in all_non_fee_outflows if o.asset_id)
+    is_mixed_asset_unit = len(non_fee_outflow_asset_ids) > 1
+
+    if base_inflows and not (is_mixed_asset_unit and disposal.asset_id != config.base_currency_id):
         # Selling to fiat: proceeds = pro-rata share of fiat received
         total_base_received = sum(
             Decimal(i.quantity) if i.quantity else Decimal(0)
@@ -780,7 +1133,8 @@ def _compute_proceeds(
         )
         
         # Pro-rata allocation if multiple outflows share base currency inflows
-        # All outflows in a unit are the same asset, so allocate by quantity
+        # In a pure sell (single outflow asset), proportion = 1.0
+        # In a mixed unit where this disposal is base currency, only base outflows count
         disposal_qty = Decimal(disposal.quantity) if disposal.quantity else Decimal(0)
         total_outflow_qty = sum(
                 Decimal(o.quantity) if o.quantity else Decimal(0)
@@ -818,88 +1172,674 @@ def _compute_proceeds(
     return fmv_result.value, error, metadata
 
 
+def _handle_dividend(
+    unit: CalculationUnit,
+    lot_manager: LotManager,
+    fmv_service: FMVService,
+    config: PnLConfig,
+) -> None:
+    """
+    Handle a dividend/income unit: create IncomeEvent and cost lot for cash received.
+
+    Dividends are NOT disposals — the underlying stock is retained. The cash
+    received enters the portfolio as a new cost lot (cost = FMV = amount received).
+    An IncomeEvent is created instead of RealizedPnl.
+
+    Withholding tax info is expected in the transaction's tags dict:
+        tags = {
+            "withholding_amount": "1.60",
+            "withholding_jurisdiction": "US",
+            "withholding_rate": "0.30",
+        }
+    """
+    inflows = unit.inflow_legs
+    if not inflows:
+        log.warning("dividend_unit_no_inflows", unit_id=unit.id)
+        return
+
+    for inflow in inflows:
+        tx = inflow.transaction
+        if not tx:
+            continue
+
+        asset_id = inflow.asset_id
+        qty = Decimal(str(inflow.quantity)) if inflow.quantity else Decimal(0)
+        income_dt = inflow.date_time or utc_now()
+
+        # Compute gross amount in base currency via FMV
+        fmv_result = fmv_service.get_fmv_in_base(inflow, skip_on_error=True)
+        gross_amount = fmv_result.value
+
+        # Extract withholding info from transaction tags
+        tags = _flatten_tags(getattr(tx, 'tags', None))
+        withholding_amount_str = tags.get("withholding_amount", "0")
+        withholding_jurisdiction = tags.get("withholding_jurisdiction")
+        withholding_rate_str = tags.get("withholding_rate")
+
+        withholding_raw = Decimal(str(withholding_amount_str)) if withholding_amount_str else Decimal(0)
+        withholding_rate = Decimal(str(withholding_rate_str)) if withholding_rate_str else None
+
+        # Convert WHT to base currency (fixes currency mixing bug)
+        fx_rate_str = tags.get("fx_rate")
+        if fx_rate_str and withholding_raw:
+            # Broker FX rate available — convert source-currency WHT to base
+            fx_rate = Decimal(fx_rate_str)
+            wht_source_str = tags.get("wht_amount_source")
+            wht_source = Decimal(wht_source_str) if wht_source_str else withholding_raw
+            withholding_amount = wht_source / fx_rate
+        else:
+            # Proportional fallback: same ratio as gross_base / gross_source
+            gross_source_str = tags.get("gross_amount_source")
+            if gross_source_str and gross_amount and withholding_raw:
+                gross_source = Decimal(gross_source_str)
+                if gross_source:
+                    ratio = gross_amount / gross_source
+                    withholding_amount = withholding_raw * ratio
+                else:
+                    withholding_amount = withholding_raw
+            else:
+                # Same-currency or no conversion data — use raw value
+                withholding_amount = withholding_raw
+
+        net_amount = gross_amount - withholding_amount
+
+        # Determine attributed asset (the stock generating the dividend)
+        attributed_asset_id = getattr(tx, 'attributed_asset_id', None)
+
+        # Determine income type from source_transaction_type
+        source_tx_type = getattr(tx, 'source_transaction_type', 'dividend') or 'dividend'
+        income_type_map = {
+            "dividend": "dividend",
+            "interest": "interest",
+            "staking": "staking",
+            "funding": "funding",
+            "airdrop": "airdrop",
+        }
+        income_type = income_type_map.get(source_tx_type, "other")
+
+        # Create IncomeEvent
+        income_event = IncomeEvent(
+            version_id=unit.version_id,
+            unit_id=unit.id,
+            income_type=income_type,
+            asset_id=asset_id,
+            attributed_asset_id=attributed_asset_id,
+            transaction_id=tx.id,
+            gross_amount_in_base=gross_amount,
+            net_amount_in_base=net_amount,
+            withholding_amount_in_base=withholding_amount,
+            withholding_jurisdiction=withholding_jurisdiction,
+            withholding_rate=withholding_rate,
+            income_at=income_dt,
+        )
+
+        if unit.income_events is None:
+            unit.income_events = []
+        unit.income_events.append(income_event)
+
+        log.info(
+            "income_event_created",
+            unit_id=unit.id,
+            income_type=income_type,
+            asset_id=asset_id,
+            attributed_asset_id=attributed_asset_id,
+            gross=float(gross_amount),
+            withholding=float(withholding_amount),
+            net=float(net_amount),
+            jurisdiction=withholding_jurisdiction,
+        )
+
+    # Create cost lots for the cash received (standard acquisition path)
+    _handle_acquisition(
+        inflows=inflows,
+        consumed_slices=[],
+        lot_manager=lot_manager,
+        fmv_service=fmv_service,
+        config=config,
+        unit=unit,
+    )
+
+
+def _handle_cash_in_lieu(
+    unit: CalculationUnit,
+    lot_manager: LotManager,
+    fmv_service: FMVService,
+    config: PnLConfig,
+) -> None:
+    """
+    Handle cash-in-lieu of fractional shares from corporate actions.
+
+    Cash-in-lieu represents a forced disposal of fractional shares: the broker
+    sells them at market price and pays cash instead. This creates a taxable
+    disposal of the parent asset plus acquisition of the cash received.
+
+    Steps:
+    1. Compute cash proceeds in base currency (FMV of inflow)
+    2. Look up parent stock FMV → back-calculate fractional qty disposed
+    3. Consume parent lots for that fractional qty
+    4. Create RealizedPnl (proceeds − cost basis of consumed lots)
+    5. Create cost lot for cash received via _handle_acquisition
+
+    Expected transaction attributes:
+        source_transaction_type = "cash_in_lieu"
+        attributed_asset_id = <parent stock asset ID>
+    """
+    inflows = unit.inflow_legs
+    if not inflows:
+        log.warning("cash_in_lieu_no_inflows", unit_id=unit.id)
+        return
+
+    for inflow in inflows:
+        tx = inflow.transaction
+        if not tx:
+            continue
+
+        parent_asset_id = getattr(tx, 'attributed_asset_id', None)
+        if not parent_asset_id:
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.UNMATCHED_GROUP.value,
+                    message="Cash-in-lieu missing attributed_asset_id (parent stock)",
+                    unit=unit,
+                )
+            )
+            log.warning("cash_in_lieu_no_parent", unit_id=unit.id)
+            continue
+
+        cash_dt = inflow.date_time or utc_now()
+        account_id = inflow.account_id
+
+        # Cash proceeds in base currency
+        fmv_result = fmv_service.get_fmv_in_base(inflow, skip_on_error=True)
+        proceeds_in_base = fmv_result.value
+
+        if not proceeds_in_base or proceeds_in_base <= 0:
+            log.warning("cash_in_lieu_zero_proceeds", unit_id=unit.id)
+            continue
+
+        # Look up parent stock FMV to back-calculate fractional qty
+        parent_price = fmv_service.get_price_in_base(parent_asset_id, cash_dt)
+
+        if not parent_price or parent_price <= 0:
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.MISSING_PRICE.value,
+                    message=f"Cannot determine fractional qty: parent asset {parent_asset_id} has no FMV",
+                    unit=unit,
+                    asset_id=parent_asset_id,
+                )
+            )
+            log.warning(
+                "cash_in_lieu_no_parent_fmv",
+                unit_id=unit.id,
+                parent_asset_id=parent_asset_id,
+            )
+            continue
+
+        fractional_qty = proceeds_in_base / parent_price
+
+        # Resolve parent symbol from existing lots
+        parent_symbol = f"ASSET#{parent_asset_id}"
+        parent_lots = list(lot_manager.get_lots(account_id, parent_asset_id))
+        if parent_lots and parent_lots[0].asset:
+            parent_symbol = parent_lots[0].asset.symbol
+
+        # Consume parent stock lots for the fractional qty
+        consumed_slices, negative_lot = lot_manager.consume_lots(
+            account_id=account_id,
+            asset_id=parent_asset_id,
+            asset_symbol=parent_symbol,
+            qty=fractional_qty,
+            allow_negative=config.allow_negative_balances,
+            triggered_by_transaction=tx,
+            triggered_by_unit=unit,
+        )
+
+        total_cost = sum(s.total_cost_in_base for s in consumed_slices)
+        gain = proceeds_in_base - total_cost
+
+        # Holding period from oldest consumed lot
+        holding_days = None
+        if consumed_slices:
+            min_acquired = min(
+                (ensure_utc(s.cost_lot.acquired_at) for s in consumed_slices if s.cost_lot and s.cost_lot.acquired_at),
+                default=None,
+            )
+            if min_acquired:
+                holding_days = (ensure_utc(cash_dt) - min_acquired).days
+
+        realized = RealizedPnl(
+            asset_id=parent_asset_id,
+            qty=fractional_qty,
+            proceeds_in_base=proceeds_in_base,
+            cost_basis_in_base=total_cost,
+            pnl_in_base=gain,
+            disposal_taxable=True,
+            transaction_id=tx.id,
+            transaction=tx,
+            origin_unit=unit,
+            realized_at=cash_dt,
+            holding_period_days=holding_days,
+            slices=consumed_slices,
+            proceeds_source="fmv_lookup",
+        )
+
+        # Set pnl FK on slices from the non-viewonly side
+        for s in consumed_slices:
+            s.pnl = realized
+
+        if unit.realized_pnl_records is None:
+            unit.realized_pnl_records = []
+        if realized not in unit.realized_pnl_records:
+            unit.realized_pnl_records.append(realized)
+
+        log.info(
+            "cash_in_lieu_disposal",
+            unit_id=unit.id,
+            parent_asset_id=parent_asset_id,
+            parent_symbol=parent_symbol,
+            fractional_qty=float(fractional_qty),
+            proceeds=float(proceeds_in_base),
+            cost_basis=float(total_cost),
+            gain=float(gain),
+        )
+
+    # Create cost lots for cash received
+    _handle_acquisition(
+        inflows=inflows,
+        consumed_slices=[],
+        lot_manager=lot_manager,
+        fmv_service=fmv_service,
+        config=config,
+        unit=unit,
+    )
+
+
+def _handle_spinoff(
+    unit: CalculationUnit,
+    lot_manager: LotManager,
+    fmv_service: FMVService,
+    config: PnLConfig,
+) -> None:
+    """
+    Handle a corporate spin-off: reallocate cost basis from parent to new company.
+
+    A spin-off has NO outflow of the parent — the parent shares stay. Only the
+    new company shares arrive as inflows. Cost basis is split between parent and
+    new company proportionally (by FMV or user-specified allocation %).
+
+    Approach: consume-and-recreate. For each source lot:
+    1. Consume fully (creates ConsumedLotSlice, NO RealizedPnl)
+    2. Create new source-asset lot: same qty, reduced cost (1 - allocation_pct)
+    3. Create new target-asset lot: proportional qty, freed cost (allocation_pct)
+    4. Preserve holding period (acquired_at) from source lot
+
+    Bundle metadata expected:
+        {
+            "spinoff_source_asset_id": int,       # Parent asset (e.g., Aptiv)
+            "spinoff_allocation_pct": float|None,  # % of cost basis going to new company (0-1)
+        }
+
+    If allocation_pct is not provided, auto-compute from FMV at the spinoff date.
+    """
+    inflows = unit.inflow_legs
+    if not inflows:
+        log.warning("spinoff_no_inflows", unit_id=unit.id)
+        return
+
+    # Read spinoff metadata from bundle
+    metadata = getattr(unit, 'bundle_metadata', None) or {}
+    source_asset_id = metadata.get("spinoff_source_asset_id")
+    allocation_pct = metadata.get("spinoff_allocation_pct")
+
+    if not source_asset_id:
+        unit.warnings.append(
+            PnlWarning(
+                warning_type=WarningType.UNMATCHED_GROUP.value,
+                message="Spin-off bundle missing spinoff_source_asset_id in metadata",
+                unit=unit,
+            )
+        )
+        log.error("spinoff_missing_source_asset", unit_id=unit.id)
+        return
+
+    # Get the target (new company) inflow leg
+    target_inflow = inflows[0]
+    target_asset_id = target_inflow.asset_id
+    target_inflow_qty = Decimal(str(target_inflow.quantity)) if target_inflow.quantity else Decimal(0)
+    spinoff_date = target_inflow.date_time
+
+    # Get the account from the inflow — spinoff only affects lots in this account
+    account_id = target_inflow.account_id
+
+    if not target_asset_id or target_inflow_qty <= 0:
+        unit.warnings.append(
+            PnlWarning(
+                warning_type=WarningType.UNMATCHED_GROUP.value,
+                message="Spin-off inflow has no valid asset or quantity",
+                unit=unit,
+            )
+        )
+        return
+
+    # Auto-compute allocation from FMV if not specified
+    if allocation_pct is None:
+        source_price = fmv_service.get_price_in_base(source_asset_id, spinoff_date)
+        target_price = fmv_service.get_price_in_base(target_asset_id, spinoff_date)
+
+        if source_price and target_price and (source_price + target_price) > 0:
+            allocation_pct = float(target_price / (source_price + target_price))
+            log.info(
+                "spinoff_allocation_auto_computed",
+                unit_id=unit.id,
+                source_price=float(source_price),
+                target_price=float(target_price),
+                allocation_pct=allocation_pct,
+            )
+        else:
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.MISSING_PRICE.value,
+                    message=(
+                        f"Cannot auto-compute spin-off allocation: "
+                        f"source price={'found' if source_price else 'missing'}, "
+                        f"target price={'found' if target_price else 'missing'}. "
+                        f"Set spinoff_allocation_pct in bundle metadata."
+                    ),
+                    unit=unit,
+                    asset_id=target_asset_id,
+                )
+            )
+            log.error("spinoff_fmv_missing", unit_id=unit.id, source_asset_id=source_asset_id, target_asset_id=target_asset_id)
+            return
+
+    allocation_pct_dec = Decimal(str(allocation_pct))
+    retain_pct = Decimal(1) - allocation_pct_dec
+
+    # Get all source-asset lots in this account
+    source_lots = list(lot_manager.get_lots(account_id, source_asset_id))
+    if not source_lots:
+        unit.warnings.append(
+            PnlWarning(
+                warning_type=WarningType.INSUFFICIENT_LOTS.value,
+                message=f"No lots found for source asset {source_asset_id} in account {account_id}",
+                unit=unit,
+                asset_id=source_asset_id,
+            )
+        )
+        log.warning("spinoff_no_source_lots", unit_id=unit.id, source_asset_id=source_asset_id, account_id=account_id)
+        return
+
+    # Compute total source qty for proportional target qty allocation
+    total_source_qty = sum(lot.qty_remaining for lot in source_lots if lot.qty_remaining > 0 and not lot.is_negative)
+
+    if total_source_qty <= 0:
+        log.warning("spinoff_zero_source_qty", unit_id=unit.id)
+        return
+
+    # Get a trigger transaction for event emission
+    trigger_tx = target_inflow.transaction
+
+    log.info(
+        "spinoff_processing",
+        unit_id=unit.id,
+        source_asset_id=source_asset_id,
+        target_asset_id=target_asset_id,
+        account_id=account_id,
+        allocation_pct=float(allocation_pct_dec),
+        source_lots=len(source_lots),
+        total_source_qty=float(total_source_qty),
+        target_inflow_qty=float(target_inflow_qty),
+    )
+
+    if unit.cost_lots is None:
+        unit.cost_lots = []
+
+    # Process each source lot: consume and recreate with split cost basis
+    lots_to_consume = [lot for lot in source_lots if lot.qty_remaining > 0 and not lot.is_negative]
+
+    for source_lot in lots_to_consume:
+        original_qty = source_lot.qty_remaining
+        original_cost = source_lot.unit_cost_in_base
+        original_acquired_at = ensure_utc(source_lot.acquired_at) if source_lot.acquired_at else utc_now()
+
+        # Consume the source lot fully
+        slice_record = source_lot.consume(original_qty)
+        lot_manager._emit_event(
+            event_type=LotEventType.CONSUMED,
+            lot=source_lot,
+            quantity_delta=-original_qty,
+            cost_basis_delta=-(original_qty * original_cost),
+            triggered_by_transaction=trigger_tx,
+            triggered_by_unit=unit,
+        )
+
+        # 1. Recreate source-asset lot with reduced cost basis
+        new_source_lot = CostLot(
+            asset_id=source_asset_id,
+            asset=source_lot.asset,
+            account_id=account_id,
+            account=source_lot.account,
+            qty=original_qty,
+            qty_remaining=original_qty,
+            unit_cost_in_base=original_cost * retain_pct,
+            acquired_at=original_acquired_at,
+            origin_transaction_id=trigger_tx.id if trigger_tx else None,
+            origin_transaction=trigger_tx,
+            unit_id=unit.id,
+            cost_source="inherited",
+            source_lot_id=source_lot.cost_lot_id if source_lot.cost_lot_id else None,
+            notes=f"Spin-off: retained {float(retain_pct)*100:.1f}% cost (from lot {source_lot.cost_lot_id})",
+        )
+        lot_manager.add_lot(
+            new_source_lot,
+            triggered_by_transaction=trigger_tx,
+            triggered_by_unit=unit,
+        )
+        unit.cost_lots.append(new_source_lot)
+
+        # 2. Create target-asset lot with freed cost basis
+        # Proportional qty: (this lot's share of total source) * target inflow qty
+        target_lot_qty = (original_qty / total_source_qty) * target_inflow_qty
+        target_unit_cost = (original_cost * allocation_pct_dec * original_qty) / target_lot_qty if target_lot_qty > 0 else Decimal(0)
+
+        new_target_lot = CostLot(
+            asset_id=target_asset_id,
+            asset=target_inflow.asset,
+            account_id=account_id,
+            account=target_inflow.account,
+            qty=target_lot_qty,
+            qty_remaining=target_lot_qty,
+            unit_cost_in_base=target_unit_cost,
+            acquired_at=original_acquired_at,
+            origin_transaction_id=trigger_tx.id if trigger_tx else None,
+            origin_transaction=trigger_tx,
+            unit_id=unit.id,
+            cost_source="inherited",
+            source_lot_id=source_lot.cost_lot_id if source_lot.cost_lot_id else None,
+            notes=f"Spin-off: {float(allocation_pct_dec)*100:.1f}% cost from {source_lot.asset.symbol if source_lot.asset else source_asset_id} (lot {source_lot.cost_lot_id})",
+        )
+        lot_manager.add_lot(
+            new_target_lot,
+            triggered_by_transaction=trigger_tx,
+            triggered_by_unit=unit,
+        )
+        unit.cost_lots.append(new_target_lot)
+
+        log.debug(
+            "spinoff_lot_processed",
+            source_lot_id=source_lot.cost_lot_id,
+            original_qty=float(original_qty),
+            original_unit_cost=float(original_cost),
+            new_source_unit_cost=float(original_cost * retain_pct),
+            target_lot_qty=float(target_lot_qty),
+            target_unit_cost=float(target_unit_cost),
+            acquired_at=str(original_acquired_at),
+        )
+
+    log.info(
+        "spinoff_completed",
+        unit_id=unit.id,
+        lots_created=len(unit.cost_lots),
+        total_lots_processed=len(lots_to_consume),
+    )
+
+
 def _handle_cost_basis_transfer(
     inflows: List[CalculationUnitLeg],
     consumed_slices: List[ConsumedLotSlice],
+    absorbed_fee_cost: Decimal,
     lot_manager: LotManager,
     unit: CalculationUnit,
+    config: PnLConfig,
 ) -> None:
     """
     Handle transfer or same-asset swap by preserving individual lot slices.
 
     For transfers: each consumed slice becomes a new lot (preserves holding period per-lot)
     For same-asset swaps (splits/reverse splits): qty scales proportionally, cost preserved per-slice
+    
+    Multi-asset units (e.g. ETF split modeled as buy+sell with notional currency legs):
+    consumed slices are grouped by asset and matched to the corresponding inflow leg.
+    Each asset group gets its own qty_ratio so quantities and assets stay correct.
+    
+    When absorbed_fee_cost > 0, the fee's cost basis is distributed proportionally
+    across the new lots (by each slice's share of total cost), increasing their
+    unit_cost_in_base. This implements the "fee absorbed into transfer cost" approach
+    for jurisdictions where crypto fees are non-taxable (e.g., France).
     """
     if not inflows or not consumed_slices:
         return
 
-    total_outflow_qty = sum(s.quantity for s in consumed_slices)
-    total_inflow_qty = sum(
-        Decimal(i.quantity) if i.quantity else Decimal(0) for i in inflows
-    )
+    # Group consumed slices by source asset to handle multi-asset units correctly.
+    # Without grouping, a unit with EUR + INDW.PA outflows would mix quantities
+    # in the ratio calculation and assign all new lots to a single asset.
+    slices_by_asset: dict[int, List[ConsumedLotSlice]] = {}
+    for s in consumed_slices:
+        asset_id = s.cost_lot.asset_id if s.cost_lot else None
+        if asset_id is None:
+            continue
+        slices_by_asset.setdefault(asset_id, []).append(s)
 
-    if total_inflow_qty <= 0 or total_outflow_qty <= 0:
-        return
+    # Build inflow lookup by asset_id
+    inflow_by_asset: dict[int, CalculationUnitLeg] = {}
+    for inf in inflows:
+        # First inflow per asset wins (typically one inflow per asset)
+        if inf.asset_id not in inflow_by_asset:
+            inflow_by_asset[inf.asset_id] = inf
 
-    # For same-asset swaps (splits), qty ratio determines scaling
-    # For transfers, ratio should be 1.0 (qty unchanged)
-    qty_ratio = total_inflow_qty / total_outflow_qty
+    # Total cost across all slices (for proportional fee distribution)
+    total_transfer_cost = sum(s.total_cost_in_base for s in consumed_slices)
 
     log.debug(
         "cost_basis_transfer",
-        asset_id=inflows[0].asset_id,
-        asset_symbol=inflows[0].asset_symbol,
+        unit_id=unit.id,
+        asset_groups=list(slices_by_asset.keys()),
+        inflow_assets=list(inflow_by_asset.keys()),
         slices=len(consumed_slices),
-        outflow_qty=float(total_outflow_qty),
-        inflow_qty=float(total_inflow_qty),
-        qty_ratio=float(qty_ratio),
+        absorbed_fee_cost=float(absorbed_fee_cost),
     )
 
-    # Get inflow metadata (use first inflow for now - typically there's one)
-    inflow = inflows[0]
+    for asset_id, asset_slices in slices_by_asset.items():
+        inflow = inflow_by_asset.get(asset_id)
+        if not inflow:
+            # No matching inflow for this asset — warn and skip.
+            # This can happen if consumed slices belong to an asset
+            # that has no corresponding inflow leg in the unit.
+            log.warning(
+                "cost_basis_transfer_no_matching_inflow",
+                unit_id=unit.id,
+                consumed_asset_id=asset_id,
+                consumed_qty=float(sum(s.quantity for s in asset_slices)),
+                available_inflow_assets=list(inflow_by_asset.keys()),
+            )
+            continue
 
-    # Create one lot per consumed slice (preserves individual holding periods)
-    for slice in consumed_slices:
-        # Scale qty for splits, preserve cost basis
-        new_qty = slice.quantity * qty_ratio
-        unit_cost = slice.total_cost_in_base / new_qty      
+        # Per-asset qty ratio
+        outflow_qty = sum(s.quantity for s in asset_slices)
+        inflow_qty = Decimal(inflow.quantity) if inflow.quantity else Decimal(0)
 
-        new_lot = CostLot(
-            # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
-            # relationship objects needed for persistence when objects aren't yet persisted)
-            asset_id=inflow.asset_id,
-            asset=inflow.asset,
-            account_id=inflow.account_id,
-            account=inflow.account,
-            qty=new_qty,
-            qty_remaining=new_qty,
-            unit_cost_in_base=unit_cost,
-            acquired_at=ensure_utc(slice.cost_lot.acquired_at) if slice.cost_lot and slice.cost_lot.acquired_at else utc_now(),  # Preserve original holding period
-            origin_transaction_id=inflow.origin_transaction_id,
-            origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
-            unit_id=unit.id,  # FK to calculation_units
-            notes=f"Transfer (from lot {slice.cost_lot.cost_lot_id if slice.cost_lot else 'unknown'})",
-        )
-        lot_manager.add_lot(
-            new_lot,
-            triggered_by_transaction=inflow.transaction,
-            triggered_by_unit=unit,
-        )
-        if unit.cost_lots is None:
-            unit.cost_lots = []
-        unit.cost_lots.append(new_lot)
+        if inflow_qty <= 0 or outflow_qty <= 0:
+            continue
+
+        qty_ratio = inflow_qty / outflow_qty
 
         log.debug(
-            "transfer_lot_created",
-            tx_id=inflow.origin_transaction_id,
-            asset_id=inflow.asset_id,
-            asset_symbol=inflow.asset_symbol,
-            qty=float(new_qty),
-            unit_cost=float(unit_cost),
-            acquired_at=str(slice.cost_lot.acquired_at) if slice.cost_lot and slice.cost_lot.acquired_at else None,
-            from_lot_id=slice.cost_lot.cost_lot_id if slice.cost_lot else None,
+            "cost_basis_transfer_asset_group",
             unit_id=unit.id,
+            asset_id=asset_id,
+            asset_symbol=inflow.asset_symbol,
+            slices=len(asset_slices),
+            outflow_qty=float(outflow_qty),
+            inflow_qty=float(inflow_qty),
+            qty_ratio=float(qty_ratio),
         )
+
+        # Create one lot per consumed slice (preserves individual holding periods)
+        for slice in asset_slices:
+            # Scale qty for splits, preserve cost basis
+            new_qty = slice.quantity * qty_ratio
+
+            # Base cost from the consumed slice
+            slice_cost = slice.total_cost_in_base
+
+            # Distribute absorbed fee cost proportionally by each slice's share of total cost
+            if absorbed_fee_cost > 0 and total_transfer_cost > 0:
+                fee_share = (slice.total_cost_in_base / total_transfer_cost) * absorbed_fee_cost
+                slice_cost += fee_share
+
+            unit_cost = slice_cost / new_qty if new_qty > 0 else Decimal(0)
+
+            # Preserve original holding period from the source lot
+            original_acquired_at = None
+            if slice.cost_lot and slice.cost_lot.acquired_at:
+                original_acquired_at = ensure_utc(slice.cost_lot.acquired_at)
+            if not original_acquired_at:
+                original_acquired_at = utc_now()
+
+            # Flag zero-cost transfer lots (inherited from source lot with zero cost)
+            is_base = config.base_currency_id and inflow.asset_id == config.base_currency_id
+            lot_is_zero_cost = (unit_cost == Decimal(0) and not is_base)
+
+            new_lot = CostLot(
+                asset_id=inflow.asset_id,
+                asset=inflow.asset,
+                account_id=inflow.account_id,
+                account=inflow.account,
+                qty=new_qty,
+                qty_remaining=new_qty,
+                unit_cost_in_base=unit_cost,
+                acquired_at=original_acquired_at,  # Preserve original holding period
+                origin_transaction_id=inflow.origin_transaction_id,
+                origin_transaction=inflow.origin_transaction,
+                unit_id=unit.id,  # FK only — relationship set via manual append below
+                notes=f"Transfer (from lot {slice.cost_lot_id if hasattr(slice, 'cost_lot_id') and slice.cost_lot_id else 'unknown'})",
+                is_zero_cost=lot_is_zero_cost,
+                cost_source="inherited",
+                source_lot_id=slice.cost_lot_id if hasattr(slice, 'cost_lot_id') and slice.cost_lot_id else None,
+            )
+            lot_manager.add_lot(
+                new_lot,
+                triggered_by_transaction=inflow.transaction,
+                triggered_by_unit=unit,
+                transfer_metadata={"is_transfer": True},
+            )
+            if unit.cost_lots is None:
+                unit.cost_lots = []
+            if new_lot not in unit.cost_lots:
+                unit.cost_lots.append(new_lot)
+
+            log.debug(
+                "transfer_lot_created",
+                tx_id=inflow.origin_transaction_id,
+                asset_id=inflow.asset_id,
+                asset_symbol=inflow.asset_symbol,
+                qty=float(new_qty),
+                unit_cost=float(unit_cost),
+                acquired_at=str(slice.cost_lot.acquired_at) if slice.cost_lot and slice.cost_lot.acquired_at else None,
+                from_lot_id=slice.cost_lot.cost_lot_id if slice.cost_lot else None,
+                unit_id=unit.id,
+            )
 
 
 def _handle_acquisition(
@@ -923,25 +1863,224 @@ def _handle_acquisition(
     - Create adjustment P&L entries to correct provisional entries
     """
     # Determine total cost to allocate
+    # Bug #2 fix: Exclude fee RealizedPnl entries from total_cost to avoid
+    # double-counting fees (they already have their own RealizedPnl disposal event).
     realized_entries = unit.realized_pnl_records or []
-    if realized_entries:
-        # Taxable disposals: new asset cost = proceeds realized
-        total_cost = sum(e.proceeds_in_base for e in realized_entries)
-        cost_source = "realized_proceeds"
-    elif consumed_slices:
+    fee_origin_tx_ids = {leg.origin_transaction_id for leg in unit.fee_legs}
+    non_fee_entries = [e for e in realized_entries if e.transaction_id not in fee_origin_tx_ids]
+    
+    # Only use proceeds from taxable disposals for cost basis of new lots.
+    # Non-taxable entries (e.g. derivative settlements, non-taxable swaps) should
+    # still inherit cost basis from consumed slices.
+    taxable_non_fee_entries = [e for e in non_fee_entries if e.disposal_taxable]
+
+    # Derivative settlement inflows (perp_close, funding) must always use
+    # the FMV acquisition path, even when consumed_slices is non-empty from
+    # fee disposals. Without this guard, fee slices cause the "inherited"
+    # branch to fire, producing near-zero lot costs and suppressing the
+    # derivative gain entry (which lives in the FMV/else block).
+    is_deriv_settlement = any(
+        getattr(
+            getattr(inf, 'origin_transaction', None),
+            'source_transaction_type', None,
+        ) in DERIVATIVE_SETTLEMENT_TYPES
+        for inf in inflows
+    )
+
+    if taxable_non_fee_entries:
+        # Taxable disposals: new asset cost = proceeds from non-fee disposals only
+        total_cost = sum(e.proceeds_in_base for e in taxable_non_fee_entries)
+        cost_source = "proceeds"
+        acq_fmv_metadata = None  # No FMV metadata — cost from realized proceeds
+        # Link to the primary disposal entry that generated the proceeds
+        origin_pnl_entry = taxable_non_fee_entries[0]
+    elif consumed_slices and not is_deriv_settlement:
         # Non-taxable disposals: new asset inherits cost basis from all consumed slices
         total_cost = sum(s.total_cost_in_base for s in consumed_slices)
-        cost_source = "inherited_cost_basis"
+        cost_source = "inherited"
+        acq_fmv_metadata = None  # No FMV metadata — cost inherited from source lots
+        origin_pnl_entry = None  # No single origin P&L — cost inherited from consumed lots
     else:
         # Pure acquisition (airdrop, deposit): cost = FMV
         total_cost = Decimal(0)
+        acq_fmv_metadata = None  # Will be set from last successful FMV result
+        origin_pnl_entry = None  # No origin P&L — cost from FMV lookup
+        fmv_failed_any = False
         for inflow in inflows:
             fmv_result = fmv_service.get_fmv_in_base(inflow, skip_on_error=True)
             total_cost += fmv_result.value
-        cost_source = "fmv_at_acquisition"
+            if fmv_result.success and fmv_result.price:
+                # Capture FMV metadata from the result (last successful one wins)
+                acq_fmv_metadata = {
+                    "source": fmv_result.source,
+                    "price": Decimal(str(fmv_result.price)),
+                    "timestamp": fmv_result.timestamp,
+                    "is_stale": getattr(fmv_result, 'is_stale', None),
+                }
+            # Emit warning when FMV lookup fails for an acquisition
+            if not fmv_result.success and inflow.asset_id != config.base_currency_id:
+                fmv_failed_any = True
+                if unit.warnings is None:
+                    unit.warnings = []
+                unit.warnings.append(
+                    PnlWarning(
+                        warning_type=WarningType.MISSING_PRICE.value,
+                        message=f"FMV lookup failed for {inflow.asset_symbol} (id={inflow.asset_id}) "
+                                f"on acquisition: {fmv_result.error}. "
+                                f"Cost lot will be created with zero cost basis.",
+                        transaction_id=inflow.origin_transaction_id,
+                        asset_id=inflow.asset_id,
+                        unit=unit,
+                        details={
+                            "error": fmv_result.error,
+                            "source": fmv_result.source,
+                            "acquisition_date": inflow.date_time.isoformat() if inflow.date_time else None,
+                            "qty": float(inflow.quantity) if inflow.quantity else 0,
+                        },
+                    )
+                )
+                log.warning(
+                    "fmv_failed_on_acquisition",
+                    asset_id=inflow.asset_id,
+                    asset_symbol=inflow.asset_symbol,
+                    error=fmv_result.error,
+                    tx_id=inflow.origin_transaction_id,
+                )
+        cost_source = "provisional" if fmv_failed_any else "fmv"
 
-    # Calculate total inflow quantity for proportional allocation
-    # All inflows should be the same asset, so we allocate by quantity
+        # --- Derivative settlement gain: create RealizedPnl(proceeds=FMV, cost=0) ---
+        # For derivative settlements (perp_close gains, funding), the inflow is income,
+        # not a traditional acquisition. We still create the lot at FMV cost, but also
+        # record a RealizedPnl so the gain is captured.
+        for inflow in inflows:
+            tx = inflow.origin_transaction
+            source_type = getattr(tx, 'source_transaction_type', None) if tx else None
+            if source_type and source_type in DERIVATIVE_SETTLEMENT_TYPES:
+                inflow_fmv = fmv_service.get_fmv_in_base(inflow, skip_on_error=True)
+
+                # Always create the gain entry — use zero proceeds when FMV fails
+                fmv_ok = inflow_fmv.success and inflow_fmv.value > 0
+                proceeds = inflow_fmv.value if fmv_ok else Decimal("0")
+
+                if not fmv_ok:
+                    if unit.warnings is None:
+                        unit.warnings = []
+                    unit.warnings.append(
+                        PnlWarning(
+                            warning_type=WarningType.MISSING_PRICE.value,
+                            message=(
+                                f"FMV lookup failed for {inflow.asset_symbol} (id={inflow.asset_id}) "
+                                f"derivative settlement. Gain entry created with zero proceeds — "
+                                f"review manually."
+                            ),
+                            transaction_id=inflow.origin_transaction_id,
+                            asset_id=inflow.asset_id,
+                            unit=unit,
+                            details={
+                                "error": inflow_fmv.error,
+                                "source_type": source_type,
+                                "qty": float(inflow.quantity) if inflow.quantity else 0,
+                                "transaction_date": inflow.date_time.isoformat() if inflow.date_time else None,
+                            },
+                        )
+                    )
+                    log.warning(
+                        "derivative_settlement_fmv_failed",
+                        asset_id=inflow.asset_id,
+                        asset_symbol=inflow.asset_symbol,
+                        error=inflow_fmv.error,
+                        source_type=source_type,
+                        tx_id=inflow.origin_transaction_id,
+                    )
+
+                # Get attributed asset ID directly from transaction
+                _attributed_asset_id = getattr(tx, 'attributed_asset_id', None)
+
+                deriv_entry = RealizedPnl(
+                    asset_id=inflow.asset_id,
+                    asset=inflow.asset,
+                    qty=inflow.quantity,
+                    proceeds_in_base=proceeds,
+                    cost_basis_in_base=Decimal("0"),
+                    pnl_in_base=proceeds,
+                    disposal_taxable=False,
+                    transaction_id=inflow.origin_transaction_id,
+                    # NOTE: Do NOT set transaction=tx here. The fee entry already
+                    # sets this relationship on the same NormalizedTransaction object.
+                    # SQLAlchemy's back-population via the NormalizedTransaction.realized_pnl
+                    # list can cause the second entry to silently evict the first during
+                    # flush when both share the same transaction object. Setting only the
+                    # FK (transaction_id) avoids this issue.
+                    origin_unit=unit,
+                    realized_at=inflow.date_time,
+                    holding_period_days=0,
+                    proceeds_source="derivative_settlement",
+                    proceeds_price=inflow_fmv.price if fmv_ok else None,
+                    proceeds_price_source=inflow_fmv.source if fmv_ok else "missing",
+                    proceeds_price_timestamp=inflow_fmv.timestamp if fmv_ok else None,
+                    attributed_asset_id=_attributed_asset_id,
+                )
+                if unit.realized_pnl_records is None:
+                    unit.realized_pnl_records = []
+                if deriv_entry not in unit.realized_pnl_records:
+                    unit.realized_pnl_records.append(deriv_entry)
+
+                # Explicitly add to the DB session. Unlike fee/disposal entries
+                # (which reach the session via ConsumedLotSlice.pnl relationship),
+                # derivative gain entries have no slices and may not be cascade-
+                # tracked when the collection is a plain Python list.
+                sess = object_session(unit)
+                if sess is not None:
+                    sess.add(deriv_entry)
+
+                log.info(
+                    "derivative_settlement_gain",
+                    asset_id=inflow.asset_id,
+                    asset_symbol=inflow.asset_symbol,
+                    pnl=float(proceeds),
+                    fmv_ok=fmv_ok,
+                    source_type=source_type,
+                    attributed_asset_id=_attributed_asset_id,
+                    tx_id=inflow.origin_transaction_id,
+                    unit_id=unit.id,
+                )
+
+        # Emit stale-price warning when FMV used for acquisition cost is from an old date
+        if acq_fmv_metadata and acq_fmv_metadata.get("is_stale"):
+            if unit.warnings is None:
+                unit.warnings = []
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.STALE_PRICE.value,
+                    message=f"Stale price used for {inflows[0].asset_symbol} acquisition cost: "
+                            f"price from {acq_fmv_metadata.get('source', 'unknown')} source "
+                            f"may be outdated.",
+                    transaction_id=inflows[0].origin_transaction_id,
+                    asset_id=inflows[0].asset_id,
+                    unit=unit,
+                    details={
+                        "fmv_source": acq_fmv_metadata.get("source"),
+                        "fmv_timestamp": acq_fmv_metadata["timestamp"].isoformat() if acq_fmv_metadata.get("timestamp") else None,
+                        "acquisition_date": inflows[0].date_time.isoformat() if inflows[0].date_time else None,
+                    },
+                )
+            )
+
+    # Bug #3 fix: Use FMV-based allocation when inflows contain different assets.
+    # When all inflows are the same asset, quantity-based allocation is used (backward compat).
+    inflow_asset_ids = {i.asset_id for i in inflows if i.asset_id}
+    multi_asset_inflows = len(inflow_asset_ids) > 1
+    
+    if multi_asset_inflows:
+        # Compute FMV for each inflow to allocate cost proportionally by value
+        inflow_fmvs: dict[int, Decimal] = {}
+        total_inflow_fmv = Decimal(0)
+        for idx, inf in enumerate(inflows):
+            fmv_result = fmv_service.get_fmv_in_base(inf, skip_on_error=True)
+            inflow_fmvs[idx] = fmv_result.value
+            total_inflow_fmv += fmv_result.value
+    
+    # For single-asset inflows, use quantity-based allocation (original behavior)
     total_inflow_qty = sum(
         Decimal(i.quantity) if i.quantity else Decimal(0)
         for i in inflows
@@ -955,25 +2094,38 @@ def _handle_acquisition(
         total_cost=float(total_cost),
         total_inflow_qty=float(total_inflow_qty),
         cost_source=cost_source,
-        realized_entries=len(realized_entries),
+        realized_entries=len(non_fee_entries),
+        multi_asset_inflows=multi_asset_inflows,
     )
 
     # Create lots (and handle negative lot settlement)
-    for inflow in inflows:
+    for idx, inflow in enumerate(inflows):
         inflow_qty = Decimal(inflow.quantity) if inflow.quantity else Decimal(0)
         if inflow_qty <= 0:
             continue
 
         # Special case: base currency (e.g., EUR) always has unit_cost = 1.0
+        lot_cost_source = cost_source  # Default from branch above
+        lot_fmv_metadata = acq_fmv_metadata  # Default from branch above
         if inflow.asset_id == config.base_currency_id:
             unit_cost = Decimal(1)
+            lot_cost_source = "base_currency"
+            lot_fmv_metadata = None
         else:
-            # Proportional allocation by quantity (all inflows are same asset)
-            if total_inflow_qty > 0:
-                proportion = inflow_qty / total_inflow_qty
-                allocated_cost = total_cost * proportion
+            if multi_asset_inflows:
+                # Allocate cost proportionally by FMV (handles different asset units correctly)
+                if total_inflow_fmv > 0:
+                    proportion = inflow_fmvs[idx] / total_inflow_fmv
+                    allocated_cost = total_cost * proportion
+                else:
+                    allocated_cost = Decimal(0)
             else:
-                allocated_cost = Decimal(0)
+                # Single-asset: allocate proportionally by quantity (backward compatible)
+                if total_inflow_qty > 0:
+                    proportion = inflow_qty / total_inflow_qty
+                    allocated_cost = total_cost * proportion
+                else:
+                    allocated_cost = Decimal(0)
 
             unit_cost = allocated_cost / inflow_qty if inflow_qty > 0 else Decimal(0)
 
@@ -982,6 +2134,16 @@ def _handle_acquisition(
 
         # Create the settling lot first (with full qty_remaining)
         # It will be updated after settlement to reflect remaining quantity
+        # For unmatched internal transfers, mark as provisional with FMV cost basis
+        is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
+        notes = None
+        if is_unmatched_internal_transfer and cost_source == "fmv_at_acquisition":
+            notes = "Unmatched internal transfer (provisional FMV cost basis)"
+        
+        # Flag zero-cost acquisition lots (non-base-currency with unit_cost=0)
+        is_base = config.base_currency_id and inflow.asset_id == config.base_currency_id
+        lot_is_zero_cost = (unit_cost == Decimal(0) and not is_base)
+        
         settling_lot = CostLot(
             # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
             # relationship objects needed for persistence when objects aren't yet persisted)
@@ -996,10 +2158,47 @@ def _handle_acquisition(
             origin_transaction_id=inflow.origin_transaction_id,
             origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
             unit_id=unit.id,  # FK to calculation_units
+            notes=notes,
+            is_zero_cost=lot_is_zero_cost,
+            cost_source=lot_cost_source,
+            cost_fmv_price=lot_fmv_metadata["price"] if lot_fmv_metadata else None,
+            cost_fmv_source=lot_fmv_metadata["source"] if lot_fmv_metadata else None,
+            cost_fmv_timestamp=lot_fmv_metadata["timestamp"] if lot_fmv_metadata else None,
+            cost_fmv_stale=lot_fmv_metadata.get("is_stale") if lot_fmv_metadata else None,
+            origin_pnl=origin_pnl_entry,  # Link to the disposal that generated this lot's cost basis
         )
+        
+        # Emit warning for zero-cost lots (likely a missing price or FMV failure)
+        if lot_is_zero_cost:
+            if unit.warnings is None:
+                unit.warnings = []
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.ZERO_COST_LOT.value,
+                    message=f"Zero-cost lot created for {inflow.asset_symbol} (id={inflow.asset_id}): "
+                            f"{float(inflow_qty):.6g} units acquired with unit_cost=0. "
+                            f"Cost source: {lot_cost_source}. This may indicate a missing price.",
+                    transaction_id=inflow.origin_transaction_id,
+                    asset_id=inflow.asset_id,
+                    unit=unit,
+                    details={
+                        "qty": float(inflow_qty),
+                        "unit_cost": float(unit_cost),
+                        "cost_source": lot_cost_source,
+                        "total_cost": float(total_cost),
+                    },
+                )
+            )
+            log.warning(
+                "zero_cost_lot_created",
+                asset_id=inflow.asset_id,
+                asset_symbol=inflow.asset_symbol,
+                qty=float(inflow_qty),
+                cost_source=lot_cost_source,
+            )
 
         # Check for negative lots to settle (pass the settling_lot for relationship)
-        remaining_qty, settlement_records = lot_manager.settle_negative_lots(
+        remaining_qty, settlement_info = lot_manager.settle_negative_lots(
             account=inflow.account,
             asset=inflow.asset,
             available_qty=inflow_qty,
@@ -1024,7 +2223,8 @@ def _handle_acquisition(
         )
         if unit.cost_lots is None:
             unit.cost_lots = []
-        unit.cost_lots.append(settling_lot)
+        if settling_lot not in unit.cost_lots:
+            unit.cost_lots.append(settling_lot)
         
         log.debug(
             "acquisition_lot_created",
@@ -1046,7 +2246,7 @@ def _handle_acquisition(
         # (1 EUR = 1 EUR always, spending and receiving is not a taxable event)
         is_base_currency = config.base_currency_id and inflow.asset_id == config.base_currency_id
         
-        for settlement in settlement_records:
+        for settlement, provisional_unit_cost in settlement_info:
             if is_base_currency:
                 # Skip P&L adjustment for base currency - no real gain/loss
                 log.debug(
@@ -1057,25 +2257,38 @@ def _handle_acquisition(
                 continue
                 
             # Create adjustment entry to correct provisional P&L for non-base currencies
-            # Note: unit=unit relationship auto-populates realized_pnl_records
-            cost_applied = settlement.cost_basis_applied or Decimal(0)
+            # The negative lot already had provisional cost (FMV or 0) baked into the original P&L.
+            # The adjustment is the DELTA between actual settlement cost and provisional cost.
+            actual_cost = settlement.cost_basis_applied or Decimal(0)
+            # provisional_unit_cost comes from the settle_negative_lots tuple
+            provisional_cost = provisional_unit_cost * settlement.qty_settled
+            cost_delta = actual_cost - provisional_cost  # Positive = more cost, negative = less cost
+            
             adjustment_entry = RealizedPnl(
                 # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
                 # relationship objects needed for persistence when objects aren't yet persisted)
                 asset=inflow.asset,  # Use relationship object
                 qty=settlement.qty_settled,
                 proceeds_in_base=Decimal(0),  # Adjustment only affects cost
-                cost_basis_in_base=cost_applied,
-                pnl_in_base=-cost_applied,  # Reduces P&L (cost was 0, now has real cost)
-                taxable=True,  # Non-base currency adjustments are taxable
+                cost_basis_in_base=cost_delta,
+                pnl_in_base=-cost_delta,  # Corrects P&L: positive delta = lower P&L, negative delta = higher P&L
+                disposal_taxable=True,  # Non-base currency adjustments are taxable
                 transaction=inflow.origin_transaction,  # Use relationship object
-                unit=unit,  # FK to calculation_units - auto-populates realized_pnl_records
+                origin_unit=unit,  # FK to calculation_units
                 realized_at=inflow_date,
-                notes=f"Cost basis settlement for negative lot #{settlement.negative_lot_id}",
+                notes=f"Cost basis settlement for negative lot #{settlement.negative_lot_id} "
+                      f"(provisional={float(provisional_cost):.2f}, actual={float(actual_cost):.2f})",
             )
+            # Manual append - back-population unreliable for transient objects
+            if unit.realized_pnl_records is None:
+                unit.realized_pnl_records = []
+            if adjustment_entry not in unit.realized_pnl_records:
+                unit.realized_pnl_records.append(adjustment_entry)
             log.info(
                 "pnl_adjustment_created",
-                cost_applied=float(cost_applied),
+                actual_cost=float(actual_cost),
+                provisional_cost=float(provisional_cost),
+                cost_delta=float(cost_delta),
                 qty=float(settlement.qty_settled),
                 negative_lot_id=settlement.negative_lot_id,
             )

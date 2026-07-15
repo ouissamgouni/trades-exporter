@@ -1,0 +1,68 @@
+# DeGiro Account Normalization Scenario — Transactions
+# ===============================================================
+# No transactions are pre-seeded. The test flow is:
+#   1. Seed the scenario (creates account + assets only)
+#   2. Upload fixtures/Account.csv via the degiro-account-file connector
+#   3. Sync → connector creates 9 normalized transactions
+#   4. Verify the created transactions match expected output below
+#
+# CSV has 15 rows. After classification and filtering:
+#   - 3 WITHHOLDING rows → merged into matching DIVIDEND, then marked SKIP
+#   - 1 SKIP row (trade with Order Id, empty description)
+#   - 2 FX_STANDALONE rows → not handled by connector (known gap)
+#   → 9 normalizable rows = 9 expected transactions
+#
+# Note: Withholding jurisdiction is inferred from ISIN country prefix.
+# Only US, DE, IE, NL, FR are mapped. GB (Rolls Royce) is not mapped
+# so withholding_jurisdiction is null for that dividend.
+
+transactions: []
+
+# ── Expected output (for verification, not seeded) ──────────────
+#
+# D1: QUALCOMM dividend (US)
+#   asset=USD, qty=5.34, direction=inflow, type=dividend
+#   tags: withholding_amount=1.60, jurisdiction=US, rate≈0.30
+#   attributed_asset: QUALCOMM INC (US7475251036)
+#
+# D2: ASML dividend (NL)
+#   asset=EUR, qty=7.82, direction=inflow, type=dividend
+#   tags: withholding_amount=1.17, jurisdiction=NL, rate≈0.15
+#   attributed_asset: ASML HOLDING NV (NL0010273215)
+#
+# D3: ROLLS ROYCE dividend (GB)
+#   asset=GBP, qty=3.50, direction=inflow, type=dividend
+#   tags: withholding_amount=0.35, jurisdiction=null (GB not mapped), rate=0.10
+#   attributed_asset: ROLLS ROYCE HOLDINGS PLC (GB00B63H8491)
+#
+# F1: Nasdaq exchange fee
+#   asset=EUR, qty=0, fee=2.50, direction=neutral, type=cost
+#   source_transaction_type=exchange_fee
+#
+# F2: Euronext exchange fee
+#   asset=EUR, qty=0, fee=2.50, direction=neutral, type=cost
+#   source_transaction_type=exchange_fee
+#
+# F3: APTIV ADR custody fee
+#   asset=USD, qty=0, fee=0.45, direction=neutral, type=cost
+#   source_transaction_type=adr_custody_fee
+#   attributed_asset: APTIV PLC (JE00BTDN8H13)
+#
+# I1: Flatex interest income
+#   asset=EUR, qty=0.12, direction=inflow, type=dividend
+#   source_transaction_type=interest
+#
+# T1: Bank deposit
+#   asset=EUR, qty=1000.00, direction=inflow, type=transfer
+#   source_transaction_type=deposit, taxability_status=non_taxable
+#
+# C1: APTIV cash-in-lieu
+#   asset=USD, qty=9.30, direction=inflow, type=trade
+#   source_transaction_type=cash_in_lieu, taxability_status=taxable
+#
+# ── Not normalized ──────────────────────────────────────────────
+# FX_STANDALONE (rows 12-13): EUR +543.21 / USD -590.00
+#   → Not handled by raw_to_normalized (known gap)
+#
+# SKIP (row 14): RIGETTI COMPUTING INC trade row (has Order Id)
+#   → Correctly skipped: trades are imported via degiro-file

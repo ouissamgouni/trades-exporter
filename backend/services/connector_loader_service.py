@@ -6,7 +6,7 @@ actual connector instances used for syncing.
 """
 
 import os
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 from sqlmodel import Session
 
@@ -16,6 +16,9 @@ from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging, load_settings
 
 log = configure_logging("connector_loader")
+
+# Type alias for progress callback
+ProgressCallback = Callable[[int, str, int, int, Optional[str]], None]
 
 
 class ConnectorLoaderService:
@@ -74,6 +77,18 @@ class ConnectorLoaderService:
         """
         return self.repo.get_enabled()
 
+    def get_all_connectors_with_accounts(self) -> List[Tuple[AccountConnector, Account]]:
+        """
+        Get ALL connectors from the database (enabled and disabled).
+
+        Use this when you need to apply runtime overrides that may enable
+        disabled connectors.
+
+        Returns:
+            List of (AccountConnector, Account) tuples ordered by sync_priority
+        """
+        return self.repo.get_all()
+
     def get_connectors_for_account(self, account_id: int) -> List[AccountConnector]:
         """
         Get all connectors for a specific account.
@@ -85,6 +100,34 @@ class ConnectorLoaderService:
             List of AccountConnector records
         """
         return self.repo.get_by_account(account_id)
+
+    def load_connector_by_id(
+        self,
+        connector_id: int,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Optional[Any]:
+        """
+        Load and instantiate a connector by its ID.
+
+        Args:
+            connector_id: The AccountConnector ID
+            progress_callback: Optional callback for reporting progress
+
+        Returns:
+            Instantiated connector or None if not found
+        """
+        result = self.repo.get_with_account(connector_id)
+        if not result:
+            log.warning(f"Connector {connector_id} not found")
+            return None
+
+        account_connector, account = result
+
+        return self.instantiate_connector(
+            account_connector,
+            account,
+            progress_callback=progress_callback,
+        )
 
     def resolve_credentials(self, credentials_ref: Optional[str]) -> Optional[str]:
         """
@@ -143,9 +186,20 @@ class ConnectorLoaderService:
         # Start with database config
         config = db_config.copy()
 
+        # For file connectors: fall back to default file if no pending file uploaded
+        if not config.get("file_path") and config.get("default_file_path"):
+            config["file_path"] = config["default_file_path"]
+            if config.get("default_file_import_id"):
+                config["file_import_id"] = config["default_file_import_id"]
+            log.info(
+                f"📌 Using default file for connector '{connector_type}': "
+                f"{config['default_file_path']}"
+            )
+
         # Add account context
         config["_account_id"] = account.id
         config["_account_name"] = account.name
+        config["_account_address_or_identifier"] = account.address_or_identifier
         config["_connector_id"] = account_connector.id
 
         # Resolve credentials
@@ -155,6 +209,15 @@ class ConnectorLoaderService:
 
         # For on-chain connectors, add chain-specific config
         if self._registry.is_onchain(connector_type):
+            # Inherit address from account if not explicitly set in config
+            if "address" not in config or not config.get("address"):
+                if account.address_or_identifier:
+                    config["address"] = account.address_or_identifier
+                    log.debug(
+                        f"Inherited address '{account.address_or_identifier}' from account '{account.name}' "
+                        f"for connector '{connector_type}'"
+                    )
+            
             chain = db_config.get("chain")
             chain_config_obj = self._registry.get_chain_config(connector_type, chain)
             if chain_config_obj:
@@ -167,6 +230,8 @@ class ConnectorLoaderService:
         self,
         account_connector: AccountConnector,
         account: Account,
+        override: Optional[Any] = None,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> Optional[Any]:
         """
         Instantiate a connector with full account context.
@@ -179,12 +244,23 @@ class ConnectorLoaderService:
         Args:
             account_connector: The AccountConnector record
             account: The parent Account record
+            override: Optional override settings (enabled, test_mode, test_file_path)
+            progress_callback: Optional callback for reporting connector progress
 
         Returns:
             Instantiated connector or None if connector type not found
         """
         connector_type = account_connector.connector_type
         config = self.build_connector_config(account_connector, account)
+
+        # Apply overrides to config
+        if override:
+            test_mode = getattr(override, 'test_mode', None) if hasattr(override, 'test_mode') else override.get('test_mode') if isinstance(override, dict) else None
+            test_file_path = getattr(override, 'test_file_path', None) if hasattr(override, 'test_file_path') else override.get('test_file_path') if isinstance(override, dict) else None
+            if test_mode is not None:
+                config['test_mode'] = test_mode
+            if test_file_path:
+                config['test_file_path'] = test_file_path
 
         # Get connector class from registry
         connector_class = self._registry.get_class(connector_type)
@@ -202,6 +278,7 @@ class ConnectorLoaderService:
                 "account_id": account_id,
                 "connector_id": connector_id,
                 "config": config,  # Pass full config for test_mode, test_file_path, etc.
+                "progress_callback": progress_callback,  # Pass progress callback for reporting
             }
 
             # Add connector-specific config based on type
@@ -230,27 +307,9 @@ class ConnectorLoaderService:
             log.error(f"❌ Failed to instantiate {connector_type}: {e}")
             return None
 
-    def get_all_connectors(self) -> List[Tuple[Any, AccountConnector, Account]]:
-        """
-        Get all enabled connectors as instantiated objects.
-
-        Returns:
-            List of (connector_instance, account_connector, account) tuples
-        """
-        connectors = []
-
-        for account_connector, account in self.get_enabled_connectors():
-            connector = self.instantiate_connector(account_connector, account)
-            if connector:
-                connectors.append((connector, account_connector, account))
-
-        return connectors
-
     def get_onchain_addresses(self) -> List[Dict[str, Any]]:
         """
         Get all enabled on-chain connector addresses grouped by chain.
-
-        This is used by ConnectorOnchainHub to know which addresses to sync.
 
         Returns:
             List of address configs with chain, address, and options

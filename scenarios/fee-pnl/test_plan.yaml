@@ -1,0 +1,206 @@
+# Fee PnL Scenario — QA Test Plan
+# =================================
+# Verify that fees from every source (COST transactions, embedded trade fees,
+# transfer fees) produce correct FeeEntry records, related_asset attribution,
+# RealizedPnl entries, and base-currency short-circuits.
+
+test_plan:
+  name: "Fee PnL — FeeEntry Creation, Attribution & Disposal"
+  description: >
+    Seven fee cases covering every fee processing path in the PnL engine:
+    embedded trade fees, standalone COST fees (with and without attribution),
+    sell fees alongside realized P&L, transfer fee absorption, crypto-to-crypto
+    fees, and base-currency fee short-circuits.
+
+  steps:
+    # ── Setup ──────────────────────────────────────────────────
+    - id: 1
+      title: "Seed scenario and verify transaction count"
+      description: >
+        Run reset_and_seed.py --scenario fee-pnl --test (or use
+        task start:scenario SCENARIO=fee-pnl RESET=1).
+        Verify pre-seed + case transactions are created.
+      expected: >
+        13 transactions seeded:
+          - 5 pre-seed (BUY ETH, BUY BTC, BUY USDC, ETH withdrawal, ETH deposit)
+          - 8 case transactions (cases 1–7, case 5 has 2 legs)
+        5 assets created: EUR, ETH, BTC, USDC, APTIV PLC (JE00BTDN8H13).
+        3 accounts: Binance, Ethereum Wallet, DeGiro.
+
+    - id: 2
+      title: "Run PnL calculation"
+      description: >
+        Trigger PnL recalculation. All transactions should process
+        without errors. Check the calculation version is created.
+      expected: >
+        CalculationVersion created with status=completed.
+        No unresolved prices (all mock prices provided).
+        No PnL warnings except possibly for the pre-seed transfer pair.
+
+    # ── Case 1: Trade with embedded fee ────────────────────────
+    - id: 3
+      title: "Case 1 — BUY ETH with EUR trading fee"
+      description: >
+        Check the calculation unit for fee_c1_buy_eth_with_fee.
+        Should have 3 legs: inflow(ETH), outflow(EUR), fee(EUR).
+        Fee is in base currency (EUR).
+      expected: >
+        Legs: inflow 2 ETH, outflow 4000 EUR, fee 5 EUR.
+        FeeEntry created:
+          - related_asset_id = ETH (the non-base, non-fee asset)
+          - fee_value_in_base = 5.00 EUR
+          - realized_pnl_id = NULL (base currency fee → no RealizedPnl)
+        CostLot: 2 ETH @ 2002.50 EUR each (cost includes fee: (4000+5)/2).
+
+    # ── Case 2: Standalone COST gas fee ────────────────────────
+    - id: 4
+      title: "Case 2 — Gas fee COST (ETH, no attribution)"
+      description: >
+        Check the calculation unit for fee_c2_gas_fee.
+        Standalone fee unit with only 1 fee leg: 0.005 ETH.
+        No other legs → no non-fee candidate for related asset.
+        No attributed_asset_id → fallback returns None.
+      expected: >
+        1 leg: fee 0.005 ETH.
+        FeeEntry created:
+          - related_asset_id = NULL (no other legs, no attribution)
+          - realized_pnl_id = NOT NULL (ETH is non-base → disposal creates RealizedPnl)
+        RealizedPnl for fee:
+          - asset_id = ETH
+          - cost_basis = 0.005 × 2000 EUR = 10.00 EUR (from pre-seed BUY cost lot)
+          - proceeds = 0.005 × 2100 EUR = 10.50 EUR (FMV at fee date)
+          - pnl = +0.50 EUR
+
+    # ── Case 3: COST with attributed asset ─────────────────────
+    - id: 5
+      title: "Case 3 — ADR custody fee with APTIV attribution"
+      description: >
+        Check the calculation unit for fee_c3_adr_custody.
+        Standalone fee unit: 0.45 EUR. Fee is base currency.
+        The COST transaction has source_attributed_asset_symbol = "APTIV PLC (JE00BTDN8H13)".
+        _determine_related_asset_for_fee should use the attributed_asset_id fallback.
+      expected: >
+        1 leg: fee 0.45 EUR.
+        FeeEntry created:
+          - related_asset_id = APTIV asset ID (via attributed_asset_id fallback)
+          - fee_value_in_base = 0.45 EUR
+          - realized_pnl_id = NULL (base currency fee → no RealizedPnl)
+        Confirm: FeeEntry appears under APTIV in the asset's fee breakdown.
+
+    # ── Case 4: Sell with fee ──────────────────────────────────
+    - id: 6
+      title: "Case 4 — SELL ETH with EUR fee (alongside realized PnL)"
+      description: >
+        Check the calculation unit for fee_c4_sell_eth_with_fee.
+        Should have 3 legs: outflow(ETH), inflow(EUR), fee(EUR).
+        The sell creates a RealizedPnl for ETH disposal.
+        The fee creates a separate FeeEntry.
+      expected: >
+        Legs: outflow 5 ETH, inflow 12500 EUR, fee 10 EUR.
+        RealizedPnl (ETH disposal):
+          - asset_id = ETH
+          - cost_basis = 5 × 2000 = 10000 EUR (from BUY cost lots)
+          - proceeds = 12500 EUR
+          - pnl = +2500 EUR
+        FeeEntry created:
+          - related_asset_id = ETH (outflow leg, non-base)
+          - fee_value_in_base = 10.00 EUR
+          - realized_pnl_id = NULL (base currency fee)
+
+    # ── Case 5: Transfer fee absorption ────────────────────────
+    - id: 7
+      title: "Case 5 — USDC transfer with fee absorption"
+      description: >
+        Check the transfer grouping for fee_c5_usdc_withdrawal + fee_c5_usdc_deposit.
+        The withdrawal carries a 2 USDC fee.
+        With fee_taxable_by_default=False (default), the fee cost is absorbed
+        into the transferred asset's cost basis.
+      expected: >
+        Transfer group matched (INTERNAL_TRANSFER pattern).
+        Fee 2 USDC absorbed into transfer cost basis.
+        FeeEntry created:
+          - related_asset_id = USDC (the transferred asset)
+          - realized_pnl_id = NULL (absorbed, not taxable)
+          - fee_value_in_base = 2 × 0.92 = 1.84 EUR
+        Destination cost lot (Ethereum Wallet):
+          200 USDC with cost basis = original 200×0.92 + absorbed fee cost = 185.84 EUR.
+        No separate RealizedPnl for the fee.
+
+    # ── Case 6: Crypto-to-crypto fee ──────────────────────────
+    - id: 8
+      title: "Case 6 — BUY ETH/BTC with BTC fee"
+      description: >
+        Check the calculation unit for fee_c6_eth_btc_trade.
+        3 legs: inflow(ETH), outflow(BTC), fee(BTC).
+        Fee is in BTC (non-base) → creates RealizedPnl for BTC fee disposal.
+        Related asset resolution: outflow BTC is the non-base, non-fee candidate.
+      expected: >
+        Legs: inflow 1 ETH, outflow ~0.0489 BTC, fee 0.0005 BTC.
+        RealizedPnl (BTC outflow disposal):
+          - asset_id = BTC
+          - cost_basis from BUY BTC pre-seed @ 40000 EUR
+        RealizedPnl (BTC fee disposal):
+          - asset_id = BTC
+          - cost_basis = 0.0005 × 40000 = 20.00 EUR
+          - proceeds = 0.0005 × 45000 = 22.50 EUR (FMV at trade date)
+          - pnl = +2.50 EUR
+        FeeEntry created:
+          - related_asset_id = BTC (outflow asset, preferred over inflow)
+          - realized_pnl_id = NOT NULL (non-base fee)
+
+    # ── Case 7: Base-currency COST fee ─────────────────────────
+    - id: 9
+      title: "Case 7 — EUR exchange fee (base currency, no attribution)"
+      description: >
+        Check the calculation unit for fee_c7_exchange_fee.
+        Standalone fee unit: 2.50 EUR. Fee is base currency.
+        No attributed asset → related_asset = None.
+      expected: >
+        1 leg: fee 2.50 EUR.
+        FeeEntry created:
+          - related_asset_id = NULL (no attribution, no other legs)
+          - fee_value_in_base = 2.50 EUR
+          - realized_pnl_id = NULL (base currency → no RealizedPnl)
+        No RealizedPnl entry for this fee.
+
+    # ── Aggregation Checks ─────────────────────────────────────
+    - id: 10
+      title: "Fee aggregation by asset"
+      description: >
+        Query FeeEntry grouped by related_asset_id to verify
+        fees are correctly bucketed per asset.
+      expected: >
+        ETH-related fees:
+          - Case 1 (trade fee): 5.00 EUR
+          - Case 4 (sell fee): 10.00 EUR
+          Total: 15.00 EUR
+        BTC-related fees:
+          - Case 6 (crypto-to-crypto fee): ~22.50 EUR
+        APTIV-related fees:
+          - Case 3 (ADR custody): 0.45 EUR
+        USDC-related fees:
+          - Case 5 (transfer absorbed): 1.84 EUR
+        Unattributed fees (related_asset = NULL):
+          - Case 2 (gas): ~10.50 EUR (fee proceeds at FMV)
+          - Case 7 (exchange fee): 2.50 EUR
+          Total: ~13.00 EUR
+
+    - id: 11
+      title: "Total fee cost impact"
+      description: >
+        Sum all fee_value_in_base across all FeeEntry records.
+        This is the total cost of fees for the portfolio.
+      expected: >
+        Total fees ≈ 5.00 + 10.50 + 0.45 + 10.00 + 1.84 + 22.50 + 2.50 = ~52.79 EUR.
+        (Exact values depend on cost lot FIFO allocation.)
+
+    - id: 12
+      title: "No orphan FeeEntry records"
+      description: >
+        Verify every FeeEntry has a valid fee_leg_id pointing to
+        a leg with leg_type='fee', and unit_id/version_id set.
+      expected: >
+        All FeeEntry.fee_leg → CalculationUnitLeg with leg_type='fee'.
+        All FeeEntry.unit_id → valid CalculationUnit.
+        All FeeEntry.version_id → current CalculationVersion.
+        No NULL fee_leg_id.

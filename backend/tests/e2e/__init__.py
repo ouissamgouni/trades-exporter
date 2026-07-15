@@ -1,1 +1,1 @@
-"""End-to-end tests for the trades exporter system."""
+"""End-to-end tests for the TradeTrail system."""

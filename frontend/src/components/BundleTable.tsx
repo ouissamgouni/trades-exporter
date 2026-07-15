@@ -11,27 +11,20 @@
  */
 
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Checkbox,
-    Flex,
-    Input,
-    NativeSelect,
-    Table,
-    Text,
-    Textarea,
-} from '@chakra-ui/react';
+import { Badge, Button, Input } from './ui/primitives';
+import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
-import { FiChevronDown, FiChevronRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader } from 'react-icons/fi';
-import { Bundle, TransactionSummary, TaxabilityStatus, API_URL, TransactionAssetRef } from '../types';
+import { FiChevronDown, FiChevronRight, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader, FiFileText, FiRepeat, FiArrowRight, FiGitBranch, FiTrendingUp, FiShare2, FiTool, FiHelpCircle, FiDollarSign, FiShield } from 'react-icons/fi';
+import { Bundle, TransactionSummary, TaxabilityStatus, API_URL, AssetRef } from '../types';
 import { UnitPattern, TaxabilityStatus as TaxabilityEnum } from '../enums';
 import { TransactionTooltip } from './TransactionTooltip';
 import { AssetBadge } from './AssetBadge';
-import { formatDateNumeric, getDateRangeDisplay, parseApiDate } from '../utils/dateUtils';
+import { formatDateTimeCompact, parseApiDate } from '../utils/dateUtils';
+import { formatQuantity } from '../utils/numberUtils';
+import { ValueDisplay } from './ValueDisplay';
+import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
+import { useAssets } from '../hooks/useAssets';
 
 // ============================================================================
 // Types
@@ -74,9 +67,9 @@ interface TransactionDetail {
     source_from_account?: string;
     source_to_account?: string;
     // Nested asset references (preferred)
-    linked_asset?: TransactionAssetRef | null;
-    price_quote_asset?: TransactionAssetRef | null;
-    fee_quote_asset?: TransactionAssetRef | null;
+    linked_asset?: AssetRef | null;
+    price_quote_asset?: AssetRef | null;
+    fee_quote_asset?: AssetRef | null;
     // Legacy flat fields for fallback
     asset_id?: number;
     asset_symbol?: string;
@@ -98,45 +91,14 @@ interface TransactionDetail {
 // Helpers
 // ============================================================================
 
-const patternColors: Record<string, string> = {
-    [UnitPattern.TRANSFER]: 'blue',
-    [UnitPattern.SWAP]: 'orange',
-    [UnitPattern.SPLIT]: 'purple',
-    [UnitPattern.PENDING_TRANSFER]: 'yellow',
-    [UnitPattern.UNKNOWN]: 'gray',
-};
 
-// Using formatDateNumeric from dateUtils for consistent date formatting
 
-const formatQty = (value: number): string => {
-    if (value === 0) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
-
-// Using getDateRangeDisplay from dateUtils for consistent date range display
-
-const getUniqueAssets = (transactions: TransactionSummary[]): TransactionAssetRef[] => {
+const getUniqueAssets = (transactions: TransactionSummary[]): AssetRef[] => {
     if (!transactions) return [];
-    const assetMap = new Map<string, TransactionAssetRef>();
+    const assetMap = new Map<string, AssetRef>();
     transactions.forEach(t => {
-        // Prefer nested asset ref
-        if (t.linked_asset?.symbol) {
-            assetMap.set(t.linked_asset.symbol, t.linked_asset);
-        } else {
-            // Fallback to flat symbol
-            const symbol = t.symbol || t.asset_symbol;
-            if (symbol && !assetMap.has(symbol)) {
-                assetMap.set(symbol, { symbol });
-            }
+        if (t.asset && t.asset.symbol) {
+            assetMap.set(t.asset.symbol, t.asset);
         }
     });
     return Array.from(assetMap.values());
@@ -151,91 +113,104 @@ interface FilterBarProps {
     onFiltersChange: (filters: BundleFilters) => void;
     bundleCount: number;
     filteredCount: number;
+    onRefresh?: () => void;
 }
 
-const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleCount, filteredCount }) => {
+const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleCount, filteredCount, onRefresh }) => {
     const [showFilters, setShowFilters] = useState(false);
 
     const hasActiveFilters = filters.search || filters.pattern || filters.taxability;
 
     return (
-        <Box mb={3}>
-            <Flex justify="space-between" align="center" mb={2}>
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="bold" fontSize="sm">
+        <div className="mb-3">
+            <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold">
                         📦 Bundles ({filteredCount}{filteredCount !== bundleCount && ` / ${bundleCount}`})
-                    </Text>
-                </Flex>
-                <Flex gap={2}>
+                    </span>
+                </div>
+                <div className="flex gap-2">
+                    <Tooltip content="To create a bundle, select transactions in the Transactions tab and use the Bundle action" openDelay={100}>
+                        <Button size="sm" variant="outline" colorScheme="gray" className="border-purple-300 text-purple-700 hover:bg-purple-50" disabled>
+                            ➕ Create
+                        </Button>
+                    </Tooltip>
+                    {onRefresh && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={onRefresh}
+                        >
+                            🔄 Refresh
+                        </Button>
+                    )}
                     <Button
-                        size="xs"
+                        size="sm"
                         variant={showFilters ? 'solid' : 'outline'}
-                        colorPalette={hasActiveFilters ? 'blue' : 'gray'}
+                        colorScheme={hasActiveFilters ? 'blue' : 'gray'}
                         onClick={() => setShowFilters(!showFilters)}
                     >
                         <FiFilter size={12} />
-                        <Text ml={1}>Filter</Text>
-                        {hasActiveFilters && <Badge ml={1} size="xs" colorPalette="blue">●</Badge>}
+                        <span className="ml-1">Filter</span>
+                        {hasActiveFilters && <Badge colorScheme="blue" className="ml-1">●</Badge>}
                     </Button>
                     {hasActiveFilters && (
                         <Button
-                            size="xs"
+                            size="sm"
                             variant="ghost"
                             onClick={() => onFiltersChange({ search: '', pattern: '', taxability: '' })}
                         >
                             <FiX size={12} />
-                            <Text ml={1}>Clear</Text>
+                            <span className="ml-1">Clear</span>
                         </Button>
                     )}
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
             {showFilters && (
-                <Flex gap={3} p={2} bg="gray.50" borderRadius="md" flexWrap="wrap" align="center">
-                    <Flex align="center" gap={1}>
+                <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-2">
+                    <div className="flex items-center gap-1">
                         <FiSearch size={12} color="gray" />
                         <Input
-                            size="xs"
                             placeholder="Search label..."
                             value={filters.search}
                             onChange={e => onFiltersChange({ ...filters, search: e.target.value })}
-                            width="140px"
+                            className="w-[140px]"
                         />
-                    </Flex>
-                    <Flex align="center" gap={1}>
-                        <Text fontSize="xs" color="gray.600">Pattern:</Text>
-                        <NativeSelect.Root size="sm" width="100px">
-                            <NativeSelect.Field
-                                value={filters.pattern}
-                                onChange={e => onFiltersChange({ ...filters, pattern: e.target.value })}
-                                style={{ fontSize: '11px', padding: '2px 4px' }}
-                            >
-                                <option value="">All</option>
-                                <option value={UnitPattern.TRANSFER}>Transfer</option>
-                                <option value={UnitPattern.SWAP}>Swap</option>
-                                <option value={UnitPattern.SPLIT}>Split</option>
-                                <option value={UnitPattern.UNKNOWN}>Unknown</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-                    <Flex align="center" gap={1}>
-                        <Text fontSize="xs" color="gray.600">Tax:</Text>
-                        <NativeSelect.Root size="sm" width="100px">
-                            <NativeSelect.Field
-                                value={filters.taxability}
-                                onChange={e => onFiltersChange({ ...filters, taxability: e.target.value })}
-                                style={{ fontSize: '11px', padding: '2px 4px' }}
-                            >
-                                <option value="">All</option>
-                                <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
-                                <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
-                                <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-                </Flex>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <span className="text-xs text-slate-600">Pattern:</span>
+                        <select
+                            title="Pattern"
+                            value={filters.pattern}
+                            onChange={e => onFiltersChange({ ...filters, pattern: e.target.value })}
+                            className="w-[100px] rounded-none border border-slate-200 px-1 py-0.5 text-[11px]"
+                        >
+                            <option value="">All</option>
+                            <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
+                            <option value={UnitPattern.SWAP}>Swap</option>
+                            <option value={UnitPattern.SPLIT}>Split</option>
+                            <option value={UnitPattern.SPINOFF}>Spin-Off</option>
+                            <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <span className="text-xs text-slate-600">Tax:</span>
+                        <select
+                            title="Taxability"
+                            value={filters.taxability}
+                            onChange={e => onFiltersChange({ ...filters, taxability: e.target.value })}
+                            className="w-[100px] rounded-none border border-slate-200 px-1 py-0.5 text-[11px]"
+                        >
+                            <option value="">All</option>
+                            <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
+                            <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
+                            <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
+                        </select>
+                    </div>
+                </div>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -257,31 +232,25 @@ const TransactionBadges: React.FC<TransactionBadgesProps> = ({
     onTransactionClick,
 }) => {
     if (!transactions || transactions.length === 0) {
-        return <Text fontSize="2xs" color="gray.400">-</Text>;
+        return <span className="text-xs text-slate-400">-</span>;
     }
 
     const visibleTxs = transactions.slice(0, maxVisible);
     const hiddenCount = transactions.length - maxVisible;
 
     return (
-        <Flex gap={1} flexWrap="wrap" align="center">
+        <div className="flex flex-wrap items-center gap-1">
             {visibleTxs.map(tx => (
                 <TransactionTooltip key={tx.id} txId={tx.id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
-                    <Badge
-                        size="xs"
-                        colorPalette="gray"
-                        variant="subtle"
-                        cursor="pointer"
-                        fontSize="9px"
-                    >
+                    <Badge colorScheme="gray" className="cursor-pointer text-[9px]">
                         #{tx.id}
                     </Badge>
                 </TransactionTooltip>
             ))}
             {hiddenCount > 0 && (
-                <Text fontSize="2xs" color="gray.500">+{hiddenCount}</Text>
+                <span className="text-xs text-slate-500">+{hiddenCount}</span>
             )}
-        </Flex>
+        </div>
     );
 };
 
@@ -381,90 +350,95 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
 
     if (loading) {
         return (
-            <Flex align="center" gap={2} py={3}>
+            <div className="flex items-center gap-2 py-3">
                 <FiLoader className="animate-spin" />
-                <Text fontSize="xs" color="gray.500">Loading transaction details...</Text>
-            </Flex>
+                <span className="text-xs text-slate-500">Loading transaction details...</span>
+            </div>
         );
     }
 
     if (error) {
-        return <Text fontSize="xs" color="red.500">Error: {error}</Text>;
+        return <span className="text-xs text-red-500">Error: {error}</span>;
     }
 
     if (txDetails.length === 0) {
-        return <Text fontSize="xs" color="gray.500" fontStyle="italic">No transactions</Text>;
+        return <span className="text-xs italic text-slate-500">No transactions</span>;
     }
 
     return (
-        <Card.Root size="sm" variant="outline">
-            <Card.Body p={3}>
-                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
+        <div className="border border-slate-200 bg-white">
+            <div className="p-3">
+                <p className="mb-2 text-xs font-bold text-slate-600">
                     📄 Transactions ({txDetails.length})
-                </Text>
-                <Table.Root size="sm">
-                    <Table.Header>
-                        <Table.Row>
-                            <Table.ColumnHeader fontSize="2xs" width="50px">TX ID</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="50px">Dir</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="60px">Asset</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="80px">Qty</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="70px">Price</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="70px">Total</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" textAlign="right" width="60px">Fee</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="70px">Account</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="60px">Type</Table.ColumnHeader>
-                            <Table.ColumnHeader fontSize="2xs" width="70px">From/To</Table.ColumnHeader>
+                </p>
+                <table className="w-full text-left">
+                    <thead>
+                        <tr>
+                            <th className="w-[50px] text-[10px] font-medium text-slate-500">TX ID</th>
+                            <th className="w-[50px] text-[10px] font-medium text-slate-500">Dir</th>
+                            <th className="w-[60px] text-[10px] font-medium text-slate-500">Asset</th>
+                            <th className="w-[80px] text-right text-[10px] font-medium text-slate-500">Qty</th>
+                            <th className="w-[70px] text-right text-[10px] font-medium text-slate-500">Price</th>
+                            <th className="w-[70px] text-right text-[10px] font-medium text-slate-500">Total</th>
+                            <th className="w-[60px] text-right text-[10px] font-medium text-slate-500">Fee</th>
+                            <th className="w-[70px] text-[10px] font-medium text-slate-500">Account</th>
+                            <th className="w-[60px] text-[10px] font-medium text-slate-500">Type</th>
+                            <th className="w-[70px] text-[10px] font-medium text-slate-500">From/To</th>
                             {onRemoveTransaction && (
-                                <Table.ColumnHeader fontSize="2xs" width="40px"></Table.ColumnHeader>
+                                <th className="w-[40px]"></th>
                             )}
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {txDetails.map((tx) => {
                             const txType = tx.transaction_type || tx.source_transaction_type || '-';
                             const fromAccount = tx.from_account_name || tx.source_from_account;
                             const toAccount = tx.to_account_name || tx.source_to_account;
                             const fromToAccount = tx.direction === 'inflow' ? fromAccount : toAccount;
+                            // Build source tooltip: show source address when linked account name is displayed
+                            const fromToSource = tx.direction === 'inflow'
+                                ? (tx.from_account_name && tx.source_from_account && tx.source_from_account !== tx.from_account_name ? `Source: ${tx.source_from_account}` : undefined)
+                                : (tx.to_account_name && tx.source_to_account && tx.source_to_account !== tx.to_account_name ? `Source: ${tx.source_to_account}` : undefined);
 
                             return (
-                                <Table.Row key={tx.transaction_id}>
-                                    <Table.Cell>
+                                <tr key={tx.transaction_id}>
+                                    <td className="py-1">
                                         <TransactionTooltip txId={tx.transaction_id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
-                                            <Badge size="xs" colorPalette="gray" variant="subtle" cursor="pointer">
+                                            <Badge colorScheme="gray" className="cursor-pointer">
                                                 #{tx.transaction_id}
                                             </Badge>
                                         </TransactionTooltip>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td className="py-1">
                                         <Badge
-                                            size="xs"
-                                            colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
+                                            colorScheme={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
                                         >
                                             {tx.direction === 'inflow' ? '↓' : tx.direction === 'outflow' ? '↑' : '↔'}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell>
+                                    </td>
+                                    <td className="py-1">
                                         <AssetBadge
                                             asset={tx.linked_asset}
                                             sourceSymbol={tx.source_asset_symbol || tx.asset_symbol}
                                             size="xs"
                                             maxLength={15}
                                         />
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right" fontFamily="mono">
-                                        {formatQty(tx.quantity || 0)}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right">
-                                        {tx.price ? formatCurrency(tx.price, baseCurrency) : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right">
-                                        {tx.total ? formatCurrency(tx.total, baseCurrency) : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" textAlign="right">
+                                    </td>
+                                    <td className="py-1 text-right font-mono text-[10px]">
+                                        <ValueDisplay value={tx.quantity} />
+                                    </td>
+                                    <td className="py-1 text-right text-[10px]">
+                                        {tx.price ? <ValueDisplay value={tx.price} currency={baseCurrency} /> : '-'}
+                                    </td>
+                                    <td className="py-1 text-right text-[10px]">
+                                        {tx.total ? <ValueDisplay value={tx.total} currency={baseCurrency} /> : '-'}
+                                    </td>
+                                    <td className="py-1 text-right text-[10px]">
                                         {tx.fee ? (
-                                            <Flex align="center" gap={1} justify="flex-end">
-                                                <Text color="orange.600">{formatQty(tx.fee)}</Text>
+                                            <div className="flex items-center justify-end gap-1">
+                                                <span className="text-orange-600">
+                                                    <ValueDisplay value={tx.fee} />
+                                                </span>
                                                 <AssetBadge
                                                     asset={tx.fee_quote_asset}
                                                     sourceSymbol={tx.source_fee_quote_asset_symbol || tx.fee_quote_asset_symbol}
@@ -472,42 +446,39 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                                                     colorPalette="orange"
                                                     maxLength={10}
                                                 />
-                                            </Flex>
+                                            </div>
                                         ) : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs">{tx.account_name || '-'}</Table.Cell>
-                                    <Table.Cell fontSize="2xs">
-                                        <Badge size="xs" colorPalette={txType === 'transfer' ? 'blue' : 'gray'}>
+                                    </td>
+                                    <td className="py-1 text-[10px]">{tx.account_name || '-'}</td>
+                                    <td className="py-1 text-[10px]">
+                                        <Badge colorScheme={txType === 'transfer' ? 'blue' : 'gray'}>
                                             {txType}
                                         </Badge>
-                                    </Table.Cell>
-                                    <Table.Cell fontSize="2xs" color="gray.600">
+                                    </td>
+                                    <td className="py-1 text-[10px] text-slate-600" title={fromToSource}>
                                         {fromToAccount || '-'}
-                                    </Table.Cell>
+                                    </td>
                                     {onRemoveTransaction && (
-                                        <Table.Cell>
+                                        <td className="py-1">
                                             <Button
-                                                size="xs"
                                                 variant="ghost"
-                                                colorPalette="red"
-                                                p={0}
-                                                minW="20px"
-                                                h="20px"
+                                                colorScheme="red"
+                                                className="h-5 min-w-[20px] p-0"
                                                 onClick={() => handleRemove(tx.transaction_id)}
                                                 loading={removingId === tx.transaction_id}
                                                 title="Remove from bundle"
                                             >
                                                 <FiX size={10} />
                                             </Button>
-                                        </Table.Cell>
+                                        </td>
                                     )}
-                                </Table.Row>
+                                </tr>
                             );
                         })}
-                    </Table.Body>
-                </Table.Root>
-            </Card.Body>
-        </Card.Root>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     );
 };
 
@@ -552,38 +523,33 @@ const InlineEditLabel: React.FC<InlineEditLabelProps> = ({ value, onSave, placeh
 
     if (editing) {
         return (
-            <Flex gap={1} align="center">
+            <div className="flex items-center gap-1">
                 <Input
-                    size="xs"
                     value={editValue}
                     onChange={e => setEditValue(e.target.value)}
                     onKeyDown={handleKeyDown}
                     onBlur={handleSave}
                     autoFocus
-                    width="140px"
-                    fontSize="11px"
+                    className="w-[140px] text-[11px]"
                 />
-                <Button size="xs" variant="ghost" colorPalette="green" onClick={handleSave} loading={saving} p={1} minW="20px" h="20px">
+                <Button variant="ghost" colorScheme="green" onClick={handleSave} loading={saving} className="h-5 min-w-[20px] p-1">
                     <FiCheck size={10} />
                 </Button>
-                <Button size="xs" variant="ghost" onClick={() => { setEditValue(value); setEditing(false); }} p={1} minW="20px" h="20px">
+                <Button variant="ghost" onClick={() => { setEditValue(value); setEditing(false); }} className="h-5 min-w-[20px] p-1">
                     <FiX size={10} />
                 </Button>
-            </Flex>
+            </div>
         );
     }
 
     return (
-        <Text
-            fontSize="11px"
-            fontWeight="medium"
-            cursor="pointer"
-            _hover={{ color: 'blue.600', textDecoration: 'underline' }}
+        <span
+            className="cursor-pointer text-[11px] font-medium hover:text-blue-600 hover:underline"
             onClick={() => setEditing(true)}
             title="Click to edit"
         >
-            {value || <Text as="span" color="gray.400" fontStyle="italic">{placeholder}</Text>}
-        </Text>
+            {value || <span className="italic text-slate-400">{placeholder}</span>}
+        </span>
     );
 };
 
@@ -617,12 +583,20 @@ const BundleRow: React.FC<BundleRowProps> = ({
     onTransactionClick,
 }) => {
     const [deleting, setDeleting] = useState(false);
-    const [editingNotes, setEditingNotes] = useState(false);
-    const [notesValue, setNotesValue] = useState(bundle.notes || '');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const assets = getUniqueAssets(bundle.transactions);
-    const dateRange = getDateRangeDisplay(bundle.transactions?.map(t => t.date_time) || []);
+    const { assets: allAssets } = useAssets();
+
+    // Resolve spinoff parent asset from metadata
+    const isSpinoff = bundle.pattern === UnitPattern.SPINOFF;
+    const spinoffSourceAssetId = bundle.metadata?.spinoff_source_asset_id;
+    const spinoffSourceAsset = isSpinoff && spinoffSourceAssetId
+        ? allAssets.find(a => a.asset_id === spinoffSourceAssetId)
+        : null;
+    const spinoffAccountName = isSpinoff && bundle.transactions?.length
+        ? bundle.transactions[0].account_name
+        : null;
 
     const openDeleteConfirm = () => setShowDeleteConfirm(true);
 
@@ -640,75 +614,143 @@ const BundleRow: React.FC<BundleRowProps> = ({
         await onUpdate({ taxability_override: newValue as TaxabilityStatus });
     };
 
-    const handleSaveNotes = async () => {
-        if (notesValue === (bundle.notes || '')) {
-            setEditingNotes(false);
-            return;
-        }
-        await onUpdate({ notes: notesValue });
-        setEditingNotes(false);
+    const handlePatternChange = async (newValue: string) => {
+        await onUpdate({ pattern: newValue as UnitPattern });
     };
+
+    // Compute a compact date range using short datetime format
+    const txDates = (bundle.transactions || []).map(t => t.date_time).filter(Boolean);
+    const compactDateRange = useMemo(() => {
+        if (txDates.length === 0) return '-';
+        const timestamps = txDates.map(d => parseApiDate(d)?.getTime()).filter((t): t is number => t != null && !isNaN(t));
+        if (timestamps.length === 0) return '-';
+        const minStr = formatDateTimeCompact(new Date(Math.min(...timestamps)));
+        const maxStr = formatDateTimeCompact(new Date(Math.max(...timestamps)));
+        return minStr === maxStr ? minStr : `${minStr} – ${maxStr}`;
+    }, [txDates]);
 
     return (
         <>
-            {/* Main Row */}
-            <Table.Row
-                bg={isSelected ? 'blue.50' : isExpanded ? 'purple.50' : 'white'}
-                _hover={{ bg: isSelected ? 'blue.100' : 'gray.50' }}
-                css={{ fontSize: '11px' }}
+            <div
+                className={`border p-3 shadow-sm transition-colors hover:shadow-md ${isSelected ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white'} ${isExpanded ? 'border-purple-300 hover:border-purple-400' : 'hover:border-blue-200'}`}
             >
-                {/* Checkbox */}
-                <Table.Cell width="30px" p={1}>
-                    <Checkbox.Root checked={isSelected} onCheckedChange={onToggleSelect}>
-                        <Checkbox.HiddenInput />
-                        <Checkbox.Control />
-                    </Checkbox.Root>
-                </Table.Cell>
-
-                {/* Expand Toggle */}
-                <Table.Cell width="30px" p={1}>
+                {/* Top row: checkbox + pattern icon + taxability icon + delete */}
+                <div className="mb-1 flex items-center gap-1.5">
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={onToggleSelect}
+                        title="Select bundle"
+                        className="h-4 w-4 cursor-pointer accent-blue-500"
+                    />
+                    <Tooltip content={{
+                        [UnitPattern.SWAP]: 'Swap',
+                        [UnitPattern.INTERNAL_TRANSFER]: 'Transfer',
+                        [UnitPattern.SPLIT]: 'Split',
+                        [UnitPattern.FLOW]: 'Flow',
+                        [UnitPattern.SPINOFF]: 'Spin-Off',
+                        [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Transfer',
+                        [UnitPattern.CUSTOM]: 'Custom',
+                        [UnitPattern.UNKNOWN]: 'Unknown',
+                    }[bundle.pattern || UnitPattern.UNKNOWN] || 'Unknown'} openDelay={200}>
+                        <span className="relative inline-flex">
+                            <span
+                                className="pointer-events-none flex h-[22px] w-[22px] items-center justify-center text-slate-700"
+                                style={{
+                                    backgroundColor: {
+                                        [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
+                                        [UnitPattern.SWAP]: '#FEEBC8',
+                                        [UnitPattern.SPLIT]: '#E9D8FD',
+                                        [UnitPattern.FLOW]: '#C6F6D5',
+                                        [UnitPattern.SPINOFF]: '#FED7E2',
+                                        [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: '#FEFCBF',
+                                        [UnitPattern.CUSTOM]: '#E2E8F0',
+                                        [UnitPattern.UNKNOWN]: '#EDF2F7',
+                                    }[bundle.pattern || UnitPattern.UNKNOWN] || '#EDF2F7',
+                                }}
+                            >
+                                {{
+                                    [UnitPattern.SWAP]: <FiRepeat size={11} />,
+                                    [UnitPattern.INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
+                                    [UnitPattern.SPLIT]: <FiGitBranch size={11} />,
+                                    [UnitPattern.FLOW]: <FiTrendingUp size={11} />,
+                                    [UnitPattern.SPINOFF]: <FiShare2 size={11} />,
+                                    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
+                                    [UnitPattern.CUSTOM]: <FiTool size={11} />,
+                                    [UnitPattern.UNKNOWN]: <FiHelpCircle size={11} />,
+                                }[bundle.pattern || UnitPattern.UNKNOWN] || <FiHelpCircle size={11} />}
+                            </span>
+                            <select
+                                title="Pattern"
+                                className="absolute inset-0 cursor-pointer opacity-0"
+                                value={bundle.pattern || UnitPattern.UNKNOWN}
+                                onChange={(e) => handlePatternChange(e.target.value)}
+                            >
+                                <option value={UnitPattern.SWAP}>Swap</option>
+                                <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
+                                <option value={UnitPattern.SPLIT}>Split</option>
+                                <option value={UnitPattern.FLOW}>Flow</option>
+                                <option value={UnitPattern.SPINOFF}>Spin-Off</option>
+                                <option value={UnitPattern.CUSTOM}>Custom</option>
+                                <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                            </select>
+                        </span>
+                    </Tooltip>
+                    <Tooltip content={{
+                        [TaxabilityEnum.TAXABLE]: 'Taxable',
+                        [TaxabilityEnum.NON_TAXABLE]: 'Non-Taxable',
+                        [TaxabilityEnum.UNKNOWN]: 'Taxability Unknown',
+                    }[bundle.taxability_override || TaxabilityEnum.UNKNOWN] || 'Taxability Unknown'} openDelay={200}>
+                        <span className="relative inline-flex">
+                            <span
+                                className="pointer-events-none flex h-[22px] w-[22px] items-center justify-center text-slate-700"
+                                style={{
+                                    backgroundColor: bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
+                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
+                                }}
+                            >
+                                {bundle.taxability_override === TaxabilityEnum.TAXABLE ? <FiDollarSign size={11} /> :
+                                    bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? <FiShield size={11} /> :
+                                        <FiHelpCircle size={11} />}
+                            </span>
+                            <select
+                                title="Taxability"
+                                className="absolute inset-0 cursor-pointer opacity-0"
+                                value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
+                                onChange={(e) => handleTaxabilityChange(e.target.value)}
+                            >
+                                <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
+                                <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
+                                <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
+                            </select>
+                        </span>
+                    </Tooltip>
+                    <div className="flex-1" />
                     <Button
-                        size="xs"
                         variant="ghost"
-                        onClick={onToggleExpand}
-                        p={0}
-                        minW="20px"
-                        h="20px"
+                        colorScheme="red"
+                        onClick={openDeleteConfirm}
+                        loading={deleting}
+                        title="Delete bundle"
+                        className="h-5 min-w-[20px] p-1"
                     >
-                        {isExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                        <FiTrash2 size={11} />
                     </Button>
-                </Table.Cell>
+                </div>
 
-                {/* Pattern */}
-                <Table.Cell width="80px" p={1}>
-                    <Badge size="xs" colorPalette={patternColors[bundle.pattern || 'unknown'] || 'gray'}>
-                        {bundle.pattern || 'unknown'}
-                    </Badge>
-                </Table.Cell>
-
-                {/* Label (inline editable) */}
-                <Table.Cell p={1} minW="150px">
+                {/* Bundle name on its own line */}
+                <div className="mb-1.5">
                     <InlineEditLabel
                         value={bundle.label || ''}
                         onSave={async (value) => onUpdate({ label: value })}
                         placeholder={`Bundle #${bundle.id}`}
                     />
-                </Table.Cell>
+                </div>
 
-                {/* Transaction Badges */}
-                <Table.Cell p={1} maxW="120px">
-                    <TransactionBadges
-                        transactions={bundle.transactions}
-                        baseCurrency={baseCurrency}
-                        maxVisible={3}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Table.Cell>
-
-                {/* Assets */}
-                <Table.Cell p={1} maxW="120px">
-                    <Flex gap={1} flexWrap="wrap">
-                        {assets.slice(0, 3).map((asset, idx) => (
+                {/* Assets + date + notes icon row */}
+                <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600">
+                    <div className="flex flex-wrap items-center gap-1">
+                        {assets.slice(0, 4).map((asset, idx) => (
                             <AssetBadge
                                 key={asset.symbol || idx}
                                 asset={asset}
@@ -717,110 +759,69 @@ const BundleRow: React.FC<BundleRowProps> = ({
                                 maxLength={12}
                             />
                         ))}
-                        {assets.length > 3 && (
-                            <Text fontSize="10px" color="gray.500">+{assets.length - 3}</Text>
+                        {assets.length > 4 && (
+                            <span className="text-[10px] text-slate-500">+{assets.length - 4}</span>
                         )}
-                    </Flex>
-                </Table.Cell>
-
-                {/* Date Range */}
-                <Table.Cell width="90px" p={1}>
-                    <Text fontSize="10px" color="gray.600">{dateRange}</Text>
-                </Table.Cell>
-
-                {/* Taxability (editable dropdown) */}
-                <Table.Cell width="90px" p={1}>
-                    <NativeSelect.Root size="sm" width="80px">
-                        <NativeSelect.Field
-                            value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
-                            onChange={e => handleTaxabilityChange(e.target.value)}
-                            style={{
-                                fontSize: '10px',
-                                padding: '2px 4px',
-                                backgroundColor: bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
-                                    bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
-                                borderRadius: '4px',
-                            }}
+                    </div>
+                    <span className="text-[10px] text-slate-500">{compactDateRange}</span>
+                    <Tooltip content={bundle.notes || 'No notes'} openDelay={200}>
+                        <span
+                            className={`cursor-pointer ${bundle.notes ? 'text-purple-500 hover:text-purple-600' : 'text-slate-300 hover:text-purple-600'}`}
                         >
-                            <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
-                            <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
-                            <option value={TaxabilityEnum.NON_TAXABLE}>Non-Tax</option>
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Table.Cell>
+                            <FiFileText size={12} />
+                        </span>
+                    </Tooltip>
+                </div>
 
-                {/* Actions */}
-                <Table.Cell width="60px" p={1} textAlign="right">
-                    <Flex gap={1} justify="flex-end">
-                        <Button
-                            size="xs"
-                            variant="ghost"
-                            colorPalette="red"
-                            onClick={openDeleteConfirm}
-                            loading={deleting}
-                            title="Delete bundle"
-                            p={1}
-                            minW="24px"
-                            h="24px"
-                        >
-                            <FiTrash2 size={12} />
-                        </Button>
-                    </Flex>
-                </Table.Cell>
-            </Table.Row>
-
-            {/* Expanded Content */}
-            {isExpanded && (
-                <Table.Row>
-                    <Table.Cell colSpan={9} p={0} bg="gray.25">
-                        <Box p={3} borderBottom="2px solid" borderColor="purple.200">
-                            {/* Notes Section */}
-                            <Flex align="flex-start" gap={2} mb={3}>
-                                <Text fontSize="xs" color="gray.600" fontWeight="medium" minW="50px">Notes:</Text>
-                                {editingNotes ? (
-                                    <Flex direction="column" gap={1} flex={1}>
-                                        <Textarea
-                                            size="xs"
-                                            value={notesValue}
-                                            onChange={e => setNotesValue(e.target.value)}
-                                            rows={2}
-                                            fontSize="11px"
-                                            autoFocus
-                                        />
-                                        <Flex gap={1}>
-                                            <Button size="xs" colorPalette="green" onClick={handleSaveNotes}>Save</Button>
-                                            <Button size="xs" variant="ghost" onClick={() => { setNotesValue(bundle.notes || ''); setEditingNotes(false); }}>Cancel</Button>
-                                        </Flex>
-                                    </Flex>
-                                ) : (
-                                    <Text
-                                        fontSize="11px"
-                                        color={bundle.notes ? 'gray.700' : 'gray.400'}
-                                        fontStyle={bundle.notes ? 'normal' : 'italic'}
-                                        cursor="pointer"
-                                        _hover={{ color: 'blue.600' }}
-                                        onClick={() => setEditingNotes(true)}
-                                        flex={1}
-                                    >
-                                        {bundle.notes || 'Click to add notes...'}
-                                    </Text>
-                                )}
-                            </Flex>
-
-                            {/* Transactions - Full Table like P&L expanded row */}
-                            <Box mt={3}>
-                                <ExpandedTransactionTable
-                                    transactions={bundle.transactions}
-                                    bundleId={bundle.id}
-                                    baseCurrency={baseCurrency}
-                                    onRemoveTransaction={onRemoveTransaction}
-                                    onTransactionClick={onTransactionClick}
+                {/* Spinoff source info row */}
+                {isSpinoff && (spinoffSourceAsset || spinoffAccountName) && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
+                        {spinoffSourceAsset && (
+                            <div className="flex items-center gap-1">
+                                <span className="text-[10px] text-slate-400">Parent:</span>
+                                <AssetBadge
+                                    asset={{ id: spinoffSourceAsset.asset_id!, symbol: spinoffSourceAsset.symbol || '?', label: spinoffSourceAsset.label }}
+                                    size="xs"
+                                    colorPalette="pink"
+                                    maxLength={12}
                                 />
-                            </Box>
-                        </Box>
-                    </Table.Cell>
-                </Table.Row>
-            )}
+                            </div>
+                        )}
+                        {spinoffAccountName && (
+                            <Badge colorScheme="gray" className="border border-slate-300 bg-transparent text-slate-600">
+                                {spinoffAccountName}
+                            </Badge>
+                        )}
+                        {bundle.metadata?.spinoff_allocation_pct != null && (
+                            <span className="text-[10px] text-slate-400">
+                                {(bundle.metadata.spinoff_allocation_pct * 100).toFixed(0)}% alloc
+                            </span>
+                        )}
+                    </div>
+                )}
+
+                {/* Collapsible transaction list */}
+                <div
+                    className="mt-1.5 cursor-pointer border-t border-slate-100 pt-1 text-center hover:text-purple-600"
+                    onClick={onToggleExpand}
+                >
+                    <div className="flex items-center justify-center gap-1">
+                        {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                        <span className="text-xs text-slate-500">
+                            {bundle.transactions?.length || 0} transaction{(bundle.transactions?.length || 0) !== 1 ? 's' : ''}
+                        </span>
+                    </div>
+                </div>
+
+                {isExpanded && (
+                    <div className="mt-1.5">
+                        <BundleMemberTransactionsTable
+                            transactionIds={(bundle.transactions || []).map(t => t.id)}
+                            onTransactionClick={onTransactionClick}
+                        />
+                    </div>
+                )}
+            </div>
 
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog
@@ -852,31 +853,89 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({ selectedCount, onDelete
     if (selectedCount === 0) return null;
 
     return (
-        <Box mb={3} p={2} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
-            <Flex justify="space-between" align="center">
-                <Text fontSize="sm" fontWeight="medium" color="blue.700">
+        <div className="mb-3 border border-blue-200 bg-blue-50 p-2">
+            <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-blue-700">
                     {selectedCount} bundle{selectedCount !== 1 ? 's' : ''} selected
-                </Text>
-                <Flex gap={2}>
+                </span>
+                <div className="flex gap-2">
                     <Button
-                        size="xs"
-                        colorPalette="red"
+                        colorScheme="red"
                         variant="outline"
                         onClick={onDelete}
                         loading={loading}
                     >
                         <FiTrash2 size={12} />
-                        <Text ml={1}>Delete Selected</Text>
+                        <span className="ml-1">Delete Selected</span>
                     </Button>
-                    <Button size="xs" variant="ghost" onClick={onClearSelection}>
+                    <Button variant="ghost" onClick={onClearSelection}>
                         <FiX size={12} />
-                        <Text ml={1}>Clear</Text>
+                        <span className="ml-1">Clear</span>
                     </Button>
-                </Flex>
-            </Flex>
-        </Box>
+                </div>
+            </div>
+        </div>
     );
 };
+
+// ============================================================================
+// Pagination Bar (reusable top + bottom)
+// ============================================================================
+
+interface PaginationBarProps {
+    page: number;
+    setPage: React.Dispatch<React.SetStateAction<number>>;
+    pageSize: number;
+    setPageSize: React.Dispatch<React.SetStateAction<number>>;
+    pageSizeOptions: number[];
+    totalItems: number;
+    totalPages: number;
+    rangeStart: number;
+    rangeEnd: number;
+    className?: string;
+}
+
+const PaginationBar: React.FC<PaginationBarProps> = ({
+    page, setPage, pageSize, setPageSize, pageSizeOptions,
+    totalItems, totalPages, rangeStart, rangeEnd, className,
+}) => (
+    <div className={`flex items-center justify-between px-1 ${className || ''}`}>
+        <div className="flex items-center gap-0">
+            {pageSizeOptions.map(size => (
+                <Button
+                    key={size}
+                    size="sm"
+                    variant={pageSize === size ? 'solid' : 'outline'}
+                    colorScheme={pageSize === size ? 'blue' : 'gray'}
+                    onClick={() => setPageSize(size)}
+                    className="h-6 px-2 font-normal"
+                >
+                    {size}
+                </Button>
+            ))}
+        </div>
+        <span className="text-xs text-slate-500">
+            {rangeStart}–{rangeEnd} of {totalItems}
+        </span>
+        <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" onClick={() => setPage(0)} disabled={page === 0} className="h-6 px-1">
+                <FiChevronsLeft size={14} />
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setPage((p: number) => Math.max(0, p - 1))} disabled={page === 0} className="h-6 px-1">
+                <FiChevronLeft size={14} />
+            </Button>
+            <span className="px-1 text-xs text-slate-600">
+                {page + 1}/{totalPages}
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setPage((p: number) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="h-6 px-1">
+                <FiChevronRight size={14} />
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1} className="h-6 px-1">
+                <FiChevronsRight size={14} />
+            </Button>
+        </div>
+    </div>
+);
 
 // ============================================================================
 // Main Component
@@ -979,25 +1038,37 @@ export const BundleTable: React.FC<BundleTableProps> = ({
         }
     }, [onBundleDelete, onRefresh]);
 
+    const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+    const [pageSize, setPageSize] = useState(10);
+    const [page, setPage] = useState(0); // 0-indexed
+    const totalPages = Math.max(1, Math.ceil(filteredBundles.length / pageSize));
+    const pagedBundles = filteredBundles.slice(page * pageSize, (page + 1) * pageSize);
+    const rangeStart = filteredBundles.length === 0 ? 0 : page * pageSize + 1;
+    const rangeEnd = Math.min((page + 1) * pageSize, filteredBundles.length);
+
+    // Reset to page 0 when filters or page size change
+    useEffect(() => { setPage(0); }, [filters, pageSize]);
+
     const allSelected = filteredBundles.length > 0 && filteredBundles.every(b => selectedIds.has(b.id));
 
     if (bundles.length === 0) {
         return (
-            <Box textAlign="center" py={8} bg="gray.50" borderRadius="md">
-                <Text color="gray.500" fontSize="sm">
+            <div className="bg-slate-50 py-8 text-center">
+                <span className="text-sm text-slate-500">
                     No bundles yet. Accept suggestions or select transactions to create bundles.
-                </Text>
-            </Box>
+                </span>
+            </div>
         );
     }
 
     return (
-        <Box>
+        <div>
             <FilterBar
                 filters={filters}
                 onFiltersChange={setFilters}
                 bundleCount={bundles.length}
                 filteredCount={filteredBundles.length}
+                onRefresh={onRefresh}
             />
 
             <BulkActionsBar
@@ -1007,55 +1078,59 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                 loading={bulkLoading}
             />
 
-            <Box overflowX="auto" bg="white" borderRadius="md" borderWidth={1} borderColor="gray.200">
-                <Table.Root size="sm" variant="line">
-                    <Table.Header>
-                        <Table.Row css={{ fontSize: '10px', bg: 'gray.100' }}>
-                            <Table.ColumnHeader width="30px" p={1}>
-                                <Checkbox.Root checked={allSelected} onCheckedChange={toggleSelectAll}>
-                                    <Checkbox.HiddenInput />
-                                    <Checkbox.Control />
-                                </Checkbox.Root>
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader width="30px" p={1}></Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px" p={1}>Pattern</Table.ColumnHeader>
-                            <Table.ColumnHeader p={1} minW="150px">Label</Table.ColumnHeader>
-                            <Table.ColumnHeader p={1} minW="110px">Trx</Table.ColumnHeader>
-                            <Table.ColumnHeader p={1} maxW="120px">Assets</Table.ColumnHeader>
-                            <Table.ColumnHeader width="90px" p={1}>Date Range</Table.ColumnHeader>
-                            <Table.ColumnHeader width="90px" p={1}>Taxability</Table.ColumnHeader>
-                            <Table.ColumnHeader width="60px" p={1}></Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                        {filteredBundles.length === 0 ? (
-                            <Table.Row>
-                                <Table.Cell colSpan={9}>
-                                    <Text textAlign="center" py={4} color="gray.500" fontSize="sm">
-                                        No bundles match the current filters
-                                    </Text>
-                                </Table.Cell>
-                            </Table.Row>
-                        ) : (
-                            filteredBundles.map(bundle => (
-                                <BundleRow
-                                    key={bundle.id}
-                                    bundle={bundle}
-                                    baseCurrency={baseCurrency}
-                                    isExpanded={expandedIds.has(bundle.id)}
-                                    isSelected={selectedIds.has(bundle.id)}
-                                    onToggleExpand={() => toggleExpand(bundle.id)}
-                                    onToggleSelect={() => toggleSelect(bundle.id)}
-                                    onUpdate={(updates) => handleUpdate(bundle.id, updates)}
-                                    onDelete={() => handleDelete(bundle.id)}
-                                    onRemoveTransaction={onRemoveTransaction}
-                                    onTransactionClick={onTransactionClick}
-                                />
-                            ))
-                        )}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+            {filteredBundles.length === 0 ? (
+                <div className="bg-slate-50 py-4 text-center">
+                    <span className="text-sm text-slate-500">No bundles match the current filters</span>
+                </div>
+            ) : (
+                <>
+                    {/* Top pagination bar */}
+                    <PaginationBar
+                        page={page}
+                        setPage={setPage}
+                        pageSize={pageSize}
+                        setPageSize={setPageSize}
+                        pageSizeOptions={PAGE_SIZE_OPTIONS}
+                        totalItems={filteredBundles.length}
+                        totalPages={totalPages}
+                        rangeStart={rangeStart}
+                        rangeEnd={rangeEnd}
+                        className="mb-2"
+                    />
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                        {pagedBundles.map(bundle => (
+                            <BundleRow
+                                key={bundle.id}
+                                bundle={bundle}
+                                baseCurrency={baseCurrency}
+                                isExpanded={expandedIds.has(bundle.id)}
+                                isSelected={selectedIds.has(bundle.id)}
+                                onToggleExpand={() => toggleExpand(bundle.id)}
+                                onToggleSelect={() => toggleSelect(bundle.id)}
+                                onUpdate={(updates) => handleUpdate(bundle.id, updates)}
+                                onDelete={() => handleDelete(bundle.id)}
+                                onRemoveTransaction={onRemoveTransaction}
+                                onTransactionClick={onTransactionClick}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Bottom pagination bar */}
+                    <PaginationBar
+                        page={page}
+                        setPage={setPage}
+                        pageSize={pageSize}
+                        setPageSize={setPageSize}
+                        pageSizeOptions={PAGE_SIZE_OPTIONS}
+                        totalItems={filteredBundles.length}
+                        totalPages={totalPages}
+                        rangeStart={rangeStart}
+                        rangeEnd={rangeEnd}
+                        className="mt-3"
+                    />
+                </>
+            )}
 
             {/* Bulk Delete Confirmation Dialog */}
             <ConfirmDialog
@@ -1068,7 +1143,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                 isDestructive
                 isLoading={bulkLoading}
             />
-        </Box>
+        </div>
     );
 };
 

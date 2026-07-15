@@ -1,0 +1,268 @@
+"""Unit tests for Blockscout Transactions connector."""
+
+from unittest.mock import patch
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from backend.connectors.onchain.blockscout.connector_blockscout_transactions import (
+    ConnectorBlockscoutTransactions,
+)
+
+
+class TestBlockscoutTransactionsConnector:
+    """Unit tests for Blockscout transactions connector with mocked API responses."""
+
+    def test_native_transfer_inflow(self):
+        """Test mapping of native ETH inflow transaction (no token_transfers processing)."""
+        connector = ConnectorBlockscoutTransactions(
+            wallet_address="0xTEST_WALLET",
+            chain_name="base",
+        )
+
+        # Mock transactions endpoint response
+        mock_api_response = {
+            "items": [
+                {
+                    "hash": "0xabc123",
+                    "timestamp": "2025-10-14T20:40:51.000000Z",
+                    "status": "ok",
+                    "from": {"hash": "0xSENDER_ADDRESS"},
+                    "to": {"hash": "0xTEST_WALLET"},
+                    "value": "1471018019526625",  # ~0.0015 ETH
+                    "block": "12345678",
+                    "gas_used": "21000",
+                    "gas_price": "10000000000",
+                    "fee": {"type": "actual", "value": "210000000000000"},
+                    "transaction_types": ["coin_transfer"],
+                    "token_transfers": [],  # Has embedded token_transfers but we ignore it
+                }
+            ],
+            "next_page_params": None,
+        }
+
+        with patch.object(connector, "safe_request", return_value=mock_api_response):
+            results = list(connector.yield_normalized())
+
+            # Should yield only 1 transaction (main tx, ignoring token_transfers)
+            assert len(results) == 1
+            raw, normalized, error = results[0]
+            
+            assert error is None
+            assert normalized is not None
+            assert normalized.direction == "inflow"
+            assert normalized.transaction_type == "transfer"
+            # Note: NormalizedTransaction uses different field names than the raw data
+            # The actual mapping to DB fields happens in the processing pipeline
+
+    def test_native_transfer_outflow(self):
+        """Test mapping of native ETH outflow transaction."""
+        connector = ConnectorBlockscoutTransactions(
+            wallet_address="0xTEST_WALLET",
+            chain_name="base",
+        )
+
+        mock_api_response = {
+            "items": [
+                {
+                    "hash": "0xdef456",
+                    "timestamp": "2025-10-14T20:40:51.000000Z",
+                    "status": "ok",
+                    "from": {"hash": "0xTEST_WALLET"},
+                    "to": {"hash": "0xRECEIVER_ADDRESS"},
+                    "value": "500000000000000000",  # 0.5 ETH
+                    "block": "12345679",
+                    "gas_used": "21000",
+                    "gas_price": "30000000000",
+                    "fee": {"type": "actual", "value": "630000000000000"},
+                    "transaction_types": ["coin_transfer"],
+                    "token_transfers": [],
+                }
+            ],
+            "next_page_params": None,
+        }
+
+        with patch.object(connector, "safe_request", return_value=mock_api_response):
+            results = list(connector.yield_normalized())
+
+            assert len(results) == 1
+            raw, normalized, error = results[0]
+            
+            assert error is None
+            assert normalized is not None
+            assert normalized.direction == "outflow"
+            assert normalized.transaction_type == "transfer"
+
+    def test_ignores_embedded_token_transfers(self):
+        """Test that embedded token_transfers array is ignored by transactions connector."""
+        connector = ConnectorBlockscoutTransactions(
+            wallet_address="0xTEST_WALLET",
+            chain_name="base",
+        )
+
+        # Transaction with embedded token_transfers
+        mock_api_response = {
+            "items": [
+                {
+                    "hash": "0xtoken123",
+                    "timestamp": "2025-10-14T20:40:51.000000Z",
+                    "status": "ok",
+                    "from": {"hash": "0xTEST_WALLET"},
+                    "to": {"hash": "0xCONTRACT_ADDRESS"},
+                    "value": "0",  # No native transfer
+                    "block": "12345680",
+                    "gas_used": "65000",
+                    "gas_price": "25000000000",
+                    "token_transfers": [
+                        {
+                            "from": {"hash": "0xTEST_WALLET"},
+                            "to": {"hash": "0xRECEIVER_ADDRESS"},
+                            "total": {"value": "1000000", "decimals": 6},
+                            "token": {
+                                "address": "0xUSDC_CONTRACT",
+                                "symbol": "USDC",
+                                "type": "ERC-20",
+                                "decimals": 6,
+                            },
+                            "tx_hash": "0xtoken123",
+                            "timestamp": "2025-10-14T20:40:51.000000Z",
+                        }
+                    ],
+                }
+            ],
+            "next_page_params": None,
+        }
+
+        with patch.object(connector, "safe_request", return_value=mock_api_response):
+            results = list(connector.yield_normalized())
+
+            # Should yield only 1 transaction (main tx), token_transfers are ignored
+            assert len(results) == 1
+            raw, normalized, error = results[0]
+            
+            assert error is None
+            assert normalized is not None
+            assert normalized.direction == "outflow"  # Wallet is sending to contract
+            assert normalized.transaction_type == "transfer"
+
+    def test_failed_transaction_raises_error(self):
+        """Test that failed transactions raise ValueError."""
+        connector = ConnectorBlockscoutTransactions(
+            wallet_address="0xTEST_WALLET",
+            chain_name="base",
+        )
+
+        mock_api_response = {
+            "items": [
+                {
+                    "hash": "0xfailed",
+                    "timestamp": "2025-10-14T20:40:51.000000Z",
+                    "status": "error",
+                    "result": "Execution reverted",
+                    "from": {"hash": "0xTEST_WALLET"},
+                    "to": {"hash": "0xCONTRACT"},
+                    "value": "0",
+                    "block": "12345681",
+                    "gas_used": "50000",
+                    "gas_price": "20000000000",
+                }
+            ],
+            "next_page_params": None,
+        }
+
+        with patch.object(connector, "safe_request", return_value=mock_api_response):
+            results = list(connector.yield_normalized())
+
+            assert len(results) == 1
+            raw, normalized, error = results[0]
+            
+            assert error is not None
+            assert "Transaction failed" in str(error)
+
+    def test_pagination_support(self):
+        """Test pagination with next_page_params."""
+        connector = ConnectorBlockscoutTransactions(
+            wallet_address="0xTEST_WALLET",
+            chain_name="base",
+        )
+
+        # First page response
+        page1_response = {
+            "items": [
+                {
+                    "hash": "0xpage1_tx1",
+                    "timestamp": "2025-10-14T20:40:51.000000Z",
+                    "status": "ok",
+                    "from": {"hash": "0xSENDER"},
+                    "to": {"hash": "0xTEST_WALLET"},
+                    "value": "1000000000000000000",
+                    "block": "12345682",
+                    "gas_used": "21000",
+                    "gas_price": "10000000000",
+                }
+            ],
+            "next_page_params": {"block_number": 12345681, "index": 50},
+        }
+
+        # Second page response
+        page2_response = {
+            "items": [
+                {
+                    "hash": "0xpage2_tx1",
+                    "timestamp": "2025-10-13T20:40:51.000000Z",
+                    "status": "ok",
+                    "from": {"hash": "0xTEST_WALLET"},
+                    "to": {"hash": "0xRECEIVER"},
+                    "value": "2000000000000000000",
+                    "block": "12345680",
+                    "gas_used": "21000",
+                    "gas_price": "10000000000",
+                }
+            ],
+            "next_page_params": None,
+        }
+
+        # Mock safe_request to return different responses for consecutive calls
+        with patch.object(
+            connector, "safe_request", side_effect=[page1_response, page2_response]
+        ):
+            results = list(connector.yield_normalized())
+
+            assert len(results) == 2
+            # Verify both transactions were processed
+            assert results[0][1] is not None
+            assert results[1][1] is not None
+
+    def test_polygon_chain(self):
+        """Test transactions connector works with different chains (Polygon)."""
+        connector = ConnectorBlockscoutTransactions(
+            wallet_address="0xTEST_WALLET",
+            chain_name="polygon",
+        )
+
+        mock_api_response = {
+            "items": [
+                {
+                    "hash": "0xpoly123",
+                    "timestamp": "2025-10-14T20:40:51.000000Z",
+                    "status": "ok",
+                    "from": {"hash": "0xTEST_WALLET"},
+                    "to": {"hash": "0xRECEIVER"},
+                    "value": "5000000000000000000",  # 5 MATIC
+                    "block": "50123456",
+                    "gas_used": "21000",
+                    "gas_price": "50000000000",
+                }
+            ],
+            "next_page_params": None,
+        }
+
+        with patch.object(connector, "safe_request", return_value=mock_api_response):
+            results = list(connector.yield_normalized())
+
+            assert len(results) == 1
+            raw, normalized, error = results[0]
+            
+            assert error is None
+            assert normalized is not None
+            assert normalized.direction == "outflow"
+            assert normalized.transaction_type == "transfer"

@@ -1,13 +1,8 @@
 "use client"
 
-import {
-    Button,
-    Dialog,
-    Flex,
-    Portal,
-    Text,
-} from '@chakra-ui/react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import React from 'react';
+import { Button } from './primitives';
 
 export interface ConfirmDialogProps {
     isOpen: boolean;
@@ -38,41 +33,38 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     };
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(); }}>
-            <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                    <Dialog.Content>
-                        <Dialog.Header>
-                            <Dialog.Title>{title}</Dialog.Title>
-                        </Dialog.Header>
+        <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <RadixDialog.Portal>
+                {/* Square corners by design system: no rounded utilities. */}
+                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                    <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+                        <RadixDialog.Title className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                            {title}
+                        </RadixDialog.Title>
+                    </div>
 
-                        <Dialog.Body>
-                            <Text>{message}</Text>
-                        </Dialog.Body>
+                    <div className="px-5 py-4">
+                        <RadixDialog.Description className="text-sm text-slate-600 dark:text-slate-300">
+                            {message}
+                        </RadixDialog.Description>
+                    </div>
 
-                        <Dialog.Footer>
-                            <Flex gap={3}>
-                                <Button
-                                    variant="outline"
-                                    onClick={onClose}
-                                    disabled={isLoading}
-                                >
-                                    {cancelLabel}
-                                </Button>
-                                <Button
-                                    colorPalette={isDestructive ? 'red' : 'blue'}
-                                    onClick={handleConfirm}
-                                    loading={isLoading}
-                                >
-                                    {confirmLabel}
-                                </Button>
-                            </Flex>
-                        </Dialog.Footer>
-                    </Dialog.Content>
-                </Dialog.Positioner>
-            </Portal>
-        </Dialog.Root>
+                    <div className="flex justify-end gap-3 border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+                        <Button variant="outline" colorScheme="gray" onClick={onClose} disabled={isLoading}>
+                            {cancelLabel}
+                        </Button>
+                        <Button
+                            colorScheme={isDestructive ? 'red' : 'blue'}
+                            onClick={handleConfirm}
+                            loading={isLoading}
+                        >
+                            {confirmLabel}
+                        </Button>
+                    </div>
+                </RadixDialog.Content>
+            </RadixDialog.Portal>
+        </RadixDialog.Root>
     );
 };
 

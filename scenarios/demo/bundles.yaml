@@ -1,0 +1,49 @@
+bundles:
+  # ── Internal Transfers (cross-account, non-taxable) ────────────────
+  - id: 1
+    label: "Binance → MEXC BTC transfer"
+    pattern: internal_transfer
+    notes: "Internal transfer from Binance to MEXC"
+    reason: "Self-custody move between owned accounts"
+
+  - id: 2
+    label: "Binance → Hyperliquid USDC funding"
+    pattern: internal_transfer
+    notes: "Funding Hyperliquid from Binance"
+    reason: "Deposit into derivative account"
+
+  - id: 3
+    label: "Coinbase → Ledger Bitcoin BTC transfer"
+    pattern: internal_transfer
+    notes: "Self-custody Bitcoin transfer from Coinbase"
+    reason: "On-chain custody move"
+
+  - id: 4
+    label: "Coinbase → Ledger Ethereum ETH transfer"
+    pattern: internal_transfer
+    notes: "Self-custody Ethereum transfer from Coinbase"
+    reason: "On-chain custody move"
+
+  - id: 5
+    label: "Binance → Ledger XRP XRP transfer"
+    pattern: internal_transfer
+    notes: "Self-custody XRP transfer from Binance"
+    reason: "On-chain custody move"
+
+  - id: 6
+    label: "OKX → Ledger BSC BNB transfer"
+    pattern: internal_transfer
+    notes: "Self-custody BNB transfer from OKX"
+    reason: "On-chain custody move"
+
+  - id: 7
+    label: "Binance → Ledger Polygon USDC funding"
+    pattern: internal_transfer
+    notes: "Funding Ledger Polygon for prediction market activity"
+    reason: "Deposit into wallet for Polymarket"
+
+  - id: 8
+    label: "Binance → Ledger Polygon USDC top-up"
+    pattern: internal_transfer
+    notes: "Additional Ledger Polygon funding for prediction markets"
+    reason: "Deposit into wallet for Polymarket"

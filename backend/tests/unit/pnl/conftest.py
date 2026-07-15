@@ -10,7 +10,7 @@ from typing import Optional, List
 
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.services.pnl.models import RuntimeUnitType
-from backend.db.models import CostLot, Asset, Account, CalculationUnit, CalculationUnitLeg, NormalizedTransaction
+from backend.db.models import CostLot, Asset, Account, CalculationUnit, CalculationUnitLeg, NormalizedTransaction, LegType
 
 
 # ============================================================================
@@ -20,7 +20,7 @@ from backend.db.models import CostLot, Asset, Account, CalculationUnit, Calculat
 
 class MockTransaction:
     """Mock transaction for testing."""
-    def __init__(self, id: int, direction: str = None, asset_id: int = None, quantity: Decimal = None, 
+    def __init__(self, id: int = 1, direction: str = None, asset_id: int = None, quantity: Decimal = None, 
                  date_time: datetime = None, total_in_base: Decimal = None, **kwargs):
         self.id = id
         self.direction = direction
@@ -121,12 +121,34 @@ def mock_price_service():
         5: Decimal("100"),  # AAPL
         6: Decimal("0.90"),  # CHF
         7: Decimal("0.0067"),  # JPY
+        8: Decimal("0.90"),  # USDC (in EUR)
     }
 
     def get_price(asset_id, dt=None, price_quote=None):
         return prices.get(asset_id, Decimal("10"))
+    
+    def get_price_with_source(asset_id, dt=None, price_quote=None):
+        """Mock get_price_with_source to return PriceResult-like object."""
+        from types import SimpleNamespace
+        price = prices.get(asset_id, Decimal("10"))
+        return SimpleNamespace(price=price, source="price_service", timestamp=dt)
+    
+    def get_price_with_fallback(asset_id, dt=None, price_quote=None, use_fallback=True, staleness_window_days=7):
+        """Mock get_price_with_fallback to return PriceResult-like object."""
+        from types import SimpleNamespace
+        price = prices.get(asset_id, Decimal("10"))
+        return SimpleNamespace(
+            price=price,
+            source="price_service",
+            actual_price_date=dt,
+            is_fallback=False,
+            is_stale=False,
+            staleness_days=0,
+        )
 
     service.get_price = Mock(side_effect=get_price)
+    service.get_price_with_source = Mock(side_effect=get_price_with_source)
+    service.get_price_with_fallback = Mock(side_effect=get_price_with_fallback)
     service.prices = prices  # Allow test modification
     return service
 
@@ -144,6 +166,7 @@ def mock_asset_service():
         5: Mock(asset_id=5, symbol="AAPL", asset_type="stock"),
         6: Mock(asset_id=6, symbol="CHF", asset_type="fiat"),
         7: Mock(asset_id=7, symbol="JPY", asset_type="fiat"),
+        8: Mock(asset_id=8, symbol="USDC", asset_type="crypto"),
     }
 
     def get_asset(asset_id):
@@ -158,8 +181,8 @@ def mock_asset_service():
 # ============================================================================
 
 # Standard asset/symbol mappings for tests
-ASSET_SYMBOL_MAP = {1: "EUR", 2: "BTC", 3: "ETH", 4: "USDT", 5: "AAPL", 6: "CHF", 7: "JPY"}
-ASSET_TYPE_MAP = {1: "fiat", 2: "crypto", 3: "crypto", 4: "crypto", 5: "stock", 6: "fiat", 7: "fiat"}
+ASSET_SYMBOL_MAP = {1: "EUR", 2: "BTC", 3: "ETH", 4: "USDT", 5: "AAPL", 6: "CHF", 7: "JPY", 8: "USDC"}
+ASSET_TYPE_MAP = {1: "fiat", 2: "crypto", 3: "crypto", 4: "crypto", 5: "stock", 6: "fiat", 7: "fiat", 8: "crypto"}
 
 
 def make_asset(asset_id: int, symbol: str = None) -> Asset:
@@ -186,7 +209,8 @@ def make_transaction(
     quantity: Decimal,
     account_id: int = 1,
     date_time: datetime = None,
-    disposal_taxable: bool = False,  # User input override flag
+    taxability_status: str = "unknown",  # 3-state: taxable/non_taxable/unknown
+    source_transaction_type: str = None,  # e.g. "funding", "perp_open", "perp_close"
 ) -> NormalizedTransaction:
     """Create a NormalizedTransaction for testing (minimal fields)."""
     if date_time is None:
@@ -198,9 +222,11 @@ def make_transaction(
         quantity=quantity,
         account_id=account_id,
         date_time=date_time,
-        disposal_taxable=disposal_taxable,
+        taxability_status=taxability_status,
         source_transaction_id=f"test-{id}",
     )
+    if source_transaction_type:
+        tx.source_transaction_type = source_transaction_type
     # Set relationship objects for property access
     tx.asset = make_asset(asset_id)
     tx.account_rel = make_account(account_id)
@@ -209,10 +235,9 @@ def make_transaction(
 
 def make_leg(
     asset_id: int,
-    leg_type: str,
+    leg_type: LegType,
     quantity: Decimal,
     transaction: NormalizedTransaction = None,
-    tx_disposal_taxable: bool = False,
 ) -> CalculationUnitLeg:
     """
     Create a CalculationUnitLeg for testing.
@@ -222,7 +247,6 @@ def make_leg(
         leg_type: "inflow", "outflow", or "fee"
         quantity: Amount
         transaction: Optional NormalizedTransaction (creates one if not provided)
-        tx_disposal_taxable: User override flag from transaction
     """
     if transaction is None:
         # Create a minimal transaction for relationship
@@ -230,7 +254,6 @@ def make_leg(
             id=1,
             asset_id=asset_id,
             quantity=quantity,
-            disposal_taxable=tx_disposal_taxable,
         )
     
     leg = CalculationUnitLeg(
@@ -318,12 +341,12 @@ def create_buy_group(
     base_currency_id: int = 1,
 ) -> CalculationUnit:
     """Create a BUY group: EUR → Asset."""
-    outflow_tx = make_transaction(id=1, asset_id=base_currency_id, quantity=cost_in_base)
-    inflow_tx = make_transaction(id=2, asset_id=asset_id, quantity=qty)
+    outflow_tx = make_transaction(id=1, asset_id=base_currency_id, quantity=cost_in_base, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=2, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=base_currency_id, leg_type="outflow", quantity=cost_in_base, transaction=outflow_tx),
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=qty, transaction=inflow_tx),
+        make_leg(asset_id=base_currency_id, leg_type=LegType.OUTFLOW, quantity=cost_in_base, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Buy {qty} of asset {asset_id}")
@@ -338,12 +361,12 @@ def create_sell_group(
     base_currency_id: int = 1,
 ) -> CalculationUnit:
     """Create a SELL group: Asset → EUR."""
-    outflow_tx = make_transaction(id=3, asset_id=asset_id, quantity=qty)
-    inflow_tx = make_transaction(id=4, asset_id=base_currency_id, quantity=proceeds_in_base)
+    outflow_tx = make_transaction(id=3, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=4, asset_id=base_currency_id, quantity=proceeds_in_base, account_id=account_id, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
-        make_leg(asset_id=base_currency_id, leg_type="inflow", quantity=proceeds_in_base, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=base_currency_id, leg_type=LegType.INFLOW, quantity=proceeds_in_base, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Sell {qty} of asset {asset_id}")
@@ -360,12 +383,12 @@ def create_swap_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create a SWAP group: Asset1 → Asset2."""
-    outflow_tx = make_transaction(id=5, asset_id=from_asset_id, quantity=from_qty)
-    inflow_tx = make_transaction(id=6, asset_id=to_asset_id, quantity=to_qty)
+    outflow_tx = make_transaction(id=5, asset_id=from_asset_id, quantity=from_qty, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=6, asset_id=to_asset_id, quantity=to_qty, account_id=account_id, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=from_asset_id, leg_type="outflow", quantity=from_qty, transaction=outflow_tx),
-        make_leg(asset_id=to_asset_id, leg_type="inflow", quantity=to_qty, transaction=inflow_tx),
+        make_leg(asset_id=from_asset_id, leg_type=LegType.OUTFLOW, quantity=from_qty, transaction=outflow_tx),
+        make_leg(asset_id=to_asset_id, leg_type=LegType.INFLOW, quantity=to_qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Swap {from_qty} asset {from_asset_id} for {to_qty} asset {to_asset_id}")
@@ -382,20 +405,20 @@ def create_transfer_group(
     """Create a TRANSFER group: same asset, different accounts."""
     inflow_qty = qty - fee_qty if fee_qty else qty
 
-    outflow_tx = make_transaction(id=7, asset_id=asset_id, quantity=qty)
-    inflow_tx = make_transaction(id=8, asset_id=asset_id, quantity=inflow_qty)
+    outflow_tx = make_transaction(id=7, asset_id=asset_id, quantity=qty, account_id=from_account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=8, asset_id=asset_id, quantity=inflow_qty, account_id=to_account_id, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=inflow_qty, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=inflow_qty, transaction=inflow_tx),
     ]
 
     # Add fee leg if specified
     if fee_qty:
-        fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, is_fee=True)
-        legs.append(make_leg(asset_id=asset_id, leg_type="fee", quantity=fee_qty, transaction=fee_tx))
+        fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, account_id=from_account_id, date_time=base_dt)
+        legs.append(make_leg(asset_id=asset_id, leg_type=LegType.FEE, quantity=fee_qty, transaction=fee_tx))
 
-    return make_unit(legs=legs, pattern="transfer", unit_label=f"Transfer {qty} of asset {asset_id}")
+    return make_unit(legs=legs, pattern="internal_transfer", unit_label=f"Transfer {qty} of asset {asset_id}")
 
 
 def create_split_group(
@@ -406,12 +429,12 @@ def create_split_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create a SPLIT group: same asset, qty multiplies (e.g., 2:1 split)."""
-    outflow_tx = make_transaction(id=10, asset_id=asset_id, quantity=from_qty)
-    inflow_tx = make_transaction(id=11, asset_id=asset_id, quantity=to_qty)
+    outflow_tx = make_transaction(id=10, asset_id=asset_id, quantity=from_qty, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=11, asset_id=asset_id, quantity=to_qty, account_id=account_id, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=from_qty, transaction=outflow_tx),
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=to_qty, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=from_qty, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=to_qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="split", unit_label=f"Split {from_qty} → {to_qty} of asset {asset_id}")
@@ -425,10 +448,10 @@ def create_airdrop_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create an AIRDROP group: inflow only."""
-    inflow_tx = make_transaction(id=12, asset_id=asset_id, quantity=qty)
+    inflow_tx = make_transaction(id=12, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=qty, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern=None, unit_label=f"Airdrop {qty} of asset {asset_id}")
@@ -442,10 +465,10 @@ def create_payment_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create a PAYMENT group: outflow only."""
-    outflow_tx = make_transaction(id=13, asset_id=asset_id, quantity=qty)
+    outflow_tx = make_transaction(id=13, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
     ]
     
     return make_unit(legs=legs, pattern=None, unit_label=f"Payment {qty} of asset {asset_id}")
@@ -471,9 +494,9 @@ def create_sell_with_fee_group(
     fee_tx = make_transaction(id=22, asset_id=fee_asset_id, quantity=fee_qty, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
-        make_leg(asset_id=base_currency_id, leg_type="inflow", quantity=proceeds_in_base, transaction=inflow_tx),
-        make_leg(asset_id=fee_asset_id, leg_type="fee", quantity=fee_qty, transaction=fee_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=base_currency_id, leg_type=LegType.INFLOW, quantity=proceeds_in_base, transaction=inflow_tx),
+        make_leg(asset_id=fee_asset_id, leg_type=LegType.FEE, quantity=fee_qty, transaction=fee_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Sell {qty} of asset {asset_id} with {fee_qty} fee")
@@ -496,11 +519,11 @@ def create_multi_asset_sell_group(
     
     for asset_id, qty in outflows:
         outflow_tx = make_transaction(id=tx_id, asset_id=asset_id, quantity=qty, date_time=base_dt)
-        legs.append(make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx))
+        legs.append(make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx))
         tx_id += 1
     
     inflow_tx = make_transaction(id=tx_id, asset_id=base_currency_id, quantity=total_proceeds_in_base, date_time=base_dt)
-    legs.append(make_leg(asset_id=base_currency_id, leg_type="inflow", quantity=total_proceeds_in_base, transaction=inflow_tx))
+    legs.append(make_leg(asset_id=base_currency_id, leg_type=LegType.INFLOW, quantity=total_proceeds_in_base, transaction=inflow_tx))
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Multi-asset sell for {total_proceeds_in_base} EUR")
 

@@ -1,13 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-    Box,
-    Button,
-    Card,
-    Flex,
-    Heading,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
+import { Button, Heading, Spinner } from './ui/primitives';
 import { API_URL, Asset } from '../types';
 
 interface BaseCurrencySelectorProps {
@@ -93,18 +85,18 @@ export const BaseCurrencySelector: React.FC<BaseCurrencySelectorProps> = ({
 
     if (loading) {
         return (
-            <Box textAlign="center" py={compact ? 2 : 4}>
+            <div className={`text-center ${compact ? 'py-2' : 'py-4'}`}>
                 <Spinner size="sm" />
-                <Text fontSize="sm" mt={2}>Loading currencies...</Text>
-            </Box>
+                <span className="mt-2 block text-sm">Loading currencies...</span>
+            </div>
         );
     }
 
     // Compact mode for inline display (e.g., in Inbox header)
     if (compact) {
         return (
-            <Flex align="center" gap={2}>
-                <Text fontSize="sm" fontWeight="medium">Base Currency:</Text>
+            <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Base Currency:</span>
                 <select
                     value={baseCurrency}
                     onChange={(e) => handleCompactChange(e.target.value)}
@@ -130,108 +122,104 @@ export const BaseCurrencySelector: React.FC<BaseCurrencySelectorProps> = ({
                         </>
                     )}
                 </select>
-            </Flex>
+            </div>
         );
     }
 
     // Full mode for Setup tab
     return (
-        <Box>
-            <Heading size="md" mb={4}>� P&L Settings</Heading>
+        <div>
+            <Heading className="mb-4 text-lg">💱 P&L Settings</Heading>
 
-            <Card.Root mb={4}>
-                <Card.Body>
-                    <Text mb={4}>
-                        Select your base currency for P&L calculations and reporting.
-                        This is typically your local fiat currency (e.g., EUR, USD).
-                    </Text>
+            <div className="mb-4 border border-slate-200 bg-white p-4">
+                <span className="mb-4 block">
+                    Select your base currency for P&L calculations and reporting.
+                    This is typically your local fiat currency (e.g., EUR, USD).
+                </span>
 
-                    <Flex gap={4} align="flex-end" flexWrap="wrap">
-                        <Box flex="1" minW="200px">
-                            <Text fontSize="sm" mb={2} fontWeight="medium">
-                                Base Currency for P&L
-                            </Text>
-                            <select
-                                value={baseCurrency}
-                                onChange={(e) => handleCurrencyChange(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '10px 12px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #e2e8f0',
-                                    fontSize: '16px',
-                                }}
-                            >
-                                {fiatAssets.length > 0 ? (
-                                    fiatAssets.map(asset => (
-                                        <option key={asset.asset_id} value={asset.symbol}>
-                                            {asset.symbol} {asset.label ? `- ${asset.label}` : ''}
-                                        </option>
-                                    ))
-                                ) : (
-                                    <>
-                                        <option value="EUR">EUR - Euro</option>
-                                        <option value="USD">USD - US Dollar</option>
-                                        <option value="GBP">GBP - British Pound</option>
-                                        <option value="CHF">CHF - Swiss Franc</option>
-                                        <option value="JPY">JPY - Japanese Yen</option>
-                                    </>
-                                )}
-                            </select>
-                        </Box>
-
-                        <Button
-                            colorPalette="blue"
-                            onClick={handleSave}
-                            loading={saving}
+                <div className="flex flex-wrap items-end gap-4">
+                    <div className="min-w-[200px] flex-1">
+                        <span className="mb-2 block text-sm font-medium">
+                            Base Currency for P&L
+                        </span>
+                        <select
+                            value={baseCurrency}
+                            onChange={(e) => handleCurrencyChange(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '10px 12px',
+                                borderRadius: '6px',
+                                border: '1px solid #e2e8f0',
+                                fontSize: '16px',
+                            }}
                         >
-                            Save
-                        </Button>
+                            {fiatAssets.length > 0 ? (
+                                fiatAssets.map(asset => (
+                                    <option key={asset.asset_id} value={asset.symbol}>
+                                        {asset.symbol} {asset.label ? `- ${asset.label}` : ''}
+                                    </option>
+                                ))
+                            ) : (
+                                <>
+                                    <option value="EUR">EUR - Euro</option>
+                                    <option value="USD">USD - US Dollar</option>
+                                    <option value="GBP">GBP - British Pound</option>
+                                    <option value="CHF">CHF - Swiss Franc</option>
+                                    <option value="JPY">JPY - Japanese Yen</option>
+                                </>
+                            )}
+                        </select>
+                    </div>
 
-                        {saved && (
-                            <Text color="green.500" fontSize="sm">
-                                ✓ Saved!
-                            </Text>
-                        )}
-                    </Flex>
+                    <Button
+                        colorScheme="blue"
+                        onClick={handleSave}
+                        loading={saving}
+                    >
+                        Save
+                    </Button>
 
-                    <Box mt={6} p={4} bg="blue.50" borderRadius="md">
-                        <Text fontWeight="bold" mb={2}>ℹ️ Why is base currency important?</Text>
-                        <Text fontSize="sm" color="gray.700">
-                            • <strong>P&L Calculation</strong>: All gains and losses will be calculated
-                            and reported in your base currency.
-                        </Text>
-                        <Text fontSize="sm" color="gray.700" mt={1}>
-                            • <strong>Cost Basis</strong>: Asset acquisition costs are tracked in your base currency.
-                        </Text>
-                        <Text fontSize="sm" color="gray.700" mt={1}>
-                            • <strong>Note</strong>: Taxability is determined by transaction type and taxable events,
-                            not by the base currency selection.
-                        </Text>
-                    </Box>
-                </Card.Body>
-            </Card.Root>
+                    {saved && (
+                        <span className="text-sm text-green-500">
+                            ✓ Saved!
+                        </span>
+                    )}
+                </div>
 
-            <Card.Root>
-                <Card.Body>
-                    <Heading size="sm" mb={3}>Current Configuration</Heading>
-                    <Flex gap={6}>
-                        <Box>
-                            <Text fontSize="xs" color="gray.500">Selected Base Currency</Text>
-                            <Text fontSize="2xl" fontWeight="bold" color="blue.600">
-                                {baseCurrency}
-                            </Text>
-                        </Box>
-                        <Box>
-                            <Text fontSize="xs" color="gray.500">Status</Text>
-                            <Text fontSize="lg" color="green.500" fontWeight="bold">
-                                ✓ Configured
-                            </Text>
-                        </Box>
-                    </Flex>
-                </Card.Body>
-            </Card.Root>
-        </Box>
+                <div className="mt-6 bg-blue-50 p-4">
+                    <span className="mb-2 block font-bold">ℹ️ Why is base currency important?</span>
+                    <span className="block text-sm text-slate-700">
+                        • <strong>P&L Calculation</strong>: All gains and losses will be calculated
+                        and reported in your base currency.
+                    </span>
+                    <span className="mt-1 block text-sm text-slate-700">
+                        • <strong>Cost Basis</strong>: Asset acquisition costs are tracked in your base currency.
+                    </span>
+                    <span className="mt-1 block text-sm text-slate-700">
+                        • <strong>Note</strong>: Taxability is determined by transaction type and taxable events,
+                        not by the base currency selection.
+                    </span>
+                </div>
+            </div>
+
+            <div className="border border-slate-200 bg-white p-4">
+                <Heading className="mb-3 text-sm">Current Configuration</Heading>
+                <div className="flex gap-6">
+                    <div>
+                        <span className="block text-xs text-slate-500">Selected Base Currency</span>
+                        <span className="block text-2xl font-bold text-blue-600">
+                            {baseCurrency}
+                        </span>
+                    </div>
+                    <div>
+                        <span className="block text-xs text-slate-500">Status</span>
+                        <span className="block text-lg font-bold text-green-500">
+                            ✓ Configured
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 };
 

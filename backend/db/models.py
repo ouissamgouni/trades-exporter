@@ -1,5 +1,5 @@
 """
-SQLModel ORM models for the Trade Exporter database.
+SQLModel ORM models for the TradeTrail database.
 
 Schema v2: Updated with proper relationships, high-precision numerics,
 and normalized structure for P&L calculations.
@@ -9,9 +9,19 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Any, Dict
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
-from sqlalchemy import UniqueConstraint, Text, ARRAY, Numeric, case, Integer
+from sqlalchemy import (
+    UniqueConstraint,
+    Text,
+    ARRAY,
+    Numeric,
+    case,
+    Integer,
+    Enum as SAEnum,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from enum import Enum
 from sqlalchemy.ext.hybrid import hybrid_property
+from pydantic import field_validator
 
 
 def utc_now() -> datetime:
@@ -22,7 +32,7 @@ def utc_now() -> datetime:
 def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
     """
     Ensure a datetime is timezone-aware (UTC).
-    
+
     If the datetime is naive (no timezone), assume it's UTC and add timezone info.
     If it's already aware, return as-is.
     Returns None if input is None.
@@ -50,10 +60,44 @@ class SyncStatus(str, Enum):
     FAILED = "failed"
 
 
+class SyncJobStatus(str, Enum):
+    """Status enum for sync jobs."""
+
+    IDLE = "idle"
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    WARNING = "warning"
+    ABORTED = "aborted"
+    FAILED = "failed"
+
+
+class SyncJobConnectorStatus(str, Enum):
+    """Status enum for individual connector runs within a sync job."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    WARNING = "warning"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    ABORTED = "aborted"
+
+
+class FileImportStatus(str, Enum):
+    """Status enum for file imports."""
+
+    PENDING = "pending"  # Uploaded, waiting to be processed
+    PROCESSING = "processing"  # Currently being processed by sync job
+    COMPLETED = "completed"  # Successfully processed
+    FAILED = "failed"  # Processing failed, file kept for retry
+    DEFAULT = "default"  # Saved as default file for connector (auto-used on sync start)
+
+
 class PriceType(str, Enum):
     """
     Price type for determining which price getter to use.
-    
+
     Simple 3-value enum:
     - crypto: Use CoinGecko (covers tokens, stablecoins, NFTs, etc.)
     - stock: Use DataReader/Yahoo (covers ETFs, indices, commodities, etc.)
@@ -71,25 +115,33 @@ AssetType = PriceType
 
 class UnitPattern(str, Enum):
     """Pattern types for calculation units.
-    
-    Simplified to fundamental operations:
-    - TRANSFER: Same asset moves between owned accounts (non-taxable)
-    - SWAP: Exchange of value (taxability depends on asset types)
-    - SPLIT: Same asset, quantity changes (stock split - non-taxable)
-    - PENDING_TRANSFER: Transfer with missing counterpart leg (awaiting reconciliation)
+
+    Patterns:
+    - SWAP: Exchange of different assets (taxable)
+    - INTERNAL_TRANSFER: Complete transfer between owned accounts (non-taxable)
+    - UNMATCHED_INTERNAL_TRANSFER: Incomplete internal transfer awaiting counterpart (no P&L)
+    - FLOW: External single-leg movement (airdrop, payment, external deposit/withdrawal)
+    - SPLIT: Stock split - same asset, qty changes (non-taxable)
     - UNKNOWN: Needs user review
     """
 
-    TRANSFER = "transfer"  # Self-transfer between owned accounts (non-taxable)
     SWAP = "swap"  # Exchange of value (taxable/non-taxable based on config)
+    INTERNAL_TRANSFER = (
+        "internal_transfer"  # Complete transfer between owned accounts (non-taxable)
+    )
+    UNMATCHED_INTERNAL_TRANSFER = (
+        "unmatched_internal_transfer"  # Incomplete internal transfer (no P&L)
+    )
+    FLOW = "flow"  # External single-leg movement (airdrop, payment, external deposit/withdrawal)
     SPLIT = "split"  # Stock split - same asset, qty changes (non-taxable)
-    PENDING_TRANSFER = "pending_transfer"  # Transfer missing inflow or outflow leg
+    SPINOFF = "spinoff"  # Corporate spin-off - cost basis reallocation across parent and new company
+    CUSTOM = "custom"  # User-created bundle with no predefined pattern
     UNKNOWN = "unknown"  # Needs review
 
 
 class LotEventType(str, Enum):
     """Event types for cost lot lifecycle tracking.
-    
+
     Provides full audit trail for all lot state changes:
     - CREATED: Lot created from acquisition
     - CONSUMED: Lot partially/fully consumed in disposal
@@ -97,37 +149,48 @@ class LotEventType(str, Enum):
     - TRANSFERRED: Lot moved between accounts (LOT_TRAVEL mode)
     - ADJUSTED: Manual cost basis adjustment
     """
-    
+
     CREATED = "created"
+    NEGATIVE_CREATED = "created-negative"
     CONSUMED = "consumed"
     SETTLED = "settled"
-    TRANSFERRED = "transferred"
-    ADJUSTED = "adjusted"
+    SPINOFF_ADJUSTED = "spinoff-adjusted"
 
 
 class TransactionType(str, Enum):
-    """Transaction type for P&L calculation and leg expansion.
-    
-    Simplified 3-value enum:
-    - TRADE: Buy/sell exchange of assets (expand to inflow + outflow legs)
-    - TRANSFER: Movement of assets between accounts (deposits, withdrawals, internal transfers)
-    - TECHNICAL: Zero-value transactions (approvals, failed txs, contract interactions)
+    """High-level classification controlling PnL leg expansion behaviour.
+
+    * TRADE    – bilateral exchange (buy/sell); expanded to inflow + outflow legs.
+    * TRANSFER – asset movement between accounts (deposit, withdrawal, airdrop,
+                 internal transfer); single leg, from/to accounts expected.
+    * MARGIN   – derivative cash flow (funding rate, perp open/close PnL);
+                 single leg, no from/to, non-taxable by default.
+    * COST     – fee-only transaction (gas, management fee, approval cost);
+                 zero tracked value, neutral PnL impact.
+    * MEMO     – audit-only record (e.g. redeem cash settlement);
+                 no PnL impact, no cost lot changes.
+
+    Note: Internal transfers are detected at P&L calculation time using
+    from_account_id / to_account_id, not through transaction_type.
     """
-    
-    TRADE = "trade"  # Buy/sell - will be expanded to inflow + outflow legs
-    TRANSFER = "transfer"  # Deposits, withdrawals, internal transfers
-    TECHNICAL = "technical"  # Zero-value: approvals, failed txs, contract calls
+
+    TRADE = "trade"  # Buy/sell – expanded to inflow + outflow legs
+    TRANSFER = "transfer"  # Asset movement – single leg, from/to expected
+    MARGIN = "margin"  # Derivative cash flow – single leg, no from/to
+    COST = "cost"  # Fee-only – neutral, zero tracked value
+    DIVIDEND = "dividend"  # Income inflow – single leg, creates IncomeEvent
+    MEMO = "memo"  # Audit-only record – no PnL impact, no cost lot changes
 
 
 class TaxabilityStatus(str, Enum):
     """Taxability status for transactions.
-    
+
     Values:
     - TAXABLE: Transaction is a taxable event (capital gains/losses)
     - NON_TAXABLE: Transaction is not taxable (transfers, gifts received)
     - UNKNOWN: Needs user review to determine taxability
     """
-    
+
     TAXABLE = "taxable"
     NON_TAXABLE = "non_taxable"
     UNKNOWN = "unknown"
@@ -135,27 +198,41 @@ class TaxabilityStatus(str, Enum):
 
 class Direction(str, Enum):
     """Transaction direction for flow classification.
-    
+
     Values:
     - INFLOW: Assets coming into the account (buys, deposits, receives)
     - OUTFLOW: Assets leaving the account (sells, withdrawals, sends)
     - NEUTRAL: No asset movement (approvals, contract interactions)
     """
-    
+
     INFLOW = "inflow"
     OUTFLOW = "outflow"
     NEUTRAL = "neutral"
 
 
+class LegType(str, Enum):
+    """Leg type for calculation unit legs.
+
+    Values:
+    - INFLOW: Assets entering the unit
+    - OUTFLOW: Assets leaving the unit
+    - FEE: Fee payments
+    """
+
+    INFLOW = "inflow"
+    OUTFLOW = "outflow"
+    FEE = "fee"
+
+
 class ReviewStatus(str, Enum):
     """Review status for transaction workflow.
-    
+
     Values:
     - VALID: Transaction has been reviewed and validated
     - PENDING: Transaction awaits user review
     - INVALID: Transaction marked as invalid/error
     """
-    
+
     VALID = "valid"
     PENDING = "pending"
     INVALID = "invalid"
@@ -163,27 +240,47 @@ class ReviewStatus(str, Enum):
 
 class AccountType(str, Enum):
     """Account type classification.
-    
+
     Values:
     - CEX: Centralized exchange account (Binance, Coinbase, etc.)
+    - DEX: Decentralized exchange (Hyperliquid, Uniswap, etc.)
     - BROKER: Traditional broker account (stocks, ETFs)
     - WALLET: On-chain wallet (MetaMask, hardware wallets)
+    - BANK: Traditional bank account (Revolut, N26, etc.)
+    - INVESTMENT: Tax-advantaged investment account (Assurance vie, PEA, etc.)
     """
-    
+
     CEX = "cex"
+    DEX = "dex"
     BROKER = "broker"
     WALLET = "wallet"
+    BANK = "bank"
+    INVESTMENT = "investment"
+
+
+class AccountEnvelope(str, Enum):
+    """Tax envelope for investment/broker accounts (French tax law).
+
+    Values:
+    - CTO: Compte-Titres Ordinaire — standard taxable brokerage account
+    - PEA: Plan d'Épargne en Actions — tax-advantaged equity savings plan
+    - AV: Assurance Vie — tax-advantaged life insurance wrapper
+    """
+
+    CTO = "cto"
+    PEA = "pea"
+    AV = "av"
 
 
 class ConnectorCategory(str, Enum):
     """Connector category for data sources.
-    
+
     Values:
     - CEX: Centralized exchange connectors (API-based)
     - ONCHAIN: On-chain/blockchain connectors (address-based)
     - BROKER: Traditional broker connectors
     """
-    
+
     CEX = "cex"
     ONCHAIN = "onchain"
     BROKER = "broker"
@@ -197,11 +294,12 @@ class ConnectorCategory(str, Enum):
 class AppSettings(SQLModel, table=True):
     """
     Application-wide settings stored in database.
-    
+
     Stores user preferences that can be modified via UI:
     - base_currency: Default currency for P&L calculations
+    - pnl_*: Default P&L calculation configuration
     - theme preferences, etc.
-    
+
     This is a single-row table (id=1 always).
     """
 
@@ -209,8 +307,32 @@ class AppSettings(SQLModel, table=True):
 
     id: int = Field(default=1, primary_key=True)
     base_currency: str = Field(default="EUR")  # Default base currency symbol
+    mock_mode_enabled: bool = Field(default=False)  # Global mock pricing toggle
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    # Default P&L calculation configuration
+    pnl_lot_method: str = Field(default="FIFO")  # FIFO, LIFO, HIFO
+    pnl_lot_mode: str = Field(default="LOT_TRAVEL")  # LOT_TRAVEL, MEGA_WALLET
+    pnl_residual_tolerance_pct: Decimal = Field(
+        default=Decimal("0"),
+        sa_column=Column(
+            Numeric(10, 4), nullable=False, default=0, name="pnl_residual_tolerance_pct"
+        ),
+    )
+    pnl_allow_negative_balances: bool = Field(default=True)
+    pnl_crypto_swap_taxable: bool = Field(default=False)
+    pnl_fee_taxable: bool = Field(default=False)
+    pnl_compute_residuals: bool = Field(
+        default=False
+    )  # Whether to compute residual warnings
+    pnl_use_price_fallback: bool = Field(default=True)
+    pnl_price_staleness_days: int = Field(default=7)
+
+    # QA test plans ingested at seed time (from test_plan.yaml files in SEED_DIR)
+    qa_test_plans: Optional[List[Dict[str, Any]]] = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
 
 
 # ============================================================================
@@ -228,11 +350,24 @@ class Account(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(nullable=False, index=True)
-    account_type: str = Field(nullable=False, index=True)  # 'cex', 'broker', 'wallet'
+    account_type: str = Field(
+        nullable=False, index=True
+    )  # 'cex', 'dex', 'broker', 'wallet', 'bank', 'investment'
+    envelope: Optional[str] = Field(
+        default=None, index=True
+    )  # Tax envelope: 'cto', 'pea', 'av' (see AccountEnvelope)
     address_or_identifier: Optional[str] = Field(default=None, index=True)
-    tags: Optional[List[str]] = Field(default=None, sa_column=Column(ARRAY(Text)))
+    group: Optional[str] = Field(
+        default=None, index=True
+    )  # Grouping label (e.g. 'Tangem EVM', 'Trading')
+    tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     owned: bool = Field(default=True)  # Whether this account is owned by the user
-    enabled: bool = Field(default=True, index=True)  # Whether this account is enabled for sync
+    enabled: bool = Field(
+        default=True, index=True
+    )  # Whether this account is enabled for sync
+    color: Optional[str] = Field(
+        default=None
+    )  # Badge color palette (e.g. 'purple', 'blue', 'green')
     created_at: datetime = Field(default_factory=utc_now)
 
     # Relationships
@@ -243,12 +378,26 @@ class Account(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[NormalizedTransaction.account_id]"},
     )
     cost_lots: List["CostLot"] = Relationship(back_populates="account")
+    french_crypto_tax_entries: List["FrenchCryptoTaxEntry"] = Relationship(
+        back_populates="account_rel"
+    )
+    french_crypto_tax_annual_summaries: List["FrenchCryptoTaxAnnualSummary"] = (
+        Relationship(back_populates="account_rel")
+    )
+    tax_loss_carryforwards: List["TaxLossCarryforward"] = Relationship(
+        back_populates="account_rel"
+    )
 
 
 class AccountConnector(SQLModel, table=True):
     """
     Account connector configuration.
     Links an account to a specific connector type with its configuration.
+
+    Uniqueness: (account_id, connector_type, config->>'chain') via DB index
+    ``uq_connector_account_type_chain``.  Multi-chain connector types
+    (blockscout, moralis) may appear multiple times per account with
+    different ``chain`` values in their config.
     """
 
     __tablename__ = "account_connectors"
@@ -260,6 +409,9 @@ class AccountConnector(SQLModel, table=True):
     config: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     credentials_ref: Optional[str] = Field(default=None)
     sync_priority: int = Field(default=100, index=True)
+    color: Optional[str] = Field(
+        default=None
+    )  # Badge color palette (e.g. 'blue', 'teal', 'orange')
     last_sync_at: Optional[datetime] = Field(default=None)
     last_sync_status: Optional[str] = Field(default="pending")
     last_error: Optional[str] = Field(default=None)
@@ -268,6 +420,183 @@ class AccountConnector(SQLModel, table=True):
 
     # Relationships
     account: Optional[Account] = Relationship(back_populates="connectors")
+    connector_runs: List["SyncJobConnectorRun"] = Relationship(
+        back_populates="connector"
+    )
+    file_imports: List["FileImport"] = Relationship(back_populates="connector")
+
+
+# ============================================================================
+# Sync Job Models (Job History Tracking)
+# ============================================================================
+
+
+class SyncJob(SQLModel, table=True):
+    """
+    Sync job record for tracking job history.
+
+    Each sync job execution creates a record with:
+    - Overall job status and timing
+    - Aggregated stats (computed from connector runs)
+    - Configuration snapshot (overrides used)
+    """
+
+    __tablename__ = "sync_jobs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    status: str = Field(default="running", index=True)  # SyncJobStatus enum values
+    started_at: datetime = Field(default_factory=utc_now, index=True)
+    finished_at: Optional[datetime] = Field(default=None)
+    last_heartbeat: Optional[datetime] = Field(
+        default=None
+    )  # For detecting stale/crashed jobs
+
+    # Aggregated stats (updated on completion)
+    total_connectors: int = Field(default=0)
+    total_processed: int = Field(default=0)
+    total_new: int = Field(default=0)
+    total_updated: int = Field(default=0)
+    total_skipped: int = Field(default=0)
+    total_errors: int = Field(default=0)
+
+    # Configuration snapshot (overrides, settings)
+    config_snapshot: Optional[Dict[str, Any]] = Field(
+        default=None, sa_column=Column(JSON)
+    )
+
+    # Error info
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    created_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    connector_runs: List["SyncJobConnectorRun"] = Relationship(back_populates="job")
+
+
+class SyncJobConnectorRun(SQLModel, table=True):
+    """
+    Per-connector run within a sync job.
+
+    Tracks detailed metrics, outcomes, and logs for each connector execution.
+    Supports viewing transactions synced by this run and rerun capability.
+    """
+
+    __tablename__ = "sync_job_connector_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_id: int = Field(foreign_key="sync_jobs.id", nullable=False, index=True)
+    connector_id: int = Field(
+        foreign_key="account_connectors.id", nullable=False, index=True
+    )
+
+    # Connector info snapshot (for display even if connector deleted)
+    connector_type: str = Field(default="")
+    account_name: str = Field(default="")
+
+    # Status and timing
+    status: str = Field(
+        default="queued", index=True
+    )  # SyncJobConnectorStatus enum values
+    test_mode: bool = Field(default=False)
+    started_at: Optional[datetime] = Field(default=None)
+    finished_at: Optional[datetime] = Field(default=None)
+
+    # Metrics
+    processed: int = Field(default=0)  # Total items processed from connector
+    synced_count: int = Field(default=0)  # New transactions created
+    updated_count: int = Field(default=0)  # Existing transactions updated
+    skipped_count: int = Field(default=0)  # Duplicates skipped (no changes)
+    error_count: int = Field(default=0)  # Items that failed
+
+    # Outcome tracking (JSON arrays)
+    # synced_ids: external IDs of new transactions
+    # updated_ids: external IDs of updated transactions
+    # skipped_ids: external IDs of skipped (no change) items - limited to sample
+    # error_details: [{external_id, stage, error}]
+    synced_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+    updated_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+    skipped_ids: Optional[List[str]] = Field(
+        default=None, sa_column=Column(JSON)
+    )  # Sample only
+    error_details: Optional[List[Dict[str, Any]]] = Field(
+        default=None, sa_column=Column(JSON)
+    )
+
+    # Logs (JSON array of {timestamp, level, message})
+    logs: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
+
+    # Error summary
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    created_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    job: Optional[SyncJob] = Relationship(back_populates="connector_runs")
+    connector: Optional[AccountConnector] = Relationship(
+        back_populates="connector_runs"
+    )
+    transactions: List["NormalizedTransaction"] = Relationship(
+        back_populates="sync_connector_run"
+    )
+
+
+class FileImport(SQLModel, table=True):
+    """
+    File import tracking for file-based connectors.
+
+    Tracks the lifecycle of uploaded files from upload through processing:
+    - pending: File uploaded, waiting to be processed
+    - processing: Currently being processed by a sync job
+    - completed: Successfully processed (file and record retained for history)
+    - failed: Processing failed (file kept for retry)
+
+    File Retention: Files are kept for the full retention period (default 90 days)
+    to allow preview of completed imports for audit/debugging purposes.
+    Both files and records are cleaned up after retention_expires_at.
+    Default retention is 90 days (configurable via FILE_IMPORT_RETENTION_DAYS env var).
+    """
+
+    __tablename__ = "file_imports"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    connector_id: int = Field(
+        foreign_key="account_connectors.id", nullable=False, index=True
+    )
+
+    # File info
+    filename: str = Field(nullable=False)  # Saved filename (with timestamp prefix)
+    original_filename: str = Field(nullable=False)  # Original uploaded filename
+    file_path: str = Field(nullable=False)  # Full path to file (for pending/failed)
+    file_size: int = Field(default=0)  # File size in bytes
+
+    # Status tracking
+    status: str = Field(default="pending", index=True)  # FileImportStatus enum values
+
+    # Timestamps
+    uploaded_at: datetime = Field(default_factory=utc_now, index=True)
+    processed_at: Optional[datetime] = Field(default=None)
+
+    # Metrics (populated after processing)
+    row_count: int = Field(default=0)  # Total rows in file
+    new_count: int = Field(default=0)  # New transactions created
+    updated_count: int = Field(default=0)  # Existing transactions updated
+    skipped_count: int = Field(default=0)  # Duplicates skipped
+
+    # Processing info
+    sync_job_connector_run_id: Optional[int] = Field(
+        default=None, foreign_key="sync_job_connector_runs.id", index=True
+    )
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    # Retention
+    retention_expires_at: Optional[datetime] = Field(default=None, index=True)
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    connector: Optional[AccountConnector] = Relationship(back_populates="file_imports")
+    sync_connector_run: Optional[SyncJobConnectorRun] = Relationship()
 
 
 # ============================================================================
@@ -285,12 +614,18 @@ class Asset(SQLModel, table=True):
     asset_id: Optional[int] = Field(default=None, primary_key=True)
     symbol: str = Field(index=True, unique=True, nullable=False)
     label: Optional[str] = None
+    isin: Optional[str] = Field(default=None, index=True, unique=True)
     price_type: Optional[str] = Field(
         default=None, index=True
     )  # 'crypto', 'stock', 'fiat' - for price getter selection
-    tags: Optional[List[str]] = Field(default=None, sa_column=Column(ARRAY(Text)))
+    tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     created_at: Optional[datetime] = Field(default_factory=utc_now)
     status: int = Field(default=0)
+    denomination_currency_id: Optional[int] = Field(
+        default=None,
+        foreign_key="assets.asset_id",
+        index=True,
+    )  # FK to fiat Asset (e.g., USD, EUR) — the currency this asset is naturally priced in
 
     # Relationships
     price_snapshots: List["PriceSnapshot"] = Relationship(
@@ -299,6 +634,12 @@ class Asset(SQLModel, table=True):
     )
     raw_assets: List["RawAsset"] = Relationship(back_populates="asset")
     price_getters: List["AssetPriceGetter"] = Relationship(back_populates="asset")
+    denomination_currency: Optional["Asset"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[Asset.denomination_currency_id]",
+            "remote_side": "[Asset.asset_id]",
+        },
+    )
     # Note: categories relationship defined via AssetCategory junction table
     # Access via: select(Category).join(AssetCategory).where(AssetCategory.asset_id == asset_id)
 
@@ -330,7 +671,9 @@ class AssetPriceGetter(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     asset_id: int = Field(foreign_key="assets.asset_id", nullable=False, index=True)
     price_getter: str = Field(nullable=False, index=True)  # e.g., 'yahoo', 'coingecko'
-    external_id: Optional[str] = Field(default=None)  # API identifier: "BTC-USD", "bitcoin", "AAPL"
+    external_id: Optional[str] = Field(
+        default=None
+    )  # API identifier: "BTC-USD", "bitcoin", "AAPL"
     priority: int = Field(default=100, index=True)  # Lower = higher priority
     enabled: bool = Field(default=True, index=True)
     params: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -338,7 +681,9 @@ class AssetPriceGetter(SQLModel, table=True):
     # - native_quote_currency: Currency the ticker returns (e.g., "USD", "EUR")
     # - source: DataReader source (e.g., "stooq", "fred")
     # - to_currency: Forex target currency
-    staleness_window_days: Optional[int] = Field(default=None)  # Per-asset staleness override (days)
+    staleness_window_days: Optional[int] = Field(
+        default=None
+    )  # Per-asset staleness override (days)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -407,11 +752,11 @@ class RawAsset(SQLModel, table=True):
 class Dimension(SQLModel, table=True):
     """
     Dimension for asset classification (e.g., "Asset Class", "Sector", "Region").
-    
+
     Dimensions are orthogonal facets for categorizing assets.
     Each dimension can have multiple category values.
     Assets can belong to at most one category per dimension.
-    
+
     Examples:
     - label="Asset Class" (with categories: Crypto, Stock, Fixed Income)
     - label="Sector" (with categories: DeFi, Gaming, Infrastructure)
@@ -431,7 +776,7 @@ class Dimension(SQLModel, table=True):
 class Category(SQLModel, table=True):
     """
     Category value within a dimension for asset classification.
-    
+
     Examples:
     - dimension_id=1 (Asset Class), label="Cryptocurrency"
     - dimension_id=2 (Sector), label="DeFi"
@@ -460,9 +805,6 @@ class AssetCategory(SQLModel, table=True):
     """
 
     __tablename__ = "asset_categories"
-    __table_args__ = (
-        UniqueConstraint("asset_id", "category_id", name="uq_asset_category"),
-    )
 
     asset_id: int = Field(foreign_key="assets.asset_id", primary_key=True)
     category_id: int = Field(foreign_key="categories.id", primary_key=True)
@@ -491,11 +833,17 @@ class RawTransaction(SQLModel, table=True):
     raw_data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     ingestion_time: datetime = Field(default_factory=utc_now)
 
+    # Link to the connector that produced this transaction (nullable for legacy data)
+    connector_id: Optional[int] = Field(
+        default=None, foreign_key="account_connectors.id", index=True
+    )
+
     # Relationships
     normalized_transactions: List["NormalizedTransaction"] = Relationship(
         back_populates="raw_transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
+    connector: Optional["AccountConnector"] = Relationship()
 
 
 class NormalizedTransaction(SQLModel, table=True):
@@ -525,14 +873,16 @@ class NormalizedTransaction(SQLModel, table=True):
     account_id: Optional[int] = Field(
         default=None, foreign_key="accounts.id", index=True
     )
-    source_account: Optional[str] = Field(default=None)  # Raw account identifier before mapping
+    source_account: Optional[str] = Field(
+        default=None
+    )  # Raw account identifier before mapping
 
     # Core transaction fields
     date_time: Optional[datetime] = Field(default=None, index=True)
     direction: str = Field(default="")  # 'inflow', 'outflow', 'neutral'
     transaction_type: str = Field(
         default=""
-    )  # 'trade', 'transfer', 'technical' (see TransactionType enum)
+    )  # 'trade', 'transfer', 'margin', 'cost' (see TransactionType enum)
 
     # Asset and quantity
     asset_id: Optional[int] = Field(default=None, foreign_key="assets.asset_id")
@@ -556,12 +906,16 @@ class NormalizedTransaction(SQLModel, table=True):
     fee_quote_asset_id: Optional[int] = Field(
         default=None, foreign_key="assets.asset_id"
     )
+
+    # Attributed asset (e.g., derivative PnL attributed to underlying: ETH for ETH-PERP settled in USDC)
+    source_attributed_asset_symbol: Optional[str] = Field(default=None)
+    attributed_asset_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id"
+    )
+
     include_fee: bool = Field(
         default=False
     )  # Whether to include fee in P&L calculation
-
-    # Tax - disposal_taxable indicates if disposing this asset is a taxable event (capital gains)
-    disposal_taxable: bool = Field(default=False)
 
     # NOTE: group_id removed in V2 architecture - use calculation_unit_id instead
     # Migration 004 drops the groups tables entirely
@@ -571,15 +925,43 @@ class NormalizedTransaction(SQLModel, table=True):
     to_account_id: Optional[int] = Field(default=None, foreign_key="accounts.id")
 
     # Source account identifiers (raw from connector, before mapping)
-    source_from_account: Optional[str] = Field(default=None)  # Raw source address/identifier
-    source_to_account: Optional[str] = Field(default=None)  # Raw destination address/identifier
+    source_from_account: Optional[str] = Field(
+        default=None
+    )  # Raw source address/identifier
+    source_to_account: Optional[str] = Field(
+        default=None
+    )  # Raw destination address/identifier
     network: Optional[str] = Field(default=None)
     network_transaction_id: Optional[str] = Field(default=None)
     token_contract_address: Optional[str] = Field(default=None)
 
     # Metadata
-    tags: Optional[List[Dict[str, str]]] = Field(default=None, sa_column=Column(JSON))
+    tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     synced_at: Optional[datetime] = Field(default=None)
+
+    # Duplicate detection - hash of transaction identity for efficient duplicate detection
+    transaction_hash: Optional[str] = Field(default=None, index=True, max_length=64)
+
+    # Connector tracking - links to the account connector that produced this transaction
+    connector_id: Optional[int] = Field(
+        default=None, foreign_key="account_connectors.id", index=True
+    )
+
+    # Sync job tracking - links to the connector run that last synced this transaction
+    sync_connector_run_id: Optional[int] = Field(
+        default=None, foreign_key="sync_job_connector_runs.id", index=True
+    )
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def coerce_empty_dict_to_list(cls, v):
+        """Coerce empty dict or None to empty list for consistent API responses."""
+        if v is None or v == {} or v == []:
+            return []
+        if isinstance(v, dict):
+            # If it's a dict (legacy format), convert to list
+            return [v]
+        return v
 
     # Review status and taxability
     review_status: str = Field(default="pending", index=True)  # valid, pending, invalid
@@ -594,6 +976,10 @@ class NormalizedTransaction(SQLModel, table=True):
 
     # Review notes
     review_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    # Content hash for cross-source deduplication (MD5 of normalized trade content)
+    # Formula: MD5({datetime_iso}_{BASE}_{QUOTE}_{qty:.8f}_{price:.8f}_{side})
+    content_hash: Optional[str] = Field(default=None, index=True)
 
     # Timestamps
     created_at: datetime = Field(default_factory=utc_now)
@@ -620,6 +1006,11 @@ class NormalizedTransaction(SQLModel, table=True):
             "foreign_keys": "[NormalizedTransaction.fee_quote_asset_id]"
         },
     )
+    attributed_asset: Optional[Asset] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[NormalizedTransaction.attributed_asset_id]"
+        },
+    )
     price_snapshot: Optional[PriceSnapshot] = Relationship()
     # V3: UserCalculationBundle relationship (user-defined groupings)
     user_calculation_unit: Optional["UserCalculationBundle"] = Relationship(
@@ -628,7 +1019,7 @@ class NormalizedTransaction(SQLModel, table=True):
             "foreign_keys": "[NormalizedTransaction.user_calculation_unit_id]"
         },
     )
-    
+
     from_account: Optional[Account] = Relationship(
         sa_relationship_kwargs={
             "foreign_keys": "[NormalizedTransaction.from_account_id]"
@@ -640,47 +1031,74 @@ class NormalizedTransaction(SQLModel, table=True):
         },
     )
 
-    # Cascade relationships for cleanup upon deletion
+    # Sync job tracking relationship
+    sync_connector_run: Optional["SyncJobConnectorRun"] = Relationship(
+        back_populates="transactions",
+        sa_relationship_kwargs={
+            "foreign_keys": "[NormalizedTransaction.sync_connector_run_id]"
+        },
+    )
+
+    # P&L traceability relationships — NOT lifecycle owners.
+    # These children are lifecycle-owned by CalculationUnit (which has delete-orphan).
+    # Using save-update/merge here so SQLAlchemy propagates new objects to the session
+    # but does NOT treat removal from this collection as an orphan-deletion trigger.
+    # This avoids the dual-delete-orphan anti-pattern that caused silent lot loss.
     cost_lots: List["CostLot"] = Relationship(
         back_populates="origin_transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"},
     )
     pnl_warnings: List["PnlWarning"] = Relationship(
         back_populates="transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"},
     )
     calculation_legs: List["CalculationUnitLeg"] = Relationship(
         back_populates="transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"},
     )
     realized_pnl: List["RealizedPnl"] = Relationship(
         back_populates="transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"},
     )
     lot_settlements: List["LotSettlement"] = Relationship(
         back_populates="settling_transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"},
     )
     cost_lot_events: List["CostLotEvent"] = Relationship(
         back_populates="triggered_by_transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"},
+    )
+    tax_overrides: List["TransactionTaxOverride"] = Relationship(
+        back_populates="transaction",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[TransactionTaxOverride.transaction_id]",
+        },
+    )
+
+    # Derivative positions linked to this transaction (viewonly - managed by pipeline stage)
+    derivative_positions_opened: List["DerivativePosition"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[DerivativePosition.open_transaction_id]",
+            "viewonly": True,
+        },
     )
 
     # Computed total property (price * quantity)
     @property
     def total(self) -> Optional[Decimal]:
         """Compute total from price * quantity.
-        
+
         Returns None if price is not set.
         """
         if self.price is not None and self.quantity is not None:
             return self.price * self.quantity
         return None
-    
+
     @total.setter
     def total(self, value: Optional[Decimal]) -> None:
         """Set total by computing price = total / quantity.
-        
+
         If quantity is zero or None, price is set to None.
         If value is None, price is left unchanged.
         """
@@ -701,23 +1119,34 @@ class NormalizedTransaction(SQLModel, table=True):
 class RawAccount(SQLModel, table=True):
     """
     Raw account mapping table.
-    Maps (source, label) pairs to account_id in the accounts table.
+    Maps (source, label, network) triples to account_id in the accounts table.
     Similar to raw_assets but for accounts/addresses.
     Used to map source_account, source_from_account and source_to_account to resolved accounts.
+    The network dimension ensures the same address on different chains creates separate mappings.
     """
 
     __tablename__ = "raw_accounts"
-    __table_args__ = (UniqueConstraint("source", "label", name="uq_raw_account"),)
+    __table_args__ = (
+        UniqueConstraint("source", "label", "network", name="uq_raw_account_network"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(
         nullable=False, index=True
     )  # e.g., 'binance', 'blockscout', 'manual'
     label: str = Field(nullable=False, index=True)  # Raw address or identifier
+    network: str = Field(
+        default="", nullable=False, index=True
+    )  # Normalized chain name (e.g. 'bsc', 'ethereum', '')
     account_id: Optional[int] = Field(
         default=None, foreign_key="accounts.id", index=True
     )
     created_at: datetime = Field(default_factory=utc_now)
+
+    # Dismiss functionality
+    dismissed: bool = Field(default=False, index=True)
+    dismissed_at: Optional[datetime] = Field(default=None)
+    dismissed_reason: Optional[str] = Field(default=None)
 
     # Relationships
     account: Optional[Account] = Relationship(back_populates="raw_accounts")
@@ -731,11 +1160,11 @@ class RawAccount(SQLModel, table=True):
 class UserCalculationBundle(SQLModel, table=True):
     """
     User-defined grouping of transactions for P&L calculation.
-    
+
     This stores user-created bundles (manual groupings):
     - Links transactions that should be processed together
     - Can be a suggestion (confidence set) or confirmed (confidence=None)
-    
+
     At P&L runtime, the engine creates CalculationUnit records with
     unit_origin="bundle:{id}" or "tx:{id}" for processing and audit.
     """
@@ -744,16 +1173,21 @@ class UserCalculationBundle(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     label: Optional[str] = Field(default=None)
-    pattern: Optional[str] = Field(default=None)  # transfer, swap, split, unknown
+    pattern: Optional[str] = Field(
+        default=None
+    )  # internal_transfer, swap, flow, split, spinoff, unknown
     notes: Optional[str] = Field(default=None, sa_column=Column(Text))
     taxability_override: Optional[str] = Field(
         default=None
     )  # taxable, non_taxable, or None (use computed)
-    
+    bundle_data: Optional[dict] = Field(
+        default=None, sa_column=Column("bundle_data", JSON)
+    )  # Pattern-specific data (e.g. spinoff allocation)
+
     # Suggestion metadata (set when created from GroupingEngine)
     confidence: Optional[float] = Field(default=None)  # 0.0-1.0 for suggestions
     reason: Optional[str] = Field(default=None)  # Human-readable explanation
-    
+
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -761,16 +1195,43 @@ class UserCalculationBundle(SQLModel, table=True):
     transactions: List["NormalizedTransaction"] = Relationship(
         back_populates="user_calculation_unit"
     )
-    
+
     @property
     def is_suggestion(self) -> bool:
         """True if this is an unconfirmed suggestion."""
         return self.confidence is not None
-    
+
     @property
     def is_confirmed(self) -> bool:
         """True if user has confirmed this grouping."""
         return self.confidence is None
+
+
+# ============================================================================
+# DismissedSuggestion Model (Persisted dismissals of bundle suggestions)
+# ============================================================================
+
+
+class DismissedSuggestion(SQLModel, table=True):
+    """
+    Stores dismissed bundle suggestions so they don't reappear.
+
+    Suggestions are identified by a fingerprint derived from
+    (pattern, sorted transaction_ids). This allows individual transactions
+    to still appear in other suggestions — only the exact combination is blocked.
+    """
+
+    __tablename__ = "dismissed_suggestions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    fingerprint: str = Field(
+        index=True, unique=True
+    )  # sha256(pattern:sorted_tx_ids)[:16]
+    pattern: Optional[str] = Field(default=None)  # internal_transfer, swap, flow, etc.
+    transaction_ids: List[int] = Field(default_factory=list, sa_column=Column(JSON))
+    label: Optional[str] = Field(default=None)  # Suggestion label at time of dismissal
+    reason: Optional[str] = Field(default=None)  # User-provided reason (optional)
+    dismissed_at: datetime = Field(default_factory=utc_now)
 
 
 # ============================================================================
@@ -782,7 +1243,7 @@ class CalculationVersion(SQLModel, table=True):
     """
     Calculation version for tracking P&L computation runs.
     Each run creates a new version for idempotency and auditability.
-    
+
     Status values:
     - draft: Preview calculation, not yet committed (auto-expires)
     - committed: User confirmed and saved this version
@@ -794,7 +1255,9 @@ class CalculationVersion(SQLModel, table=True):
     version_id: Optional[int] = Field(default=None, primary_key=True)
     description: Optional[str] = Field(default=None, sa_column=Column(Text))
     created_at: datetime = Field(default_factory=utc_now)
-    expires_at: Optional[datetime] = Field(default=None, index=True)  # For draft cleanup
+    expires_at: Optional[datetime] = Field(
+        default=None, index=True
+    )  # For draft cleanup
     method: str = Field(default="FIFO")  # FIFO, LIFO, HIFO, SPECIFIC
     lot_mode: str = Field(default="LOT_TRAVEL")  # LOT_TRAVEL, MEGA_WALLET
     base_currency_id: Optional[int] = Field(default=None, foreign_key="assets.asset_id")
@@ -802,11 +1265,25 @@ class CalculationVersion(SQLModel, table=True):
     allow_negative_balances: bool = Field(default=False)
     residual_tolerance_pct: Decimal = Field(
         default=Decimal("0.05"),
-        sa_column=Column(Numeric(10, 4), nullable=False, default=0.05)
+        sa_column=Column(Numeric(10, 4), nullable=False, default=0.05),
     )
-    status: str = Field(
-        default="draft", index=True
-    )  # draft, committed, active
+    status: str = Field(default="draft", index=True)  # draft, committed, active
+    # Advanced config fields for reproducibility
+    compute_residuals: bool = Field(
+        default=True
+    )  # Whether residual warnings were computed
+    crypto_swap_taxable: bool = Field(
+        default=False
+    )  # Whether crypto-to-crypto swaps were taxable
+    fee_taxable: bool = Field(
+        default=False
+    )  # Whether fees were treated as taxable events
+    use_price_fallback: bool = Field(default=True)  # Whether price fallback was used
+    price_staleness_window_days: int = Field(
+        default=7
+    )  # Max days to consider a cached price fresh
+    # Trigger source: "auto" (background refresh), "manual" (ad-hoc custom), "refresh" (user-clicked refresh)
+    trigger: Optional[str] = Field(default="manual")  # auto, manual, refresh
     # Account filter - stores which accounts were included in this calculation
     # NULL means all accounts, empty array means none (though that would be unusual)
     account_ids: Optional[List[int]] = Field(
@@ -817,7 +1294,46 @@ class CalculationVersion(SQLModel, table=True):
     # All other children (cost_lots, realized_pnl, etc.) are owned by CalculationUnit
     calculation_units: List["CalculationUnit"] = Relationship(
         back_populates="version",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+    # French tax tracking (cascade delete when version is deleted)
+    french_crypto_tax_entries: List["FrenchCryptoTaxEntry"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    french_crypto_tax_annual_summaries: List["FrenchCryptoTaxAnnualSummary"] = (
+        Relationship(
+            back_populates="calculation_version",
+            sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+        )
+    )
+    french_securities_tax_entries: List["FrenchSecuritiesTaxEntry"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    french_securities_tax_annual_summaries: List["FrenchSecuritiesTaxAnnualSummary"] = (
+        Relationship(
+            back_populates="calculation_version",
+            sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+        )
+    )
+    income_events: List["IncomeEvent"] = Relationship(
+        back_populates="version",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[IncomeEvent.version_id]",
+        },
+    )
+    dividend_income_tax_entries: List["DividendIncomeTaxEntry"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    dividend_income_annual_summaries: List["DividendIncomeAnnualSummary"] = (
+        Relationship(
+            back_populates="calculation_version",
+            sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+        )
     )
 
 
@@ -828,15 +1344,15 @@ class CostLot(SQLModel, table=True):
     """
     Cost lot for FIFO/LIFO tax lot tracking.
     Tracks individual acquisition lots and their remaining quantities.
-    
+
     Used both for persistence (SQLModel table) and runtime P&L calculation.
     The consume() method provides lot consumption logic for the P&L engine.
-    
+
     Supports negative lots for out-of-order transactions:
     - is_negative=True indicates this lot represents a debt (disposal before acquisition)
     - qty and qty_remaining are negative for negative lots
     - is_settled=True when the debt has been fully resolved by later inflows
-    
+
     Cost basis handling:
     - Set unit_cost_in_base OR total_cost_in_base at creation
     - The other will be computed automatically from qty
@@ -856,10 +1372,11 @@ class CostLot(SQLModel, table=True):
     qty: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
     qty_remaining: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
     unit_cost_in_base: Decimal = Field(
-        default=Decimal("0"), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+        default=Decimal("0"),
+        sa_column=Column(Numeric(36, 18), nullable=False, default=0),
     )
     acquired_at: datetime = Field(default_factory=utc_now, index=True)
-    
+
     # Traceability
     origin_transaction_id: Optional[int] = Field(
         default=None, foreign_key="normalized_transactions.id", index=True
@@ -868,82 +1385,110 @@ class CostLot(SQLModel, table=True):
         default=None, foreign_key="calculation_units.id", index=True
     )  # FK to CalculationUnit (processing record)
     notes: Optional[str] = Field(default=None, sa_column=Column(Text))
-    
+
+    # Cost basis provenance
+    cost_source: Optional[str] = Field(
+        default=None
+    )  # fmv, inherited, proceeds, provisional, base_currency
+    cost_fmv_price: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18))
+    )  # FMV unit price used (when cost_source="fmv")
+    cost_fmv_source: Optional[str] = Field(
+        default=None
+    )  # Price provider (e.g. coingecko, manual, fallback:cached)
+    cost_fmv_timestamp: Optional[datetime] = Field(
+        default=None
+    )  # When the price was valid
+    cost_fmv_stale: Optional[bool] = Field(
+        default=None
+    )  # Whether the price was a stale fallback
+
     # Negative lot tracking
     is_negative: bool = Field(default=False, index=True)
     is_zero_cost: bool = Field(default=False)
     is_settled: bool = Field(default=False, index=True)
-    settled_by_lot_id: Optional[int] = Field(default=None, foreign_key="cost_lots.cost_lot_id", index=True)
+    settled_by_lot_id: Optional[int] = Field(
+        default=None, foreign_key="cost_lots.cost_lot_id", index=True
+    )
     settled_cost_in_base: Optional[Decimal] = Field(
         default=None, sa_column=Column(Numeric(36, 18))
     )
-    origin_pnl_id: Optional[int] = Field(default=None, index=True)
-    
+    origin_pnl_id: Optional[int] = Field(
+        default=None, foreign_key="realized_pnl.pnl_id", index=True
+    )
+
+    # Cost basis chain — links to the lot that was consumed to create this one
+    # (set for transfers/splits where cost_source="inherited")
+    source_lot_id: Optional[int] = Field(
+        default=None, foreign_key="cost_lots.cost_lot_id", index=True
+    )
+
     created_at: datetime = Field(default_factory=utc_now)
-    
+
     # Relationships
     asset: Optional[Asset] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CostLot.asset_id]"},
     )
+    origin_pnl: Optional["RealizedPnl"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[CostLot.origin_pnl_id]"}
+    )
     origin_transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="cost_lots",
-        sa_relationship_kwargs={"foreign_keys": "[CostLot.origin_transaction_id]"}
+        sa_relationship_kwargs={"foreign_keys": "[CostLot.origin_transaction_id]"},
     )
     # consumed_slices owned by this lot with cascade
     consumed_slices: List["ConsumedLotSlice"] = Relationship(
         back_populates="cost_lot",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
     # outgoing_settlements: settlements where this lot is the settling lot (cascade)
     outgoing_settlements: List["LotSettlement"] = Relationship(
         back_populates="settling_lot",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
-            "foreign_keys": "[LotSettlement.settling_lot_id]"
-        }
+            "foreign_keys": "[LotSettlement.settling_lot_id]",
+        },
     )
     # events: audit trail of all state changes to this lot (cascade)
     events: List["CostLotEvent"] = Relationship(
         back_populates="lot",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
-            "foreign_keys": "[CostLotEvent.lot_id]"
-        }
+            "foreign_keys": "[CostLotEvent.lot_id]",
+        },
     )
     account: Optional[Account] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CostLot.account_id]"},
     )
-    origin_transaction: Optional["NormalizedTransaction"] = Relationship(
-        sa_relationship_kwargs={"foreign_keys": "[CostLot.origin_transaction_id]"},
-    )
+    # NOTE: origin_transaction is defined ONCE above (with back_populates="cost_lots").
+    # A duplicate definition here was overwriting the correct one, breaking
+    # back_populates symmetry. Removed to keep the single correct definition.
     # Owner relationship: CostLot belongs to CalculationUnit
     unit: Optional["CalculationUnit"] = Relationship(
         back_populates="cost_lots",
         sa_relationship_kwargs={"foreign_keys": "[CostLot.unit_id]"},
     )
-    
+
     def __init__(self, **data):
         """Initialize CostLot with automatic cost computation.
-        
+
         If total_cost_in_base is provided but unit_cost_in_base is not (or is 0),
         compute unit_cost_in_base from total_cost_in_base / qty.
         """
         # Extract total_cost_in_base if provided (it's not a DB field)
         total_cost = data.pop("total_cost_in_base", None)
-        
+
         super().__init__(**data)
-        
+
         # If total_cost was provided, compute it
-        if self.total_cost_in_base is None :
+        if self.total_cost_in_base is None:
             self.total_cost_in_base = total_cost
 
-
-    
     @property
     def total_cost_in_base(self) -> Decimal:
         """Total cost basis for the original quantity (alias for total_cost)."""
         return self.qty * self.unit_cost_in_base
-    
+
     @total_cost_in_base.setter
     def total_cost_in_base(self, value: Decimal) -> None:
         """Set total cost and compute unit cost from qty."""
@@ -957,7 +1502,7 @@ class CostLot(SQLModel, table=True):
     def total_cost(self) -> Decimal:
         """Alias for total_cost_in_base."""
         return self.total_cost_in_base
-    
+
     @property
     def unit_cost(self) -> Decimal:
         """Alias for unit_cost_in_base."""
@@ -967,7 +1512,7 @@ class CostLot(SQLModel, table=True):
     def remaining_cost_in_base(self) -> Decimal:
         """Remaining cost basis for unconsumed quantity."""
         return self.qty_remaining * self.unit_cost_in_base
-    
+
     # Alias for backward compatibility
     @property
     def cost_remaining_in_base(self) -> Decimal:
@@ -976,7 +1521,7 @@ class CostLot(SQLModel, table=True):
 
     def consume(self, qty: Decimal) -> "ConsumedLotSlice":
         """Consume a quantity from this lot, returning a slice record.
-        
+
         Sets the cost_lot relationship on the slice at creation time.
         The slice is automatically persisted via the cascade relationship.
         """
@@ -992,6 +1537,7 @@ class CostLot(SQLModel, table=True):
             unit_cost_in_base=self.unit_cost_in_base,
             total_cost_in_base=qty * self.unit_cost_in_base,
             cost_lot=self,  # Set cost_lot relationship - cascade handles persistence
+            unit_id=self.unit_id,  # Set unit_id for direct link to calculation unit
         )
         return slice_record
 
@@ -1000,10 +1546,10 @@ class ConsumedLotSlice(SQLModel, table=True):
     """
     Detailed tracking of cost lot consumption.
     Each slice represents a portion of a cost lot consumed in a disposal.
-    
+
     Used both for persistence (SQLModel table) and runtime P&L calculation.
     Runtime fields (consumed_at, etc.) are populated during calculation.
-    
+
     Ownership: Owned by CostLot via cost_lot_id (cascade delete).
     """
 
@@ -1018,6 +1564,9 @@ class ConsumedLotSlice(SQLModel, table=True):
     consumed_by_leg_id: Optional[int] = Field(
         default=None, foreign_key="calculation_unit_legs.id", index=True
     )
+    unit_id: Optional[int] = Field(
+        default=None, foreign_key="calculation_units.id", index=True
+    )
     quantity: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
     unit_cost_in_base: Decimal = Field(
         sa_column=Column(Numeric(36, 18), nullable=False)
@@ -1026,20 +1575,23 @@ class ConsumedLotSlice(SQLModel, table=True):
         sa_column=Column(Numeric(36, 18), nullable=False)
     )
     created_at: datetime = Field(default_factory=utc_now)
-    
+
     # Runtime-only fields (used during P&L calculation, derived from cost_lot)
     consumed_at: Optional[datetime] = Field(default=None, exclude=True)
 
     # Relationships - cost_lot is the owner
     pnl: Optional["RealizedPnl"] = Relationship(
         back_populates="slices",
-        sa_relationship_kwargs={"foreign_keys": "[ConsumedLotSlice.pnl_id]"}
+        sa_relationship_kwargs={"foreign_keys": "[ConsumedLotSlice.pnl_id]"},
     )
     cost_lot: Optional[CostLot] = Relationship(back_populates="consumed_slices")
     consumed_by_leg: Optional["CalculationUnitLeg"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[ConsumedLotSlice.consumed_by_leg_id]"}
     )
-    
+    unit: Optional["CalculationUnit"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[ConsumedLotSlice.unit_id]"}
+    )
+
     # Convenience property to access version via cost_lot
     @property
     def version(self) -> Optional["CalculationVersion"]:
@@ -1047,19 +1599,23 @@ class ConsumedLotSlice(SQLModel, table=True):
         if self.cost_lot and self.cost_lot.unit:
             return self.cost_lot.unit.version
         return None
-    
+
     @property
     def holding_period_days(self) -> Optional[int]:
         """
         Number of days this slice was held before consumption.
         Computed from consumed_at - cost_lot.acquired_at.
         Returns None if either date is not set.
-        
+
         Both datetimes are now guaranteed to be timezone-aware UTC.
         """
-        if self.consumed_at is None or not self.cost_lot or not self.cost_lot.acquired_at:
+        if (
+            self.consumed_at is None
+            or not self.cost_lot
+            or not self.cost_lot.acquired_at
+        ):
             return None
-        
+
         delta = ensure_utc(self.consumed_at) - ensure_utc(self.cost_lot.acquired_at)
         return max(0, delta.days)
 
@@ -1068,10 +1624,10 @@ class RealizedPnl(SQLModel, table=True):
     """
     Realized profit/loss record for tax reporting.
     Records each disposal and the lots consumed.
-    
+
     Used both for persistence (SQLModel table) and runtime P&L calculation.
     Runtime fields (is_fee, is_provisional, etc.) are used during calculation.
-    
+
     Ownership: Owned by CalculationUnit via origin_unit_id (cascade delete).
     """
 
@@ -1085,7 +1641,9 @@ class RealizedPnl(SQLModel, table=True):
         sa_column=Column(Numeric(36, 18), nullable=False)
     )
     pnl_in_base: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
-    disposal_taxable: bool = Field(default=False)  # Whether this disposal is a taxable event
+    disposal_taxable: bool = Field(
+        default=False
+    )  # Whether this disposal is a taxable event
     transaction_id: Optional[int] = Field(
         default=None, foreign_key="normalized_transactions.id", index=True
     )
@@ -1097,13 +1655,26 @@ class RealizedPnl(SQLModel, table=True):
     realized_at: Optional[datetime] = Field(default=None, index=True)
     holding_period_days: Optional[int] = Field(default=None)
     notes: Optional[str] = Field(default=None, sa_column=Column(Text))
-    
+
     # Proceeds tracking - how FMV was determined
-    proceeds_source: Optional[str] = Field(default="fmv_lookup")  # 'fmv_lookup', 'base_currency', 'transfer'
-    proceeds_price: Optional[Decimal] = Field(default=None, sa_column=Column(Numeric(36, 18)))  # Price used for FMV
-    proceeds_price_source: Optional[str] = Field(default=None)  # 'coingecko', 'manual', 'fallback', etc.
-    proceeds_price_timestamp: Optional[datetime] = Field(default=None)  # When price was fetched
-    
+    proceeds_source: Optional[str] = Field(
+        default="fmv_lookup"
+    )  # 'fmv_lookup', 'base_currency', 'transfer'
+    proceeds_price: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18))
+    )  # Price used for FMV
+    proceeds_price_source: Optional[str] = Field(
+        default=None
+    )  # 'coingecko', 'manual', 'fallback', etc.
+    proceeds_price_timestamp: Optional[datetime] = Field(
+        default=None
+    )  # When price was fetched
+
+    # Attributed asset — PnL from this record is attributed to this asset instead of asset_id
+    # e.g., derivative settlement in USDC attributed to ETH
+    attributed_asset_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id", index=True
+    )
 
     # Relationships
     # slices is viewonly - ConsumedLotSlice is owned by CostLot
@@ -1111,11 +1682,14 @@ class RealizedPnl(SQLModel, table=True):
         back_populates="pnl",
         sa_relationship_kwargs={
             "viewonly": True,
-            "foreign_keys": "[ConsumedLotSlice.pnl_id]"
-        }
+            "foreign_keys": "[ConsumedLotSlice.pnl_id]",
+        },
     )
     asset: Optional[Asset] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.asset_id]"},
+    )
+    attributed_asset: Optional[Asset] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.attributed_asset_id]"},
     )
     # Owner relationship: RealizedPnl belongs to CalculationUnit
     origin_unit: Optional["CalculationUnit"] = Relationship(
@@ -1125,18 +1699,18 @@ class RealizedPnl(SQLModel, table=True):
     transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="realized_pnl",
         sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.transaction_id]"},
-    ) 
+    )
 
 
 class FeeEntry(SQLModel, table=True):
     """
     Fee index table linking fee legs to their RealizedPnl entries.
-    
+
     This is a minimal join table that:
     - Links fee_leg_id to realized_pnl_id for efficient fee queries
     - All fee data (FMV, cost basis, quantity) lives in RealizedPnl
     - All fees create RealizedPnl entries (disposal_taxable flag determines tax treatment)
-    
+
     Ownership: Owned by CalculationUnitLeg via fee_leg_id (cascade delete).
     Hierarchy: CalculationUnit → CalculationUnitLeg → FeeEntry
     """
@@ -1144,24 +1718,34 @@ class FeeEntry(SQLModel, table=True):
     __tablename__ = "fee_entries"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    
+
     # Core FKs - fee_leg_id is the owner relationship
-    fee_leg_id: int = Field(foreign_key="calculation_unit_legs.id", nullable=False, index=True)
-    realized_pnl_id: Optional[int] = Field(default=None, foreign_key="realized_pnl.pnl_id", nullable=True, index=True)
+    fee_leg_id: int = Field(
+        foreign_key="calculation_unit_legs.id", nullable=False, index=True
+    )
+    realized_pnl_id: Optional[int] = Field(
+        default=None, foreign_key="realized_pnl.pnl_id", nullable=True, index=True
+    )
     # unit_id kept for query convenience but derived from fee_leg.unit_id
     unit_id: int = Field(foreign_key="calculation_units.id", nullable=False, index=True)
-    version_id: int = Field(foreign_key="calculation_versions.version_id", nullable=False, index=True)
-    
+    version_id: int = Field(
+        foreign_key="calculation_versions.version_id", nullable=False, index=True
+    )
+
     # Related asset - the primary asset this fee relates to (non-base-currency side of trade)
     # Used for aggregating fees by asset in balance view
-    related_asset_id: Optional[int] = Field(default=None, foreign_key="assets.asset_id", index=True)
-    
+    related_asset_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id", index=True
+    )
+
     # Fee value in base currency - stored directly for base currency fees (no RealizedPnl)
-    fee_value_in_base: Decimal = Field(default=Decimal(0), max_digits=28, decimal_places=18)
-    
+    fee_value_in_base: Decimal = Field(
+        default=Decimal(0), max_digits=28, decimal_places=18
+    )
+
     # Timestamps
     created_at: datetime = Field(default_factory=utc_now)
-    
+
     # Relationships - fee_leg is the owner
     fee_leg: Optional["CalculationUnitLeg"] = Relationship(
         back_populates="fee_entries",
@@ -1181,22 +1765,22 @@ class FeeEntry(SQLModel, table=True):
 class CalculationUnitLeg(SQLModel, table=True):
     """
     Unified leg interface for both persistence and runtime.
-    
+
     This model serves as:
     1. Database persistence layer (minimal fields stored)
     2. Runtime interface (computed properties access transaction data via relationships)
-    
+
     Replaces the dual ExpandedLeg/CalculationUnitLeg pattern with a single interface.
     All transaction details are accessible through relationships and computed properties.
-    
+
     Fields stored in DB:
     - transaction_id, asset_id, leg_type, quantity (essential identifiers)
-    
+
     Computed via relationships:
     - All transaction fields (date_time, price, account, etc.) via transaction FK
     - Asset details via asset FK
     - Unit metadata via unit FK
-    
+
     Usage:
     - In P&L engine: Create with relationships set (transaction, asset)
     - In queries: Eager load relationships with selectinload()
@@ -1207,20 +1791,28 @@ class CalculationUnitLeg(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     unit_id: int = Field(foreign_key="calculation_units.id", nullable=False, index=True)
-    transaction_id: int = Field(foreign_key="normalized_transactions.id", nullable=False, index=True)
+    transaction_id: int = Field(
+        foreign_key="normalized_transactions.id", nullable=False, index=True
+    )
     asset_id: int = Field(foreign_key="assets.asset_id", nullable=False, index=True)
-    leg_type: str = Field(nullable=False, index=True)  # "inflow", "outflow", "fee"
+    leg_type: LegType = Field(
+        sa_column=Column(
+            SAEnum("inflow", "outflow", "fee", name="legtype", create_type=False),
+            nullable=False,
+            index=True,
+        )
+    )
     quantity: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
     created_at: datetime = Field(default_factory=utc_now)
 
     # Relationships
     unit: Optional["CalculationUnit"] = Relationship(
         back_populates="legs",
-        sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.unit_id]"}
+        sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.unit_id]"},
     )
     transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="calculation_legs",
-        sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.transaction_id]"}
+        sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.transaction_id]"},
     )
     asset: Optional["Asset"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.asset_id]"}
@@ -1230,56 +1822,67 @@ class CalculationUnitLeg(SQLModel, table=True):
         back_populates="fee_leg",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
-            "foreign_keys": "[FeeEntry.fee_leg_id]"
-        }
+            "foreign_keys": "[FeeEntry.fee_leg_id]",
+        },
     )
-    
+
     # Computed properties for ExpandedLeg compatibility
     @property
     def asset_symbol(self) -> str:
         """Get asset symbol from loaded relationship or fallback to ID."""
         return self.asset.symbol if self.asset else f"#{self.asset_id}"
-    
+
     @property
     def date_time(self) -> Optional[datetime]:
         """Get transaction datetime."""
         return self.transaction.date_time if self.transaction else None
-    
+
     @property
     def origin_transaction_id(self) -> int:
         """Alias for transaction_id."""
         return self.transaction_id
-    
+
     @property
     def origin_transaction(self) -> Optional["NormalizedTransaction"]:
         """Alias for transaction relationship."""
         return self.transaction
-    
+
     @property
     def account_id(self) -> Optional[int]:
         """Get account ID from transaction."""
         return self.transaction.account_id if self.transaction else None
-    
+
     @property
     def account(self) -> Optional[Account]:
         """Get account from transaction."""
         return self.transaction.account_rel if self.transaction else None
-    
+
     @property
     def direction(self) -> str:
         """Map leg_type to direction for ExpandedLeg compatibility."""
-        return self.leg_type if self.leg_type in ("inflow", "outflow") else "outflow"
-    
+        # leg_type might be string or enum, handle both
+        if isinstance(self.leg_type, str):
+            return (
+                self.leg_type if self.leg_type in ("inflow", "outflow") else "outflow"
+            )
+        return (
+            self.leg_type.value
+            if self.leg_type in (LegType.INFLOW, LegType.OUTFLOW)
+            else "outflow"
+        )
+
     @property
     def is_fee(self) -> bool:
         """Check if this is a fee leg."""
-        return self.leg_type == "fee"
-    
+        return self.leg_type == LegType.FEE
+
     @property
-    def tx_disposal_taxable(self) -> bool:
-        """Get disposal_taxable override flag from transaction (user input)."""
-        return self.transaction.disposal_taxable if self.transaction else False
-    
+    def tx_taxability_status(self) -> str:
+        """Get taxability_status from transaction (3-state: taxable/non_taxable/unknown)."""
+        if self.transaction and self.transaction.taxability_status:
+            return self.transaction.taxability_status
+        return TaxabilityStatus.UNKNOWN.value
+
     # Persisted taxability (computed by TaxabilityCalculator during P&L processing)
     disposal_taxable: bool = Field(default=False)
 
@@ -1287,14 +1890,14 @@ class CalculationUnitLeg(SQLModel, table=True):
 class CalculationUnit(SQLModel, table=True):
     """
     Unified calculation unit for P&L processing and audit trail.
-    
+
     Merges RuntimeCalculationUnit (runtime) and ProcessedUnit (persistence) into one.
     Each unit represents a logical grouping of transactions processed together.
-    
+
     Origin tracking:
     - unit_origin="bundle:{id}" for user-defined bundles (UserCalculationBundle)
     - unit_origin="tx:{id}" for single transactions
-    
+
     Persisted fields are minimal - computed fields are derived from relationships
     at API/service level:
     - transaction_ids → from members at runtime
@@ -1308,153 +1911,168 @@ class CalculationUnit(SQLModel, table=True):
     version_id: int = Field(
         foreign_key="calculation_versions.version_id", nullable=False, index=True
     )
-    
+
     # Origin tracking: "bundle:{id}" or "tx:{id}"
     unit_origin: str = Field(nullable=False, index=True)
-    
+
     # Unit metadata
     unit_label: Optional[str] = Field(default=None)  # Human-readable label
-    pattern: Optional[str] = Field(default=None)  # User-confirmed pattern: transfer, swap, split, unknown
+    pattern: Optional[str] = Field(
+        default=None
+    )  # User-confirmed pattern: internal_transfer, swap, flow, split, unknown
     timestamp: datetime = Field(default_factory=utc_now, index=True)
     created_at: datetime = Field(default_factory=utc_now)
 
     # Relationships - all children use cascade for automatic persistence
-    version: Optional["CalculationVersion"] = Relationship(back_populates="calculation_units")
-    
+    version: Optional["CalculationVersion"] = Relationship(
+        back_populates="calculation_units"
+    )
+
     # Children owned by this unit - cascade enables automatic persistence/deletion
     cost_lots: List["CostLot"] = Relationship(
         back_populates="unit",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
-            "foreign_keys": "[CostLot.unit_id]"
-        }
+            "foreign_keys": "[CostLot.unit_id]",
+        },
     )
     realized_pnl_records: List["RealizedPnl"] = Relationship(
         back_populates="origin_unit",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
-            "foreign_keys": "[RealizedPnl.origin_unit_id]"
-        }
+            "foreign_keys": "[RealizedPnl.origin_unit_id]",
+        },
     )
     # fee_entries now owned by CalculationUnitLeg, not CalculationUnit
     # Kept as viewonly for query convenience (cascades via legs → fee_entries)
     fee_entries: List["FeeEntry"] = Relationship(
-        sa_relationship_kwargs={
-            "foreign_keys": "[FeeEntry.unit_id]",
-            "viewonly": True
-        }
+        sa_relationship_kwargs={"foreign_keys": "[FeeEntry.unit_id]", "viewonly": True}
     )
     warnings: List["PnlWarning"] = Relationship(
         back_populates="unit",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
-            "foreign_keys": "[PnlWarning.unit_id]"
-        }
+            "foreign_keys": "[PnlWarning.unit_id]",
+        },
     )
     legs: List["CalculationUnitLeg"] = Relationship(
         back_populates="unit",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
-            "foreign_keys": "[CalculationUnitLeg.unit_id]"
-        }
+            "foreign_keys": "[CalculationUnitLeg.unit_id]",
+        },
     )
-    
+    consumed_slices: List["ConsumedLotSlice"] = Relationship(
+        back_populates="unit",
+        sa_relationship_kwargs={"foreign_keys": "[ConsumedLotSlice.unit_id]"},
+    )
+    income_events: List["IncomeEvent"] = Relationship(
+        back_populates="unit",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[IncomeEvent.unit_id]",
+        },
+    )
+
     # Model configuration to allow extra attributes for runtime data
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
-    
+
     def __init__(self, **data):
         """Initialize with runtime-only attributes and auto-compute pattern if needed."""
         import logging
+
         logger = logging.getLogger("backend")
-        
-        _label = data.pop('_label', None)
-        bundle_taxability_override = data.pop('bundle_taxability_override', None)
-        bundle_pattern = data.pop('bundle_pattern', None)
-        
+
+        _label = data.pop("_label", None)
+        bundle_taxability_override = data.pop("bundle_taxability_override", None)
+        bundle_pattern = data.pop("bundle_pattern", None)
+        bundle_metadata = data.pop("bundle_metadata", None)
+
         super().__init__(**data)
-        
+
         # Runtime-only attributes (not persisted)
-        object.__setattr__(self, 'bundle_taxability_override', bundle_taxability_override)
-        object.__setattr__(self, 'residual_pct', None)
-        
+        object.__setattr__(
+            self, "bundle_taxability_override", bundle_taxability_override
+        )
+        object.__setattr__(self, "bundle_metadata", bundle_metadata)
+        object.__setattr__(self, "residual_pct", None)
+
         if _label and not self.unit_label:
             self.unit_label = _label
-        
+
         # Pattern precedence: explicit > bundle > computed > unknown
         if self.pattern is None:
             if bundle_pattern:
                 self.pattern = bundle_pattern
-                logger.debug(f"Unit {self.id}: Pattern set from bundle: {bundle_pattern}")
+                logger.debug(
+                    f"Unit {self.id}: Pattern set from bundle: {bundle_pattern}"
+                )
             else:
                 try:
                     computed_pattern, reason = self._compute_pattern_from_legs()
                     self.pattern = computed_pattern
-                    logger.debug(f"Unit {self.id}: Pattern auto-computed: {computed_pattern} ({reason})")
+                    logger.debug(
+                        f"Unit {self.id}: Pattern auto-computed: {computed_pattern} ({reason})"
+                    )
                 except Exception as e:
                     self.pattern = UnitPattern.UNKNOWN.value
-                    logger.warning(f"Unit {self.id}: Pattern computation failed: {e}, defaulting to unknown")
-    
+                    logger.warning(
+                        f"Unit {self.id}: Pattern computation failed: {e}, defaulting to unknown"
+                    )
+
     # Computed properties from persisted relationships
-    @property
-    def lots_created_count(self) -> int:
-        return len(self.cost_lots) if self.cost_lots else 0
-    
-    @property
-    def realized_entry_count(self) -> int:
-        return len(self.realized_pnl_records) if self.realized_pnl_records else 0
-    
     @property
     def total_realized_pnl_in_base(self) -> Decimal:
         if not self.realized_pnl_records:
             return Decimal("0")
         return sum(r.pnl_in_base for r in self.realized_pnl_records if r.pnl_in_base)
-    
+
     # Persisted leg accessors (for API/queries)
     @property
     def outflow_legs(self) -> List["CalculationUnitLeg"]:
-        return [leg for leg in (self.legs or []) if leg.leg_type == "outflow"]
-    
+        return [leg for leg in (self.legs or []) if leg.leg_type == LegType.OUTFLOW]
+
     @property
     def inflow_legs(self) -> List["CalculationUnitLeg"]:
-        return [leg for leg in (self.legs or []) if leg.leg_type == "inflow"]
-    
+        return [leg for leg in (self.legs or []) if leg.leg_type == LegType.INFLOW]
+
     @property
     def fee_legs(self) -> List["CalculationUnitLeg"]:
-        return [leg for leg in (self.legs or []) if leg.leg_type == "fee"]
-    
-    @property
-    def transaction_ids(self) -> List[int]:
-        return list({leg.transaction_id for leg in (self.legs or [])})
-    
+        return [leg for leg in (self.legs or []) if leg.leg_type == LegType.FEE]
+
     # Computed properties from legs
     @property
     def _outflow_asset_ids(self) -> set:
         """Set of asset IDs being disposed (excluding fees)."""
         return {leg.asset_id for leg in self.outflow_legs if leg.asset_id}
-    
+
     @property
     def _inflow_asset_ids(self) -> set:
         """Set of asset IDs being acquired."""
         return {leg.asset_id for leg in self.inflow_legs if leg.asset_id}
-    
+
     @property
     def total_outflow_qty(self) -> Decimal:
         return sum(leg.quantity for leg in self.outflow_legs if leg.quantity)
-    
+
     @property
     def total_inflow_qty(self) -> Decimal:
         return sum(leg.quantity for leg in self.inflow_legs if leg.quantity)
-    
+
     def _generate_label(self) -> str:
         """Generate a human-readable label from legs with quantities.
-        
-        Returns:
-            Label like '0.5 BTC → 10 ETH' for swaps, '1.5 BTC out' for spends,
-            '1 BTC: Binance → Ledger' for transfers, etc.
+
+        Format: ↓{inflow} | ↑{outflow} | 💸{fee}
+        Examples:
+            - "↓0.5 BTC | ↑10 ETH" for swap
+            - "↓1 BTC" for deposit/income
+            - "↑1.5 BTC" for withdrawal/spend
+            - "↓0.5 BTC | 💸0.001 BTC" for deposit with fee
+            - "↓0.5 BTC | ↑10 ETH | 💸0.01 BNB" for swap with fee
         """
         if not self.legs:
             return ""
-        
+
         def format_qty(qty) -> str:
             """Format quantity, stripping trailing zeros."""
             if qty is None:
@@ -1462,142 +2080,193 @@ class CalculationUnit(SQLModel, table=True):
             # Convert to float for cleaner display, then strip trailing zeros
             formatted = f"{float(qty):g}"
             return formatted
-        
-        def get_account_name(leg) -> str:
-            """Get account name from leg if available."""
-            if leg.account:
-                return leg.account.name
-            return ""
-        
-        # For transfers: show "{qty} {asset}: {from_account} → {to_account}"
-        if self.pattern == UnitPattern.TRANSFER.value:
-            outflow_legs = self.outflow_legs
-            inflow_legs = self.inflow_legs
-            
-            if outflow_legs and inflow_legs:
-                # Get the asset (same for both sides in transfer)
-                asset_symbol = outflow_legs[0].asset_symbol if outflow_legs else "?"
-                qty = sum(leg.quantity or Decimal(0) for leg in outflow_legs)
-                
-                # Get account names
-                from_accounts = list({get_account_name(leg) for leg in outflow_legs if get_account_name(leg)})
-                to_accounts = list({get_account_name(leg) for leg in inflow_legs if get_account_name(leg)})
-                
-                from_str = ", ".join(from_accounts[:2]) if from_accounts else "?"
-                to_str = ", ".join(to_accounts[:2]) if to_accounts else "?"
-                
-                if from_accounts and to_accounts:
-                    return f"{format_qty(qty)} {asset_symbol}: {from_str} → {to_str}"
-        
-        # Aggregate quantities by symbol for outflows
-        outflow_by_symbol: dict[str, Decimal] = {}
-        for leg in self.outflow_legs:
-            if leg.asset_symbol:
-                outflow_by_symbol[leg.asset_symbol] = outflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + (leg.quantity or Decimal(0))
-        
-        # Aggregate quantities by symbol for inflows
+
+        # Aggregate quantities by symbol for each direction
         inflow_by_symbol: dict[str, Decimal] = {}
-        for leg in self.inflow_legs:
-            if leg.asset_symbol:
-                inflow_by_symbol[leg.asset_symbol] = inflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + (leg.quantity or Decimal(0))
-        
-        # Format as "qty SYMBOL" pairs
-        outflow_parts = [f"{format_qty(qty)} {sym}" for sym, qty in sorted(outflow_by_symbol.items())[:2]]
-        inflow_parts = [f"{format_qty(qty)} {sym}" for sym, qty in sorted(inflow_by_symbol.items())[:2]]
-        
-        # For swaps: OUT → IN
-        if outflow_parts and inflow_parts:
-            return f"{', '.join(outflow_parts)} → {', '.join(inflow_parts)}"
-        
-        # For outflow only (e.g., spend)
-        if outflow_parts:
-            return f"{', '.join(outflow_parts)} out"
-        
-        # For inflow only (e.g., income)
+        outflow_by_symbol: dict[str, Decimal] = {}
+        fee_by_symbol: dict[str, Decimal] = {}
+
+        for leg in self.legs:
+            if not leg.asset_symbol:
+                continue
+            qty = leg.quantity or Decimal(0)
+            if leg.leg_type == LegType.INFLOW:
+                inflow_by_symbol[leg.asset_symbol] = (
+                    inflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + qty
+                )
+            elif leg.leg_type == LegType.OUTFLOW:
+                outflow_by_symbol[leg.asset_symbol] = (
+                    outflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + qty
+                )
+            elif leg.leg_type == LegType.FEE:
+                fee_by_symbol[leg.asset_symbol] = (
+                    fee_by_symbol.get(leg.asset_symbol, Decimal(0)) + qty
+                )
+
+        # Format as "↓qty SYM" for inflows, "↑qty SYM" for outflows, "💸qty SYM" for fees
+        inflow_parts = [
+            f"↓{format_qty(qty)} {sym}"
+            for sym, qty in sorted(inflow_by_symbol.items())[:3]
+        ]
+        outflow_parts = [
+            f"↑{format_qty(qty)} {sym}"
+            for sym, qty in sorted(outflow_by_symbol.items())[:3]
+        ]
+        fee_parts = [
+            f"💸{format_qty(qty)} {sym}"
+            for sym, qty in sorted(fee_by_symbol.items())[:2]
+        ]
+
+        # Build label: inflows | outflows | fees
+        sections = []
         if inflow_parts:
-            return f"{', '.join(inflow_parts)} in"
-        
-        return ""
-    
+            sections.append(", ".join(inflow_parts))
+        if outflow_parts:
+            sections.append(", ".join(outflow_parts))
+        if fee_parts:
+            sections.append(", ".join(fee_parts))
+
+        return " | ".join(sections)
+
     def _compute_pattern_from_legs(self) -> tuple[str, str]:
         """Compute pattern from legs analysis.
-        
+
         Returns:
             Tuple of (pattern, reason) for logging.
-            
+
         Pattern detection priority:
-        1. Same single asset in/out = transfer (complete)
-        2. Different assets with both in/out = swap
-        3. Single-leg transfer (outflow-only or inflow-only with transfer tx_type) = pending_transfer
-        4. Unknown
+        1. Same single asset in/out = INTERNAL_TRANSFER (complete)
+        2. Different assets with both in/out = SWAP
+        3. Single-leg with counterparty mapped to owned account = UNMATCHED_INTERNAL_TRANSFER
+        4. Single-leg external (counterparty not owned) = FLOW
+        5. Unknown
         """
         if not self.legs:
             return (UnitPattern.UNKNOWN.value, "no legs")
-        
+
         outflow_assets = self._outflow_asset_ids
         inflow_assets = self._inflow_asset_ids
-        
-        # Same single asset in/out = transfer (complete)
+
+        # Same single asset in/out = INTERNAL_TRANSFER (complete)
         if outflow_assets == inflow_assets and len(outflow_assets) == 1:
             asset_id = next(iter(outflow_assets))
-            return (UnitPattern.TRANSFER.value, f"same asset #{asset_id} in/out")
-        
-        # Different assets = swap
+            return (
+                UnitPattern.INTERNAL_TRANSFER.value,
+                f"same asset #{asset_id} in/out",
+            )
+
+        # Different assets = SWAP
         if outflow_assets and inflow_assets:
             return (UnitPattern.SWAP.value, "different assets")
-        
-        # Check for incomplete transfer: single-leg with transfer transaction_type
-        # This detects withdrawal/deposit without matching counterpart
+
+        # Single leg with counterparty mapped to owned account = UNMATCHED_INTERNAL_TRANSFER
         if self._is_incomplete_transfer():
             if outflow_assets:
-                return (UnitPattern.PENDING_TRANSFER.value, "outflow-only transfer awaiting inflow")
+                return (
+                    UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value,
+                    "outflow-only internal transfer",
+                )
             else:
-                return (UnitPattern.PENDING_TRANSFER.value, "inflow-only transfer awaiting outflow")
-        
+                return (
+                    UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value,
+                    "inflow-only internal transfer",
+                )
+
+        # Single leg external (counterparty not owned) = FLOW
+        # This catches airdrops, external deposits/withdrawals, payments
+        if self.is_outflow_only or self.is_inflow_only:
+            return (UnitPattern.FLOW.value, "external single-leg transaction")
+
         # Default to unknown
         return (UnitPattern.UNKNOWN.value, "unable to determine pattern")
-    
+
     def _is_incomplete_transfer(self) -> bool:
-        """Check if this unit is an incomplete transfer (single leg with transfer tx_type).
-        
+        """Check if this is an incomplete INTERNAL transfer (single leg whose counterparty is an owned account).
+
+        Internal transfers are detected using from_account/to_account on the transaction:
+        - Outflow with to_account.owned == True → destination is an owned account (internal)
+        - Inflow with from_account.owned == True → source is an owned account (internal)
+
+        Having from_account_id/to_account_id set is NOT sufficient: the account
+        may exist but not be owned (e.g. a counterparty / external address the user
+        tracks but does not own).  We must check the Account.owned flag.
+
+        If neither counterparty is an owned account, this is an external flow
+        (airdrop, payment, external deposit/withdrawal), not an unmatched
+        internal transfer.
+
         Returns:
-            True if legs indicate a transfer but missing counterpart (inflow or outflow).
+            True if this is an internal transfer missing its counterpart leg.
         """
         # Must be single-direction (outflow-only or inflow-only)
         if not (self.is_outflow_only or self.is_inflow_only):
             return False
-        
-        # Check if any leg's source transaction has transfer-related type
-        transfer_types = {"transfer", "withdrawal", "deposit", "internal_transfer"}
-        
+
+        # Check if counterparty resolves to an *owned* account.
+        # Only transfers where the other side is a known, owned account are "internal".
         for leg in self.legs:
-            if leg.transaction and leg.transaction.transaction_type:
-                tx_type = leg.transaction.transaction_type.lower()
-                if tx_type in transfer_types:
+            tx = leg.transaction
+            if not tx:
+                continue
+            if self.is_outflow_only and tx.to_account_id is not None:
+                # to_account relationship must exist AND be owned
+                if tx.to_account is not None and tx.to_account.owned:
                     return True
-        
+            if self.is_inflow_only and tx.from_account_id is not None:
+                # from_account relationship must exist AND be owned
+                if tx.from_account is not None and tx.from_account.owned:
+                    return True
+
         return False
-    
+
     @property
     def is_cost_basis_transfer(self) -> bool:
-        """True if cost basis transfers (user pattern or same asset in/out)."""
-        # If pattern is explicitly set, use it
-        if self.pattern is not None:
-            if self.pattern in (UnitPattern.TRANSFER.value, UnitPattern.SPLIT.value):
+        """True if cost basis transfers (internal transfers, splits, or spinoffs)."""
+        return self.pattern in (
+            UnitPattern.INTERNAL_TRANSFER.value,
+            UnitPattern.SPLIT.value,
+            UnitPattern.SPINOFF.value,
+        )
+
+    @property
+    def is_spinoff(self) -> bool:
+        """True if this is a corporate spin-off unit."""
+        return self.pattern == UnitPattern.SPINOFF.value
+
+    @property
+    def is_dividend(self) -> bool:
+        """True if this unit represents an income event (dividend, interest, etc.)."""
+        if not self.legs:
+            return False
+        for leg in self.legs:
+            tx = leg.transaction
+            if (
+                tx
+                and getattr(tx, "transaction_type", None)
+                == TransactionType.DIVIDEND.value
+            ):
                 return True
-            if self.pattern == UnitPattern.SWAP.value:
-                return False
-        # Fallback to intrinsic detection (same single asset in/out)
-        return self._outflow_asset_ids == self._inflow_asset_ids and len(self._outflow_asset_ids) == 1
-    
+        return False
+
+    @property
+    def is_cash_in_lieu(self) -> bool:
+        """True if this unit represents a cash-in-lieu corporate action settlement."""
+        if not self.legs:
+            return False
+        for leg in self.legs:
+            tx = leg.transaction
+            if tx and getattr(tx, "source_transaction_type", None) == "cash_in_lieu":
+                return True
+        return False
+
     @property
     def is_inflow_only(self) -> bool:
         return bool(self.inflow_legs) and not self.outflow_legs
-    
+
     @property
     def is_outflow_only(self) -> bool:
         return bool(self.outflow_legs) and not self.inflow_legs
-    
+
     @property
     def label(self) -> str:
         """Generate a descriptive label for logging/debugging."""
@@ -1605,7 +2274,7 @@ class CalculationUnit(SQLModel, table=True):
             return self.unit_label
         if not self.legs:
             return "Empty"
-        
+
         def fmt(legs) -> str:
             if not legs:
                 return "-"
@@ -1616,7 +2285,7 @@ class CalculationUnit(SQLModel, table=True):
                 qty_str = f"{qty:.4g}" if qty != int(qty) else str(int(qty))
                 parts.append(f"{sym} {qty_str}")
             return ", ".join(parts)
-        
+
         pattern_label = (self.pattern or "unknown").upper()
         return f"{pattern_label} out: {fmt(self.outflow_legs)} in: {fmt(self.inflow_legs)} fees: {fmt(self.fee_legs)}"
 
@@ -1624,13 +2293,13 @@ class CalculationUnit(SQLModel, table=True):
 class LotSettlement(SQLModel, table=True):
     """
     Settlement record linking negative lots to their settling positive lots.
-    
+
     When a negative lot (debt) is settled by one or more inflows, each settlement
     creates a record to maintain full audit trail.
-    
+
     Ownership: Owned by settling_lot (the positive lot that provides funds).
     Version accessed via settling_lot.unit.version.
-    
+
     Example:
         Day 1: BUY 3 BTC with 100€ → Creates negative lot (NEG1) for EUR
         Day 2: SELL AAPL → 50€ → Creates positive lot (POS1), settles 50€ of NEG1
@@ -1640,33 +2309,33 @@ class LotSettlement(SQLModel, table=True):
     __tablename__ = "lot_settlements"
 
     settlement_id: Optional[int] = Field(default=None, primary_key=True)
-    
+
     # The negative lot (debt) being settled
     negative_lot_id: Optional[int] = Field(
         default=None, foreign_key="cost_lots.cost_lot_id", index=True
     )
-    
+
     # The positive lot providing funds (owner of this settlement)
     settling_lot_id: Optional[int] = Field(
         default=None, foreign_key="cost_lots.cost_lot_id", index=True
     )
-    
+
     # Transaction that triggered the settlement (the inflow)
     settling_transaction_id: Optional[int] = Field(
         default=None, foreign_key="normalized_transactions.id", index=True
     )
-    
+
     # Settlement amount
     qty_settled: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
-    
+
     # For non-base currency: cost basis applied
     cost_basis_applied: Optional[Decimal] = Field(
         default=None, sa_column=Column(Numeric(36, 18))
     )
-    
+
     settled_at: datetime = Field(default_factory=utc_now, index=True)
     created_at: datetime = Field(default_factory=utc_now)
-    
+
     # Relationships
     # settling_lot is the owner - back_populates to CostLot.outgoing_settlements
     settling_lot: Optional["CostLot"] = Relationship(
@@ -1678,9 +2347,11 @@ class LotSettlement(SQLModel, table=True):
     )
     settling_transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="lot_settlements",
-        sa_relationship_kwargs={"foreign_keys": "[LotSettlement.settling_transaction_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[LotSettlement.settling_transaction_id]"
+        },
     )
-    
+
     # Convenience property to access version via settling_lot
     @property
     def version(self) -> Optional["CalculationVersion"]:
@@ -1693,7 +2364,7 @@ class LotSettlement(SQLModel, table=True):
 class PnlWarning(SQLModel, table=True):
     """
     Warning record from P&L calculation.
-    
+
     Ownership: Owned by CalculationUnit via unit_id (cascade delete).
     Version accessed via unit.version.
     """
@@ -1702,7 +2373,9 @@ class PnlWarning(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     # version_id removed - version accessed via unit.version
-    warning_type: str = Field(index=True)  # insufficient_lots, negative_balance, missing_price, etc.
+    warning_type: str = Field(
+        index=True
+    )  # insufficient_lots, negative_balance, missing_price, etc.
     message: str = Field(sa_column=Column(Text))
     transaction_id: Optional[int] = Field(
         default=None, foreign_key="normalized_transactions.id", index=True
@@ -1718,13 +2391,13 @@ class PnlWarning(SQLModel, table=True):
     # Relationships - unit is the owner
     unit: Optional["CalculationUnit"] = Relationship(
         back_populates="warnings",
-        sa_relationship_kwargs={"foreign_keys": "[PnlWarning.unit_id]"}
+        sa_relationship_kwargs={"foreign_keys": "[PnlWarning.unit_id]"},
     )
     transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="pnl_warnings",
-        sa_relationship_kwargs={"foreign_keys": "[PnlWarning.transaction_id]"}
+        sa_relationship_kwargs={"foreign_keys": "[PnlWarning.transaction_id]"},
     )
-    
+
     # Convenience property to access version via unit
     @property
     def version(self) -> Optional["CalculationVersion"]:
@@ -1735,47 +2408,45 @@ class PnlWarning(SQLModel, table=True):
 class CostLotEvent(SQLModel, table=True):
     """
     Event-sourced audit trail for cost lot lifecycle.
-    
+
     Tracks every state change to cost lots for complete traceability:
     - Creation from acquisitions
     - Consumption from disposals
     - Settlements of negative lots
     - Transfers between accounts
     - Manual adjustments
-    
+
     This provides a chronological history that can reconstruct lot state
     at any point in time, supporting tax audit requirements.
-    
+
     Ownership: Part of version via lot → unit → version chain.
     """
 
     __tablename__ = "cost_lot_events"
 
     event_id: Optional[int] = Field(default=None, primary_key=True)
-    
+
     # Event type (LotEventType value)
     event_type: str = Field(index=True)
-    
+
     # Primary lot affected
     lot_id: Optional[int] = Field(
         default=None, foreign_key="cost_lots.cost_lot_id", index=True
     )
-    
+
     # Related lot (for settlements/transfers)
     related_lot_id: Optional[int] = Field(
         default=None, foreign_key="cost_lots.cost_lot_id", index=True
     )
-    
+
     # Quantity change (positive = increase, negative = decrease)
-    quantity_delta: Decimal = Field(
-        sa_column=Column(Numeric(36, 18), nullable=False)
-    )
-    
+    quantity_delta: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
+
     # Cost basis change (for adjustments and settlements)
     cost_basis_delta: Optional[Decimal] = Field(
         default=None, sa_column=Column(Numeric(36, 18))
     )
-    
+
     # New balances after event (snapshot for quick queries)
     qty_remaining_after: Decimal = Field(
         sa_column=Column(Numeric(36, 18), nullable=False)
@@ -1783,7 +2454,16 @@ class CostLotEvent(SQLModel, table=True):
     cost_basis_remaining_after: Optional[Decimal] = Field(
         default=None, sa_column=Column(Numeric(36, 18))
     )
-    
+
+    # Asset-level balance (across all accounts/lots for this asset)
+    balance_after: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18))
+    )
+    # Account-level balance (for this specific account+asset combination)
+    account_balance_after: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18))
+    )
+
     # Triggering context
     triggered_by_transaction_id: Optional[int] = Field(
         default=None, foreign_key="normalized_transactions.id", index=True
@@ -1791,32 +2471,31 @@ class CostLotEvent(SQLModel, table=True):
     triggered_by_unit_id: Optional[int] = Field(
         default=None, foreign_key="calculation_units.id", index=True
     )
-    
+
     # Timestamp and sequencing
     timestamp: datetime = Field(default_factory=utc_now, index=True)
     sequence_num: int = Field(default=0)  # For ordering events at same timestamp
-    
-    # Extensible metadata (e.g., adjustment reason, transfer source/dest accounts)
-    event_metadata: Optional[dict] = Field(default=None, sa_column=Column(JSON))
-    
+
     created_at: datetime = Field(default_factory=utc_now)
-    
+
     # Relationships
     lot: Optional["CostLot"] = Relationship(
         back_populates="events",
-        sa_relationship_kwargs={"foreign_keys": "[CostLotEvent.lot_id]"}
+        sa_relationship_kwargs={"foreign_keys": "[CostLotEvent.lot_id]"},
     )
     related_lot: Optional["CostLot"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CostLotEvent.related_lot_id]"}
     )
     triggered_by_transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="cost_lot_events",
-        sa_relationship_kwargs={"foreign_keys": "[CostLotEvent.triggered_by_transaction_id]"}
+        sa_relationship_kwargs={
+            "foreign_keys": "[CostLotEvent.triggered_by_transaction_id]"
+        },
     )
     triggered_by_unit: Optional["CalculationUnit"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CostLotEvent.triggered_by_unit_id]"}
     )
-    
+
     # Convenience properties
     @property
     def version(self) -> Optional["CalculationVersion"]:
@@ -1824,8 +2503,647 @@ class CostLotEvent(SQLModel, table=True):
         if self.lot and self.lot.unit:
             return self.lot.unit.version
         return None
-    
+
     @property
     def asset(self) -> Optional["Asset"]:
         """Access asset through the lot."""
         return self.lot.asset if self.lot else None
+
+
+# ============================================================================
+# Derivative Positions
+# ============================================================================
+
+
+class DerivativePosition(SQLModel, table=True):
+    """
+    Tracks derivative (perpetual futures) position lifecycle.
+
+    Created and updated by the DerivativePositionStage in the sync pipeline.
+    Links to NormalizedTransactions for the opening and closing fills.
+    """
+
+    __tablename__ = "derivative_positions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_id: int = Field(foreign_key="accounts.id", index=True)
+    connector_id: Optional[int] = Field(
+        default=None, foreign_key="account_connectors.id", index=True
+    )
+    exchange: str = Field(index=True)  # "hyperliquid", extensible
+    coin: str = Field(index=True)  # "ZEC", "BTC", "HYPE"
+    side: str = Field(default="long")  # "long" / "short"
+    status: str = Field(default="open", index=True)  # "open" / "closed"
+
+    # Price tracking
+    entry_price: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    exit_price: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18), nullable=True)
+    )
+
+    # Size tracking
+    size: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    remaining_size: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Settlement
+    margin_currency: str = Field(default="USDC")
+    realized_pnl: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    total_fees: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Timestamps
+    opened_at: Optional[datetime] = Field(default=None)
+    closed_at: Optional[datetime] = Field(default=None)
+
+    # Transaction links
+    open_transaction_id: Optional[int] = Field(
+        default=None, foreign_key="normalized_transactions.id"
+    )
+    close_transaction_ids: Optional[List[int]] = Field(
+        default_factory=list, sa_column=Column(JSONB, default=[])
+    )
+
+    # Relationship to opening transaction
+    open_transaction: Optional["NormalizedTransaction"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[DerivativePosition.open_transaction_id]",
+        },
+    )
+
+
+# ============================================================================
+# French Tax Models
+# ============================================================================
+
+
+class FrenchCryptoTaxEntry(SQLModel, table=True):
+    """
+    Individual crypto transaction tax calculation record (French Article 150 VH bis CGI).
+
+    Stores line-item tax data for each dispositive transaction (crypto→fiat conversion).
+    Used for reconstructing the Cerfa 2086 tax form submission.
+    """
+
+    __tablename__ = "french_crypto_tax_entries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Link to calculation and version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+
+    # Transaction reference
+    realized_pnl_id: Optional[int] = Field(
+        default=None, foreign_key="realized_pnl.pnl_id", index=True
+    )
+
+    # Tax year (fiscal year)
+    fiscal_year: int = Field(index=True)  # 2024, 2025, etc.
+
+    # Disposal transaction details
+    cession_date: datetime = Field(index=True)  # Date of crypto→fiat conversion
+    asset_symbol: str = Field(index=True)  # "BTC", "ETH", etc.
+
+    # French formula components (Article 150 VH bis CGI)
+    # PV = Prix_cession − (Prix_total_acquisition × Prix_cession / Valeur_globale_portefeuille)
+    proceeds: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Prix_cession
+
+    cost_basis: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Prix_acquisition for this lot
+
+    portfolio_value_at_cession: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Valeur_globale_portefeuille
+
+    total_acquisition_cost: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Prix_total_acquisition
+
+    # Calculated gain/loss
+    taxable_gain: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Can be negative (loss)
+
+    # Tax at 30% PFU (12.8% income + 17.2% social)
+    tax_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # taxable_gain * 0.30
+
+    # Metadata
+    note: Optional[str] = Field(default=None)  # e.g., "CEX withdrawal", "P2P sale"
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_crypto_tax_entries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[FrenchCryptoTaxEntry.account_id]"}
+    )
+
+
+class FrenchCryptoTaxAnnualSummary(SQLModel, table=True):
+    """
+    Annual aggregation of French crypto taxes (Article 150 VH bis CGI).
+
+    Summarizes all dispositions for a fiscal year and tracks annual netting.
+    Used for summary reporting in tax filings and UI display.
+    """
+
+    __tablename__ = "french_crypto_tax_annual_summaries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Link to calculation and version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+
+    # Tax year
+    fiscal_year: int = Field(index=True)  # 2024, 2025, etc.
+
+    # Annual aggregates
+    total_gains: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Sum of all positive gains (before netting)
+
+    total_losses: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Sum of all losses (absolute value)
+
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # total_gains - total_losses (capped at 0 if negative)
+
+    # Annual tax
+    tax_before_carryforward: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # net_taxable * 0.30
+
+    # Loss carryforward (pre-2025: no carryforward, always 0)
+    loss_carryforward_used: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Losses applied from prior years
+
+    loss_carried_forward: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Unnet loss this year (post-2025 only)
+
+    # Final tax
+    tax_total: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # tax_before_carryforward (after carryforward, always >= 0)
+
+    # Transaction count
+    transaction_count: int = Field(default=0)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_crypto_tax_annual_summaries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[FrenchCryptoTaxAnnualSummary.account_id]"
+        }
+    )
+
+
+class TaxLossCarryforward(SQLModel, table=True):
+    """
+    Tracks loss carryforward for French securities tax (Article 150-0 A CGI).
+
+    Securities losses can be carried forward 10 years against future gains.
+    This model tracks carryforward history per account per fiscal year.
+    """
+
+    __tablename__ = "tax_loss_carryforwards"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Link to account
+    account_id: int = Field(foreign_key="accounts.id", index=True)
+
+    # Historical data
+    loss_fiscal_year: int = Field(index=True)  # Year loss occurred (e.g., 2020)
+    current_fiscal_year: int = Field(index=True)  # Current year evaluating carryforward
+
+    # Carryforward tracking
+    loss_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Original loss from loss_fiscal_year
+
+    used_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Amount used in current_fiscal_year
+
+    remaining_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # loss_amount - used_amount
+
+    # Carryforward window (10 years for securities)
+    carryforward_expires: int = Field(default=0)  # loss_fiscal_year + 10
+
+    is_expired: bool = Field(
+        default=False, index=True
+    )  # True if current_fiscal_year > carryforward_expires
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[TaxLossCarryforward.account_id]"}
+    )
+
+
+class FrenchSecuritiesTaxEntry(SQLModel, table=True):
+    """
+    Individual securities transaction tax calculation record (French Article 150-0 A CGI).
+
+    Stores line-item tax data for each securities disposal using CUMP method.
+    Used for reconstructing the Form 2074 tax form submission.
+    """
+
+    __tablename__ = "french_securities_tax_entries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Link to calculation version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+
+    # Transaction reference
+    realized_pnl_id: Optional[int] = Field(
+        default=None, foreign_key="realized_pnl.pnl_id", index=True
+    )
+
+    # Tax year (fiscal year)
+    fiscal_year: int = Field(index=True)
+
+    # Trade details
+    trade_date: datetime = Field(index=True)
+    asset_symbol: str = Field(index=True)
+    direction: str = Field(default="sell")  # "buy" or "sell"
+    qty: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )
+
+    # CUMP method fields
+    proceeds_per_unit: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Sale price per unit
+    cump_at_time: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # CUMP (Coût Unitaire Moyen Pondéré) at time of trade
+
+    # Calculated gain/loss: qty × (proceeds_per_unit - cump_at_time) for sells
+    gain_loss: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Tax at 30% PFU
+    tax_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Metadata
+    note: Optional[str] = Field(default=None)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_securities_tax_entries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[FrenchSecuritiesTaxEntry.account_id]"}
+    )
+
+
+class FrenchSecuritiesTaxAnnualSummary(SQLModel, table=True):
+    """
+    Annual aggregation of French securities taxes (Article 150-0 A CGI).
+
+    Summarizes all dispositions for a fiscal year with CUMP-based gains/losses
+    and 10-year loss carryforward tracking.
+    """
+
+    __tablename__ = "french_securities_tax_annual_summaries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Link to calculation version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+
+    # Tax year
+    fiscal_year: int = Field(index=True)
+
+    # Annual aggregates
+    total_gains: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    total_losses: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Loss carryforward
+    loss_carryforward_used: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    loss_carried_forward: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Final tax
+    tax_total: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Transaction count
+    transaction_count: int = Field(default=0)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_securities_tax_annual_summaries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[FrenchSecuritiesTaxAnnualSummary.account_id]"
+        }
+    )
+
+
+class TransactionTaxOverride(SQLModel, table=True):
+    """
+    Per-transaction, per-jurisdiction tax override.
+
+    Stores user overrides of computed taxability for specific tax jurisdictions.
+    Only stores exceptions — absence of a row means "use computed disposal_taxable".
+
+    PK: (transaction_id, jurisdiction)
+    """
+
+    __tablename__ = "transaction_tax_overrides"
+
+    transaction_id: int = Field(
+        foreign_key="normalized_transactions.id",
+        primary_key=True,
+        nullable=False,
+    )
+    jurisdiction: str = Field(
+        max_length=10,
+        primary_key=True,
+        nullable=False,
+    )
+    is_taxable: bool = Field(nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="tax_overrides",
+        sa_relationship_kwargs={
+            "foreign_keys": "[TransactionTaxOverride.transaction_id]"
+        },
+    )
+
+
+# ============================================================================
+# Income tracking models
+# ============================================================================
+
+
+class IncomeType(str, Enum):
+    """Classification of income events."""
+
+    DIVIDEND = "dividend"
+    INTEREST = "interest"
+    STAKING = "staking"
+    FUNDING = "funding"
+    AIRDROP = "airdrop"
+    OTHER = "other"
+
+
+class IncomeEvent(SQLModel, table=True):
+    """
+    Income event record — sibling of RealizedPnl for non-disposal income.
+
+    Tracks dividends, interest, staking rewards, funding rate payments, and
+    other income that does not involve disposing of an asset. Withholding tax
+    is stored inline (not as a separate transaction).
+
+    Ownership: CalculationUnit → IncomeEvent (cascade all, delete-orphan).
+    """
+
+    __tablename__ = "income_events"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    version_id: int = Field(
+        foreign_key="calculation_versions.version_id", nullable=False, index=True
+    )
+    unit_id: int = Field(foreign_key="calculation_units.id", nullable=False, index=True)
+    income_type: str = Field(nullable=False, index=True)  # IncomeType values
+    asset_id: int = Field(
+        foreign_key="assets.asset_id", nullable=False, index=True
+    )  # Cash/token received
+    attributed_asset_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id", index=True
+    )  # Stock/position generating income
+    transaction_id: Optional[int] = Field(
+        default=None, foreign_key="normalized_transactions.id", index=True
+    )
+
+    # Amounts
+    gross_amount_in_base: Decimal = Field(
+        sa_column=Column(Numeric(36, 18), nullable=False)
+    )
+    net_amount_in_base: Decimal = Field(
+        sa_column=Column(Numeric(36, 18), nullable=False)
+    )
+    withholding_amount_in_base: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Withholding details
+    withholding_jurisdiction: Optional[str] = Field(default=None, max_length=10)
+    withholding_rate: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(10, 6), nullable=True)
+    )
+
+    # Timing
+    income_at: datetime = Field(index=True)
+
+    # Metadata
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    unit: Optional["CalculationUnit"] = Relationship(
+        back_populates="income_events",
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.unit_id]"},
+    )
+    version: Optional["CalculationVersion"] = Relationship(
+        back_populates="income_events",
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.version_id]"},
+    )
+    asset: Optional["Asset"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.asset_id]"},
+    )
+    attributed_asset: Optional["Asset"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.attributed_asset_id]"},
+    )
+    transaction: Optional["NormalizedTransaction"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.transaction_id]"},
+    )
+
+
+class DividendIncomeTaxEntry(SQLModel, table=True):
+    """
+    Individual income tax calculation record (French PFU on securities income).
+
+    Stores line-item tax data for each income event (dividend, interest)
+    with withholding tax credit handling per US-France treaty.
+    """
+
+    __tablename__ = "dividend_income_tax_entries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+    income_event_id: Optional[int] = Field(
+        default=None, foreign_key="income_events.id", index=True
+    )
+
+    fiscal_year: int = Field(index=True)
+    asset_symbol: str = Field(index=True)
+    income_type: str = Field(default="dividend")  # dividend, interest, etc.
+
+    # Amounts
+    gross_income: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    withholding_tax_credit: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    tax_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Metadata
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="dividend_income_tax_entries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[DividendIncomeTaxEntry.account_id]"}
+    )
+    income_event: Optional["IncomeEvent"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[DividendIncomeTaxEntry.income_event_id]"
+        }
+    )
+
+
+class DividendIncomeAnnualSummary(SQLModel, table=True):
+    """
+    Annual aggregation of income taxes (French PFU on securities income).
+
+    Summarizes all income events for a fiscal year with withholding tax
+    credit tracking for 2042/2047 form filling.
+    """
+
+    __tablename__ = "dividend_income_annual_summaries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+
+    fiscal_year: int = Field(index=True)
+
+    # Annual aggregates
+    total_gross_income: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    total_withholding_credits: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    tax_total: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    event_count: int = Field(default=0)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="dividend_income_annual_summaries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[DividendIncomeAnnualSummary.account_id]"
+        }
+    )

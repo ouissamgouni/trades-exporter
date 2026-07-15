@@ -6,11 +6,13 @@
  */
 
 import React, { useState } from 'react';
-import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import { FiLoader } from 'react-icons/fi';
 import { Tooltip } from './ui/tooltip';
+import { Badge } from './ui/primitives';
 import { API_URL } from '../types';
 import { formatDateTimeLocale } from '../utils/dateUtils';
+import { formatQuantity } from '../utils/numberUtils';
+import { ValueDisplay } from './ValueDisplay';
 
 // ============================================================================
 // Types
@@ -53,20 +55,6 @@ export interface TransactionTooltipProps {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-const formatQty = (value: number): string => {
-    if (value === 0) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
 
 // ============================================================================
 // Component
@@ -125,102 +113,93 @@ export const TransactionTooltip: React.FC<TransactionTooltipProps> = ({
     };
 
     const tooltipContent = (
-        <Box
-            p={2}
-            bg="gray.800"
-            borderRadius="md"
-            minW="250px"
-            onMouseEnter={fetchTransaction}
-        >
+        <div className="min-w-[250px] text-xs" onMouseEnter={fetchTransaction}>
             {loading ? (
-                <Flex align="center" gap={2}>
+                <div className="flex items-center gap-2">
                     <FiLoader className="animate-spin" />
-                    <Text fontSize="xs" color="gray.300">Loading...</Text>
-                </Flex>
+                    <span className="text-slate-300">Loading...</span>
+                </div>
             ) : error ? (
-                <Text fontSize="xs" color="red.300">Error: {error}</Text>
+                <span className="text-red-300">Error: {error}</span>
             ) : txData ? (
-                <Box fontSize="xs">
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Date</Text>
-                        <Text color="white">{formatDateTimeLocale(txData.date_time)}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Account</Text>
-                        <Text color="white">{txData.account_name || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Type</Text>
-                        <Text color="white">{txData.transaction_type || txData.source_transaction_type || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Source</Text>
-                        <Text color="white">{txData.source || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Asset</Text>
-                        <Badge size="xs">{txData.asset_symbol || '-'}</Badge>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Quantity</Text>
-                        <Text color="white" fontFamily="mono">{formatQty(txData.quantity || 0)}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Unit Price</Text>
-                        <Text color="white">{txData.price ? formatCurrency(txData.price, baseCurrency) : '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Total</Text>
-                        <Text color="white">{txData.total ? formatCurrency(txData.total, baseCurrency) : '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Quote Asset</Text>
-                        <Text color="white">{txData.price_quote_asset_symbol || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Fee</Text>
-                        <Text color="white">{txData.fee ? formatQty(txData.fee) : '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Fee Quote</Text>
-                        <Text color="white">{txData.fee_quote_asset_symbol || '-'}</Text>
-                    </Flex>
-                    <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">From/To Account</Text>
-                        <Text color="white">
+                <div className="text-xs">
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Date</span>
+                        <span className="text-white">{formatDateTimeLocale(txData.date_time)}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Account</span>
+                        <span className="text-white">{txData.account_name || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Type</span>
+                        <span className="text-white">{txData.transaction_type || txData.source_transaction_type || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Source</span>
+                        <span className="text-white">{txData.source || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Asset</span>
+                        <Badge colorScheme="gray">{txData.asset_symbol || '-'}</Badge>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Quantity</span>
+                        <span className="font-mono text-white"><ValueDisplay value={txData.quantity} /></span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Unit Price</span>
+                        <span className="text-white"><ValueDisplay value={txData.price} /></span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Total</span>
+                        <span className="text-white">
+                            {txData.total ? <ValueDisplay value={txData.total} currency={baseCurrency} /> : '-'}
+                        </span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Quote Asset</span>
+                        <span className="text-white">{txData.price_quote_asset_symbol || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Fee</span>
+                        <span className="text-white"><ValueDisplay value={txData.fee} /></span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">Fee Quote</span>
+                        <span className="text-white">{txData.fee_quote_asset_symbol || '-'}</span>
+                    </div>
+                    <div className="mb-1 flex justify-between">
+                        <span className="text-slate-400">From/To Account</span>
+                        <span className="text-white">
                             {txData.direction === 'inflow'
-                                ? (txData.from_account_name || txData.source_from_account || '-')
-                                : (txData.to_account_name || txData.source_to_account || '-')}
-                        </Text>
-                    </Flex>
+                                ? (txData.from_account_name
+                                    ? `${txData.from_account_name}${txData.source_from_account && txData.source_from_account !== txData.from_account_name ? ` (${txData.source_from_account})` : ''}`
+                                    : (txData.source_from_account || '-'))
+                                : (txData.to_account_name
+                                    ? `${txData.to_account_name}${txData.source_to_account && txData.source_to_account !== txData.to_account_name ? ` (${txData.source_to_account})` : ''}`
+                                    : (txData.source_to_account || '-'))}
+                        </span>
+                    </div>
                     {/* View full details link */}
                     {onTransactionClick && (
-                        <Box
-                            mt={2}
-                            pt={2}
-                            borderTop="1px solid"
-                            borderColor="gray.600"
-                            textAlign="center"
-                        >
-                            <Text
-                                fontSize="xs"
-                                color="blue.300"
-                                cursor="pointer"
-                                _hover={{ color: 'blue.200', textDecoration: 'underline' }}
+                        <div className="mt-2 border-t border-slate-600 pt-2 text-center">
+                            <span
+                                className="cursor-pointer text-blue-300 hover:text-blue-200 hover:underline"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     onTransactionClick(txId);
                                 }}
                             >
                                 View full details →
-                            </Text>
-                        </Box>
+                            </span>
+                        </div>
                     )}
-                </Box>
+                </div>
             ) : (
-                <Text fontSize="xs" color="gray.400">Hover to load details</Text>
+                <span className="text-slate-400">Hover to load details</span>
             )}
-        </Box>
+        </div>
     );
 
     return (
@@ -229,9 +208,9 @@ export const TransactionTooltip: React.FC<TransactionTooltipProps> = ({
             openDelay={200}
             closeDelay={100}
         >
-            <Box onMouseEnter={fetchTransaction} display="inline-block">
+            <span className="inline-block" onMouseEnter={fetchTransaction}>
                 {children}
-            </Box>
+            </span>
         </Tooltip>
     );
 };

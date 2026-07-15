@@ -10,23 +10,11 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-    Badge,
-    Box,
-    Button,
-    Card,
-    Flex,
-    Heading,
-    NativeSelect,
-    Spinner,
-    Text,
-} from '@chakra-ui/react';
+import { Badge, Button, Spinner } from '../ui/primitives';
 import { FiActivity, FiPlay, FiSave, FiRefreshCw, FiClock, FiTrash2, FiDownload, FiPlus, FiFolder } from 'react-icons/fi';
 import { CalculationConfig, CalculationStatus, VersionListItem } from './types';
-import { Account, Asset, API_URL, CostMethod, LotMode, ValidationSummary } from '../../types';
+import { Account, CostMethod, LotMode } from '../../types';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
-import { DataHealthCheckDrawer } from '../DataHealthCheckDrawer';
-import { Tooltip } from '../ui/tooltip';
 
 export type CalculationMode = 'load' | 'new';
 
@@ -76,87 +64,21 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
     error,
 }) => {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
-    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
-    const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
-    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
-    const [assets, setAssets] = useState<Asset[]>([]);
-    const [healthCheckAccounts, setHealthCheckAccounts] = useState<Account[]>([]);
 
     const selectedVersion = availableVersions.find(v => v.version_id === selectedVersionId);
-
-    // Fetch assets for health check drawer
-    const fetchAssets = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
-        }
-    }, []);
-
-    // Fetch accounts for health check drawer
-    const fetchHealthCheckAccounts = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts/`);
-            if (response.ok) {
-                const data = await response.json();
-                setHealthCheckAccounts(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch accounts:', err);
-        }
-    }, []);
-
-    // Fetch assets and accounts when health check opens
-    useEffect(() => {
-        if (isHealthCheckOpen) {
-            fetchAssets();
-            fetchHealthCheckAccounts();
-        }
-    }, [isHealthCheckOpen, fetchAssets, fetchHealthCheckAccounts]);
-
-    // Fetch validation summary on mount and when account filter changes
-    const fetchValidationSummary = useCallback(async () => {
-        try {
-            const params = new URLSearchParams();
-            if (config.account_ids && config.account_ids.length > 0) {
-                params.set('account_ids', config.account_ids.join(','));
-            }
-            const url = `${API_URL}/transactions/data-health-check${params.toString() ? `?${params}` : ''}`;
-            const response = await fetch(url);
-            if (response.ok) {
-                const data: ValidationSummary = await response.json();
-                setValidationSummary(data);
-            } else {
-                // On error, show healthy state
-                setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
-            }
-        } catch (err) {
-            console.error('Failed to fetch validation summary:', err);
-            // On error, show healthy state
-            setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
-        }
-    }, [config.account_ids]);
-
-    useEffect(() => {
-        fetchValidationSummary();
-    }, [fetchValidationSummary]);
 
     const getStatusBadge = () => {
         switch (status) {
             case 'idle':
-                return <Badge colorPalette="gray">No Calculation</Badge>;
+                return <Badge colorScheme="gray">No Calculation</Badge>;
             case 'calculating':
-                return <Badge colorPalette="blue"><Spinner size="xs" mr={1} /> Calculating...</Badge>;
+                return <Badge colorScheme="blue"><Spinner size="xs" className="mr-1" /> Calculating...</Badge>;
             case 'preview':
-                return <Badge colorPalette="orange">Preview</Badge>;
+                return <Badge colorScheme="orange">Preview</Badge>;
             case 'persisted':
-                return <Badge colorPalette="green">Saved</Badge>;
+                return <Badge colorScheme="green">Saved</Badge>;
             case 'error':
-                return <Badge colorPalette="red">Error</Badge>;
+                return <Badge colorScheme="red">Error</Badge>;
             default:
                 return null;
         }
@@ -174,17 +96,16 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
     };
 
     return (
-        <Card.Root mb={4}>
-            <Card.Body>
+        <div className="mb-4 rounded-md border border-gray-200 bg-white">
+            <div className="p-4">
                 {/* Mode Toggle: Load Version OR New Calculation */}
-                <Flex gap={2} mb={4} pb={4} borderBottom="1px solid" borderColor="gray.200">
+                <div className="mb-4 flex gap-2 border-b border-gray-200 pb-4">
                     <Button
                         size="sm"
                         variant={mode === 'load' ? 'solid' : 'outline'}
-                        colorPalette={mode === 'load' ? 'blue' : 'gray'}
+                        colorScheme={mode === 'load' ? 'blue' : 'gray'}
                         onClick={() => onModeChange('load')}
-                        flex={1}
-                        maxW="200px"
+                        className="max-w-[200px] flex-1"
                     >
                         <FiFolder style={{ marginRight: 6 }} />
                         Load Saved Version
@@ -192,55 +113,52 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                     <Button
                         size="sm"
                         variant={mode === 'new' ? 'solid' : 'outline'}
-                        colorPalette={mode === 'new' ? 'blue' : 'gray'}
+                        colorScheme={mode === 'new' ? 'blue' : 'gray'}
                         onClick={() => onModeChange('new')}
-                        flex={1}
-                        maxW="200px"
+                        className="max-w-[200px] flex-1"
                     >
                         <FiPlus style={{ marginRight: 6 }} />
                         New Calculation
                     </Button>
-                    <Box flex={1} />
+                    <div className="flex-1" />
                     {getStatusBadge()}
-                </Flex>
+                </div>
 
                 {/* Load Version Mode */}
                 {mode === 'load' && onLoadVersion && (
-                    <Box>
-                        <Text fontSize="xs" fontWeight="medium" color="gray.600" mb={2}>
+                    <div>
+                        <div className="mb-2 text-xs font-medium text-gray-600">
                             <FiClock style={{ display: 'inline', marginRight: 4 }} />
                             Saved Versions {availableVersions.length > 0 && `(${availableVersions.length})`}
-                            {isLoadingVersions && <Spinner size="xs" ml={2} />}
-                        </Text>
-                        <Flex gap={2} align="center" wrap="wrap">
-                            <NativeSelect.Root size="sm" width="320px">
-                                <NativeSelect.Field
-                                    value={selectedVersionId ?? ''}
-                                    onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (val) onLoadVersion(parseInt(val, 10));
-                                    }}
-                                    _disabled={{ opacity: 0.5 }}
-                                >
-                                    <option value="">Select a saved version...</option>
-                                    {availableVersions.map((v) => (
-                                        <option key={v.version_id} value={v.version_id}>
-                                            v{v.version_id} - {formatDateTimeLocale(v.created_at)} - {v.lot_method} ({v.status})
-                                        </option>
-                                    ))}
-                                </NativeSelect.Field>
-                            </NativeSelect.Root>
+                            {isLoadingVersions && <Spinner size="xs" className="ml-2" />}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <select
+                                className="h-9 w-[320px] border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                                value={selectedVersionId ?? ''}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val) onLoadVersion(parseInt(val, 10));
+                                }}
+                            >
+                                <option value="">Select a saved version...</option>
+                                {availableVersions.map((v) => (
+                                    <option key={v.version_id} value={v.version_id}>
+                                        v{v.version_id} - {formatDateTimeLocale(v.created_at)} - {v.lot_method} ({v.status})
+                                    </option>
+                                ))}
+                            </select>
 
                             {selectedVersionId && onDeleteVersion && (
                                 <Button
                                     size="sm"
-                                    colorPalette="red"
+                                    colorScheme="red"
                                     variant={showDeleteConfirm === selectedVersionId ? 'solid' : 'outline'}
                                     onClick={() => handleDeleteVersion(selectedVersionId)}
                                     disabled={isDeleting}
                                 >
                                     {isDeleting ? (
-                                        <><Spinner size="xs" mr={2} /> Deleting...</>
+                                        <><Spinner size="xs" className="mr-2" /> Deleting...</>
                                     ) : showDeleteConfirm === selectedVersionId ? (
                                         <><FiTrash2 /> Click to confirm</>
                                     ) : (
@@ -250,49 +168,53 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                             )}
 
                             {selectedVersion && (
-                                <Badge colorPalette="gray" ml={2}>
+                                <Badge colorScheme="gray" className="ml-2">
                                     {selectedVersion.lot_method} / {selectedVersion.lot_mode}
                                 </Badge>
                             )}
-                        </Flex>
+                        </div>
 
                         {selectedVersion && (
-                            <Text fontSize="xs" color="gray.500" mt={2}>
-                                <FiClock style={{ display: 'inline', marginRight: 4 }} />
-                                Calculated: {formatDateTimeLocale(selectedVersion.created_at)}
-                            </Text>
+                            <div className="mt-2">
+                                <div className="text-xs text-gray-500">
+                                    <FiClock style={{ display: 'inline', marginRight: 4 }} />
+                                    Calculated: {formatDateTimeLocale(selectedVersion.created_at)}
+                                </div>
+                                <div className="mt-1 text-xs text-gray-500">
+                                    Base: {selectedVersion.base_currency_symbol || '?'} ·
+                                    Tolerance: {selectedVersion.residual_tolerance_pct === 0 ? 'OFF' : `${selectedVersion.residual_tolerance_pct}%`} ·
+                                    Neg. balances: {selectedVersion.allow_negative_balances ? '✓' : '✗'} ·
+                                    Swaps taxable: {selectedVersion.crypto_swap_taxable ? '✓' : '✗'} ·
+                                    Fees taxable: {selectedVersion.fee_taxable ? '✓' : '✗'}
+                                    {selectedVersion.use_price_fallback !== undefined && (
+                                        <> · Price fallback: {selectedVersion.use_price_fallback ? `✓ (${selectedVersion.price_staleness_window_days ?? 7}d)` : '✗'}</>
+                                    )}
+                                </div>
+                            </div>
                         )}
-                    </Box>
+                    </div>
                 )}
 
                 {/* New Calculation Mode */}
                 {mode === 'new' && (
                     <>
                         {/* Accounts Filter Section - Prominent, Above Other Config */}
-                        <Box mb={4} pb={4} borderBottom="1px solid" borderColor="gray.100">
-                            <Text fontSize="xs" fontWeight="medium" color="gray.600" mb={2}>
+                        <div className="mb-4 border-b border-gray-100 pb-4">
+                            <div className="mb-2 text-xs font-medium text-gray-600">
                                 Filter by Accounts
-                            </Text>
-                            <Box
-                                maxH="180px"
-                                overflowY="auto"
-                                p={2}
-                                bg="gray.50"
-                                borderRadius="md"
-                                border="1px solid"
-                                borderColor="gray.200"
-                            >
-                                <Flex gap={1} flexWrap="wrap">
+                            </div>
+                            <div className="max-h-[180px] overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-2">
+                                <div className="flex flex-wrap gap-1">
                                     {isLoadingAccounts ? (
-                                        <Text fontSize="sm" color="gray.400">Loading accounts...</Text>
+                                        <span className="text-sm text-gray-400">Loading accounts...</span>
                                     ) : accounts.length === 0 ? (
-                                        <Text fontSize="sm" color="gray.400">No accounts available</Text>
+                                        <span className="text-sm text-gray-400">No accounts available</span>
                                     ) : (
                                         <>
                                             <Button
-                                                size="xs"
+                                                size="sm"
                                                 variant={!config.account_ids || config.account_ids.length === 0 ? 'solid' : 'outline'}
-                                                colorPalette={!config.account_ids || config.account_ids.length === 0 ? 'blue' : 'gray'}
+                                                colorScheme={!config.account_ids || config.account_ids.length === 0 ? 'blue' : 'gray'}
                                                 onClick={() => onConfigChange({ account_ids: [] })}
                                             >
                                                 All ({accounts.length})
@@ -300,9 +222,9 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                             {accounts.map(account => (
                                                 <Button
                                                     key={account.id}
-                                                    size="xs"
+                                                    size="sm"
                                                     variant={config.account_ids?.includes(account.id) ? 'solid' : 'outline'}
-                                                    colorPalette={config.account_ids?.includes(account.id) ? 'blue' : 'gray'}
+                                                    colorScheme={config.account_ids?.includes(account.id) ? 'blue' : 'gray'}
                                                     onClick={() => {
                                                         const current = config.account_ids || [];
                                                         const newIds = current.includes(account.id)
@@ -316,65 +238,63 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                             ))}
                                         </>
                                     )}
-                                </Flex>
-                            </Box>
+                                </div>
+                            </div>
                             {config.account_ids && config.account_ids.length > 0 && (
-                                <Text fontSize="xs" color="blue.600" mt={1}>
+                                <div className="mt-1 text-xs text-blue-600">
                                     {config.account_ids.length} account{config.account_ids.length > 1 ? 's' : ''} selected
-                                </Text>
+                                </div>
                             )}
-                        </Box>
+                        </div>
 
                         {/* Main Configuration Parameters */}
-                        <Flex gap={4} wrap="wrap" align="flex-start" mb={4}>
-                            <Box>
-                                <Text fontSize="xs" mb={1} fontWeight="medium" color="gray.600">
+                        <div className="mb-4 flex flex-wrap items-start gap-4">
+                            <div>
+                                <div className="mb-1 text-xs font-medium text-gray-600">
                                     Cost Method
-                                </Text>
-                                <NativeSelect.Root size="sm" width="100px">
-                                    <NativeSelect.Field
-                                        value={config.lot_method}
-                                        onChange={(e) => onConfigChange({ lot_method: e.target.value as CostMethod })}
-                                    >
-                                        <option value="FIFO">FIFO</option>
-                                        <option value="LIFO">LIFO</option>
-                                        <option value="HIFO">HIFO</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Box>
+                                </div>
+                                <select
+                                    className="h-9 w-[100px] border border-slate-200 bg-white px-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    value={config.lot_method}
+                                    onChange={(e) => onConfigChange({ lot_method: e.target.value as CostMethod })}
+                                >
+                                    <option value="FIFO">FIFO</option>
+                                    <option value="LIFO">LIFO</option>
+                                    <option value="HIFO">HIFO</option>
+                                </select>
+                            </div>
 
-                            <Box>
-                                <Text fontSize="xs" mb={1} fontWeight="medium" color="gray.600">
+                            <div>
+                                <div className="mb-1 text-xs font-medium text-gray-600">
                                     Lot Mode
-                                </Text>
-                                <NativeSelect.Root size="sm" width="130px">
-                                    <NativeSelect.Field
-                                        value={config.lot_mode}
-                                        onChange={(e) => onConfigChange({ lot_mode: e.target.value as LotMode })}
-                                    >
-                                        <option value="LOT_TRAVEL">Lot Travel</option>
-                                        <option value="MEGA_WALLET">Mega Wallet</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Box>
+                                </div>
+                                <select
+                                    className="h-9 w-[130px] border border-slate-200 bg-white px-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    value={config.lot_mode}
+                                    onChange={(e) => onConfigChange({ lot_mode: e.target.value as LotMode })}
+                                >
+                                    <option value="LOT_TRAVEL">Lot Travel</option>
+                                    <option value="MEGA_WALLET">Mega Wallet</option>
+                                </select>
+                            </div>
 
-                            <Box>
-                                <Text fontSize="xs" mb={1} fontWeight="medium" color="gray.600">
+                            <div>
+                                <div className="mb-1 text-xs font-medium text-gray-600">
                                     Base Currency
-                                </Text>
-                                <Badge colorPalette="blue" size="lg" px={3} py={1}>
+                                </div>
+                                <Badge colorScheme="blue" className="px-3 py-1 text-base">
                                     {config.base_currency_symbol}
                                 </Badge>
-                            </Box>
+                            </div>
 
                             {/* Advanced Settings - Inline */}
-                            <Box p={2} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
-                                <Text fontSize="xs" fontWeight="semibold" color="gray.700" mb={2}>
+                            <div className="rounded-md border border-gray-200 bg-gray-50 p-2">
+                                <div className="mb-2 text-xs font-semibold text-gray-700">
                                     Advanced Settings
-                                </Text>
-                                <Flex gap={3} wrap="wrap" align="center">
-                                    <Flex align="center" gap={1}>
-                                        <Text fontSize="xs" color="gray.600">Residual %</Text>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-xs text-gray-600">Residual %</span>
                                         <input
                                             type="number"
                                             value={config.residual_tolerance_pct}
@@ -390,9 +310,9 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                                 fontSize: '12px',
                                             }}
                                         />
-                                    </Flex>
+                                    </div>
 
-                                    <Flex align="center" gap={1}>
+                                    <div className="flex items-center gap-1">
                                         <input
                                             type="checkbox"
                                             id="allow_negative_balances"
@@ -403,9 +323,9 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                         <label htmlFor="allow_negative_balances" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
                                             Negative Bal.
                                         </label>
-                                    </Flex>
+                                    </div>
 
-                                    <Flex align="center" gap={1}>
+                                    <div className="flex items-center gap-1">
                                         <input
                                             type="checkbox"
                                             id="compute_residuals"
@@ -416,9 +336,9 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                         <label htmlFor="compute_residuals" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
                                             Residuals
                                         </label>
-                                    </Flex>
+                                    </div>
 
-                                    <Flex align="center" gap={1}>
+                                    <div className="flex items-center gap-1">
                                         <input
                                             type="checkbox"
                                             id="crypto_swap_taxable"
@@ -429,9 +349,9 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                         <label htmlFor="crypto_swap_taxable" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
                                             Swaps Tax
                                         </label>
-                                    </Flex>
+                                    </div>
 
-                                    <Flex align="center" gap={1}>
+                                    <div className="flex items-center gap-1">
                                         <input
                                             type="checkbox"
                                             id="fee_taxable"
@@ -442,10 +362,10 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                         <label htmlFor="fee_taxable" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
                                             Fees Tax
                                         </label>
-                                    </Flex>
+                                    </div>
 
-                                    <Box borderLeft="1px solid" borderColor="gray.300" pl={3} ml={1}>
-                                        <Flex align="center" gap={1}>
+                                    <div className="ml-1 border-l border-gray-300 pl-3">
+                                        <div className="flex items-center gap-1">
                                             <input
                                                 type="checkbox"
                                                 id="use_price_fallback"
@@ -456,12 +376,12 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                             <label htmlFor="use_price_fallback" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
                                                 Price Fallback
                                             </label>
-                                        </Flex>
-                                    </Box>
+                                        </div>
+                                    </div>
 
                                     {config.use_price_fallback && (
-                                        <Flex align="center" gap={1}>
-                                            <Text fontSize="xs" color="gray.600">Stale after</Text>
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs text-gray-600">Stale after</span>
                                             <input
                                                 type="number"
                                                 value={config.price_staleness_window_days}
@@ -476,23 +396,23 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                                     fontSize: '12px',
                                                 }}
                                             />
-                                            <Text fontSize="xs" color="gray.600">days</Text>
-                                        </Flex>
+                                            <span className="text-xs text-gray-600">days</span>
+                                        </div>
                                     )}
-                                </Flex>
-                            </Box>
-                        </Flex>
+                                </div>
+                            </div>
+                        </div>
 
                         {/* Calculate Button + Data Health Check */}
-                        <Flex gap={2} align="center">
+                        <div className="flex items-center gap-2">
                             <Button
                                 size="sm"
-                                colorPalette="blue"
+                                colorScheme="blue"
                                 onClick={onCalculate}
                                 disabled={isCalculating}
                             >
                                 {isCalculating ? (
-                                    <><Spinner size="xs" mr={2} /> Calculating...</>
+                                    <><Spinner size="xs" className="mr-2" /> Calculating...</>
                                 ) : status === 'preview' ? (
                                     <><FiRefreshCw style={{ marginRight: 6 }} /> Recalculate</>
                                 ) : (
@@ -503,65 +423,42 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                             {status === 'preview' && onPersist && (
                                 <Button
                                     size="sm"
-                                    colorPalette="green"
+                                    colorScheme="green"
                                     onClick={onPersist}
                                     disabled={isPersisting}
                                 >
                                     {isPersisting ? (
-                                        <><Spinner size="xs" mr={2} /> Saving...</>
+                                        <><Spinner size="xs" className="mr-2" /> Saving...</>
                                     ) : (
                                         <><FiSave style={{ marginRight: 6 }} /> Save Version</>
                                     )}
                                 </Button>
                             )}
+                        </div>
 
-                            {/* Data Health Check Indicator */}
-                            {validationSummary && (
-                                <Tooltip content={
-                                    validationSummary.has_issues 
-                                        ? `${validationSummary.total_issues} data issue(s) may affect P&L accuracy. Click to review.`
-                                        : 'All transaction data is complete and ready for P&L calculation.'
-                                }>
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        colorPalette={validationSummary.has_issues ? 'orange' : 'green'}
-                                        onClick={() => setIsHealthCheckOpen(true)}
-                                    >
-                                        <FiActivity />
-                                        {validationSummary.has_issues ? (
-                                            <Badge colorPalette="orange" size="sm" ml={1}>
-                                                {validationSummary.total_issues}
-                                            </Badge>
-                                        ) : (
-                                            <Text ml={1} fontSize="xs">✓ Ready</Text>
-                                        )}
-                                    </Button>
-                                </Tooltip>
-                            )}
-                        </Flex>
-
-                        {/* Data Health Check Drawer */}
-                        <DataHealthCheckDrawer
-                            isOpen={isHealthCheckOpen}
-                            onClose={() => setIsHealthCheckOpen(false)}
-                            accountIds={config.account_ids}
-                            refreshTrigger={healthCheckRefreshTrigger}
-                            assets={assets}
-                            accounts={healthCheckAccounts}
-                            onAssetsUpdated={fetchAssets}
-                            onAccountsUpdated={fetchHealthCheckAccounts}
-                        />
+                        {/* Config summary for draft/preview calculations */}
+                        {(status === 'preview' || status === 'persisted') && (
+                            <div className="mt-3 text-xs text-gray-500">
+                                {config.lot_method} / {config.lot_mode} · Base: {config.base_currency_symbol || '?'} ·{' '}
+                                Tolerance: {config.residual_tolerance_pct === 0 ? 'OFF' : `${config.residual_tolerance_pct}%`} ·{' '}
+                                Neg. balances: {config.allow_negative_balances ? '✓' : '✗'} ·{' '}
+                                Swaps taxable: {config.crypto_swap_taxable_by_default ? '✓' : '✗'} ·{' '}
+                                Fees taxable: {config.fee_taxable_by_default ? '✓' : '✗'}
+                                {config.use_price_fallback !== undefined && (
+                                    <> · Price fallback: {config.use_price_fallback ? `✓ (${config.price_staleness_window_days ?? 7}d)` : '✗'}</>
+                                )}
+                            </div>
+                        )}
                     </>
                 )}
 
                 {error && (
-                    <Box bg="red.50" p={2} borderRadius="md" mt={4}>
-                        <Text color="red.600" fontSize="sm">❌ {error}</Text>
-                    </Box>
+                    <div className="mt-4 rounded-md bg-red-50 p-2">
+                        <div className="text-sm text-red-600">❌ {error}</div>
+                    </div>
                 )}
-            </Card.Body>
-        </Card.Root>
+            </div>
+        </div>
     );
 };
 
