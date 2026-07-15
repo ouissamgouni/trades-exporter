@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from backend.services.price_getters.base import PriceGetterConfig, PriceResult
+from backend.tests.integration.price_getters.conftest import call_or_skip_on_flaky_error
 
 
 @pytest.mark.integration
@@ -23,7 +24,9 @@ class TestForexSmoke:
         asset.symbol = "USD"
         config = PriceGetterConfig(extra={"to_currency": "EUR"})
 
-        result = forex_getter.get_current_price(asset, config=config)
+        result = call_or_skip_on_flaky_error(
+            forex_getter.get_current_price, asset, config=config
+        )
 
         assert isinstance(result, PriceResult)
         assert 0.5 < result.price < 2.0  # EUR/USD range sanity
@@ -34,7 +37,7 @@ class TestForexSmoke:
         asset = MagicMock()
         asset.symbol = "EUR"
 
-        result = forex_getter.get_current_price(asset)
+        result = call_or_skip_on_flaky_error(forex_getter.get_current_price, asset)
 
         assert 0.5 < result.price < 2.0
         assert result.quote_currency == "USD"
@@ -43,7 +46,7 @@ class TestForexSmoke:
         asset = MagicMock()
         asset.symbol = "GBP"
 
-        result = forex_getter.get_current_price(asset)
+        result = call_or_skip_on_flaky_error(forex_getter.get_current_price, asset)
 
         assert result.price > 0
         assert result.source == "forex"

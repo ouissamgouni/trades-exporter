@@ -28,7 +28,9 @@ class TestConnectorRegistryStartDatetime:
         for connector_type in registry.list_types():
             info = registry.get(connector_type)
             assert info is not None
-            all_config_keys = (info.required_config or []) + (info.optional_config or [])
+            all_config_keys = (info.required_config or []) + (
+                info.optional_config or []
+            )
             assert "start_block" not in all_config_keys, (
                 f"Connector {connector_type} still has 'start_block' in config"
             )
@@ -40,7 +42,9 @@ class TestConnectorRegistryStartDatetime:
             info = registry.get(ct)
             if info is None:
                 continue
-            all_config_keys = (info.required_config or []) + (info.optional_config or [])
+            all_config_keys = (info.required_config or []) + (
+                info.optional_config or []
+            )
             assert "start_datetime" in all_config_keys, (
                 f"Connector {ct} missing 'start_datetime' in config"
             )
@@ -53,7 +57,9 @@ class TestConnectorRegistryStartDatetime:
         for connector_type in registry.list_types():
             info = registry.get(connector_type)
             assert info is not None
-            all_config_keys = (info.required_config or []) + (info.optional_config or [])
+            all_config_keys = (info.required_config or []) + (
+                info.optional_config or []
+            )
             assert "start_date" not in all_config_keys, (
                 f"Connector {connector_type} still has old 'start_date' in config"
             )
@@ -174,7 +180,9 @@ class TestAccountsYamlSeed:
 
     @pytest.fixture
     def accounts_yaml(self):
-        yaml_path = Path(__file__).parents[3] / "db" / "seed_data" / "scenarios" / "default" / "accounts.yaml"
+        yaml_path = (
+            Path(__file__).parents[4] / "scenarios" / "default" / "accounts.yaml"
+        )
         with open(yaml_path) as f:
             return yaml.safe_load(f)
 
@@ -226,7 +234,9 @@ class TestAccountsYamlSeed:
 
     def test_cex_accounts_have_trading_or_onramp_group(self, accounts_yaml):
         """CEX accounts should have meaningful groups."""
-        cex_accounts = [a for a in accounts_yaml["accounts"] if a["account_type"] == "cex"]
+        cex_accounts = [
+            a for a in accounts_yaml["accounts"] if a["account_type"] == "cex"
+        ]
         for account in cex_accounts:
             assert account["group"] in ("Trading", "On-Ramp"), (
                 f"CEX account '{account['name']}' has unexpected group: {account['group']}"
@@ -234,7 +244,9 @@ class TestAccountsYamlSeed:
 
     def test_wallet_accounts_have_group(self, accounts_yaml):
         """All wallet accounts should have a group."""
-        wallet_accounts = [a for a in accounts_yaml["accounts"] if a["account_type"] == "wallet"]
+        wallet_accounts = [
+            a for a in accounts_yaml["accounts"] if a["account_type"] == "wallet"
+        ]
         for account in wallet_accounts:
             assert account.get("group"), (
                 f"Wallet account '{account['name']}' is missing group"

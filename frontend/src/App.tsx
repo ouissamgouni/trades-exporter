@@ -1,5 +1,6 @@
 
 import React, { Suspense, useEffect, useState } from 'react';
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Spinner, Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/primitives';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { API_URL, SyncJobProgress, ConnectorProgress, BundleSuggestion } from './types';
@@ -55,6 +56,36 @@ const TabLoadingFallback = () => (
         <Spinner size="lg" className="text-blue-500" />
     </div>
 );
+
+// ── Tab routing config ──
+// Top-level tab ids (nav order) and, for tabs with a first-level sub-tab, the
+// set of valid sub-tab values + the default sub-tab to redirect to.
+const KNOWN_TABS = [
+    'setup', 'sync', 'add-transaction', 'inbox', 'all-transactions',
+    'timeline', 'positions', 'pnl', 'prices',
+] as const;
+type TabId = typeof KNOWN_TABS[number];
+
+const TAB_SUBTABS: Partial<Record<TabId, readonly string[]>> = {
+    setup: ['accounts', 'assets', 'pnl-defaults'],
+    sync: ['control', 'history'],
+    'add-transaction': ['manual', 'import'],
+    pnl: ['portfolio', 'tax'],
+};
+
+const DEFAULT_SUBTAB: Partial<Record<TabId, string>> = {
+    setup: 'accounts',
+    sync: 'control',
+    'add-transaction': 'manual',
+    pnl: 'portfolio',
+};
+
+const DEFAULT_TAB: TabId = 'setup';
+const DEFAULT_ROUTE = `/${DEFAULT_TAB}/${DEFAULT_SUBTAB[DEFAULT_TAB]}`;
+
+function isKnownTab(value: string | undefined): value is TabId {
+    return !!value && (KNOWN_TABS as readonly string[]).includes(value);
+}
 
 const AppContent = () => {
     // Use global data health context
@@ -112,8 +143,39 @@ const AppContent = () => {
         return () => clearInterval(interval);
     }, []);
 
-    // Check if there are setup issues
-    const [activeTab, setActiveTab] = useState('setup');
+    // Route-driven tab/sub-tab state (replaces local useState so tabs are deep-linkable)
+    const navigate = useNavigate();
+    const { tab: rawTab, subtab: rawSubtab } = useParams<{ tab?: string; subtab?: string }>();
+    const activeTab: TabId = isKnownTab(rawTab) ? rawTab : DEFAULT_TAB;
+    const allowedSubtabs = TAB_SUBTABS[activeTab];
+    const activeSubtab = allowedSubtabs
+        ? (rawSubtab && allowedSubtabs.includes(rawSubtab) ? rawSubtab : DEFAULT_SUBTAB[activeTab]!)
+        : undefined;
+
+    // Redirect to the canonical URL when the current path doesn't match a known
+    // tab/sub-tab (unknown tab, missing/invalid sub-tab, or a stray sub-tab on a
+    // tab that doesn't have one).
+    useEffect(() => {
+        if (!isKnownTab(rawTab)) {
+            navigate(DEFAULT_ROUTE, { replace: true });
+            return;
+        }
+        if (allowedSubtabs) {
+            if (!rawSubtab || !allowedSubtabs.includes(rawSubtab)) {
+                navigate(`/${activeTab}/${DEFAULT_SUBTAB[activeTab]}`, { replace: true });
+            }
+        } else if (rawSubtab) {
+            navigate(`/${activeTab}`, { replace: true });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rawTab, rawSubtab, activeTab, allowedSubtabs, navigate]);
+
+    const handleTabChange = (newTab: string) => {
+        const defaultSub = DEFAULT_SUBTAB[newTab as TabId];
+        navigate(defaultSub ? `/${newTab}/${defaultSub}` : `/${newTab}`);
+    };
+
+    const navigateSubtab = (newSubtab: string) => navigate(`/${activeTab}/${newSubtab}`);
 
     // Lightweight P&L status polling for tab badge (30s interval)
     const [pnlCalcStatus, setPnlCalcStatus] = useState<PnLCalcStatus>('idle');
@@ -179,7 +241,7 @@ const AppContent = () => {
 
                 </div>
 
-                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <Tabs value={activeTab} onValueChange={handleTabChange}>
                     <TabsList>
                         {/* Step 1: Configuration */}
                         <TabsTrigger value="setup">
@@ -248,19 +310,30 @@ const AppContent = () => {
                     {/* Step 1: Configuration */}
                     <TabsContent value="setup">
                         <Suspense fallback={<TabLoadingFallback />}>
-                            <UnifiedSetupView isActive={activeTab === 'setup'} />
+                            <UnifiedSetupView
+                                isActive={activeTab === 'setup'}
+                                activePrimaryTab={activeSubtab as string}
+                                onPrimaryTabChange={navigateSubtab}
+                            />
                         </Suspense>
                     </TabsContent>
 
                     {/* Step 2: Data Import */}
                     <TabsContent value="sync">
                         <Suspense fallback={<TabLoadingFallback />}>
-                            <SyncJobPanel isActive={activeTab === 'sync'} />
+                            <SyncJobPanel
+                                isActive={activeTab === 'sync'}
+                                activeTab={activeSubtab as 'control' | 'history'}
+                                onActiveTabChange={navigateSubtab}
+                            />
                         </Suspense>
                     </TabsContent>
                     <TabsContent value="add-transaction">
                         <Suspense fallback={<TabLoadingFallback />}>
-                            <AddImportPanel />
+                            <AddImportPanel
+                                activeTab={activeSubtab as 'manual' | 'import'}
+                                onActiveTabChange={navigateSubtab}
+                            />
                         </Suspense>
                     </TabsContent>
 
@@ -291,6 +364,8 @@ const AppContent = () => {
                         <Suspense fallback={<TabLoadingFallback />}>
                             <PnLPanel
                                 isActive={activeTab === 'pnl'}
+                                subtab={activeSubtab as 'portfolio' | 'tax'}
+                                onSubtabChange={navigateSubtab}
                             />
                         </Suspense>
                     </TabsContent>
@@ -315,7 +390,12 @@ const App = () => {
             <AssetDetailPanelProvider>
                 <DataHealthProvider>
                     <QaTestPlanProvider>
-                        <AppContent />
+                        <Routes>
+                            <Route path="/" element={<Navigate to={DEFAULT_ROUTE} replace />} />
+                            <Route path="/:tab" element={<AppContent />} />
+                            <Route path="/:tab/:subtab" element={<AppContent />} />
+                            <Route path="*" element={<Navigate to={DEFAULT_ROUTE} replace />} />
+                        </Routes>
                         <AssetDetailSlidePanel />
                     </QaTestPlanProvider>
                 </DataHealthProvider>

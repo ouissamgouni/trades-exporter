@@ -44,10 +44,13 @@ interface PrimaryTab {
   icon: React.ElementType;
 }
 
-const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
+const UnifiedSetupView: React.FC<{
+  isActive?: boolean;
+  activePrimaryTab: string;
+  onPrimaryTabChange: (tabId: string) => void;
+}> = ({ isActive = true, activePrimaryTab, onPrimaryTabChange }) => {
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [activeItem, setActiveItem] = useState<string>("accounts");
-  const [activePrimaryTab, setActivePrimaryTab] = useState<string>("accounts");
 
   useEffect(() => {
     if (!isActive) return;
@@ -139,21 +142,28 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
   const secondaryItems = getSecondaryItems();
   const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || PnLDefaultsEditor;
 
-  const handlePrimaryTabChange = (tabId: string) => {
-    setActivePrimaryTab(tabId);
-    if (tabId === "pnl-defaults") {
-      setActiveItem(tabId);
-    } else {
-      const firstItem = navItems.find((item) => item.group === tabId);
-      if (firstItem) setActiveItem(firstItem.id);
+  // Keep the 2nd-level item in sync when the primary tab changes externally
+  // (route navigation, browser back/forward), replicating the old
+  // handlePrimaryTabChange reset-to-first-item behavior.
+  useEffect(() => {
+    if (activePrimaryTab === "pnl-defaults") {
+      setActiveItem("pnl-defaults");
+      return;
     }
-  };
+    setActiveItem((prev) => {
+      const stillValid = navItems.some((item) => item.group === activePrimaryTab && item.id === prev);
+      if (stillValid) return prev;
+      const firstItem = navItems.find((item) => item.group === activePrimaryTab);
+      return firstItem ? firstItem.id : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePrimaryTab]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-1">
       <div className="flex flex-col gap-2">
         {/* Primary navigation (matches app-level tab style) */}
-        <Tabs value={activePrimaryTab} onValueChange={handlePrimaryTabChange}>
+        <Tabs value={activePrimaryTab} onValueChange={onPrimaryTabChange}>
           <TabsList>
             {primaryTabs.map((tab) => {
               const TabIcon = tab.icon;

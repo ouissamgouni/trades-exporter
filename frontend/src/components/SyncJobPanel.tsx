@@ -81,9 +81,14 @@ const TYPE_HEADER_BG: Record<string, string> = {
     green: 'bg-green-50',
 };
 
-export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
+interface SyncJobPanelProps {
+    isActive?: boolean;
+    activeTab: 'control' | 'history';
+    onActiveTabChange: (tab: 'control' | 'history') => void;
+}
+
+export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, activeTab, onActiveTabChange }) => {
     const queryClient = useQueryClient();
-    const [activeTab, setActiveTab] = useState<'control' | 'history'>('control');
     const [jobStatus, setJobStatus] = useState<SyncJobProgress | null>(null);
     const [connectors, setConnectors] = useState<ConnectorsInfo | null>(null);
     const [loading, setLoading] = useState(true);
@@ -367,7 +372,7 @@ export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true
                 </div>
             )}
 
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'control' | 'history')}>
+            <Tabs value={activeTab} onValueChange={(v) => onActiveTabChange(v as 'control' | 'history')}>
                 <TabsList className="mb-4">
                     <TabsTrigger value="control">
                         🎛️ Control

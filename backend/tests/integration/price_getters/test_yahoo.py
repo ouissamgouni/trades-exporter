@@ -15,7 +15,14 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from backend.services.price_getters.base import PriceGetterConfig, PriceResult
+from backend.services.price_getters.base import (
+    PriceGetterConfig,
+    PriceGetterError,
+    PriceResult,
+)
+from backend.tests.integration.price_getters.conftest import (
+    call_or_skip_on_flaky_error as _call_or_skip_on_rate_limit,
+)
 
 
 class TestYahooTickerResolution:
@@ -77,7 +84,9 @@ class TestYahooPriceGetterIntegration:
 
     def test_get_current_price_aapl(self, yahoo_getter, mock_asset_aapl):
         """Should fetch current AAPL stock price and return PriceResult."""
-        result = yahoo_getter.get_current_price(mock_asset_aapl)
+        result = _call_or_skip_on_rate_limit(
+            yahoo_getter.get_current_price, mock_asset_aapl
+        )
 
         assert isinstance(result, PriceResult)
         assert isinstance(result.price, float)
@@ -88,7 +97,9 @@ class TestYahooPriceGetterIntegration:
 
     def test_get_current_price_msft(self, yahoo_getter, mock_asset_msft):
         """Should fetch current MSFT stock price and return PriceResult."""
-        result = yahoo_getter.get_current_price(mock_asset_msft)
+        result = _call_or_skip_on_rate_limit(
+            yahoo_getter.get_current_price, mock_asset_msft
+        )
 
         assert isinstance(result, PriceResult)
         assert isinstance(result.price, float)
@@ -98,7 +109,9 @@ class TestYahooPriceGetterIntegration:
 
     def test_get_current_price_spy(self, yahoo_getter, mock_asset_spy):
         """Should fetch current SPY ETF price and return PriceResult."""
-        result = yahoo_getter.get_current_price(mock_asset_spy)
+        result = _call_or_skip_on_rate_limit(
+            yahoo_getter.get_current_price, mock_asset_spy
+        )
 
         assert isinstance(result, PriceResult)
         assert isinstance(result.price, float)
@@ -109,7 +122,9 @@ class TestYahooPriceGetterIntegration:
         self, yahoo_getter, mock_asset_btc, config_btc_usd
     ):
         """Should fetch BTC price using config.asset_id and return PriceResult."""
-        result = yahoo_getter.get_current_price(mock_asset_btc, config=config_btc_usd)
+        result = _call_or_skip_on_rate_limit(
+            yahoo_getter.get_current_price, mock_asset_btc, config=config_btc_usd
+        )
 
         assert isinstance(result, PriceResult)
         assert isinstance(result.price, float)
@@ -121,7 +136,9 @@ class TestYahooPriceGetterIntegration:
     def test_get_historical_price_aapl(self, yahoo_getter, mock_asset_aapl):
         """Should fetch historical AAPL price and return PriceResult."""
         target_date = datetime.now(timezone.utc) - timedelta(days=7)
-        result = yahoo_getter.get_historical_price(mock_asset_aapl, target_date)
+        result = _call_or_skip_on_rate_limit(
+            yahoo_getter.get_historical_price, mock_asset_aapl, target_date
+        )
 
         assert isinstance(result, PriceResult)
         assert isinstance(result.price, float)
@@ -131,7 +148,9 @@ class TestYahooPriceGetterIntegration:
     def test_get_historical_price_30_days_ago(self, yahoo_getter, mock_asset_spy):
         """Should fetch historical price from 30 days ago and return PriceResult."""
         target_date = datetime.now(timezone.utc) - timedelta(days=30)
-        result = yahoo_getter.get_historical_price(mock_asset_spy, target_date)
+        result = _call_or_skip_on_rate_limit(
+            yahoo_getter.get_historical_price, mock_asset_spy, target_date
+        )
 
         assert isinstance(result, PriceResult)
         assert isinstance(result.price, float)
@@ -139,8 +158,6 @@ class TestYahooPriceGetterIntegration:
 
     def test_invalid_ticker_raises_error(self, yahoo_getter):
         """Should raise error for invalid ticker symbol."""
-        from backend.services.price_getters.base import PriceGetterError
-        
         invalid_asset = MagicMock()
         invalid_asset.symbol = "ZZZINVALIDXYZ999"
 

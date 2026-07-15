@@ -440,7 +440,7 @@ export type PnLAction =
 // Initial State
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function createInitialPnLState(baseCurrency: string, baseCurrencyId: number | null, initialAccountIds: number[]): PnLState {
+export function createInitialPnLState(baseCurrency: string, baseCurrencyId: number | null, initialAccountIds: number[], initialPnLActiveTab?: 'portfolio' | 'tax'): PnLState {
     return {
         // Calculation workflow
         status: 'idle',
@@ -516,7 +516,7 @@ export function createInitialPnLState(baseCurrency: string, baseCurrencyId: numb
         auditDefaultPanel: null,
         showUnsettledNegative: false,
         totalUnsettledNegativeCount: 0,
-        pnlActiveTab: 'portfolio',
+        pnlActiveTab: initialPnLActiveTab ?? 'portfolio',
 
         // Filters
         performerGroupBy: 'asset',

@@ -9,7 +9,7 @@ This getter hits `query2.finance.yahoo.com` directly and requires no API key.
 
 The external_id should be the full Yahoo Finance ticker:
 - Crypto: "BTC-USD", "ETH-EUR"
-- Forex: "EURUSD=X", "GBPUSD=X"  
+- Forex: "EURUSD=X", "GBPUSD=X"
 - Stocks: "AAPL", "MSFT"
 - ETFs: "PE500.PA", "AGGU.L"
 - Funds: "ERDK.F", "0P0001IMHW.F"
@@ -20,7 +20,7 @@ Quote Currency Handling:
 - Configure native_quote_currency in AssetPriceGetter.params to override if needed
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, Tuple, Dict, Any, List
 
 import requests
@@ -111,7 +111,9 @@ class YahooDirectPriceGetter(BasePriceGetter):
         """
         if config and config.external_id:
             ticker = config.external_id
-            native_quote = config.extra.get("native_quote_currency") if config.extra else None
+            native_quote = (
+                config.extra.get("native_quote_currency") if config.extra else None
+            )
             if not native_quote:
                 native_quote = self._parse_ticker_quote_currency(ticker)
             if not native_quote:
@@ -124,9 +126,7 @@ class YahooDirectPriceGetter(BasePriceGetter):
             native_quote = self.DEFAULT_NATIVE_QUOTE
         return ticker, native_quote.upper()
 
-    def _fetch_chart(
-        self, ticker: str, params: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _fetch_chart(self, ticker: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Fetch data from Yahoo Chart API v8.
 
@@ -325,7 +325,7 @@ class YahooDirectPriceGetter(BasePriceGetter):
             for ts, close in zip(timestamps, closes):
                 if close is None:
                     continue
-                bar_date = datetime.utcfromtimestamp(ts).date()
+                bar_date = datetime.fromtimestamp(ts, tz=timezone.utc).date()
                 diff = abs((bar_date - target_date).days)
 
                 if best_date_diff is None or diff < best_date_diff:
@@ -386,7 +386,11 @@ class YahooDirectPriceGetter(BasePriceGetter):
             PriceGetterError: On API failure.
         """
         period1 = int(datetime.combine(start_date, datetime.min.time()).timestamp())
-        period2 = int(datetime.combine(end_date + timedelta(days=1), datetime.min.time()).timestamp())
+        period2 = int(
+            datetime.combine(
+                end_date + timedelta(days=1), datetime.min.time()
+            ).timestamp()
+        )
 
         log.info(
             f"[yahoo_direct] Fetching daily series: ticker={ticker}, "
@@ -406,8 +410,10 @@ class YahooDirectPriceGetter(BasePriceGetter):
         for ts, close in zip(timestamps, closes):
             if close is None:
                 continue
-            bar_date = datetime.utcfromtimestamp(ts).date()
-            points.append({"date": bar_date.isoformat(), "close": round(float(close), 4)})
+            bar_date = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+            points.append(
+                {"date": bar_date.isoformat(), "close": round(float(close), 4)}
+            )
 
         log.info(f"[yahoo_direct] ✓ Got {len(points)} daily bars for {ticker}")
         return points

@@ -5,8 +5,8 @@ These tests verify that every detector produces correct counts against a real
 PostgreSQL database.  They catch bugs like the JSONB ``cast()`` issue that unit
 tests cannot detect because unit tests mock all detectors.
 
-Run with: task test:int:local
-Database: trades_db_integ (set up with: task db:setup:integ)
+Run with: task test:backend:int
+Database: dedicated scenario DB, self-provisioned by: task test:backend:int
 """
 
 import pytest
@@ -27,6 +27,7 @@ from backend.services.data_health.detectors import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_account(session, name="TestAcct", **kw):
     defaults = dict(name=name, account_type="cex", owned=True)
@@ -75,9 +76,12 @@ class TestTransferDismissFilterSQL:
     def test_dismissed_from_is_excluded_from_count(self, pg_session):
         acct = _make_account(pg_session)
         _make_tx(
-            pg_session, acct,
-            transaction_type="transfer", direction="inflow",
-            source_from_account=None, from_account_id=None,
+            pg_session,
+            acct,
+            transaction_type="transfer",
+            direction="inflow",
+            source_from_account=None,
+            from_account_id=None,
             tags=[{"sys_transfer_dismissed": "source_from_account"}],
         )
         detector = TransferIssueDetector(pg_session)
@@ -87,9 +91,12 @@ class TestTransferDismissFilterSQL:
     def test_dismissed_to_is_excluded_from_count(self, pg_session):
         acct = _make_account(pg_session)
         _make_tx(
-            pg_session, acct,
-            transaction_type="transfer", direction="outflow",
-            source_to_account=None, to_account_id=None,
+            pg_session,
+            acct,
+            transaction_type="transfer",
+            direction="outflow",
+            source_to_account=None,
+            to_account_id=None,
             tags=[{"sys_transfer_dismissed": "source_to_account"}],
         )
         detector = TransferIssueDetector(pg_session)
@@ -99,9 +106,12 @@ class TestTransferDismissFilterSQL:
     def test_non_dismissed_still_counted(self, pg_session):
         acct = _make_account(pg_session)
         _make_tx(
-            pg_session, acct,
-            transaction_type="transfer", direction="inflow",
-            source_from_account=None, from_account_id=None,
+            pg_session,
+            acct,
+            transaction_type="transfer",
+            direction="inflow",
+            source_from_account=None,
+            from_account_id=None,
             tags=None,
         )
         detector = TransferIssueDetector(pg_session)
@@ -127,15 +137,21 @@ class TestIssueServiceGetCountsEndToEnd:
         acct = _make_account(pg_session)
         # 1 dismissed, 1 not
         _make_tx(
-            pg_session, acct,
-            transaction_type="transfer", direction="inflow",
-            source_from_account=None, from_account_id=None,
+            pg_session,
+            acct,
+            transaction_type="transfer",
+            direction="inflow",
+            source_from_account=None,
+            from_account_id=None,
             tags=[{"sys_transfer_dismissed": "source_from_account"}],
         )
         _make_tx(
-            pg_session, acct,
-            transaction_type="transfer", direction="inflow",
-            source_from_account=None, from_account_id=None,
+            pg_session,
+            acct,
+            transaction_type="transfer",
+            direction="inflow",
+            source_from_account=None,
+            from_account_id=None,
             tags=None,
         )
 

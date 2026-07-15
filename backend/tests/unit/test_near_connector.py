@@ -11,7 +11,7 @@ from backend.connectors.onchain.near.connector_near_ft_txns import ConnectorNear
 from backend.connectors.onchain.near.connector_near_hub import ConnectorNearHub
 
 
-WALLET = "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f"
+WALLET = "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef"
 
 
 def _make_txns(wallet=WALLET):
@@ -130,7 +130,10 @@ class TestNearHub:
 
     def test_hub_creates_two_children(self):
         hub = ConnectorNearHub(
-            wallet_address=WALLET, account_id=1, connector_id=1, config={"test_mode": True}
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
+            config={"test_mode": True},
         )
         assert len(hub.child_connectors) == 2
 

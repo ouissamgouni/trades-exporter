@@ -24,6 +24,7 @@ def client(mock_session):
     """Create test client — must depend on mock_session so overrides are active."""
     from fastapi.testclient import TestClient
     from backend.api.main import app
+
     return TestClient(app)
 
 
@@ -35,10 +36,12 @@ def mock_session():
     session = MagicMock()
 
     app.dependency_overrides[get_session_dependency] = lambda: session
-    app.dependency_overrides[get_pnl_transaction_filters] = lambda: PnLTransactionFilters(
-        applied_filters=AppliedFilters(),
-        non_owned=False,
-        warnings=[],
+    app.dependency_overrides[get_pnl_transaction_filters] = lambda: (
+        PnLTransactionFilters(
+            applied_filters=AppliedFilters(),
+            non_owned=False,
+            warnings=[],
+        )
     )
 
     yield session
@@ -54,7 +57,9 @@ def mock_version():
     return version
 
 
-def _make_mock_tx(tx_id, direction="inflow", asset_symbol="BTC", quantity="1.0", date_time=None):
+def _make_mock_tx(
+    tx_id, direction="inflow", asset_symbol="BTC", quantity="1.0", date_time=None
+):
     """Helper to create a mock NormalizedTransaction."""
     tx = MagicMock()
     tx.id = tx_id
@@ -108,6 +113,7 @@ def _make_mock_tx(tx_id, direction="inflow", asset_symbol="BTC", quantity="1.0",
     tx.price_quote_asset_id = None
     tx.fee_quote_asset = None
     tx.fee_quote_asset_id = None
+    tx.attributed_asset = None
 
     tx.sync_connector_run = None
 
@@ -151,9 +157,16 @@ def _make_mock_tx(tx_id, direction="inflow", asset_symbol="BTC", quantity="1.0",
     return tx
 
 
-def _setup_enriched_exec_chain(mock_session, transactions, leg_rows=None, rpnl_rows=None,
-                                fee_pnl_ids=None, fee_rows=None, event_rows=None,
-                                fee_assets=None):
+def _setup_enriched_exec_chain(
+    mock_session,
+    transactions,
+    leg_rows=None,
+    rpnl_rows=None,
+    fee_pnl_ids=None,
+    fee_rows=None,
+    event_rows=None,
+    fee_assets=None,
+):
     """
     Set up sequential session.exec() return values for the enriched-transactions endpoint.
 
@@ -161,12 +174,13 @@ def _setup_enriched_exec_chain(mock_session, transactions, leg_rows=None, rpnl_r
       1. total_count query → .one() → int
       2. filtered_count query → .one() → int
       3. paginated transactions query → .all() → List[NormalizedTransaction]
-      4. leg_rows query → .all() → List[Tuple]   (tx_id, unit_id, leg_type, pattern, label)
-      5. rpnl_rows query → .all() → List[RealizedPnl]
-      6. fee_pnl_ids query → .all() → List[int]
-      7. fee_rows query → .all() → List[Tuple]   (tx_id, fee_value_in_base, asset_id)
-      8. (optional) fee_assets query → .all() → List[Asset]
-      9. event_rows query → .all() → List[Tuple]  (tx_id, event_type, qty_delta, lot_id)
+      4. fr_override_tx_ids query → .all() → List[int]
+      5. leg_rows query → .all() → List[Tuple]   (tx_id, unit_id, leg_type, pattern, label)
+      6. rpnl_rows query → .all() → List[RealizedPnl]
+      7. fee_pnl_ids query → .all() → List[int]
+      8. fee_rows query → .all() → List[Tuple]   (tx_id, fee_value_in_base, asset_id)
+      9. (optional) fee_assets query → .all() → List[Asset]
+      10. event_rows query → .all() → List[Tuple]  (tx_id, event_type, qty_delta, lot_id)
     """
     results = []
 
@@ -185,33 +199,38 @@ def _setup_enriched_exec_chain(mock_session, transactions, leg_rows=None, rpnl_r
     tx_result.all.return_value = transactions
     results.append(tx_result)
 
-    # 4. leg_rows
+    # 4. fr_override_tx_ids
+    fr_override_result = MagicMock()
+    fr_override_result.all.return_value = []
+    results.append(fr_override_result)
+
+    # 5. leg_rows
     leg_result = MagicMock()
     leg_result.all.return_value = leg_rows or []
     results.append(leg_result)
 
-    # 5. rpnl_rows
+    # 6. rpnl_rows
     rpnl_result = MagicMock()
     rpnl_result.all.return_value = rpnl_rows or []
     results.append(rpnl_result)
 
-    # 6. fee_pnl_ids
+    # 7. fee_pnl_ids
     fee_pnl_result = MagicMock()
     fee_pnl_result.all.return_value = fee_pnl_ids or []
     results.append(fee_pnl_result)
 
-    # 7. fee_rows
+    # 8. fee_rows
     fee_result = MagicMock()
     fee_result.all.return_value = fee_rows or []
     results.append(fee_result)
 
-    # 8. fee_assets (only if fee_rows has asset_ids)
+    # 9. fee_assets (only if fee_rows has asset_ids)
     if fee_assets is not None:
         fee_assets_result = MagicMock()
         fee_assets_result.all.return_value = fee_assets
         results.append(fee_assets_result)
 
-    # 9. event_rows
+    # 10. event_rows
     event_result = MagicMock()
     event_result.all.return_value = event_rows or []
     results.append(event_result)
@@ -299,7 +318,8 @@ class TestEnrichedTransactionsPnlOnDisposalLeg:
         mock_rpnl.proceeds_price_timestamp = None
 
         _setup_enriched_exec_chain(
-            mock_session, [tx_outflow, tx_inflow],
+            mock_session,
+            [tx_outflow, tx_inflow],
             leg_rows=leg_rows,
             rpnl_rows=[mock_rpnl],
         )
@@ -336,25 +356,47 @@ class TestEnrichedTransactionsPagination:
         # Simulate total=5 but only 2 returned due to limit
         results = []
         # total_count = 5
-        tc = MagicMock(); tc.one.return_value = 5; results.append(tc)
+        tc = MagicMock()
+        tc.one.return_value = 5
+        results.append(tc)
         # filtered_count = 5
-        fc = MagicMock(); fc.one.return_value = 5; results.append(fc)
+        fc = MagicMock()
+        fc.one.return_value = 5
+        results.append(fc)
         # transactions (page)
-        tr = MagicMock(); tr.all.return_value = [tx1, tx2]; results.append(tr)
+        tr = MagicMock()
+        tr.all.return_value = [tx1, tx2]
+        results.append(tr)
+        # fr_override_tx_ids
+        fo = MagicMock()
+        fo.all.return_value = []
+        results.append(fo)
         # leg_rows
-        lr = MagicMock(); lr.all.return_value = []; results.append(lr)
+        lr = MagicMock()
+        lr.all.return_value = []
+        results.append(lr)
         # rpnl_rows
-        rr = MagicMock(); rr.all.return_value = []; results.append(rr)
+        rr = MagicMock()
+        rr.all.return_value = []
+        results.append(rr)
         # fee_pnl_ids
-        fp = MagicMock(); fp.all.return_value = []; results.append(fp)
+        fp = MagicMock()
+        fp.all.return_value = []
+        results.append(fp)
         # fee_rows
-        fr = MagicMock(); fr.all.return_value = []; results.append(fr)
+        fr = MagicMock()
+        fr.all.return_value = []
+        results.append(fr)
         # event_rows
-        er = MagicMock(); er.all.return_value = []; results.append(er)
+        er = MagicMock()
+        er.all.return_value = []
+        results.append(er)
 
         mock_session.exec.side_effect = results
 
-        response = client.get("/pnl/versions/123/enriched-transactions?limit=2&offset=0&sort_by=date_time&sort_dir=desc")
+        response = client.get(
+            "/pnl/versions/123/enriched-transactions?limit=2&offset=0&sort_by=date_time&sort_dir=desc"
+        )
         assert response.status_code == 200
 
         data = response.json()
@@ -384,17 +426,29 @@ class TestEnrichedTransactionsFilterOptions:
 
         results = []
         # 1. total_tx → .one()
-        tt = MagicMock(); tt.one.return_value = 15; results.append(tt)
+        tt = MagicMock()
+        tt.one.return_value = 15
+        results.append(tt)
         # 2. pattern_q → .all() → [(pattern, count)]
-        pr = MagicMock(); pr.all.return_value = [("swap", 10), ("flow", 5)]; results.append(pr)
+        pr = MagicMock()
+        pr.all.return_value = [("swap", 10), ("flow", 5)]
+        results.append(pr)
         # 3. has_realized_pnl_count → .one()
-        rp = MagicMock(); rp.one.return_value = 8; results.append(rp)
+        rp = MagicMock()
+        rp.one.return_value = 8
+        results.append(rp)
         # 4. has_fees_count → .one()
-        hf = MagicMock(); hf.one.return_value = 3; results.append(hf)
+        hf = MagicMock()
+        hf.one.return_value = 3
+        results.append(hf)
         # 5. has_warnings_count → .one()
-        hw = MagicMock(); hw.one.return_value = 2; results.append(hw)
+        hw = MagicMock()
+        hw.one.return_value = 2
+        results.append(hw)
         # 6. warning_type_q → .all()
-        wt = MagicMock(); wt.all.return_value = [("missing_price", 2)]; results.append(wt)
+        wt = MagicMock()
+        wt.all.return_value = [("missing_price", 2)]
+        results.append(wt)
 
         mock_session.exec.side_effect = results
 

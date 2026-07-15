@@ -24,6 +24,7 @@ def client(mock_session):
     """Create test client — must depend on mock_session so overrides are active."""
     from fastapi.testclient import TestClient
     from backend.api.main import app
+
     return TestClient(app)
 
 
@@ -38,10 +39,12 @@ def mock_session():
     app.dependency_overrides[get_session_dependency] = lambda: session
 
     # Override the transaction-filter dependency (it also needs a session)
-    app.dependency_overrides[get_pnl_transaction_filters] = lambda: PnLTransactionFilters(
-        applied_filters=AppliedFilters(),
-        non_owned=False,
-        warnings=[],
+    app.dependency_overrides[get_pnl_transaction_filters] = lambda: (
+        PnLTransactionFilters(
+            applied_filters=AppliedFilters(),
+            non_owned=False,
+            warnings=[],
+        )
     )
 
     yield session
@@ -88,39 +91,42 @@ def mock_unit_with_legs():
     mock_tx.network_transaction_id = None
     mock_tx.source_from_account = None
     mock_tx.source_to_account = None
-    
+
     # Mock account relationship
     mock_account_rel = MagicMock()
     mock_account_rel.name = "Coinbase"
     mock_tx.account_rel = mock_account_rel
     mock_tx.account_id = 1
-    
+
     # Mock from/to accounts
     mock_tx.from_account = None
     mock_tx.to_account = None
-    
+
     # Mock asset relationship (tx.asset)
     mock_asset = MagicMock()
     mock_asset.asset_id = 1
     mock_asset.symbol = "BTC"
+    mock_asset.label = "BTC"
     mock_tx.asset = mock_asset
     mock_tx.asset_id = 1
-    
+
     # Mock price_quote_asset and fee_quote_asset
     mock_tx.price_quote_asset = None
     mock_tx.price_quote_asset_id = None
     mock_tx.fee_quote_asset = None
     mock_tx.fee_quote_asset_id = None
-    
+
     # Mock assets for legs
     mock_asset_btc = MagicMock()
     mock_asset_btc.asset_id = 1
     mock_asset_btc.symbol = "BTC"
-    
+    mock_asset_btc.label = "BTC"
+
     mock_asset_usd = MagicMock()
     mock_asset_usd.asset_id = 2
     mock_asset_usd.symbol = "USD"
-    
+    mock_asset_usd.label = "USD"
+
     # Mock outflow leg (BTC)
     mock_leg_outflow = MagicMock()
     mock_leg_outflow.transaction_id = 100
@@ -131,7 +137,7 @@ def mock_unit_with_legs():
     mock_leg_outflow.asset = mock_asset_btc
     mock_leg_outflow.asset_id = 1
     mock_leg_outflow.transaction = mock_tx
-    
+
     # Mock inflow leg (USD)
     mock_leg_inflow = MagicMock()
     mock_leg_inflow.transaction_id = 100
@@ -142,7 +148,7 @@ def mock_unit_with_legs():
     mock_leg_inflow.asset = mock_asset_usd
     mock_leg_inflow.asset_id = 2
     mock_leg_inflow.transaction = mock_tx
-    
+
     # Mock calculation unit
     mock_unit = MagicMock()
     mock_unit.id = 1
@@ -157,7 +163,7 @@ def mock_unit_with_legs():
     mock_unit.warnings = []
     mock_unit.fee_entries = []
     mock_unit.total_realized_pnl_in_base = Decimal("0")
-    
+
     return mock_unit
 
 
@@ -199,7 +205,9 @@ def _setup_exec_chain(mock_session, mock_units):
 class TestGetVersionUnits:
     """Tests for GET /pnl/versions/{version_id}/units endpoint."""
 
-    def test_units_response_structure(self, client, mock_session, mock_version, mock_unit_with_legs):
+    def test_units_response_structure(
+        self, client, mock_session, mock_version, mock_unit_with_legs
+    ):
         """Test that units response has correct structure with deduplicated transactions."""
         mock_session.get.return_value = mock_version
         _setup_exec_chain(mock_session, [mock_unit_with_legs])
@@ -237,7 +245,9 @@ class TestGetVersionUnits:
             assert "qty" in leg
             assert leg["leg_type"] in ["inflow", "outflow", "fee"]
 
-    def test_transaction_deduplication(self, client, mock_session, mock_version, mock_unit_with_legs):
+    def test_transaction_deduplication(
+        self, client, mock_session, mock_version, mock_unit_with_legs
+    ):
         """Test that transactions are deduplicated at unit level."""
         mock_session.get.return_value = mock_version
         _setup_exec_chain(mock_session, [mock_unit_with_legs])
@@ -254,7 +264,9 @@ class TestGetVersionUnits:
         # Both legs should reference the same transaction_id
         assert all(leg["transaction_id"] == 100 for leg in unit["legs"])
 
-    def test_leg_type_filtering(self, client, mock_session, mock_version, mock_unit_with_legs):
+    def test_leg_type_filtering(
+        self, client, mock_session, mock_version, mock_unit_with_legs
+    ):
         """Test that legs can be filtered by leg_type."""
         mock_session.get.return_value = mock_version
         _setup_exec_chain(mock_session, [mock_unit_with_legs])

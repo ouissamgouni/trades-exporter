@@ -7,6 +7,7 @@ import pytest
 import logging
 from datetime import datetime, timezone
 
+from backend.config.loader import has_exchange_credentials
 from backend.connectors.cex.connector_okx_convert import OKXConvertConnector
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -14,6 +15,11 @@ log = logging.getLogger(__name__)
 
 # Only fetch recent data to speed up integration tests
 TEST_SINCE = datetime(2025, 5, 1, tzinfo=timezone.utc)
+
+pytestmark = pytest.mark.skipif(
+    not has_exchange_credentials("okx"),
+    reason="OKX_API_KEY/OKX_API_SECRET not configured — skipping live OKX integration test",
+)
 
 
 @pytest.mark.integration
@@ -45,7 +51,9 @@ def test_okx_convert_connector_yield_normalized():
     log.info(
         f"📊 OKX Convert test complete: {len(results)} converts, {len(errors)} errors"
     )
-    
+
     # Note: It's valid for results to be empty if the account has no conversion history
     if len(results) == 0:
-        log.info("⚠️ No conversions found - this is expected for accounts with no conversion history")
+        log.info(
+            "⚠️ No conversions found - this is expected for accounts with no conversion history"
+        )

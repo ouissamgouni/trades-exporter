@@ -7,6 +7,7 @@ import pytest
 import logging
 from datetime import datetime, timezone
 
+from backend.config.loader import has_exchange_credentials
 from backend.connectors.cex.connector_coinbase_deposits import (
     ConnectorCoinbaseDeposits,
 )
@@ -19,6 +20,11 @@ log = logging.getLogger(__name__)
 
 # Only fetch recent data to speed up integration tests
 TEST_SINCE = datetime(2025, 5, 1, tzinfo=timezone.utc)
+
+pytestmark = pytest.mark.skipif(
+    not has_exchange_credentials("coinbase"),
+    reason="COINBASE_API_KEY/COINBASE_API_SECRET not configured — skipping live Coinbase integration test",
+)
 
 
 @pytest.mark.integration

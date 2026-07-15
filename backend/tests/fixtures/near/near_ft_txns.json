@@ -1,7 +1,7 @@
 [
     {
         "event_index": "17604717909784375970000000101000001",
-        "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+        "affected_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
         "involved_account_id": "alice.near",
         "delta_amount": "5000000000000000000",
         "cause": "TRANSFER",
@@ -28,7 +28,7 @@
     },
     {
         "event_index": "17604717909784375970000000102000002",
-        "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+        "affected_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
         "involved_account_id": "bob.near",
         "delta_amount": "-2000000000000000000",
         "cause": "TRANSFER",
@@ -55,7 +55,7 @@
     },
     {
         "event_index": "17604717909784375970000000103000003",
-        "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+        "affected_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
         "involved_account_id": "wrap.near",
         "delta_amount": "1000000000000000000000000",
         "cause": "TRANSFER",
@@ -82,7 +82,7 @@
     },
     {
         "event_index": "17604717909784375970000000104000004",
-        "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+        "affected_account_id": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
         "involved_account_id": "carol.near",
         "delta_amount": "0",
         "cause": "TRANSFER",

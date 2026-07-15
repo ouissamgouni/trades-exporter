@@ -78,9 +78,10 @@ infra/        Docker configuration
 ## Testing
 
 ```bash
-task test
-task test:unit:backend
-task test:unit:frontend
+task test               # quick unit tests
+task test:all           # full suite: backend (unit+int+e2e), frontend, full-stack e2e
+task test:backend:unit
+task test:frontend:unit
 ```
 
 Scenario environments are useful for manual QA and demos:

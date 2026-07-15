@@ -29,6 +29,7 @@ def client(mock_session):
     """Create test client — depends on mock_session so overrides are active."""
     from fastapi.testclient import TestClient
     from backend.api.main import app
+
     return TestClient(app)
 
 
@@ -39,10 +40,12 @@ def mock_session():
 
     session = MagicMock()
     app.dependency_overrides[get_session_dependency] = lambda: session
-    app.dependency_overrides[get_pnl_transaction_filters] = lambda: PnLTransactionFilters(
-        applied_filters=AppliedFilters(),
-        non_owned=False,
-        warnings=[],
+    app.dependency_overrides[get_pnl_transaction_filters] = lambda: (
+        PnLTransactionFilters(
+            applied_filters=AppliedFilters(),
+            non_owned=False,
+            warnings=[],
+        )
     )
     yield session
     app.dependency_overrides.clear()
@@ -57,11 +60,14 @@ def mock_version():
     return version
 
 
-def _make_event(event_id, event_type, asset_id, asset_symbol, account_id=1, account_name="Acc"):
+def _make_event(
+    event_id, event_type, asset_id, asset_symbol, account_id=1, account_name="Acc"
+):
     """Helper to build a mock CostLotEvent with nested lot + asset + account."""
     mock_asset = MagicMock()
     mock_asset.asset_id = asset_id
     mock_asset.symbol = asset_symbol
+    mock_asset.label = asset_symbol
 
     mock_account = MagicMock()
     mock_account.name = account_name
@@ -71,6 +77,7 @@ def _make_event(event_id, event_type, asset_id, asset_symbol, account_id=1, acco
     mock_lot.asset_id = asset_id
     mock_lot.account_id = account_id
     mock_lot.account = mock_account
+    mock_lot.cost_fmv_source = None
 
     mock_unit = MagicMock()
     mock_unit.unit_label = f"unit-for-{event_id}"
@@ -126,7 +133,10 @@ class TestLotEventsRelatedAssetId:
     def test_no_filter_returns_all(self, client, mock_session, mock_version):
         """Without related_asset_id the endpoint returns events normally."""
         mock_session.get.return_value = mock_version
-        events = [_make_event(1, "created", 1, "BTC"), _make_event(2, "consumed", 2, "USDT")]
+        events = [
+            _make_event(1, "created", 1, "BTC"),
+            _make_event(2, "consumed", 2, "USDT"),
+        ]
         _setup_lot_events_exec(mock_session, events)
 
         response = client.get("/pnl/versions/1/lot-events")
@@ -156,7 +166,9 @@ class TestLotEventsRelatedAssetId:
         assert response.status_code == 200
         assert response.json()["total"] == 1
 
-    def test_related_asset_id_coexists_with_other_filters(self, client, mock_session, mock_version):
+    def test_related_asset_id_coexists_with_other_filters(
+        self, client, mock_session, mock_version
+    ):
         """related_asset_id works alongside event_type and other params."""
         mock_session.get.return_value = mock_version
         events = [_make_event(1, "created", 2, "USDT")]

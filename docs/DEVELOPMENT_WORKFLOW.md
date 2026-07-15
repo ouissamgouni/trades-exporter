@@ -169,8 +169,8 @@ Press `F5` and select **Backend: Attach** or **Full Stack Debug**.
 
 ```bash
 task test               # quick unit tests
-task test:unit:backend  # backend only
-task test:unit:frontend # frontend type check + build
+task test:backend:unit  # backend only
+task test:frontend:unit # frontend type check + build
 ```
 
 ### 5. Commit and Create PR
@@ -218,6 +218,11 @@ SCENARIO=custom PORT_OFFSET=42 task start:scenario       # explicit port offset
 task start:scenario:ref -- feature/my-branch
 task start:scenario:ref BROWSER=isolated COUNT=2 -- feature/my-branch
 
+# DB-only / backend-only variants (portable fixtures for automated tests, CI, Playwright)
+SCENARIO=my_test task start:scenario:db RESET=1          # Docker DB only, migrated + seeded
+SCENARIO=my_test task start:scenario:backend RESET=1     # Docker DB + backend (detached), no frontend
+task stop:scenario SCENARIO=my_test --yes                # tear down either of the above
+
 # DB operations
 SCENARIO=fr_tax task db:seed:scenario
 SCENARIO=fr_tax task db:seed:scenario WITH_DEFAULTS=1
@@ -249,26 +254,23 @@ Ports are deterministic per scenario name. Run `task scenarios` to see all assig
 
 ```bash
 task test               # unit tests (fast)
-task test:unit:backend  # backend unit + API tests
-task test:unit:frontend # frontend type check + build
-task test:int           # integration tests; requires integration DB setup
-task test:int:full      # setup -> test -> cleanup
-task test:all           # unit + integration + e2e
-task test:ci            # simulate CI locally via Act
+task test:backend:unit  # backend unit + API tests
+task test:frontend:unit # frontend type check + build
+task test:backend:int            # integration tests; requires integration DB setup
+task test:backend:int:teardown    # setup -> test -> cleanup
+task test:e2e                     # full-stack e2e (db + backend + frontend)
+task test:backend           # all backend tests: unit + integration + e2e
+task test:frontend          # all frontend tests: unit + e2e smoke
+task test:all              # full suite: backend + frontend + full-stack e2e
 ```
-
-Useful integration chunks:
 
 ```bash
-task test:int:cex       # CEX connectors
-task test:int:onchain   # onchain connectors
-task test:int:prices    # price getters
-task test:int:db        # DB operations
-task test:int:exchanges # exchange-specific integrations
-task test:e2e           # e2e tests; requires running DB
+task test:backend:e2e    # backend e2e tests; self-contained (provisions its own scenario DB)
 ```
 
-Integration tests use a separate `trades_db_integ` database on the dev Postgres server. Use `task db:setup:integ` to create/stamp/seed it, or `task test:int:full` to run setup, integration tests, and reset in one flow.
+`task test:backend:int` runs the full `tests/integration/` suite in one go, including live-API tests marked `pytest.mark.network` (Yahoo, CoinGecko, Forex, Marketstack, Alpha Vantage, Coinbase, MEXC, Etherscan, etc.) — these self-skip via `pytest.skip(...)` when they hit a rate limit, missing API key, or transient network/auth error, rather than being excluded upfront. Pass `-m "integration and network"` (or similar) directly to pytest if you only want to exercise the live-API tests.
+
+Integration and e2e tests each run against their own dedicated, self-provisioned scenario database — they're just named scenarios (`backend-integration-tests`, `backend-e2e-tests`), started via the same `start:scenario:db` mechanism as `task start:scenario`/`task start:scenario:backend` (Dockerized Postgres on a deterministic, name-hashed port; see `.taskfiles/start.yml`). `task test:backend:int` and `task test:backend:e2e` provision their scenario DB themselves as their first step — no separate CI or Taskfile setup step needed. Pass `SCENARIO=<name>` to run against a different scenario fixture instead (e.g. `SCENARIO=fr_tax task test:backend:int`); `WITH_DEFAULTS=1` (the default) layers the scenario's fixture on top of the default seed data (`settings.yaml`/`asset_map.yaml`), `WITH_DEFAULTS=0` uses only the scenario's own fixture. Use `task test:backend:int:teardown` to run setup, integration tests, and scenario teardown (`task stop:scenario`) in one flow.
 
 ---
 
@@ -417,7 +419,7 @@ task start:dev
 
 # 3. Fast tests + scenario QA
 task test
-task test:int:full
+task test:backend:int:teardown
 SCENARIO=spinoff task start:scenario
 
 # 4. Push + draft PR -> develop
@@ -436,7 +438,7 @@ task logs:staging:local
 ```bash
 task git:feature -- connector-fix
 task start:dev:backend
-task test:unit:backend
+task test:backend:unit
 
 # Scenario QA when behavior is visible to users
 SCENARIO=polymarket_pnl task start:scenario
@@ -450,7 +452,7 @@ task deploy:staging:local
 ```bash
 task git:feature -- portfolio-ui-fix
 task start:dev:frontend
-task test:unit:frontend
+task test:frontend:unit
 
 # Multi-account/manual QA benefits from isolated browser state
 SCENARIO=private-accounts task start:scenario BROWSER=isolated COUNT=2
@@ -581,8 +583,8 @@ task stop:staging:local
 | `task db:reset:staging` | Drop + reseed local staging DB |
 | `DRY_RUN=1 task db:reset:staging` | Preview local staging DB reset |
 | `task db:reset:prod` | Drop + reseed local prod DB |
-| `task db:setup:integ` | Create and seed integration DB |
-| `task db:reset:integ` | Reset integration DB |
+| `task start:scenario:db SCENARIO=<name>` | Create and seed a scenario DB (used by integration/e2e tests too) |
+| `task stop:scenario SCENARIO=<name>` | Tear down a scenario instance (DB + volume) |
 | `task db:copy:dev-to-staging` | Copy dev -> staging (`DRY_RUN=1` to preview) |
 | `task db:copy:staging-to-dev` | Copy staging -> dev and run migrations |
 | `task db:copy:staging-to-prod` | Copy staging -> prod-local |
@@ -703,20 +705,18 @@ Git worktree commands used by builds:
 
 | Command | Description |
 |---------|-------------|
-| `task test` | Quick unit tests |
+| `task test` | Quick unit tests (backend + frontend) |
 | `task test:unit` | Full unit suite |
-| `task test:unit:backend` | Backend unit + API tests |
-| `task test:unit:frontend` | Frontend type check + build |
-| `task test:int` | Integration tests |
-| `task test:int:cex` | Integration: CEX connector tests |
-| `task test:int:onchain` | Integration: onchain connector tests |
-| `task test:int:prices` | Integration: price getter tests |
-| `task test:int:db` | Integration: DB-only tests |
-| `task test:int:exchanges` | Integration: exchange-specific tests |
-| `task test:int:full` | Setup + integration |
-| `task test:e2e` | End-to-end tests; requires running database |
-| `task test:all` | All tests |
-| `task test:ci` | Simulate CI via Act |
+| `task test:backend:unit` | Backend unit + API tests |
+| `task test:frontend:unit` | Frontend type check + build |
+| `task test:backend:int` | Integration tests (includes live-API tests, which self-skip when flaky) |
+| `task test:backend:int:teardown` | Setup + integration + scenario teardown |
+| `task test:backend:e2e` | Backend end-to-end tests (self-contained; provisions its own scenario DB) |
+| `task test:frontend:e2e` | Frontend Playwright smoke tests (no backend) |
+| `task test:e2e` | Full-stack e2e: frontend Playwright against a real backend + db (dedicated scenario) |
+| `task test:backend` | All backend tests: unit + integration + e2e |
+| `task test:frontend` | All frontend tests: unit + e2e smoke |
+| `task test:all` | Full suite: backend + frontend + full-stack e2e |
 
 ### Utilities
 

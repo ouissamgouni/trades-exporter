@@ -8,7 +8,46 @@ import pytest
 from unittest.mock import MagicMock
 
 from backend.services.price_getters import get_price_getter, BasePriceGetter
-from backend.services.price_getters.base import PriceGetterConfig
+from backend.services.price_getters.base import (
+    PriceErrorReason,
+    PriceGetterConfig,
+    PriceGetterError,
+)
+
+
+# ============================================================================
+# Flaky Live-API Error Handling
+# ============================================================================
+
+# Reasons that indicate a transient/environmental problem with a free live
+# API (rate limiting, temporary outage, no data for the moment) rather than a
+# bug in our code — safe to skip instead of failing the test.
+FLAKY_PRICE_ERROR_REASONS = {
+    PriceErrorReason.API_RATE_LIMITED,
+    PriceErrorReason.API_UNAVAILABLE,
+    PriceErrorReason.NO_DATA_RETURNED,
+    PriceErrorReason.NETWORK_ERROR,
+    PriceErrorReason.TIMEOUT,
+}
+
+
+def call_or_skip_on_flaky_error(func, *args, **kwargs):
+    """Call a live price-getter API function, skipping the test instead of
+    failing when the free API is rate-limiting us (HTTP 429), temporarily
+    unavailable, or returning no data — a known flaky condition, not a code
+    bug.
+    """
+    try:
+        return func(*args, **kwargs)
+    except PriceGetterError as e:
+        original = str(e.original_error) if e.original_error else ""
+        if (
+            e.reason in FLAKY_PRICE_ERROR_REASONS
+            or "429" in original
+            or "Too Many Requests" in original
+        ):
+            pytest.skip(f"Live price API flaky/unavailable: {e}")
+        raise
 
 
 # ============================================================================

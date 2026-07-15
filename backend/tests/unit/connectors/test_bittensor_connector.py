@@ -13,7 +13,7 @@ from backend.connectors.onchain.connector_bittensor import ConnectorBittensor
 from backend.db.models import NormalizedTransaction
 
 
-WALLET_ADDRESS = "5FE7xRXFJWQbep1JrS8JyjmZJRycdskeVummEWp525LxBKud"
+WALLET_ADDRESS = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
 
 
 @pytest.fixture

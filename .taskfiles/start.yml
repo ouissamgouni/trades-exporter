@@ -336,8 +336,8 @@ tasks:
       ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
-      BACKEND_REF: '{{.BACKEND_REF | default .REF}}'
-      FRONTEND_REF: '{{.FRONTEND_REF | default .REF}}'
+      BACKEND_REF: "{{.BACKEND_REF | default .REF}}"
+      FRONTEND_REF: "{{.FRONTEND_REF | default .REF}}"
       SEED_DIR: "{{.SEED_DIR}}"
       SCENARIO: '{{.SCENARIO | default ""}}'
       WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
@@ -369,9 +369,21 @@ tasks:
         fi
       # Build backend + frontend from their (possibly different) refs, both tagged :$ENV_NAME
       - task: :build:scenario-component
-        vars: { COMPONENT: backend, REF: "{{.BACKEND_REF}}", OUT_TAG: "{{.RESOLVED_ENV_NAME}}", BACKEND_PORT: "{{.RESOLVED_API_PORT}}" }
+        vars:
+          {
+            COMPONENT: backend,
+            REF: "{{.BACKEND_REF}}",
+            OUT_TAG: "{{.RESOLVED_ENV_NAME}}",
+            BACKEND_PORT: "{{.RESOLVED_API_PORT}}",
+          }
       - task: :build:scenario-component
-        vars: { COMPONENT: frontend, REF: "{{.FRONTEND_REF}}", OUT_TAG: "{{.RESOLVED_ENV_NAME}}", BACKEND_PORT: "{{.RESOLVED_API_PORT}}" }
+        vars:
+          {
+            COMPONENT: frontend,
+            REF: "{{.FRONTEND_REF}}",
+            OUT_TAG: "{{.RESOLVED_ENV_NAME}}",
+            BACKEND_PORT: "{{.RESOLVED_API_PORT}}",
+          }
       # Tag + deploy
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
@@ -499,7 +511,160 @@ tasks:
       COUNT: '{{.COUNT | default "1"}}'
       RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
-      # Phase 1: Setup DB + schema + seed
+      - |
+        # Restarting local dev-loop processes (backend/frontend) is this
+        # task's own responsibility — scenario:_setup_db only ever manages
+        # the DB, never frontend/backend dev processes, so it's safe to
+        # reuse from automated-test contexts (Playwright/CI) too.
+        if [ "{{.RESET}}" = "1" ]; then
+          source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+          [ -n "{{.WEB_PORT}}" ] && SC_WEB_PORT="{{.WEB_PORT}}"
+          pkill -f "vite.*--port $SC_WEB_PORT" 2>/dev/null || true
+        fi
+      - task: scenario:_setup_db
+        vars:
+          SCENARIO: "{{.SCENARIO}}"
+          SEED_DIR: "{{.SEED_DIR}}"
+          WITH_DEFAULTS: "{{.WITH_DEFAULTS}}"
+          RESET: "{{.RESET}}"
+          WEB_PORT: "{{.WEB_PORT}}"
+          API_PORT: "{{.API_PORT}}"
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        [ -n "{{.WEB_PORT}}" ] && SC_WEB_PORT="{{.WEB_PORT}}"
+        [ -n "{{.API_PORT}}" ] && SC_API_PORT="{{.API_PORT}}"
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Starting scenario dev mode ($ENV_NAME) with live reload"
+        echo ""
+        echo "   [DB]  Scenario Database on localhost:$SC_DB_PORT"
+        echo "   [API] Backend on localhost:$SC_API_PORT"
+        echo "   [WEB] Frontend on localhost:$SC_WEB_PORT"
+        echo ""
+        echo "Press Ctrl+C to stop backend + frontend (DB stays running)"
+        echo "Run 'task stop:scenario SCENARIO={{.SCENARIO}}' to stop everything"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+      # Run backend + frontend with live reload (foreground, blocking)
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        [ -n "{{.WEB_PORT}}" ] && SC_WEB_PORT="{{.WEB_PORT}}"
+        [ -n "{{.API_PORT}}" ] && SC_API_PORT="{{.API_PORT}}"
+        SCENARIO_LABEL="{{.SCENARIO}}"
+        [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+        npx concurrently \
+          --names "API:$SCENARIO_LABEL,WEB:$SCENARIO_LABEL,OPEN:$SCENARIO_LABEL" \
+          --prefix-colors "yellow.bold,green.bold,magenta.bold" \
+          --prefix "[{name}] " \
+          --kill-others-on-fail \
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB {{.ROOT_DIR}}/.venv/bin/uvicorn backend.api.main:app --reload --port $SC_API_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$SC_API_PORT npm run dev -- --port $SC_WEB_PORT" \
+          "until curl -sf http://localhost:$SC_WEB_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$SC_WEB_PORT {{.BROWSER}} {{.COUNT}} scenario-$SCENARIO_LABEL {{.RESET_BROWSER}}"
+
+  scenario:db:
+    desc: "Start ONLY the scenario database (Docker Postgres, schema migrated + seeded) — no backend, no frontend. A lightweight, portable DB fixture for backend integration tests. SCENARIO=<name>. Use 'task stop:scenario SCENARIO=<name>' to tear down."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+      SCENARIO: '{{.SCENARIO | default ""}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+      RESET: '{{.RESET | default "0"}}'
+    cmds:
+      - task: scenario:_setup_db
+        vars:
+          SCENARIO: "{{.SCENARIO}}"
+          SEED_DIR: "{{.SEED_DIR}}"
+          WITH_DEFAULTS: "{{.WITH_DEFAULTS}}"
+          RESET: "{{.RESET}}"
+
+  scenario:backend:
+    desc: "Start scenario DB + backend only, in the background, for automated tests (Playwright/CI). Returns immediately. SCENARIO=<name>. Use 'task stop:scenario SCENARIO=<name>' to tear down."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+      SCENARIO: '{{.SCENARIO | default ""}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+      RESET: '{{.RESET | default "0"}}'
+      WEB_PORT: '{{.WEB_PORT | default ""}}'
+      API_PORT: '{{.API_PORT | default ""}}'
+    cmds:
+      - task: scenario:_setup_db
+        vars:
+          SCENARIO: "{{.SCENARIO}}"
+          SEED_DIR: "{{.SEED_DIR}}"
+          WITH_DEFAULTS: "{{.WITH_DEFAULTS}}"
+          RESET: "{{.RESET}}"
+          WEB_PORT: "{{.WEB_PORT}}"
+          API_PORT: "{{.API_PORT}}"
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        [ -n "{{.WEB_PORT}}" ] && SC_WEB_PORT="{{.WEB_PORT}}"
+        [ -n "{{.API_PORT}}" ] && SC_API_PORT="{{.API_PORT}}"
+        STATE_DIR="{{.ROOT_DIR}}/.taskfiles/.scenario-state"
+        SCENARIO_LABEL="{{.SCENARIO}}"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+
+        echo "Starting backend in background (detached, no reload) on port $SC_API_PORT..."
+        cd {{.BACKEND_DIR}}
+        PYTHONPATH="{{.ROOT_DIR}}" LOG_LEVEL="{{.LOG_LEVEL}}" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+          nohup {{.ROOT_DIR}}/.venv/bin/uvicorn backend.api.main:app --port $SC_API_PORT \
+          > "$STATE_DIR/$SCENARIO_LABEL.backend.log" 2>&1 &
+        echo $! > "$STATE_DIR/$SCENARIO_LABEL.backend.pid"
+        cd {{.ROOT_DIR}}
+
+        echo "Waiting for backend to become healthy..."
+        RETRIES=30
+        while [ $RETRIES -gt 0 ]; do
+          if curl -sf "http://localhost:$SC_API_PORT/health" >/dev/null 2>&1 || curl -sf "http://localhost:$SC_API_PORT/docs" >/dev/null 2>&1; then
+            echo "✅ Backend healthy on localhost:$SC_API_PORT"
+            break
+          fi
+          RETRIES=$((RETRIES - 1))
+          sleep 1
+        done
+        if [ $RETRIES -eq 0 ]; then
+          echo "❌ Backend failed to become healthy — check $STATE_DIR/$SCENARIO_LABEL.backend.log"
+          exit 1
+        fi
+
+        echo ""
+        echo "✅ Scenario '$SCENARIO_LABEL' ready (detached): DB localhost:$SC_DB_PORT, API localhost:$SC_API_PORT"
+        echo "   Stop with: task stop:scenario SCENARIO={{.SCENARIO}}"
+
+  # ════════════════════════════════════════════════════════════════
+  # Internal helpers
+  # ════════════════════════════════════════════════════════════════
+
+  scenario:_setup_db:
+    internal: true
+    desc: "Bootstrap the scenario Docker DB + schema + seed. DB-only — never touches backend/frontend processes. Shared by scenario:, scenario:db and scenario:backend."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+      SCENARIO: '{{.SCENARIO | default ""}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+      RESET: '{{.RESET | default "0"}}'
+      WEB_PORT: '{{.WEB_PORT | default ""}}'
+      API_PORT: '{{.API_PORT | default ""}}'
+    cmds:
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
         [ -n "{{.WEB_PORT}}" ] && SC_WEB_PORT="{{.WEB_PORT}}"
@@ -513,12 +678,12 @@ tasks:
           "$SC_API_PORT" "$SC_WEB_PORT" "$SC_DB_PORT" "$SC_PROJECT_NAME" \
           > "$STATE_DIR/$SCENARIO_LABEL.env"
 
-        # ── RESET cleanup ──
+        # ── RESET cleanup ── (DB + backend only; frontend lifecycle is the
+        # caller's responsibility — see scenario:'s own pkill step above)
         if [ "{{.RESET}}" = "1" ]; then
           echo "🔄 Restarting: stopping existing scenario environment ($ENV_NAME) first..."
           docker compose -f {{.DOCKER_COMPOSE_SCENARIO_DB}} -p $SC_PROJECT_NAME down -v 2>/dev/null || true
           pkill -f "uvicorn.*--port $SC_API_PORT" 2>/dev/null || true
-          pkill -f "vite.*--port $SC_WEB_PORT" 2>/dev/null || true
           echo "✅ Previous environment cleaned"
         fi
 
@@ -551,19 +716,8 @@ tasks:
         PGPASSWORD=$POSTGRES_PASSWORD docker exec $SC_DB_CONTAINER \
           psql -U $POSTGRES_USER -d postgres -c "CREATE DATABASE $POSTGRES_DB"
 
-        # ── Create tables ──
-        echo "Creating tables from models..."
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
-          {{.ROOT_DIR}}/.venv/bin/python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
-
-        # ── Stamp migrations ──
-        echo "Stamping database to current migration..."
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
-          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp head
-
-        # ── Seed data ──
+        # ── Resolve SEED_DIR ──
         SEED_DIR="{{.SEED_DIR}}"
-        WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
         if [ -z "$SEED_DIR" ] && [ -n "{{.SCENARIO}}" ] && [ "{{.SCENARIO}}" != "default" ]; then
           CANDIDATE="{{.ROOT_DIR}}/scenarios/{{.SCENARIO}}"
           if [ -d "$CANDIDATE" ]; then
@@ -571,53 +725,13 @@ tasks:
             echo "Auto-resolved SEED_DIR from SCENARIO={{.SCENARIO}}"
           fi
         fi
-        if [ -n "$SEED_DIR" ]; then
-          if [ "$WITH_DEFAULTS" = "1" ]; then
-            echo "Seeding default data first (WITH_DEFAULTS=1)..."
-            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
-              {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
-          fi
-          echo "Seeding scenario from $SEED_DIR..."
-          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
-            {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
-        else
-          echo "Seeding default data..."
-          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
-            {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
-        fi
 
-        # ── Summary ──
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Starting scenario dev mode ($ENV_NAME) with live reload"
-        echo ""
-        echo "   [DB]  Scenario Database on localhost:$SC_DB_PORT"
-        echo "   [API] Backend on localhost:$SC_API_PORT"
-        echo "   [WEB] Frontend on localhost:$SC_WEB_PORT"
-        echo ""
-        echo "Press Ctrl+C to stop backend + frontend (DB stays running)"
-        echo "Run 'task stop:scenario SCENARIO={{.SCENARIO}}' to stop everything"
-        echo "═══════════════════════════════════════════════════════════════"
-        echo ""
-      # Phase 2: Run backend + frontend with live reload
-      - |
-        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
-        [ -n "{{.WEB_PORT}}" ] && SC_WEB_PORT="{{.WEB_PORT}}"
-        [ -n "{{.API_PORT}}" ] && SC_API_PORT="{{.API_PORT}}"
-        SCENARIO_LABEL="{{.SCENARIO}}"
-        [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
-        npx concurrently \
-          --names "API:$SCENARIO_LABEL,WEB:$SCENARIO_LABEL,OPEN:$SCENARIO_LABEL" \
-          --prefix-colors "yellow.bold,green.bold,magenta.bold" \
-          --prefix "[{name}] " \
-          --kill-others-on-fail \
-          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB {{.ROOT_DIR}}/.venv/bin/uvicorn backend.api.main:app --reload --port $SC_API_PORT" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$SC_API_PORT npm run dev -- --port $SC_WEB_PORT" \
-          "until curl -sf http://localhost:$SC_WEB_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$SC_WEB_PORT {{.BROWSER}} {{.COUNT}} scenario-$SCENARIO_LABEL {{.RESET_BROWSER}}"
-
-  # ════════════════════════════════════════════════════════════════
-  # Internal helpers
-  # ════════════════════════════════════════════════════════════════
+        # ── Create tables + stamp + check + seed (shared script) ──
+        ROOT_DIR="{{.ROOT_DIR}}" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+        SEED_DIR="$SEED_DIR" \
+        WITH_DEFAULTS="{{.WITH_DEFAULTS}}" \
+          {{.ROOT_DIR}}/.taskfiles/scripts/db_bootstrap.sh
 
   _wait_healthy:
     internal: true

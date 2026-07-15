@@ -19,6 +19,7 @@ from backend.config.loader import (
 )
 from backend.connectors.base.connector_exceptions import ConnectorAPIError
 from backend.connectors.hub.connector_hub import ConnectorHub
+from backend.core.utils import is_test_mode
 from backend.db.database import get_engine
 from backend.services.pipeline import (
     create_default_pipeline,
@@ -239,6 +240,7 @@ class JobProgress:
         return {
             "status": self.status.value,
             "job_id": self.job_id,
+            "test_mode": is_test_mode(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "total_processed": self.total_processed,
@@ -460,6 +462,7 @@ class SyncJobService:
             "job_id": reserved_job_id,
             "overrides_count": overrides_count,
             "renormalize": renormalize,
+            "test_mode": is_test_mode(),
         }
 
     def abort_job(self) -> Dict[str, Any]:
@@ -1803,7 +1806,7 @@ class SyncJobService:
 
                     # Determine test mode: override > config > global
                     effective_test_mode = override_test_mode.get(
-                        connector_id, config.get("test_mode", False)
+                        connector_id, config.get("test_mode", is_test_mode())
                     )
 
                     self.progress.connector_statuses[connector_id] = ConnectorProgress(

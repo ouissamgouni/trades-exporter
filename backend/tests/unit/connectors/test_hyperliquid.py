@@ -18,8 +18,8 @@ from backend.db.models import NormalizedTransaction
 
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "e2e", "fixtures")
-WALLET = "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
-HL_BRIDGE_ADDRESS = "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7"
+WALLET = "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead"
+HL_BRIDGE_ADDRESS = "0xbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef"
 
 
 # =========================================================================

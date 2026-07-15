@@ -12,7 +12,12 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from backend.services.price_getters.base import PriceGetterConfig, PriceGetterError, PriceResult
+from backend.services.price_getters.base import (
+    PriceGetterConfig,
+    PriceGetterError,
+    PriceResult,
+)
+from backend.tests.integration.price_getters.conftest import call_or_skip_on_flaky_error
 
 
 @pytest.mark.integration
@@ -22,7 +27,10 @@ class TestAlphaVantageSmoke:
 
     @pytest.fixture(autouse=True)
     def skip_without_key(self):
-        if not os.environ.get("ALPHAVANTAGE_API_KEY") or os.environ.get("ALPHAVANTAGE_API_KEY") == "demo":
+        if (
+            not os.environ.get("ALPHAVANTAGE_API_KEY")
+            or os.environ.get("ALPHAVANTAGE_API_KEY") == "demo"
+        ):
             pytest.skip("ALPHAVANTAGE_API_KEY not set or is demo key")
 
     def test_current_price_aapl(self, alphavantage_getter):
@@ -30,7 +38,9 @@ class TestAlphaVantageSmoke:
         asset.symbol = "AAPL"
         asset.price_type = "stock"
 
-        result = alphavantage_getter.get_current_price(asset)
+        result = call_or_skip_on_flaky_error(
+            alphavantage_getter.get_current_price, asset
+        )
 
         assert isinstance(result, PriceResult)
         assert result.price > 50
@@ -41,7 +51,9 @@ class TestAlphaVantageSmoke:
         asset.symbol = "BTC"
         asset.price_type = "crypto"
 
-        result = alphavantage_getter.get_current_price(asset)
+        result = call_or_skip_on_flaky_error(
+            alphavantage_getter.get_current_price, asset
+        )
 
         assert result.price > 1000
         assert result.source == "alphavantage"
@@ -52,7 +64,9 @@ class TestAlphaVantageSmoke:
         asset.price_type = "stock"
         target = datetime.now(timezone.utc) - timedelta(days=14)
 
-        result = alphavantage_getter.get_historical_price(asset, target)
+        result = call_or_skip_on_flaky_error(
+            alphavantage_getter.get_historical_price, asset, target
+        )
 
         assert result.price > 0
         assert result.source == "alphavantage"

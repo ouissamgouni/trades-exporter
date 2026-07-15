@@ -9,7 +9,7 @@ IMPORTANT: All tests using real databases should be marked with @pytest.mark.int
 and should NEVER use the dev or production database.
 
 Integration tests use TEST_DATABASE_URL environment variable (set via Taskfile).
-Run integration tests with: task test:int:local
+Run integration tests with: task test:backend:int
 """
 
 import os
@@ -40,12 +40,14 @@ load_env_file()
 # =============================================================================
 # PostgreSQL Fixtures (Integration Tests Only)
 # =============================================================================
-# These fixtures use a dedicated integration test database (trades_db_integ).
-# Set up with: task db:setup:integ
-# Run with: task test:int:local
+# These fixtures use a dedicated scenario test database (see
+# .taskfiles/start.yml `scenario:db` and .taskfiles/test.yml), self-provisioned
+# by `task test:backend:int` / `task test:backend:e2e` (SCENARIO=
+# backend-integration-tests / backend-e2e-tests by default).
 #
-# The TEST_DATABASE_URL environment variable must point to trades_db_integ.
-# This ensures integration tests NEVER touch dev or production databases.
+# The TEST_DATABASE_URL environment variable must point to that scenario
+# database. This ensures integration tests NEVER touch dev or production
+# databases (enforced below in pytest_configure).
 #
 # Usage:
 #   @pytest.mark.integration
@@ -61,12 +63,13 @@ def pg_session():
     """
     Create a PostgreSQL session for integration tests.
 
-    Uses TEST_DATABASE_URL environment variable to connect to trades_db_integ.
-    This fixture does NOT create/drop tables - the database should be set up
-    via 'task db:setup:integ' before running integration tests.
+    Uses TEST_DATABASE_URL environment variable to connect to the scenario
+    test database. This fixture does NOT create/drop tables - the database
+    is provisioned automatically by 'task test:backend:int' /
+    'task test:backend:e2e' before tests run.
 
-    SAFETY: Uses dedicated trades_db_integ database and will NEVER
-    touch your dev or production database when run via Taskfile.
+    SAFETY: Uses a dedicated scenario database and will NEVER touch your dev
+    or production database when run via Taskfile (enforced by pytest_configure).
 
     Usage:
         @pytest.mark.integration
@@ -80,7 +83,7 @@ def pg_session():
 
     if not test_db_url:
         pytest.skip(
-            "TEST_DATABASE_URL not set. Run integration tests with: task test:int:local"
+            "TEST_DATABASE_URL not set. Run integration tests with: task test:backend:int"
         )
 
     # Create engine for integration test database
@@ -142,13 +145,15 @@ def pytest_configure(config):
             pytest.exit(
                 f"DANGER: {env_name} points to an application database ({matched}).\n"
                 f"Found: {_redact_database_url(value)}\n"
-                "Tests that need PostgreSQL must use the dedicated trades_db_integ database.",
+                "Tests that need PostgreSQL must use a dedicated scenario test database "
+                "(see task test:backend:int / task test:backend:e2e), never dev/staging/prod.",
                 returncode=4,
             )
 
     if postgres_db in dangerous_postgres_names and not database_url:
         pytest.exit(
             f"DANGER: POSTGRES_DB points to an application database ({postgres_db}).\n"
-            "Set TEST_DATABASE_URL/DATABASE_URL to trades_db_integ before running DB-backed tests.",
+            "Set TEST_DATABASE_URL/DATABASE_URL to a dedicated scenario test database "
+            "before running DB-backed tests (see task test:backend:int / task test:backend:e2e).",
             returncode=4,
         )

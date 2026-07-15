@@ -46,7 +46,7 @@ Added to [backend/db/seed_data/accounts.yaml](../db/seed_data/accounts.yaml):
 - id: 17
   name: "Cardano Wallet"
   connector_type: "cardano_scan"
-  address: "addr1qx478mhvuvlu2wfufdfem7a0truw3zjj7mrtxcdhytyjazkd4rpkpyue5qayv2spsznjn43q4phsldkptpthw3u5teasar990w"
+  address: "addr1q82aapf3k55ylaevy73ya9tw339jnewx498vhr729vsvyeuuw2t73mjxerpjhrmhaylc4cqc3644mx95p50fffrmwvss8nvyg6"
   credentials_ref: "env:CARDANOSCAN_API_KEY"
   source_key: "cardano_mainnet"
   tags:

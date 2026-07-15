@@ -13,7 +13,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock, MagicMock, patch
 from uuid import uuid4
@@ -69,8 +69,8 @@ def mock_version():
     version = MagicMock()
     version.version_id = 1
     version.description = "Test calculation"
-    version.created_at = datetime.utcnow()
-    version.expires_at = datetime.utcnow() + timedelta(hours=1)
+    version.created_at = datetime.now(timezone.utc)
+    version.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     version.status = "draft"
     version.method = "FIFO"
     version.lot_mode = "LOT_TRAVEL"
@@ -103,7 +103,7 @@ def mock_cost_lot():
     # Also provide public properties used by server code
     lot.unit_cost = Decimal("100")
     lot.total_cost = Decimal("1000")
-    lot.acquired_at = datetime.utcnow()
+    lot.acquired_at = datetime.now(timezone.utc)
     lot.origin_transaction_id = 100
     lot.origin_unit_id = 1
     lot.is_zero_cost = False
@@ -131,7 +131,7 @@ def mock_cost_lot():
     lot.cost_source = "fmv"
     lot.cost_fmv_price = Decimal("50000.00")
     lot.cost_fmv_source = "coingecko"
-    lot.cost_fmv_timestamp = datetime.utcnow()
+    lot.cost_fmv_timestamp = datetime.now(timezone.utc)
     lot.cost_fmv_stale = False
 
     return lot
@@ -176,14 +176,14 @@ def mock_realized_pnl():
     entry.disposal_taxable = True  # Actual field name in RealizedPnl
     entry.transaction_id = 100
     entry.origin_unit_id = 1
-    entry.realized_at = datetime.utcnow()
+    entry.realized_at = datetime.now(timezone.utc)
     entry.holding_period_days = 400
 
     # Proceeds tracking metadata
     entry.proceeds_source = "inflow_value"
     entry.proceeds_price = Decimal("2000")
     entry.proceeds_price_source = "price_service"
-    entry.proceeds_price_timestamp = datetime.utcnow()
+    entry.proceeds_price_timestamp = datetime.now(timezone.utc)
 
     # Derivative/attributed asset
     entry.attributed_asset = None
@@ -978,7 +978,7 @@ class TestFrTaxEffectiveInResponse:
         entry1.pnl_in_base = Decimal("1000")
         entry1.disposal_taxable = True
         entry1.origin_unit_id = 1
-        entry1.realized_at = datetime.utcnow()
+        entry1.realized_at = datetime.now(timezone.utc)
         entry1.holding_period_days = 10
         entry1.proceeds_source = None
         entry1.proceeds_price = None
@@ -1005,7 +1005,7 @@ class TestFrTaxEffectiveInResponse:
         entry2.pnl_in_base = Decimal("2000")
         entry2.disposal_taxable = True
         entry2.origin_unit_id = 1
-        entry2.realized_at = datetime.utcnow()
+        entry2.realized_at = datetime.now(timezone.utc)
         entry2.holding_period_days = 20
         entry2.proceeds_source = None
         entry2.proceeds_price = None

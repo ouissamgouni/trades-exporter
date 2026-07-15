@@ -1,4 +1,4 @@
-import React, { Suspense, useState } from 'react';
+import React, { Suspense } from 'react';
 import { Spinner, Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
 
 // Lazy load the components
@@ -13,13 +13,14 @@ const LoadingFallback = () => (
 
 interface AddImportPanelProps {
     onDataChange?: () => void;
+    activeTab: 'manual' | 'import';
+    onActiveTabChange: (tab: 'manual' | 'import') => void;
 }
 
-export const AddImportPanel: React.FC<AddImportPanelProps> = ({ onDataChange }) => {
-    const [activeTab, setActiveTab] = useState('manual');
+export const AddImportPanel: React.FC<AddImportPanelProps> = ({ onDataChange, activeTab, onActiveTabChange }) => {
     return (
         <div>
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <Tabs value={activeTab} onValueChange={(v) => onActiveTabChange(v as 'manual' | 'import')}>
                 <TabsList className="mb-4">
                     <TabsTrigger value="manual">
                         ✏️ Manual Entry

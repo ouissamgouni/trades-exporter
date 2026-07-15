@@ -11,7 +11,7 @@
  * This replaces the 100+ threaded props pattern.
  */
 
-import React, { createContext, useContext, useReducer, useMemo, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQueryClient, useQuery, type UseQueryResult, type RefetchOptions, type QueryObserverResult } from '@tanstack/react-query';
 import { useBaseCurrency } from '../BaseCurrencySelector';
 import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
@@ -137,10 +137,11 @@ export function usePnL(): PnLContextValue {
 
 interface PnLProviderProps {
     isActive: boolean;
+    subtab?: 'portfolio' | 'tax';
     children: React.ReactNode;
 }
 
-export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) => {
+export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, children }) => {
     const { baseCurrency, baseCurrencyId } = useBaseCurrency();
     const queryClient = useQueryClient();
 
@@ -158,8 +159,17 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
     const [state, dispatch] = useReducer(
         pnlReducer,
         { baseCurrency, baseCurrencyId, initialAccountIds: getInitialAccountIds() },
-        (args) => createInitialPnLState(args.baseCurrency, args.baseCurrencyId, args.initialAccountIds),
+        (args) => createInitialPnLState(args.baseCurrency, args.baseCurrencyId, args.initialAccountIds, subtab),
     );
+
+    // Keep pnlActiveTab in sync when the `subtab` prop changes externally
+    // (route navigation, browser back/forward) after initial mount.
+    useEffect(() => {
+        if (subtab && subtab !== state.pnlActiveTab) {
+            dispatch({ type: 'SET_PNL_ACTIVE_TAB', tab: subtab });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [subtab]);
 
     // ── Refs ──
     const isCalculatingRef = useRef(false);

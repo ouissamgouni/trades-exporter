@@ -138,6 +138,8 @@ lerna-debug.log*
 # React specific
 frontend/coverage/
 frontend/*.log
+frontend/playwright-report/
+frontend/test-results/
 frontend/.env.local
 frontend/.env.development.local
 frontend/.env.test.local

@@ -11,7 +11,12 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from backend.services.price_getters.base import PriceGetterConfig, PriceGetterError, PriceResult
+from backend.services.price_getters.base import (
+    PriceGetterConfig,
+    PriceGetterError,
+    PriceResult,
+)
+from backend.tests.integration.price_getters.conftest import call_or_skip_on_flaky_error
 
 
 @pytest.mark.integration
@@ -20,7 +25,9 @@ class TestYahooDirectSmoke:
     """Real API calls against Yahoo Chart API v8."""
 
     def test_current_price_aapl(self, yahoo_direct_getter, mock_asset_aapl):
-        result = yahoo_direct_getter.get_current_price(mock_asset_aapl)
+        result = call_or_skip_on_flaky_error(
+            yahoo_direct_getter.get_current_price, mock_asset_aapl
+        )
 
         assert isinstance(result, PriceResult)
         assert result.price > 50  # AAPL sanity
@@ -29,7 +36,9 @@ class TestYahooDirectSmoke:
 
     def test_current_price_with_config(self, yahoo_direct_getter, mock_asset_btc):
         config = PriceGetterConfig(external_id="BTC-USD")
-        result = yahoo_direct_getter.get_current_price(mock_asset_btc, config=config)
+        result = call_or_skip_on_flaky_error(
+            yahoo_direct_getter.get_current_price, mock_asset_btc, config=config
+        )
 
         assert result.price > 1000  # BTC sanity
         assert result.quote_currency == "USD"
@@ -43,14 +52,18 @@ class TestYahooDirectSmoke:
             external_id="PE500.PA",
             extra={"native_quote_currency": "EUR"},
         )
-        result = yahoo_direct_getter.get_current_price(asset, config=config)
+        result = call_or_skip_on_flaky_error(
+            yahoo_direct_getter.get_current_price, asset, config=config
+        )
 
         assert result.price > 0
         assert result.quote_currency == "EUR"
 
     def test_historical_price_aapl_7d(self, yahoo_direct_getter, mock_asset_aapl):
         target = datetime.now(timezone.utc) - timedelta(days=7)
-        result = yahoo_direct_getter.get_historical_price(mock_asset_aapl, target)
+        result = call_or_skip_on_flaky_error(
+            yahoo_direct_getter.get_historical_price, mock_asset_aapl, target
+        )
 
         assert isinstance(result, PriceResult)
         assert result.price > 0
@@ -58,7 +71,9 @@ class TestYahooDirectSmoke:
 
     def test_historical_price_30d(self, yahoo_direct_getter, mock_asset_aapl):
         target = datetime.now(timezone.utc) - timedelta(days=30)
-        result = yahoo_direct_getter.get_historical_price(mock_asset_aapl, target)
+        result = call_or_skip_on_flaky_error(
+            yahoo_direct_getter.get_historical_price, mock_asset_aapl, target
+        )
 
         assert result.price > 0
 

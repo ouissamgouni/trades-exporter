@@ -15,7 +15,7 @@ class TestCardanoScanConnector:
     """Unit tests for Cardano connector using test fixtures."""
 
     # Test wallet address (from fixtures)
-    WALLET_ADDRESS = "addr1qx478mhvuvlu2wfufdfem7a0truw3zjj7mrtxcdhytyjazkd4rpkpyue5qayv2spsznjn43q4phsldkptpthw3u5teasar990w"
+    WALLET_ADDRESS = "addr1q82aapf3k55ylaevy73ya9tw339jnewx498vhr729vsvyeuuw2t73mjxerpjhrmhaylc4cqc3644mx95p50fffrmwvss8nvyg6"
 
     @pytest.fixture
     def connector(self):

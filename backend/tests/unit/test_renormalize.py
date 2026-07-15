@@ -19,6 +19,7 @@ from backend.services.pipeline.stages.persistence import PersistenceStage
 # Helpers
 # ============================================================================
 
+
 class FakeConnector(BaseConnector):
     """Minimal connector for testing renormalize mode."""
 
@@ -62,6 +63,7 @@ def _make_raw_tx(id: int, raw_data: dict, connector_id: int = 1) -> MagicMock:
 # BaseConnector._yield_raws in Renormalize Mode
 # ============================================================================
 
+
 class TestConnectorRenormalizeMode:
     """Tests that _yield_raws reads from DB in renormalize mode."""
 
@@ -87,7 +89,9 @@ class TestConnectorRenormalizeMode:
         mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
         mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
 
-        with patch.object(RawTransactionRepository, "iter_by_connector_id") as mock_iter:
+        with patch.object(
+            RawTransactionRepository, "iter_by_connector_id"
+        ) as mock_iter:
             # Return a single batch with 2 items, then stop
             mock_iter.return_value = iter([raw_items])
 
@@ -109,7 +113,9 @@ class TestConnectorRenormalizeMode:
         mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
         mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
 
-        with patch.object(RawTransactionRepository, "iter_by_connector_id") as mock_iter:
+        with patch.object(
+            RawTransactionRepository, "iter_by_connector_id"
+        ) as mock_iter:
             mock_iter.return_value = iter([])  # No batches
 
             connector = FakeConnector(
@@ -124,6 +130,7 @@ class TestConnectorRenormalizeMode:
 # ============================================================================
 # CEX Connector: skip load_markets in renormalize mode
 # ============================================================================
+
 
 class TestCexConnectorSkipsInitInRenormalizeMode:
     """Tests that CEX connectors skip credentials + load_markets in renormalize mode."""
@@ -159,6 +166,7 @@ class TestCexConnectorSkipsInitInRenormalizeMode:
 # ============================================================================
 # PersistenceStage in Renormalize Mode
 # ============================================================================
+
 
 class TestPersistenceRenormalize:
     """Tests that PersistenceStage atomically deletes old + inserts new in renormalize mode."""
@@ -199,11 +207,18 @@ class TestPersistenceRenormalize:
         new_db_tx = MagicMock(spec=NormalizedTransaction)
         mock_to_sqlmodel.return_value = new_db_tx
 
-        with patch.object(RawTransactionRepository, "get_by_source", return_value=existing_raw):
+        with patch.object(
+            RawTransactionRepository, "get_by_source", return_value=existing_raw
+        ):
             with patch.object(RawTransactionRepository, "__init__", return_value=None):
                 from backend.db.repositories import NormalizedTransactionRepository
-                with patch.object(NormalizedTransactionRepository, "__init__", return_value=None):
-                    with patch.object(NormalizedTransactionRepository, "create") as mock_create:
+
+                with patch.object(
+                    NormalizedTransactionRepository, "__init__", return_value=None
+                ):
+                    with patch.object(
+                        NormalizedTransactionRepository, "create"
+                    ) as mock_create:
                         stage = PersistenceStage()
                         context = self._make_context(session)
                         tx = self._make_normalized_tx()
@@ -232,8 +247,13 @@ class TestPersistenceRenormalize:
         with patch.object(RawTransactionRepository, "get_by_source", return_value=None):
             with patch.object(RawTransactionRepository, "__init__", return_value=None):
                 from backend.db.repositories import NormalizedTransactionRepository
-                with patch.object(NormalizedTransactionRepository, "__init__", return_value=None):
-                    with patch.object(NormalizedTransactionRepository, "create") as mock_create:
+
+                with patch.object(
+                    NormalizedTransactionRepository, "__init__", return_value=None
+                ):
+                    with patch.object(
+                        NormalizedTransactionRepository, "create"
+                    ) as mock_create:
                         stage = PersistenceStage()
                         context = self._make_context(session)
                         tx = self._make_normalized_tx()
@@ -256,6 +276,7 @@ class TestPersistenceRenormalize:
 # ============================================================================
 # RawTransactionRepository New Methods
 # ============================================================================
+
 
 class TestRawTransactionRepositoryRenormalize:
     """Tests for iter_by_connector_id and get_by_source."""
@@ -312,6 +333,7 @@ class TestRawTransactionRepositoryRenormalize:
 # API Schema Renormalize Flag
 # ============================================================================
 
+
 class TestApiRenormalizeFlag:
     """Tests that API schema and route handle the renormalize flag."""
 
@@ -319,14 +341,14 @@ class TestApiRenormalizeFlag:
         """SyncJobStartRequest.renormalize defaults to False."""
         from backend.api.schemas import SyncJobStartRequest
 
-        req = SyncJobStartRequest()
+        req = SyncJobStartRequest(trigger_source="manual")
         assert req.renormalize is False
 
     def test_start_request_renormalize_true(self):
         """SyncJobStartRequest accepts renormalize=True."""
         from backend.api.schemas import SyncJobStartRequest
 
-        req = SyncJobStartRequest(renormalize=True)
+        req = SyncJobStartRequest(trigger_source="manual", renormalize=True)
         assert req.renormalize is True
 
     def test_job_status_response_includes_renormalize(self):
@@ -362,6 +384,7 @@ class TestApiRenormalizeFlag:
 # DatabaseConnectorHub renormalize_mode Flag Propagation
 # ============================================================================
 
+
 class TestHubRenormalizePropagation:
     """Tests that DatabaseConnectorHub correctly passes renormalize_mode to connectors."""
 
@@ -370,7 +393,9 @@ class TestHubRenormalizePropagation:
         from backend.connectors.hub.database_connector_hub import DatabaseConnectorHub
 
         with patch.object(DatabaseConnectorHub, "_load_connectors"):
-            with patch("backend.connectors.hub.database_connector_hub.BaseHubConnector.__init__") as mock_super:
+            with patch(
+                "backend.connectors.hub.database_connector_hub.BaseHubConnector.__init__"
+            ) as mock_super:
                 mock_super.return_value = None
                 session = MagicMock()
                 try:
@@ -426,10 +451,14 @@ class TestHubRenormalizePropagation:
             mock_account.name = "test"
 
             hub.loader_service = MagicMock()
-            hub.loader_service.get_all_connectors_with_accounts.return_value = [(mock_ac, mock_account)]
+            hub.loader_service.get_all_connectors_with_accounts.return_value = [
+                (mock_ac, mock_account)
+            ]
             hub.loader_service.build_connector_config.return_value = {"api_key": "xxx"}
 
-            with patch("backend.connectors.hub.database_connector_hub.get_connector_registry") as mock_reg:
+            with patch(
+                "backend.connectors.hub.database_connector_hub.get_connector_registry"
+            ) as mock_reg:
                 mock_reg.return_value.is_onchain.return_value = False
                 hub._load_connectors()
 
@@ -444,18 +473,25 @@ class TestHubRenormalizePropagation:
 # Onchain Connector Renormalize Guards
 # ============================================================================
 
+
 class TestOnchainRenormalizeGuards:
     """Tests that onchain connectors skip API init in renormalize mode."""
 
     def test_blockscout_base_skips_api_config_in_renormalize(self):
         """BlockscoutConnectorBase should early-return in renormalize mode."""
-        from backend.connectors.onchain.blockscout.base_blockscout_connector import BlockscoutConnectorBase
+        from backend.connectors.onchain.blockscout.base_blockscout_connector import (
+            BlockscoutConnectorBase,
+        )
 
         config = {"renormalize_mode": True}
-        with patch("backend.connectors.onchain.blockscout.base_blockscout_connector.get_connector_registry") as mock_reg:
+        with patch(
+            "backend.connectors.onchain.blockscout.base_blockscout_connector.get_connector_registry"
+        ) as mock_reg:
             mock_reg.return_value.get_native_token.return_value = "ETH"
             mock_reg.return_value.get_native_token_decimals.return_value = 18
-            mock_reg.return_value.get_chain_config.return_value = MagicMock(base_url="https://example.com")
+            mock_reg.return_value.get_chain_config.return_value = MagicMock(
+                base_url="https://example.com"
+            )
             # Should NOT raise even without valid API settings
             try:
                 conn = BlockscoutConnectorBase(
@@ -465,21 +501,31 @@ class TestOnchainRenormalizeGuards:
                 )
                 assert conn.renormalize_mode is True
                 # base_url should NOT be set (skipped by guard)
-                assert not hasattr(conn, "base_url") or conn.base_url is None or conn.base_url == ""
+                assert (
+                    not hasattr(conn, "base_url")
+                    or conn.base_url is None
+                    or conn.base_url == ""
+                )
             except TypeError:
                 # Abstract class — acceptable, the guard ran
                 pass
 
     def test_etherscan_normal_tx_skips_api_key_in_renormalize(self):
         """ConnectorEtherscanNormalTx should not require API key in renormalize mode."""
-        from backend.connectors.onchain.etherscan.connector_etherscan_normal_tx import ConnectorEtherscanNormalTx
+        from backend.connectors.onchain.etherscan.connector_etherscan_normal_tx import (
+            ConnectorEtherscanNormalTx,
+        )
 
         config = {"renormalize_mode": True}
-        with patch("backend.connectors.onchain.etherscan.connector_etherscan_normal_tx.get_connector_registry") as mock_reg:
+        with patch(
+            "backend.connectors.onchain.etherscan.connector_etherscan_normal_tx.get_connector_registry"
+        ) as mock_reg:
             mock_reg.return_value.get_native_token.return_value = "ETH"
             mock_reg.return_value.get_native_token_decimals.return_value = 18
             mock_reg.return_value.get_chain_config.return_value = MagicMock()
-            with patch("backend.connectors.onchain.etherscan.connector_etherscan_normal_tx.load_settings") as mock_settings:
+            with patch(
+                "backend.connectors.onchain.etherscan.connector_etherscan_normal_tx.load_settings"
+            ) as mock_settings:
                 mock_settings.return_value = {}  # No API key
                 # Should NOT raise ValueError("Missing API KEY")
                 conn = ConnectorEtherscanNormalTx(
@@ -491,7 +537,9 @@ class TestOnchainRenormalizeGuards:
 
     def test_solana_skips_api_key_in_renormalize(self):
         """ConnectorSolanaHelius should not require HELIUS_API_KEY in renormalize mode."""
-        from backend.connectors.onchain.connector_solana_helius import ConnectorSolanaHelius
+        from backend.connectors.onchain.connector_solana_helius import (
+            ConnectorSolanaHelius,
+        )
 
         config = {"renormalize_mode": True}
         with patch.dict("os.environ", {}, clear=True):
@@ -504,7 +552,9 @@ class TestOnchainRenormalizeGuards:
 
     def test_moralis_skips_api_key_in_renormalize(self):
         """ConnectorMoralisWalletHistory should not require MORALIS_API_KEY in renormalize mode."""
-        from backend.connectors.onchain.connector_moralis_wallet_history import ConnectorMoralisWalletHistory
+        from backend.connectors.onchain.connector_moralis_wallet_history import (
+            ConnectorMoralisWalletHistory,
+        )
 
         config = {"renormalize_mode": True}
         with patch.dict("os.environ", {}, clear=True):
@@ -518,11 +568,17 @@ class TestOnchainRenormalizeGuards:
 
     def test_near_base_skips_api_key_in_renormalize(self):
         """NearConnectorBase should not require NEARBLOCKS_API_KEY in renormalize mode."""
-        from backend.connectors.onchain.near.base_near_connector import NearConnectorBase
+        from backend.connectors.onchain.near.base_near_connector import (
+            NearConnectorBase,
+        )
 
         config = {"renormalize_mode": True}
-        with patch("backend.connectors.onchain.near.base_near_connector.get_connector_registry") as mock_reg:
-            mock_reg.return_value.get_chain_config.return_value = MagicMock(base_url="https://example.com")
+        with patch(
+            "backend.connectors.onchain.near.base_near_connector.get_connector_registry"
+        ) as mock_reg:
+            mock_reg.return_value.get_chain_config.return_value = MagicMock(
+                base_url="https://example.com"
+            )
             with patch.dict("os.environ", {}, clear=True):
                 try:
                     conn = NearConnectorBase(
@@ -539,21 +595,36 @@ class TestOnchainRenormalizeGuards:
 # Hub Connector Renormalize Child Forwarding
 # ============================================================================
 
+
 class TestHubChildRenormalizeForwarding:
     """Tests that hub connectors forward renormalize_mode to child configs."""
 
     def test_etherscan_hub_skips_api_validation_in_renormalize(self):
         """ConnectorEtherscanHub should not validate API key in renormalize mode."""
-        from backend.connectors.onchain.etherscan.connector_etherscan_hub import ConnectorEtherscanHub
+        from backend.connectors.onchain.etherscan.connector_etherscan_hub import (
+            ConnectorEtherscanHub,
+        )
 
         config = {"renormalize_mode": True}
-        with patch("backend.connectors.onchain.etherscan.connector_etherscan_hub.get_connector_registry") as mock_reg:
-            mock_reg.return_value.get_chain_config.return_value = MagicMock(base_url="https://example.com")
-            with patch("backend.connectors.onchain.etherscan.connector_etherscan_hub.load_settings") as mock_settings:
+        with patch(
+            "backend.connectors.onchain.etherscan.connector_etherscan_hub.get_connector_registry"
+        ) as mock_reg:
+            mock_reg.return_value.get_chain_config.return_value = MagicMock(
+                base_url="https://example.com"
+            )
+            with patch(
+                "backend.connectors.onchain.etherscan.connector_etherscan_hub.load_settings"
+            ) as mock_settings:
                 mock_settings.return_value = {}  # No API key!
                 # Patch child connector classes at the module where they're imported from
-                with patch("backend.connectors.onchain.etherscan.connector_etherscan_normal_tx.ConnectorEtherscanNormalTx.__init__", return_value=None):
-                    with patch("backend.connectors.onchain.etherscan.connector_etherscan_token_transfers.ConnectorEtherscanTokenTransfers.__init__", return_value=None):
+                with patch(
+                    "backend.connectors.onchain.etherscan.connector_etherscan_normal_tx.ConnectorEtherscanNormalTx.__init__",
+                    return_value=None,
+                ):
+                    with patch(
+                        "backend.connectors.onchain.etherscan.connector_etherscan_token_transfers.ConnectorEtherscanTokenTransfers.__init__",
+                        return_value=None,
+                    ):
                         # Should NOT raise ValueError("Missing API KEY")
                         hub = ConnectorEtherscanHub(
                             wallet_address="0xabc",
@@ -566,11 +637,21 @@ class TestHubChildRenormalizeForwarding:
         from backend.connectors.onchain.near.connector_near_hub import ConnectorNearHub
 
         config = {"renormalize_mode": True, "api_key": "test-key"}
-        with patch("backend.connectors.onchain.near.connector_near_hub.get_connector_registry") as mock_reg:
-            mock_reg.return_value.get_chain_config.return_value = MagicMock(base_url="https://example.com")
+        with patch(
+            "backend.connectors.onchain.near.connector_near_hub.get_connector_registry"
+        ) as mock_reg:
+            mock_reg.return_value.get_chain_config.return_value = MagicMock(
+                base_url="https://example.com"
+            )
             # Patch child connector inits at the actual class level
-            with patch("backend.connectors.onchain.near.connector_near_txns.ConnectorNearTxns.__init__", return_value=None):
-                with patch("backend.connectors.onchain.near.connector_near_ft_txns.ConnectorNearFtTxns.__init__", return_value=None):
+            with patch(
+                "backend.connectors.onchain.near.connector_near_txns.ConnectorNearTxns.__init__",
+                return_value=None,
+            ):
+                with patch(
+                    "backend.connectors.onchain.near.connector_near_ft_txns.ConnectorNearFtTxns.__init__",
+                    return_value=None,
+                ):
                     hub = ConnectorNearHub(
                         wallet_address="test.near",
                         config=config,
@@ -580,6 +661,7 @@ class TestHubChildRenormalizeForwarding:
 # ============================================================================
 # Hub Connector Renormalize Bypass
 # ============================================================================
+
 
 class TestHubConnectorRenormalizeBypass:
     """Tests that hub connectors skip the _yield_raws renormalize branch."""
@@ -622,17 +704,25 @@ class TestHubConnectorRenormalizeBypass:
         config = {"renormalize_mode": True}
         conn = FakeConnector(connector_id=42, config=config)
         assert conn.renormalize_mode is True
-        assert not getattr(conn, 'is_hub_connector', False)
+        assert not getattr(conn, "is_hub_connector", False)
 
         # _yield_raws() should enter the renormalize branch and read from DB
         mock_raw_tx = _make_raw_tx(1, {"id": "tx1"}, connector_id=42)
         with patch("backend.db.database.get_session") as mock_get_session:
             mock_session = MagicMock()
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__enter__ = MagicMock(
+                return_value=mock_session
+            )
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             with patch.object(RawTransactionRepository, "__init__", return_value=None):
-                with patch.object(RawTransactionRepository, "count_by_connector_id", return_value=1):
-                    with patch.object(RawTransactionRepository, "iter_by_connector_id", return_value=iter([[mock_raw_tx]])):
+                with patch.object(
+                    RawTransactionRepository, "count_by_connector_id", return_value=1
+                ):
+                    with patch.object(
+                        RawTransactionRepository,
+                        "iter_by_connector_id",
+                        return_value=iter([[mock_raw_tx]]),
+                    ):
                         items = list(conn._yield_raws())
         assert len(items) == 1
         assert items[0]["id"] == "tx1"
@@ -642,6 +732,7 @@ class TestHubConnectorRenormalizeBypass:
 # Renormalize Progress Tracking
 # ============================================================================
 
+
 class TestRenormalizeProgressTracking:
     """Tests that renormalize mode sends progress updates."""
 
@@ -649,17 +740,27 @@ class TestRenormalizeProgressTracking:
         """_yield_raws in renormalize mode should call update_progress with fetched_count."""
         config = {"renormalize_mode": True}
         mock_callback = MagicMock()
-        conn = FakeConnector(connector_id=42, config=config, progress_callback=mock_callback)
+        conn = FakeConnector(
+            connector_id=42, config=config, progress_callback=mock_callback
+        )
 
         raw_txs = [_make_raw_tx(i, {"id": f"tx{i}"}, connector_id=42) for i in range(3)]
 
         with patch("backend.db.database.get_session") as mock_get_session:
             mock_session = MagicMock()
-            mock_get_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_get_session.return_value.__enter__ = MagicMock(
+                return_value=mock_session
+            )
             mock_get_session.return_value.__exit__ = MagicMock(return_value=False)
             with patch.object(RawTransactionRepository, "__init__", return_value=None):
-                with patch.object(RawTransactionRepository, "count_by_connector_id", return_value=3):
-                    with patch.object(RawTransactionRepository, "iter_by_connector_id", return_value=iter([raw_txs])):
+                with patch.object(
+                    RawTransactionRepository, "count_by_connector_id", return_value=3
+                ):
+                    with patch.object(
+                        RawTransactionRepository,
+                        "iter_by_connector_id",
+                        return_value=iter([raw_txs]),
+                    ):
                         items = list(conn._yield_raws())
 
         assert len(items) == 3
@@ -679,6 +780,7 @@ class TestRenormalizeProgressTracking:
 # ============================================================================
 # RawTransactionRepository count_by_connector_id
 # ============================================================================
+
 
 class TestRawTransactionRepositoryCount:
     """Tests for count_by_connector_id."""

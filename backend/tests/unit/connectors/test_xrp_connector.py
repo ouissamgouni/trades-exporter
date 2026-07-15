@@ -18,7 +18,7 @@ def xrp_connector():
     connector = ConnectorXRPLedger(
         account_id=1,
         connector_id=1,
-        wallet_address="rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+        wallet_address="rrrrrrrrrrrrrrrrrrrrrhoLvTp",
         config={"test_mode": True},  # Pass test_mode in config dict
     )
     return connector
@@ -38,7 +38,7 @@ class TestConnectorXRPLedger:
 
     def test_connector_initialization(self, xrp_connector):
         """Test that connector initializes correctly."""
-        assert xrp_connector.wallet_address == "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6"
+        assert xrp_connector.wallet_address == "rrrrrrrrrrrrrrrrrrrrrhoLvTp"
         assert xrp_connector.chain_name == "xrp"
         assert xrp_connector.account_id == 1
         assert xrp_connector.connector_id == 1
@@ -90,7 +90,7 @@ class TestConnectorXRPLedger:
         # Check network info
         assert ntx.network == "xrp"
         assert ntx.source_from_account == "rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh"
-        assert ntx.source_to_account == "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6"
+        assert ntx.source_to_account == "rrrrrrrrrrrrrrrrrrrrrhoLvTp"
         
         # Check timestamp
         assert isinstance(ntx.date_time, datetime)
@@ -132,7 +132,7 @@ class TestConnectorXRPLedger:
         assert ntx.include_fee is True  # Outflow includes fee in P&L
         
         # Check network info
-        assert ntx.source_from_account == "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6"
+        assert ntx.source_from_account == "rrrrrrrrrrrrrrrrrrrrrhoLvTp"
         assert ntx.source_to_account == "rN7n7otQDd6FczFgLdlqtyMVrn3HMbhDyt"
         
         # Check tags contain destination tag and ledger index
@@ -169,7 +169,7 @@ class TestConnectorXRPLedger:
             "meta": {"TransactionResult": "tesSUCCESS"},
             "TransactionType": "Payment",
             "Account": "rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh",
-            "Destination": "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+            "Destination": "rrrrrrrrrrrrrrrrrrrrrhoLvTp",
             "Amount": "568741841",
             "Fee": "12",
             "hash": "TEST123",
@@ -186,7 +186,7 @@ class TestConnectorXRPLedger:
 
     def test_direction_determination(self, xrp_connector):
         """Test direction detection for different transaction scenarios."""
-        wallet = "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6"
+        wallet = "rrrrrrrrrrrrrrrrrrrrrhoLvTp"
         
         # Test inflow
         assert xrp_connector._determine_direction("rOther123", wallet) == "inflow"
@@ -205,7 +205,7 @@ class TestConnectorXRPLedger:
         tx = {
             "meta": {"TransactionResult": "tesSUCCESS"},
             "TransactionType": "OfferCreate",  # Not a Payment
-            "Account": "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+            "Account": "rrrrrrrrrrrrrrrrrrrrrhoLvTp",
             "hash": "TEST123",
             "date": "2023-07-30T19:50:21.000Z",
         }
@@ -218,7 +218,7 @@ class TestConnectorXRPLedger:
         tx = {
             "meta": {"TransactionResult": "tecUNFUNDED_PAYMENT"},  # Failed
             "TransactionType": "Payment",
-            "Account": "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+            "Account": "rrrrrrrrrrrrrrrrrrrrrhoLvTp",
             "Destination": "rOther123",
             "Amount": "1000000",
             "Fee": "12",

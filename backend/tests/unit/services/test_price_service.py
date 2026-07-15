@@ -9,7 +9,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
 
@@ -287,7 +287,7 @@ class TestPriceCache:
         mock_session = Mock()
         mock_session.exec.return_value.first.return_value = None
 
-        result = cache.get(mock_session, 1, 2, datetime.utcnow())
+        result = cache.get(mock_session, 1, 2, datetime.now(timezone.utc))
 
         assert result is None
 
@@ -299,6 +299,6 @@ class TestPriceCache:
         mock_snapshot.price = Decimal("100.50")
         mock_session.exec.return_value.first.return_value = mock_snapshot
 
-        result = cache.get(mock_session, 1, 2, datetime.utcnow())
+        result = cache.get(mock_session, 1, 2, datetime.now(timezone.utc))
 
         assert result == Decimal("100.50")

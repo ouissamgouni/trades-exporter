@@ -12,7 +12,12 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from backend.services.price_getters.base import PriceGetterConfig, PriceGetterError, PriceResult
+from backend.services.price_getters.base import (
+    PriceGetterConfig,
+    PriceGetterError,
+    PriceResult,
+)
+from backend.tests.integration.price_getters.conftest import call_or_skip_on_flaky_error
 
 
 @pytest.mark.integration
@@ -29,7 +34,9 @@ class TestMarketstackSmoke:
         asset = MagicMock()
         asset.symbol = "AAPL"
 
-        result = marketstack_getter.get_current_price(asset)
+        result = call_or_skip_on_flaky_error(
+            marketstack_getter.get_current_price, asset
+        )
 
         assert isinstance(result, PriceResult)
         assert result.price > 50
@@ -40,7 +47,9 @@ class TestMarketstackSmoke:
         asset.symbol = "AAPL"
         target = datetime.now(timezone.utc) - timedelta(days=14)
 
-        result = marketstack_getter.get_historical_price(asset, target)
+        result = call_or_skip_on_flaky_error(
+            marketstack_getter.get_historical_price, asset, target
+        )
 
         assert result.price > 0
         assert result.source == "marketstack"

@@ -8,9 +8,9 @@ These tests validate:
 - Bug fixes (e.g., account_id null checks in TransferIssueDetector)
 - Filtering by account_ids and include_dismissed
 
-Run with: task test:int:local
-Full cycle: task test:int:full
-Database: trades_db_integ (set up with: task db:setup:integ)
+Run with: task test:backend:int
+Full cycle (with teardown): task test:backend:int:teardown
+Database: dedicated scenario DB, self-provisioned by: task test:backend:int
 """
 
 import pytest
@@ -192,7 +192,7 @@ class TestMissingDataDetector:
         pg_session.commit()
 
         detector = MissingDataDetector(pg_session)
-        
+
         count = detector.count(account_ids=[account1.id])
         assert count == 1
 
@@ -202,13 +202,16 @@ class TestMissingDataDetector:
 
     def test_excludes_fee_only_cost_transactions_from_missing_asset(self, pg_session):
         """Fee-only (cost) transactions legitimately have no main asset.
-        
+
         They use fee_quote_asset_id instead. The detector should NOT flag
         them as MISSING_SOURCE_ASSET.
         """
         account = Account(name="Test Account", account_type="cex", owned=True)
-        fee_asset = Asset(symbol="ETH", name="Ethereum", asset_type="crypto")
-        pg_session.add_all([account, fee_asset])
+        fee_asset = pg_session.exec(select(Asset).where(Asset.symbol == "ETH")).first()
+        if fee_asset is None:
+            fee_asset = Asset(symbol="ETH", name="Ethereum", asset_type="crypto")
+            pg_session.add(fee_asset)
+        pg_session.add(account)
         pg_session.commit()
 
         # Fee-only transaction: no main asset, but has fee data
@@ -229,7 +232,7 @@ class TestMissingDataDetector:
         pg_session.commit()
 
         detector = MissingDataDetector(pg_session)
-        count = detector.count()
+        count = detector.count(account_ids=[account.id])
         assert count == 0, "Fee-only (cost) tx should not be flagged as missing asset"
 
     def test_still_flags_non_cost_transactions_missing_asset(self, pg_session):
@@ -257,8 +260,12 @@ class TestMissingDataDetector:
         assert count >= 1
 
         issues, total = detector.fetch(page=1, per_page=10)
-        asset_issues = [i for i in issues if i.issue_type == IssueType.MISSING_SOURCE_ASSET]
-        assert len(asset_issues) == 1, "Non-cost tx missing asset should still be flagged"
+        asset_issues = [
+            i for i in issues if i.issue_type == IssueType.MISSING_SOURCE_ASSET
+        ]
+        assert len(asset_issues) == 1, (
+            "Non-cost tx missing asset should still be flagged"
+        )
 
 
 @pytest.mark.integration
@@ -298,7 +305,7 @@ class TestTransferIssueDetector:
     def test_NOT_detected_when_from_account_id_is_set(self, pg_session):
         """
         BUG FIX VALIDATION: Transactions with from_account_id set should NOT be flagged.
-        
+
         This validates the fix: .where(NormalizedTransaction.from_account_id.is_(None))
         """
         account1 = Account(name="Account 1", account_type="cex", owned=True)
@@ -357,7 +364,7 @@ class TestTransferIssueDetector:
     def test_NOT_detected_when_to_account_id_is_set(self, pg_session):
         """
         BUG FIX VALIDATION: Transactions with to_account_id set should NOT be flagged.
-        
+
         This validates the fix: .where(NormalizedTransaction.to_account_id.is_(None))
         """
         account1 = Account(name="Account 1", account_type="cex", owned=True)
@@ -435,10 +442,10 @@ class TestTransferIssueDetector:
         pg_session.commit()
 
         detector = TransferIssueDetector(pg_session)
-        
+
         count = detector.count(include_dismissed=False)
         assert count == 0  # Should be filtered out
-        
+
         count_with_dismissed = detector.count(include_dismissed=True)
         assert count_with_dismissed == 1
 
@@ -477,7 +484,7 @@ class TestTransferIssueDetector:
         pg_session.commit()
 
         detector = TransferIssueDetector(pg_session)
-        
+
         count = detector.count(account_ids=[account1.id])
         assert count == 1
 
@@ -546,14 +553,16 @@ class TestLinkageIssueDetector:
         """Test detection of transactions with unlinked accounts."""
         # Get BTC asset from seed data to link it (avoid detecting unlinked asset issue)
         btc_asset = pg_session.exec(select(Asset).where(Asset.symbol == "BTC")).first()
-        
+
         tx = NormalizedTransaction(
             account_id=None,  # Not linked
             date_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
             direction="inflow",
             quantity=1.0,
             source_asset_symbol="BTC",
-            asset_id=btc_asset.asset_id if btc_asset else None,  # Link asset to isolate account issue
+            asset_id=btc_asset.asset_id
+            if btc_asset
+            else None,  # Link asset to isolate account issue
             source="binance",
             source_account="Binance",  # Has source account
             review_status=ReviewStatus.VALID,
@@ -570,13 +579,16 @@ class TestLinkageIssueDetector:
 
     def test_excludes_fee_only_cost_transactions_from_unlinked_asset(self, pg_session):
         """Fee-only (cost) transactions have no main asset by design.
-        
+
         They should NOT be flagged as UNLINKED_ASSET even when
         source_asset_symbol is set (e.g. empty string or leftover value).
         """
         account = Account(name="Test Account", account_type="cex", owned=True)
-        fee_asset = Asset(symbol="ETH", name="Ethereum", asset_type="crypto")
-        pg_session.add_all([account, fee_asset])
+        fee_asset = pg_session.exec(select(Asset).where(Asset.symbol == "ETH")).first()
+        if fee_asset is None:
+            fee_asset = Asset(symbol="ETH", name="Ethereum", asset_type="crypto")
+            pg_session.add(fee_asset)
+        pg_session.add(account)
         pg_session.commit()
 
         tx = NormalizedTransaction(
@@ -597,7 +609,9 @@ class TestLinkageIssueDetector:
 
         detector = LinkageIssueDetector(pg_session)
         # Should find 0 UNLINKED_ASSET issues for this tx
-        count = detector.count(issue_types=[IssueType.UNLINKED_ASSET.value])
+        count = detector.count(
+            issue_types=[IssueType.UNLINKED_ASSET.value], account_ids=[account.id]
+        )
         assert count == 0, "Fee-only (cost) tx should not be flagged as unlinked asset"
 
     def test_still_flags_non_cost_transactions_as_unlinked_asset(self, pg_session):
@@ -655,7 +669,7 @@ class TestLinkageIssueDetector:
         pg_session.commit()
 
         detector = LinkageIssueDetector(pg_session)
-        
+
         count = detector.count(account_ids=[account1.id])
         assert count == 1
 

@@ -805,9 +805,6 @@ class AssetCategory(SQLModel, table=True):
     """
 
     __tablename__ = "asset_categories"
-    __table_args__ = (
-        UniqueConstraint("asset_id", "category_id", name="uq_asset_category"),
-    )
 
     asset_id: int = Field(foreign_key="assets.asset_id", primary_key=True)
     category_id: int = Field(foreign_key="categories.id", primary_key=True)

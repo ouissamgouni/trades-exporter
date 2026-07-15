@@ -13,11 +13,11 @@ tasks:
   unit:
     desc: Run all unit tests (no database required)
     cmds:
-      - task: unit:backend
-      - task: unit:frontend
+      - task: backend:unit
+      - task: frontend:unit
       - cmd: echo "All unit tests passed"
 
-  unit:backend:
+  backend:unit:
     desc: Run backend unit + API tests in parallel
     dir: "{{.BACKEND_DIR}}"
     dotenv:
@@ -28,10 +28,10 @@ tasks:
         "{{.ROOT_DIR}}/config/secrets.dev.env",
       ]
     cmds:
-      - "{{.ROOT_DIR}}/.venv/bin/python -m pytest tests/unit/ tests/api/ -v -n auto -m \"not integration\" --timeout=30"
+      - '{{.ROOT_DIR}}/.venv/bin/python -m pytest tests/unit/ tests/api/ -v -n auto -m "not integration" --timeout=30'
 
-  unit:frontend:
-    desc: Run frontend build and type check
+  frontend:unit:
+    desc: Run frontend build, type check, and Vitest unit tests
     dir: "{{.FRONTEND_DIR}}"
     dotenv:
       [
@@ -43,188 +43,113 @@ tasks:
     cmds:
       - npm run build
       - npx tsc --noEmit || true
-
-  # =========================================================================
-  # Integration Tests — chunked by category
-  # =========================================================================
-
-  int:cex:
-    desc: "Integration: CEX connector tests (Binance, OKX, MEXC, Coinbase)"
-    dir: "{{.BACKEND_DIR}}"
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
-        "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
-      ]
-    cmds:
-      - |
-        echo "🧪 Running CEX integration tests..."
-        {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/integration/cex/ -v -m integration --timeout=60 \
-          --ignore=tests/integration/cex/test_int_connector_coinbase_deposits_withdrawals.py
-
-  int:onchain:
-    desc: "Integration: Onchain connector tests (Blockscout, Etherscan, Moralis, SUI, Hyperliquid)"
-    dir: "{{.BACKEND_DIR}}"
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
-        "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
-      ]
-    cmds:
-      - |
-        echo "🧪 Running onchain integration tests..."
-        {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/integration/onchain/ -v -m integration --timeout=120
-
-  int:exchanges:
-    desc: "Integration: Exchange-specific tests (MEXC deposits/withdrawals)"
-    dir: "{{.BACKEND_DIR}}"
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
-        "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
-      ]
-    cmds:
-      - |
-        echo "🧪 Running exchange integration tests..."
-        {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/integration/exchanges/ -v -m integration --timeout=60
-
-  int:prices:
-    desc: "Integration: Price getter tests (Yahoo, CoinGecko)"
-    dir: "{{.BACKEND_DIR}}"
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
-        "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
-      ]
-    cmds:
-      - |
-        echo "🧪 Running price getter integration tests..."
-        {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/integration/price_getters/ -v -m "integration and network" --timeout=60
-
-  int:db:
-    desc: "Integration: DB-only tests (data health, seeding, bulk update)"
-    dir: "{{.BACKEND_DIR}}"
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
-        "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
-      ]
-    cmds:
-      - |
-        echo "🧪 Running DB integration tests..."
-        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.ROOT_DIR}}/.venv/bin/python -m pytest \
-            tests/integration/test_int_data_health_detectors.py \
-            tests/integration/test_int_transfer_dismiss.py \
-            tests/integration/test_int_issue_service_counts.py \
-            tests/integration/test_int_seeding_and_connectors.py \
-            tests/integration/test_bulk_update.py \
-            -v -m integration --timeout=120
+      - npm run test
 
   # =========================================================================
   # Composite Integration Tasks
   # =========================================================================
 
-  int:
-    desc: Run all integration tests against local integration database (trades_db_integ)
+  backend:int:
+    desc: "Run all integration tests against a dedicated scenario database. Self-contained — provisions its own scenario DB via start:scenario:db (default SCENARIO=backend-integration-tests; pass a different SCENARIO=<name> to run against another scenario fixture). Includes live-API/network tests — these self-skip on rate-limit/auth/quota errors instead of hard-failing (see pytest.mark.network tests)."
     dir: "{{.BACKEND_DIR}}"
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/scenario.env",
         "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
+        "{{.ROOT_DIR}}/config/secrets.scenario.env",
       ]
+    vars:
+      SCENARIO: '{{.SCENARIO | default "backend-integration-tests"}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "1"}}'
     cmds:
+      - task: :start:scenario:db
+        vars: { SCENARIO: "{{.SCENARIO}}", WITH_DEFAULTS: "{{.WITH_DEFAULTS}}" }
       - |
-        echo "🧪 Running ALL integration tests against trades_db_integ..."
-        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+        source {{.ROOT_DIR}}/.taskfiles/scenario_ports.sh "{{.SCENARIO}}"
+        echo "🧪 Running ALL integration tests against scenario '{{.SCENARIO}}'..."
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
           {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/integration/ -v -m integration \
-            --ignore=tests/integration/cex/test_int_connector_coinbase_deposits_withdrawals.py \
             --timeout=120
-
-  int:full:
-    desc: Run full integration test cycle (setup → test → cleanup)
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
-        "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
-      ]
-    cmds:
-      - cmd: echo "Setting up integration test database..."
-      - task: :db:setup:integ
-      - cmd: echo "Running integration tests..."
-      - task: int
-      - cmd: echo "Cleaning up integration test database..."
-      - task: :db:reset:integ
-      - cmd: echo "Integration test cycle complete"
 
   # =========================================================================
   # E2E Tests
   # =========================================================================
 
-  e2e:
-    desc: Run end-to-end tests (requires running database)
+  backend:e2e:
+    desc: "Run backend end-to-end tests. Self-contained — provisions its own scenario DB via start:scenario:db (default SCENARIO=backend-e2e-tests)."
     dir: "{{.BACKEND_DIR}}"
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/scenario.env",
         "{{.ROOT_DIR}}/config/secrets.env",
-        "{{.ROOT_DIR}}/config/secrets.dev.env",
+        "{{.ROOT_DIR}}/config/secrets.scenario.env",
       ]
+    vars:
+      SCENARIO: '{{.SCENARIO | default "backend-e2e-tests"}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "1"}}'
     cmds:
+      - task: :start:scenario:db
+        vars: { SCENARIO: "{{.SCENARIO}}", WITH_DEFAULTS: "{{.WITH_DEFAULTS}}" }
       - |
-        echo "🧪 Running E2E tests..."
-        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+        source {{.ROOT_DIR}}/.taskfiles/scenario_ports.sh "{{.SCENARIO}}"
+        echo "🧪 Running E2E tests against scenario '{{.SCENARIO}}'..."
+        TEST_MODE=1 \
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
           {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/e2e/ -v -m e2e --timeout=30
 
+  frontend:e2e:
+    desc: "Frontend Playwright smoke tests (critical + major, no backend required)"
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npx playwright install --with-deps chromium
+      - npm run test:e2e:frontend
+
+  e2e:
+    desc: "Full-stack e2e: frontend Playwright tests against a real backend + db. Self-contained — Playwright's globalSetup/globalTeardown (frontend/e2e-backend/global-setup.ts) spin up/tear down the dedicated frontend_e2e scenario (task start:scenario:backend / stop:scenario) around the run, so no separate DB/backend setup step is needed here."
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npx playwright install --with-deps chromium
+      - npm run test:e2e:backend
+
   # =========================================================================
-  # Run a specific chunk by name
+  # Per-Tier Aggregates (all phases for one tier)
   # =========================================================================
+
+  backend:
+    desc: "Run all backend tests: unit, integration, e2e (3 phases)"
+    cmds:
+      - cmd: echo "--- Backend Phase 1 - Unit Tests ---"
+      - task: backend:unit
+      - cmd: echo "--- Backend Phase 2 - Integration Tests ---"
+      - task: backend:int
+      - cmd: echo "--- Backend Phase 3 - E2E Tests ---"
+      - task: backend:e2e
+      - cmd: echo "All backend tests passed!"
+
+  frontend:
+    desc: "Run all frontend tests: unit, e2e smoke (2 phases)"
+    cmds:
+      - cmd: echo "--- Frontend Phase 1 - Unit Tests ---"
+      - task: frontend:unit
+      - cmd: echo "--- Frontend Phase 2 - E2E Smoke Tests ---"
+      - task: frontend:e2e
+      - cmd: echo "All frontend tests passed!"
 
   # =========================================================================
   # Run everything
   # =========================================================================
 
   all:
-    desc: Run all tests (unit parallel, integration chunks, e2e)
+    desc: "Run the full test suite: backend (unit+int+e2e), frontend (unit+e2e), full-stack e2e (3 phases)"
     cmds:
-      - cmd: echo "--- Phase 1 - Unit Tests (parallel) ---"
-      - task: unit
-      - cmd: echo "--- Phase 2 - Integration Tests ---"
-      - task: int
-      - cmd: echo "--- Phase 3 - E2E Tests ---"
+      - cmd: echo "=== Phase 1 - Backend Tests ==="
+      - task: backend
+      - cmd: echo "=== Phase 2 - Frontend Tests ==="
+      - task: frontend
+      - cmd: echo "=== Phase 3 - Full-Stack E2E ==="
       - task: e2e
       - cmd: echo "All tests passed!"
-
-  # =========================================================================
-  # CI & Misc
-  # =========================================================================
-
-  ci:
-    desc: Simulate full CI locally via Act
-    dotenv:
-      [
-        config/base.env,
-        config/dev.env,
-        config/secrets.env,
-        config/secrets.dev.env,
-      ]
-    cmds:
-      - act push -j backend-tests --container-architecture linux/amd64

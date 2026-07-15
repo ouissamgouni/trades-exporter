@@ -118,55 +118,11 @@ tasks:
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
       - echo "✅ Staging database reset and seeded"
 
-  # === Integration Test Database ===
-
-  setup:integ:
-    desc: Setup integration test database (one-time setup)
-    dotenv:
-      [
-        config/base.env,
-        config/dev.env,
-        config/secrets.env,
-        config/secrets.dev.env,
-      ]
-    cmds:
-      - |
-        echo "🔧 Setting up integration test database (trades_db_integ)..."
-        PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -U $POSTGRES_USER -c "DROP DATABASE IF EXISTS trades_db_integ;" postgres || true
-        PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -U $POSTGRES_USER -c "CREATE DATABASE trades_db_integ;" postgres
-      - |
-        echo "Creating tables from SQLModel..."
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.ROOT_DIR}}/.venv/bin/python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
-      - |
-        echo "Stamping database to current migration..."
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp head
-      - |
-        echo "Seeding test data..."
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
-      - echo "✅ Integration test database ready (trades_db_integ)"
-
-  reset:integ:
-    desc: Reset integration test database
-    prompt: This will reset the integration test database. Continue?
-    dotenv:
-      [
-        config/base.env,
-        config/dev.env,
-        config/secrets.env,
-        config/secrets.dev.env,
-      ]
-    cmds:
-      - |
-        echo "🔄 Resetting integration test database..."
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          echo "y" | {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.reset
-      - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
-          {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
-      - echo "✅ Integration test database reset and seeded"
+  # Integration/e2e test databases are no longer special-cased here — they're
+  # just named scenarios (see `start:scenario:db SCENARIO=backend-integration-tests`
+  # / `SCENARIO=backend-e2e-tests` in .taskfiles/start.yml), provisioned
+  # directly by the `test:backend:int` / `test:backend:e2e` tasks themselves
+  # (see .taskfiles/test.yml).
 
   reset:prod:
     desc: "🚨 Reset prod database (DANGEROUS!)"

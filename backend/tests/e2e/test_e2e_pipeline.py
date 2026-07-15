@@ -35,9 +35,16 @@ def _wait_for_completion(service, max_wait=MAX_WAIT_NORMAL):
 @pytest.fixture(autouse=True)
 def isolated_e2e_database(monkeypatch):
     test_db_url = os.getenv("TEST_DATABASE_URL", "")
-    if "trades_db_integ" not in test_db_url:
+    dangerous_db_names = (
+        "trades_db_dev",
+        "trades_db_staging",
+        "trades_db_prod",
+        "trades_db_production",
+    )
+    if not test_db_url or any(name in test_db_url for name in dangerous_db_names):
         pytest.skip(
-            "E2E sync tests require TEST_DATABASE_URL pointing to trades_db_integ"
+            "E2E sync tests require TEST_DATABASE_URL pointing to a dedicated "
+            "scenario database (see task test:backend:e2e), never dev/staging/prod"
         )
 
     monkeypatch.setenv("DATABASE_URL", test_db_url)

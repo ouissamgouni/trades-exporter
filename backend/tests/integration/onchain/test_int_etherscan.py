@@ -38,7 +38,7 @@ def _check_etherscan_api_key():
 class TestEtherscanNormalTx:
     """Integration test for Etherscan normal transactions."""
 
-    def test_yield_normalized(self):
+    def test_yield_normalized(self, caplog):
         _check_etherscan_api_key()
 
         connector = ConnectorEtherscanNormalTx(
@@ -49,13 +49,28 @@ class TestEtherscanNormalTx:
         results = []
         errors = []
 
-        for idx, (raw_item, mapped_item, error) in enumerate(connector.yield_normalized()):
-            if idx >= MAX_RESULTS:
-                break
-            if error:
-                errors.append(error)
-            if mapped_item:
-                results.append(mapped_item)
+        try:
+            for idx, (raw_item, mapped_item, error) in enumerate(
+                connector.yield_normalized()
+            ):
+                if idx >= MAX_RESULTS:
+                    break
+                if error:
+                    errors.append(error)
+                if mapped_item:
+                    results.append(mapped_item)
+        except RuntimeError as e:
+            if "invalid api key" in str(e).lower():
+                pytest.skip(f"Etherscan API key invalid/expired: {e}")
+            raise
+
+        if not results and any("invalid api key" in str(e).lower() for e in errors):
+            pytest.skip(f"Etherscan API key invalid/expired: {errors[0]}")
+
+        if not results and "invalid api key" in caplog.text.lower():
+            pytest.skip(
+                "Etherscan API key invalid/expired (detected in connector logs)"
+            )
 
         assert len(results) > 0, "Should yield at least some results"
         log.info(f"Etherscan normal tx: {len(results)} results, {len(errors)} errors")
@@ -66,7 +81,7 @@ class TestEtherscanNormalTx:
 class TestEtherscanTokenTransfers:
     """Integration test for Etherscan token transfers."""
 
-    def test_yield_normalized(self):
+    def test_yield_normalized(self, caplog):
         _check_etherscan_api_key()
 
         connector = ConnectorEtherscanTokenTransfers(
@@ -77,13 +92,30 @@ class TestEtherscanTokenTransfers:
         results = []
         errors = []
 
-        for idx, (raw_item, mapped_item, error) in enumerate(connector.yield_normalized()):
-            if idx >= MAX_RESULTS:
-                break
-            if error:
-                errors.append(error)
-            if mapped_item:
-                results.append(mapped_item)
+        try:
+            for idx, (raw_item, mapped_item, error) in enumerate(
+                connector.yield_normalized()
+            ):
+                if idx >= MAX_RESULTS:
+                    break
+                if error:
+                    errors.append(error)
+                if mapped_item:
+                    results.append(mapped_item)
+        except RuntimeError as e:
+            if "invalid api key" in str(e).lower():
+                pytest.skip(f"Etherscan API key invalid/expired: {e}")
+            raise
+
+        if not results and any("invalid api key" in str(e).lower() for e in errors):
+            pytest.skip(f"Etherscan API key invalid/expired: {errors[0]}")
+
+        if not results and "invalid api key" in caplog.text.lower():
+            pytest.skip(
+                "Etherscan API key invalid/expired (detected in connector logs)"
+            )
 
         assert len(results) > 0, "Should yield at least some results"
-        log.info(f"Etherscan token transfers: {len(results)} results, {len(errors)} errors")
+        log.info(
+            f"Etherscan token transfers: {len(results)} results, {len(errors)} errors"
+        )

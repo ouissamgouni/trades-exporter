@@ -1,0 +1,57 @@
+title = "trades-exporter gitleaks config"
+
+# Extend (not replace) gitleaks' built-in ruleset — this keeps every real
+# credential-format rule (AWS keys, private keys, JWTs, exchange API keys,
+# etc.) active everywhere in the repo.
+[extend]
+useDefault = true
+
+# Belt-and-suspenders path excludes. These directories are already gitignored
+# (so `gitleaks protect --staged` / the pre-commit hook never sees them), but
+# excluding them here too protects anyone running `gitleaks dir .` directly
+# against the full working tree.
+[[allowlists]]
+description = "Local dev artifacts not tracked by git"
+paths = [
+  '''backend/data/.*''',
+  '''frontend/\.vscode/.*''',
+  '''(^|/)\.venv/.*''',
+  '''(^|/)node_modules/.*''',
+]
+
+# Known-fake/placeholder values used in tests and fixtures. These are not
+# real credentials — they are either well-known public constants (e.g. the
+# Solana System Program address, an XRPL black-hole address, the Substrate
+# "Alice" dev account) or throwaway values that were never derived from a
+# real private key. Prefer adding new entries here over broadly excluding
+# whole test directories, so a real secret pasted into a test still gets
+# caught.
+[[allowlists]]
+description = "Known-fake wallet addresses used as test/fixture placeholders"
+regexTarget = "match"
+regexes = [
+  '''0xdead(?:dead){9}''',
+  '''0xbeef(?:beef){9}''',
+  '''bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4''',
+  '''rrrrrrrrrrrrrrrrrrrrrhoLvTp''',
+  '''5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY''',
+]
+
+# `generic-api-key` is the noisiest default rule for this repo: it flags any
+# high-entropy alphanumeric string near a "key/token/secret"-ish keyword,
+# which includes ordinary public blockchain identifiers (Solana mint/token
+# addresses, tx hashes, etc.) that show up constantly in onchain connector
+# fixtures. Rather than disabling the rule everywhere (which would blind us
+# to real secrets accidentally pasted into these same files), scope its
+# allowlist to just the fixture/test paths where this noise originates.
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Public blockchain addresses/hashes in connector test fixtures are not secrets"
+  paths = [
+    '''backend/tests/fixtures/.*''',
+    '''backend/tests/e2e/fixtures/.*''',
+    '''backend/tests/unit/connectors/.*''',
+    '''backend/connectors/onchain/.*_fixtures/.*''',
+  ]

@@ -40,22 +40,18 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
 
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
       - name: Install dependencies
-        working-directory: backend
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -r backend/requirements.txt
           .venv/bin/pip install pytest pytest-cov pytest-mock pytest-xdist pytest-timeout
 
-      - name: Run unit tests only
-        working-directory: backend
-        run: |
-          .venv/bin/python -m pytest tests/unit/ tests/api/ -v --tb=short \
-            -n auto --timeout=30 \
-            -m "not integration and not network" \
-            --ignore=tests/integration \
-            --ignore=tests/e2e
+      - name: Run unit tests (task test:backend:unit)
+        run: task test:backend:unit
 
   # ========== BACKEND LINTING ==========
   backend-lint:
@@ -97,6 +93,70 @@ jobs:
           mypy . --ignore-missing-imports --check-untyped-defs
         continue-on-error: true
 
+  # ========== BACKEND INTEGRATION TESTS ==========
+  # `task test:backend:int` is fully self-contained: it provisions its own
+  # dedicated scenario database (SCENARIO=backend-integration-tests, Dockerized
+  # Postgres via .taskfiles/start.yml `scenario:db`) before running pytest, so
+  # no separate DB-setup step is needed here.
+  backend-integration-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install pytest pytest-cov pytest-mock pytest-xdist pytest-timeout
+
+      - name: Run integration tests (task test:backend:int)
+        run: task test:backend:int
+
+  # ========== BACKEND E2E TESTS ==========
+  # Separate job/runner from backend-integration-tests. `task test:backend:e2e`
+  # is likewise self-contained: it provisions its own dedicated scenario
+  # database (SCENARIO=backend-e2e-tests), independent of the integration-tests
+  # job's scenario, so there's no shared state or job-ordering dependency.
+  backend-e2e-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install pytest pytest-cov pytest-mock pytest-xdist pytest-timeout
+
+      - name: Run e2e tests (task test:backend:e2e)
+        run: task test:backend:e2e
+
   # ========== FRONTEND BUILD ==========
   frontend-build:
     runs-on: ubuntu-latest
@@ -116,18 +176,99 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Type check
-        working-directory: frontend
-        run: npx tsc --noEmit
-        continue-on-error: true
+      - name: Install Task
+        uses: arduino/setup-task@v2
 
-      - name: Build
-        working-directory: frontend
-        run: npm run build
+      - name: Build, type check, and unit test (task test:frontend:unit)
+        run: task test:frontend:unit
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: frontend/dist
+          retention-days: 7
+
+  # ========== FRONTEND E2E (PLAYWRIGHT SMOKE, NO BACKEND) ==========
+  frontend-e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Run Playwright smoke tests (task test:frontend:e2e)
+        run: task test:frontend:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  # ========== FRONTEND E2E AGAINST REAL BACKEND (PLAYWRIGHT + dedicated scenario) ==========
+  # Uses `task test:e2e` (full-stack: db + backend + frontend), which spins up
+  # the `frontend_e2e`
+  # scenario (its own dockerized Postgres + backend, see .taskfiles/start.yml)
+  # via Playwright's globalSetup/globalTeardown — no GH-native `services:` DB
+  # needed here since the scenario tooling manages its own Postgres container.
+  frontend-e2e-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Install backend dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend backend-e2e tests (task test:e2e)
+        run: task test:e2e
+
+      - name: Upload Playwright backend-e2e report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-backend-e2e-report
+          path: frontend/playwright-report
           retention-days: 7

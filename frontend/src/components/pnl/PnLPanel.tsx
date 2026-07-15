@@ -41,14 +41,16 @@ import { computeContextScope, PNL_STATUS } from './pnlState';
 interface PnLPanelProps {
     isActive?: boolean;
     onOpenHealthCheck?: () => void;
+    subtab?: 'portfolio' | 'tax';
+    onSubtabChange?: (tab: 'portfolio' | 'tax') => void;
 }
 
 /**
  * Outer shell: wraps PnLContent with PnLProvider so context is available.
  */
-export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck }) => (
-    <PnLProvider isActive={isActive}>
-        <PnLContent isActive={isActive} onOpenHealthCheck={onOpenHealthCheck} />
+export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck, subtab, onSubtabChange }) => (
+    <PnLProvider isActive={isActive} subtab={subtab}>
+        <PnLContent isActive={isActive} onOpenHealthCheck={onOpenHealthCheck} onSubtabChange={onSubtabChange} />
     </PnLProvider>
 );
 
@@ -56,7 +58,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
  * Inner content: consumes PnLContext, usePnLData, usePnLPrices.
  * Navigation handlers + render JSX.
  */
-const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck }) => {
+const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck, onSubtabChange }) => {
     const {
         state,
         dispatch,
@@ -370,7 +372,10 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                                 <div
                                     key={tab}
                                     className={`mb-[-1px] flex flex-shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-4 py-2 text-sm transition-colors hover:bg-gray-50 ${active ? 'border-blue-500 font-semibold text-blue-600' : 'border-transparent font-normal text-gray-500 hover:text-gray-700'}`}
-                                    onClick={() => dispatch({ type: 'SET_PNL_ACTIVE_TAB', tab })}
+                                    onClick={() => {
+                                        dispatch({ type: 'SET_PNL_ACTIVE_TAB', tab });
+                                        onSubtabChange?.(tab);
+                                    }}
                                 >
                                     {tab === 'tax' && <LuReceipt size={13} />}
                                     {label}

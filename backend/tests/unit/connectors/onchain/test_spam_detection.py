@@ -92,7 +92,7 @@ class TestDetectMoralisErc20Phishing:
         "token_symbol": "ꓴꓢꓓС ",
         "token_logo": None,
         "token_decimals": "6",
-        "from_address": "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be",
+        "from_address": "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead",
         "to_address": "0x2df17470c5de6a5d2d41feb8fcf5fb0deeb43df7",
         "address": "0xf247ca2d0f8ada063a259972285e31f127639f88",
         "log_index": 3,
@@ -105,7 +105,7 @@ class TestDetectMoralisErc20Phishing:
     # Real legitimate transaction
     LEGIT_TX = {
         "hash": "0x15408e68873c2764a853de9b2a6a99e065ca82ba830c0f718e150346e6eefafa",
-        "from_address": "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be",
+        "from_address": "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead",
         "to_address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
         "possible_spam": False,
     }
@@ -115,8 +115,8 @@ class TestDetectMoralisErc20Phishing:
         "token_symbol": "USDC",
         "token_logo": "https://logo.moralis.io/0xa4b1_0xaf88d065e77c8cc2239327c5edb3a432268e5831_55d334b7a54674580fd69d47086979b4.webp",
         "token_decimals": "6",
-        "from_address": "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be",
-        "to_address": "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7",
+        "from_address": "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead",
+        "to_address": "0xbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
         "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
         "log_index": 0,
         "value": "578200000",
@@ -125,7 +125,7 @@ class TestDetectMoralisErc20Phishing:
         "security_score": 93,
     }
 
-    WALLET = "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
+    WALLET = "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead"
 
     def test_fake_tx_detected(self):
         """The phishing transaction from the user's report should be detected."""
@@ -422,7 +422,7 @@ class TestApplySpamMarkers:
 class TestMoralisConnectorSpamDetection:
     """Integration tests: Moralis connector marks phishing ERC-20 transfers."""
 
-    WALLET = "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
+    WALLET = "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead"
 
     def _make_connector(self):
         return ConnectorMoralisWalletHistory(
@@ -450,7 +450,7 @@ class TestMoralisConnectorSpamDetection:
                     "token_symbol": "ꓴꓢꓓС ",
                     "token_logo": None,
                     "token_decimals": "6",
-                    "from_address": "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be",
+                    "from_address": "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead",
                     "to_address": "0x2df17470c5de6a5d2d41feb8fcf5fb0deeb43df7",
                     "address": "0xf247ca2d0f8ada063a259972285e31f127639f88",
                     "log_index": 3,
@@ -483,7 +483,7 @@ class TestMoralisConnectorSpamDetection:
 
         legit_raw_tx = {
             "hash": "0x15408e68873c2764a853de9b2a6a99e065ca82ba830c0f718e150346e6eefafa",
-            "from_address": "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be",
+            "from_address": "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead",
             "to_address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
             "block_timestamp": "2025-11-26T12:55:23.000Z",
             "transaction_fee": "0.00000045303",
@@ -496,8 +496,8 @@ class TestMoralisConnectorSpamDetection:
                     "token_symbol": "USDC",
                     "token_logo": "https://logo.moralis.io/0xa4b1_0xaf88d065e77c8cc2239327c5edb3a432268e5831.webp",
                     "token_decimals": "6",
-                    "from_address": "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be",
-                    "to_address": "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7",
+                    "from_address": "0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead",
+                    "to_address": "0xbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef",
                     "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
                     "log_index": 0,
                     "value": "578200000",

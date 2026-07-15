@@ -9,8 +9,8 @@ Tests the full dismiss lifecycle:
 - Transactions with NULL tags are not excluded
 - include_dismissed=True shows dismissed items
 
-Run with: task test:int:local
-Database: trades_db_integ (set up with: task db:setup:integ)
+Run with: task test:backend:int
+Database: dedicated scenario DB, self-provisioned by: task test:backend:int
 """
 
 import pytest
@@ -83,7 +83,9 @@ class TestTransferDismissTagFormat:
         pg_session.commit()
 
         _make_transfer(
-            pg_session, account, direction="inflow",
+            pg_session,
+            account,
+            direction="inflow",
             tags=[{"sys_transfer_dismissed": "source_from_account"}],
         )
 
@@ -98,7 +100,9 @@ class TestTransferDismissTagFormat:
         pg_session.commit()
 
         _make_transfer(
-            pg_session, account, direction="outflow",
+            pg_session,
+            account,
+            direction="outflow",
             tags=[{"sys_transfer_dismissed": "source_to_account"}],
         )
 
@@ -114,7 +118,9 @@ class TestTransferDismissTagFormat:
 
         # Outflow transfer missing to_account, but dismissed for from_account (wrong field)
         _make_transfer(
-            pg_session, account, direction="outflow",
+            pg_session,
+            account,
+            direction="outflow",
             tags=[{"sys_transfer_dismissed": "source_from_account"}],
         )
 
@@ -133,8 +139,12 @@ class TestTransferDismissTagFormat:
         # Simulate two dismiss operations (like the endpoint does)
         for _ in range(3):
             tags = [
-                tag for tag in (tx.tags or [])
-                if not (isinstance(tag, dict) and tag.get("sys_transfer_dismissed") == "source_from_account")
+                tag
+                for tag in (tx.tags or [])
+                if not (
+                    isinstance(tag, dict)
+                    and tag.get("sys_transfer_dismissed") == "source_from_account"
+                )
             ]
             tags.append({"sys_transfer_dismissed": "source_from_account"})
             tx.tags = tags
@@ -145,8 +155,10 @@ class TestTransferDismissTagFormat:
 
         # Should have exactly one dismiss tag, not three
         dismiss_tags = [
-            t for t in (tx.tags or [])
-            if isinstance(t, dict) and t.get("sys_transfer_dismissed") == "source_from_account"
+            t
+            for t in (tx.tags or [])
+            if isinstance(t, dict)
+            and t.get("sys_transfer_dismissed") == "source_from_account"
         ]
         assert len(dismiss_tags) == 1
         assert len(tx.tags) == 1
@@ -160,12 +172,16 @@ class TestTransferDismissTagFormat:
 
         # Inflow transfer: dismissed for source_from_account
         _make_transfer(
-            pg_session, account1, direction="inflow",
+            pg_session,
+            account1,
+            direction="inflow",
             tags=[{"sys_transfer_dismissed": "source_from_account"}],
         )
         # Outflow transfer: dismissed for source_to_account
         _make_transfer(
-            pg_session, account2, direction="outflow",
+            pg_session,
+            account2,
+            direction="outflow",
             tags=[{"sys_transfer_dismissed": "source_to_account"}],
         )
 
@@ -180,14 +196,20 @@ class TestTransferDismissTagFormat:
         pg_session.commit()
 
         tx = _make_transfer(
-            pg_session, account, direction="inflow",
+            pg_session,
+            account,
+            direction="inflow",
             tags=[{"custom": "value"}, {"another": "tag"}],
         )
 
         # Simulate dismiss
         tags = [
-            tag for tag in (tx.tags or [])
-            if not (isinstance(tag, dict) and tag.get("sys_transfer_dismissed") == "source_from_account")
+            tag
+            for tag in (tx.tags or [])
+            if not (
+                isinstance(tag, dict)
+                and tag.get("sys_transfer_dismissed") == "source_from_account"
+            )
         ]
         tags.append({"sys_transfer_dismissed": "source_from_account"})
         tx.tags = tags
@@ -208,7 +230,9 @@ class TestTransferDismissTagFormat:
         pg_session.commit()
 
         _make_transfer(
-            pg_session, account, direction="inflow",
+            pg_session,
+            account,
+            direction="inflow",
             tags=[{"sys_transfer_dismissed": "source_from_account"}],
         )
 
@@ -217,6 +241,8 @@ class TestTransferDismissTagFormat:
         assert total == 0
         assert len(issues) == 0
 
-        issues_all, total_all = detector.fetch(page=1, per_page=10, include_dismissed=True)
+        issues_all, total_all = detector.fetch(
+            page=1, per_page=10, include_dismissed=True
+        )
         assert total_all == 1
         assert len(issues_all) == 1

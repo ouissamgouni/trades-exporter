@@ -6682,7 +6682,7 @@ def get_live_metrics(
 def get_performers(
     version_id: int,
     period: str = Query("all"),
-    group_by: str = Query("asset", regex="^(asset|account|category)$"),
+    group_by: str = Query("asset", pattern="^(asset|account|category)$"),
     top_n: int = Query(5, ge=1, le=500),
     asset_ids: Optional[str] = Query(None),
     account_ids: Optional[str] = Query(None),
@@ -6816,7 +6816,7 @@ def get_asset_period_deltas(
 @router.get("/versions/{version_id}/metrics")
 def get_version_metrics(
     version_id: int,
-    group_by: str = Query("asset", regex="^(asset|account|category)$"),
+    group_by: str = Query("asset", pattern="^(asset|account|category)$"),
     top_n: int = Query(5, ge=1, le=500),
     asset_ids: Optional[str] = Query(None),
     account_ids: Optional[str] = Query(None),
@@ -7474,6 +7474,16 @@ def get_enriched_transactions(
     # Step 4: Bulk-load enrichment data for this page of transactions
     tx_ids = [tx.id for tx in transactions]
 
+    # Batch-load FR tax overrides for this page of transactions
+    fr_override_tx_ids: set = set()
+    if tx_ids:
+        override_rows = session.exec(
+            select(TransactionTaxOverride.transaction_id)
+            .where(TransactionTaxOverride.jurisdiction == "fr")
+            .where(TransactionTaxOverride.transaction_id.in_(tx_ids))
+        ).all()
+        fr_override_tx_ids = set(override_rows)
+
     # 4a. Legs → unit mapping (tx_id → list of (unit_id, unit_pattern, unit_label, leg_type))
     leg_rows = session.exec(
         select(
@@ -7593,7 +7603,9 @@ def get_enriched_transactions(
     results = []
     for tx in transactions:
         # Build standard transaction response
-        base_resp = _build_transaction_response(tx, session)
+        base_resp = _build_transaction_response(
+            tx, session, fr_override_tx_ids=fr_override_tx_ids
+        )
         base_dict = base_resp.model_dump()
 
         unit_info = tx_unit_map.get(tx.id, {})

@@ -16,7 +16,7 @@ class TestSolanaConnector:
     def connector(self):
         """Create a test connector instance."""
         return ConnectorSolanaHelius(
-            wallet_address="6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+            wallet_address="11111111111111111111111111111111111111111",
             account_id=1,
             connector_id=1,
             config={"test_mode": True}
@@ -25,7 +25,7 @@ class TestSolanaConnector:
     def test_connector_initialization(self, connector):
         """Test connector initializes correctly."""
         assert connector.connector_name == "solana_helius"
-        assert connector.wallet_address == "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8"
+        assert connector.wallet_address == "11111111111111111111111111111111111111111"
         assert connector.test_mode is True
 
     def test_yield_raws_from_fixture(self, connector):
@@ -341,7 +341,7 @@ class TestSolanaConnector:
             "tokenTransfers": [
                 {
                     "fromUserAccount": "ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ",
-                    "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "toUserAccount": "11111111111111111111111111111111111111111",
                     "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
                     "tokenAmount": 78517.27,
                     "tokenStandard": "Fungible"
@@ -379,7 +379,7 @@ class TestSolanaConnector:
             "nativeTransfers": [
                 {
                     "fromUserAccount": "FLipG5QHjZe1H12f6rr5LCnrmqjhwuBTBp78GwzxnwkR",
-                    "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "toUserAccount": "11111111111111111111111111111111111111111",
                     "amount": 1,  # 1 lamport — dust
                 }
             ],
@@ -405,17 +405,17 @@ class TestSolanaConnector:
             "nativeTransfers": [
                 {
                     "fromUserAccount": "SomeSender",
-                    "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "toUserAccount": "11111111111111111111111111111111111111111",
                     "amount": threshold - 1,  # 999 — just below, should be skipped
                 },
                 {
                     "fromUserAccount": "SomeSender2",
-                    "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "toUserAccount": "11111111111111111111111111111111111111111",
                     "amount": threshold,  # 1000 — at threshold, should be included
                 },
                 {
                     "fromUserAccount": "SomeSender3",
-                    "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "toUserAccount": "11111111111111111111111111111111111111111",
                     "amount": threshold + 1,  # 1001 — above, should be included
                 },
             ],
@@ -440,7 +440,7 @@ class TestSolanaRpcGapFill:
         """Create a connector in live mode with mocked API credentials."""
         with patch.dict("os.environ", {"HELIUS_API_KEY": "test-key"}):
             connector = ConnectorSolanaHelius(
-                wallet_address="6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                wallet_address="11111111111111111111111111111111111111111",
                 account_id=1,
                 connector_id=1,
                 config={},
@@ -473,7 +473,7 @@ class TestSolanaRpcGapFill:
                 "tokenTransfers": [
                     {
                         "fromUserAccount": "other",
-                        "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                        "toUserAccount": "11111111111111111111111111111111111111111",
                         "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                         "tokenAmount": 48.956623,
                     }
@@ -577,10 +577,10 @@ class TestSolanaRpcGapFill:
             "timestamp": 1772490000,
             "type": "TRANSFER",
             "fee": 5000,
-            "feePayer": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+            "feePayer": "11111111111111111111111111111111111111111",
             "nativeTransfers": [
                 {
-                    "fromUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "fromUserAccount": "11111111111111111111111111111111111111111",
                     "toUserAccount": "someone",
                     "amount": 1000000000,
                 }
@@ -599,7 +599,7 @@ class TestSolanaRpcGapFill:
             "tokenTransfers": [
                 {
                     "fromUserAccount": "other",
-                    "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "toUserAccount": "11111111111111111111111111111111111111111",
                     "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                     "tokenAmount": 48.956623,
                 }
@@ -661,7 +661,7 @@ class TestSolanaRpcGapFill:
                 "tokenTransfers": [
                     {
                         "fromUserAccount": "other",
-                        "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                        "toUserAccount": "11111111111111111111111111111111111111111",
                         "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                         "tokenAmount": 48.956623,
                     }

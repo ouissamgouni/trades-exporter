@@ -50,9 +50,10 @@ task start:dev   # run the development stack
 Before opening a pull request, run the relevant checks:
 
 ```bash
-task test               # full test suite
-task test:unit:backend  # backend unit tests
-task test:unit:frontend # frontend unit tests
+task test               # quick unit tests
+task test:all           # full test suite (backend + frontend + full-stack e2e)
+task test:backend:unit  # backend unit tests
+task test:frontend:unit # frontend unit tests
 ```
 
 ## Pull request guidelines
