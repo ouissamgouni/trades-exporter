@@ -4,7 +4,6 @@ applyTo: "frontend/**"
 
 # Frontend rules
 
-Reference: [frontend/src/pages/MyCalendar.tsx](frontend/src/pages/MyCalendar.tsx), [frontend/src/components/SignInNudge.tsx](frontend/src/components/SignInNudge.tsx).
 
 ## Don't
 - Don't use `window.alert`, `window.confirm`, `window.prompt`, or rely on `console.*` for user-facing feedback (console is for developer debugging only — leaving existing logs is fine).

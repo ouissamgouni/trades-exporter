@@ -13,7 +13,8 @@ import { RawAssetsEditor } from "./RawAssetsEditor";
 import { CategoriesEditor } from "./CategoriesEditor";
 import { PnLDefaultsEditor } from "./PnLDefaultsEditor";
 import { API_URL } from "../types";
-import { Badge } from "./ui/primitives";
+import { Badge, Tabs, TabsList, TabsTrigger } from "./ui/primitives";
+import { PANEL, PANEL_BODY } from "../lib/ui";
 
 interface SetupStatus {
   accounts_configured: boolean;
@@ -148,74 +149,56 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
     }
   };
 
-  const renderPrimaryTab = (tab: PrimaryTab) => {
-    const isActive = activePrimaryTab === tab.id;
-    const TabIcon = tab.icon;
-
-    return (
-      <button
-        type="button"
-        key={tab.id}
-        className={`px-3 py-1.5 transition-colors md:px-4 ${isActive ? 'bg-slate-700 text-white hover:bg-slate-700 hover:text-white' : 'bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}
-        onClick={() => handlePrimaryTabChange(tab.id)}
-      >
-        <div className="flex items-center gap-1.5">
-          <TabIcon size={14} />
-          <span className={`hidden text-sm sm:inline ${isActive ? 'font-semibold' : 'font-medium'}`}>
-            {tab.label}
-          </span>
-        </div>
-      </button>
-    );
-  };
-
-  const renderSecondaryItem = (item: NavItem) => {
-    const isActive = activeItem === item.id;
-    const hasWarning = typeof item.badge === 'string' && item.badge.includes('unmapped');
-    const ItemIcon = item.icon;
-
-    return (
-      <button
-        type="button"
-        key={item.id}
-        className={`px-3 py-1 transition-colors ${isActive ? 'bg-slate-700 text-white hover:bg-slate-700 hover:text-white' : 'bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-700'}`}
-        onClick={() => setActiveItem(item.id)}
-      >
-        <div className="flex items-center gap-1.5">
-          <ItemIcon size={12} />
-          <span className={`text-xs ${isActive ? 'font-semibold' : 'font-normal'}`}>
-            {item.label}
-          </span>
-          {item.badge && (
-            <Badge
-              colorScheme={hasWarning ? 'orange' : 'gray'}
-              className="rounded-full px-1.5 py-0 text-[10px] font-medium"
-            >
-              {item.badge}
-            </Badge>
-          )}
-        </div>
-      </button>
-    );
-  };
-
   return (
     <div className="mx-auto max-w-7xl px-4 py-1">
       <div className="flex flex-col gap-2">
-        {/* Primary Pill Toggle Group */}
-        <div className="inline-flex self-start border border-slate-200 bg-white">
-          {primaryTabs.map((tab) => renderPrimaryTab(tab))}
-        </div>
+        {/* Primary navigation (matches app-level tab style) */}
+        <Tabs value={activePrimaryTab} onValueChange={handlePrimaryTabChange}>
+          <TabsList>
+            {primaryTabs.map((tab) => {
+              const TabIcon = tab.icon;
+              return (
+                <TabsTrigger key={tab.id} value={tab.id}>
+                  <span className="inline-flex items-center gap-1.5">
+                    <TabIcon size={14} />
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </span>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </Tabs>
 
-        {/* Secondary Sub-Pills */}
+        {/* Secondary sub-navigation (subordinate segment style) */}
         {secondaryItems.length > 0 && (
-          <div className="inline-flex flex-wrap self-start border border-slate-200">
-            {secondaryItems.map((item) => renderSecondaryItem(item))}
-          </div>
+          <Tabs value={activeItem} onValueChange={setActiveItem} variant="segment">
+            <TabsList>
+              {secondaryItems.map((item) => {
+                const ItemIcon = item.icon;
+                const hasWarning = typeof item.badge === 'string' && item.badge.includes('unmapped');
+                return (
+                  <TabsTrigger key={item.id} value={item.id}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <ItemIcon size={12} />
+                      {item.label}
+                      {item.badge && (
+                        <Badge
+                          colorScheme={hasWarning ? 'orange' : 'gray'}
+                          className="px-1.5 py-0 text-[10px] font-medium"
+                        >
+                          {item.badge}
+                        </Badge>
+                      )}
+                    </span>
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </Tabs>
         )}
 
         {/* Content Area */}
-        <div className="min-h-[500px] border border-slate-200 bg-white p-3 md:p-4">
+        <div className={`min-h-[500px] ${PANEL} ${PANEL_BODY}`}>
           <ActiveComponent />
         </div>
       </div>

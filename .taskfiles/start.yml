@@ -222,7 +222,26 @@ tasks:
       BROWSER: '{{.BROWSER | default "none"}}'
       COUNT: '{{.COUNT | default "1"}}'
       RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+      FOLLOW: '{{.FOLLOW | default "1"}}'
     cmds:
+      - |
+        MISSING=0
+        for IMG in trades-exporter-backend trades-exporter-frontend; do
+          if ! docker image inspect "$IMG:$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "❌ Missing local image: $IMG:$IMAGE_TAG"
+            MISSING=1
+          fi
+        done
+        if [ "$MISSING" = "1" ]; then
+          echo ""
+          echo "   Build it first, then retry:"
+          echo "     task build:staging"
+          echo "     task start:staging:local"
+          echo ""
+          echo "   Or build + deploy in one step:"
+          echo "     task deploy:staging:local"
+          exit 1
+        fi
       - |
         if [ "{{.RESET}}" = "1" ]; then
           echo "🔄 RESET: tearing down staging stack..."
@@ -236,6 +255,12 @@ tasks:
       - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
       - 'echo "   Database: localhost:$POSTGRES_PORT"'
       - './.taskfiles/open-browsers.sh "http://localhost:$FRONTEND_PORT" "{{.BROWSER}}" "{{.COUNT}}" "staging-local" "{{.RESET_BROWSER}}"'
+      - |
+        if [ "{{.FOLLOW}}" != "0" ]; then
+          echo ""
+          echo "Following logs (Ctrl+C stops tailing only — the stack keeps running)..."
+          ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging logs -f --tail 50
+        fi
 
   prod:local:
     desc: Start prod stack (existing images). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
@@ -252,7 +277,26 @@ tasks:
       BROWSER: '{{.BROWSER | default "none"}}'
       COUNT: '{{.COUNT | default "1"}}'
       RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+      FOLLOW: '{{.FOLLOW | default "1"}}'
     cmds:
+      - |
+        MISSING=0
+        for IMG in trades-exporter-backend trades-exporter-frontend; do
+          if ! docker image inspect "$IMG:$IMAGE_TAG" >/dev/null 2>&1; then
+            echo "❌ Missing local image: $IMG:$IMAGE_TAG"
+            MISSING=1
+          fi
+        done
+        if [ "$MISSING" = "1" ]; then
+          echo ""
+          echo "   Build it first, then retry:"
+          echo "     task build:prod -- v1.0.0"
+          echo "     task start:prod:local"
+          echo ""
+          echo "   Or build + deploy in one step:"
+          echo "     task deploy:prod:local -- v1.0.0"
+          exit 1
+        fi
       - |
         if [ "{{.RESET}}" = "1" ]; then
           if [ "{{.FORCE}}" != "1" ]; then
@@ -270,13 +314,19 @@ tasks:
       - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
       - 'echo "   Database: localhost:$POSTGRES_PORT"'
       - './.taskfiles/open-browsers.sh "http://localhost:$FRONTEND_PORT" "{{.BROWSER}}" "{{.COUNT}}" "prod-local" "{{.RESET_BROWSER}}"'
+      - |
+        if [ "{{.FOLLOW}}" != "0" ]; then
+          echo ""
+          echo "Following logs (Ctrl+C stops tailing only — the stack keeps running)..."
+          ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod logs -f --tail 50
+        fi
 
   # ════════════════════════════════════════════════════════════════
   # Scenario: Full Docker from git ref
   # ════════════════════════════════════════════════════════════════
 
   scenario:ref:
-    desc: "Build from git ref and start isolated scenario stack. SCENARIO=<name>, WEB_PORT/API_PORT to override resolved ports, BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1, FOLLOW=1 to tail logs in foreground, LOG_LEVEL=debug|info|... (default DEBUG)."
+    desc: "Build from git ref and start isolated scenario stack. SCENARIO=<name>, WEB_PORT/API_PORT to override resolved ports, BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1, FOLLOW=0 to skip tailing logs in foreground, LOG_LEVEL=debug|info|... (default DEBUG)."
     dotenv:
       [
         config/base.env,
@@ -286,6 +336,8 @@ tasks:
       ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      BACKEND_REF: '{{.BACKEND_REF | default .REF}}'
+      FRONTEND_REF: '{{.FRONTEND_REF | default .REF}}'
       SEED_DIR: "{{.SEED_DIR}}"
       SCENARIO: '{{.SCENARIO | default ""}}'
       WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
@@ -295,22 +347,31 @@ tasks:
       BROWSER: '{{.BROWSER | default "none"}}'
       COUNT: '{{.COUNT | default "1"}}'
       RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
-      FOLLOW: '{{.FOLLOW | default "0"}}'
+      FOLLOW: '{{.FOLLOW | default "1"}}'
       RESOLVED_API_PORT:
         sh: source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"; [ -n "{{.API_PORT}}" ] && SC_API_PORT="{{.API_PORT}}"; echo "$SC_API_PORT"
+      RESOLVED_ENV_NAME:
+        sh: source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"; echo "$ENV_NAME"
     cmds:
       - |
-        REF="{{.REF}}"
-        if [ -z "$REF" ]; then
+        BACKEND_REF="{{.BACKEND_REF}}"
+        FRONTEND_REF="{{.FRONTEND_REF}}"
+        if [ -z "$BACKEND_REF" ] || [ -z "$FRONTEND_REF" ]; then
           echo "❌ Usage:"
-          echo "   task start:scenario:ref -- feature/my-branch"
-          echo "   task start:scenario:ref -- feature/my-branch SCENARIO=fr_tax"
-          echo "   task start:scenario:ref REF=v1.2.0 SCENARIO=polymarket_pnl"
+          echo "   task start:scenario:ref -- <ref>                                          # same ref for backend + frontend"
+          echo "   task start:scenario:ref -- <ref> SCENARIO=fr_tax"
+          echo "   task start:scenario:ref BACKEND_REF=develop FRONTEND_REF=main SCENARIO=demo"
+          echo "   task start:scenario:ref BACKEND_REF=workdir FRONTEND_REF=main SCENARIO=demo   # backend from working dir"
+          echo ""
+          echo "   Note: seeding/migrations run against the BACKEND, so BACKEND_REF must"
+          echo "   be a seeding-capable ref (has backend.scripts.seed --seed-dir)."
           exit 1
         fi
-      # Build images from ref
-      - task: :build:ref
-        vars: { REF: "{{.REF}}", BACKEND_PORT: "{{.RESOLVED_API_PORT}}" }
+      # Build backend + frontend from their (possibly different) refs, both tagged :$ENV_NAME
+      - task: :build:scenario-component
+        vars: { COMPONENT: backend, REF: "{{.BACKEND_REF}}", OUT_TAG: "{{.RESOLVED_ENV_NAME}}", BACKEND_PORT: "{{.RESOLVED_API_PORT}}" }
+      - task: :build:scenario-component
+        vars: { COMPONENT: frontend, REF: "{{.FRONTEND_REF}}", OUT_TAG: "{{.RESOLVED_ENV_NAME}}", BACKEND_PORT: "{{.RESOLVED_API_PORT}}" }
       # Tag + deploy
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
@@ -319,11 +380,6 @@ tasks:
         export BACKEND_PORT=$SC_API_PORT
         export FRONTEND_PORT=$SC_WEB_PORT
         export LOG_LEVEL="{{.LOG_LEVEL}}"
-        REF="{{.REF}}"
-        SHA=$(git rev-parse --short=7 "$REF")
-        TAG="ref-$SHA"
-        docker tag trades-exporter-backend:$TAG trades-exporter-backend:$ENV_NAME
-        docker tag trades-exporter-frontend:$TAG trades-exporter-frontend:$ENV_NAME
 
         # Ensure config/${ENV_NAME}.env exists for docker-compose.unified.yml's
         # `env_file: config/${ENV_NAME}.env` lookup — every scenario (scenario-default, scenario-<name>)
@@ -382,14 +438,19 @@ tasks:
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
         [ -n "{{.WEB_PORT}}" ] && SC_WEB_PORT="{{.WEB_PORT}}"
         [ -n "{{.API_PORT}}" ] && SC_API_PORT="{{.API_PORT}}"
-        REF="{{.REF}}"
-        SHA=$(git rev-parse --short=7 "$REF")
+        BACKEND_REF="{{.BACKEND_REF}}"
+        FRONTEND_REF="{{.FRONTEND_REF}}"
         SEED_DIR="{{.SEED_DIR}}"
         echo ""
         echo "═══════════════════════════════════════════════════════════════"
         echo "✅ Scenario environment ready ($ENV_NAME)"
         echo ""
-        echo "   Source:   $REF ($SHA)"
+        if [ "$BACKEND_REF" = "$FRONTEND_REF" ]; then
+          echo "   Source ref:   $BACKEND_REF"
+        else
+          echo "   Backend ref:  $BACKEND_REF"
+          echo "   Frontend ref: $FRONTEND_REF"
+        fi
         if [ -n "$SEED_DIR" ]; then
           echo "   Scenario: $SEED_DIR"
         elif [ -n "{{.SCENARIO}}" ] && [ "{{.SCENARIO}}" != "default" ]; then
@@ -408,7 +469,7 @@ tasks:
         echo "════════════════════════════════════════════════════════════"
         ./.taskfiles/open-browsers.sh "http://localhost:$SC_WEB_PORT" "{{.BROWSER}}" "{{.COUNT}}" "scenario-$ENV_NAME" "{{.RESET_BROWSER}}"
 
-        if [ "{{.FOLLOW}}" = "1" ]; then
+        if [ "{{.FOLLOW}}" != "0" ]; then
           echo ""
           echo "Following logs (Ctrl+C stops tailing only — the stack keeps running)..."
           docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME logs -f --tail 50

@@ -19,14 +19,29 @@
 # Port assignment:
 #   - default / empty     → offset 0  (ports 5435/8002/3002)
 #   - PORT_OFFSET=N       → explicit override, always wins
-#   - any other name      → hash-based: cksum of name mod 9999 + 1
+#   - any other name      → hash-based: cksum of name mod 9999 + 1,
+#                           auto-skipping any offset whose ports collide with a
+#                           reserved fixed-env port (see RESERVED_PORTS below)
 #
 # Base ports (from config/scenario.env): DB=5435, API=8002, WEB=3002
+# Reserved (never used by scenarios): dev 5432/8000/5173/5678,
+#   staging 5433/8001/3001, prod 5434/8080/3000
 # Run `task scenarios` to see all current port assignments.
 # ─────────────────────────────────────────────────────────────
 
 _SCENARIO="${1:-}"
-
+# ── Reserved ports (fixed local envs) ─────────────────
+# Scenario ports are hash-derived and must never land on a port that a fixed
+# env (dev/staging/prod) statically binds. Keep this list in sync with
+# config/{dev,staging,prod}.env (POSTGRES_PORT/BACKEND_PORT/FRONTEND_PORT +
+# dev DEBUGPY_PORT). Named scenarios skip any offset colliding with these.
+RESERVED_PORTS="5432 8000 5173 5678 5433 8001 3001 5434 8080 3000"
+_port_reserved() {
+  case " $RESERVED_PORTS " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 # ── Port offset resolution (hash-based) ────────────────────
 if [ -n "${PORT_OFFSET:-}" ]; then
   # Explicit override always wins
@@ -36,6 +51,23 @@ elif [ -z "$_SCENARIO" ] || [ "$_SCENARIO" = "default" ]; then
 else
   # Deterministic hash: cksum of name → offset 1–9999
   SC_PORT_OFFSET=$(printf '%s' "$_SCENARIO" | cksum | awk '{print ($1 % 9999) + 1}')
+
+  # Skip offsets whose resulting ports collide with a reserved fixed-env port
+  # (dev/staging/prod). Deterministic: same name always starts from the same
+  # hash and steps +1 the same way, so it resolves to the same final offset.
+  _tries=0
+  while :; do
+    _db=$((5435 + SC_PORT_OFFSET))
+    _api=$((8002 + SC_PORT_OFFSET))
+    _web=$((3002 + SC_PORT_OFFSET))
+    if _port_reserved "$_db" || _port_reserved "$_api" || _port_reserved "$_web"; then
+      SC_PORT_OFFSET=$(( (SC_PORT_OFFSET % 9999) + 1 ))
+      _tries=$((_tries + 1))
+      [ "$_tries" -ge 9999 ] && break
+      continue
+    fi
+    break
+  done
 fi
 
 # ── Compute ports ───────────────────────────────────────────

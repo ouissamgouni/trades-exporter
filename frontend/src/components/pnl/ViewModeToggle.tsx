@@ -17,13 +17,13 @@ const MODES: { key: AssetsViewMode; label: string; icon: React.ReactNode }[] = [
 
 export const ViewModeToggle: React.FC<ViewModeToggleProps> = ({ value, onChange }) => (
     <div className="flex items-center gap-1">
-        <div className="flex overflow-hidden border border-slate-200">
+        <div className="flex items-center gap-0.5 border border-slate-200 bg-white p-0.5">
             {MODES.map(({ key, label, icon }) => (
                 <button
                     key={key}
                     type="button"
                     onClick={() => onChange(key)}
-                    className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium ${value === key ? 'bg-slate-700 text-white' : 'bg-transparent text-slate-700 hover:bg-slate-100'}`}
+                    className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${value === key ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}
                 >
                     {icon}
                     {label}

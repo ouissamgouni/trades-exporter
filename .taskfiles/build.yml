@@ -176,6 +176,67 @@ tasks:
         echo ""
         echo "Deploy with: task deploy:staging:local -- $TAG"
 
+  scenario-component:
+    # Internal helper: build a SINGLE component (backend|frontend) from a git
+    # ref (or the working directory) and tag it as OUT_TAG. Enables mixing
+    # different refs per component (e.g. develop backend + main frontend) so a
+    # scenario can be seeded by a seeding-capable backend while the UI comes
+    # from another branch. REF may be a git ref or one of: workdir | . | local.
+    internal: true
+    vars:
+      COMPONENT: '{{.COMPONENT}}'
+      REF: '{{.REF}}'
+      OUT_TAG: '{{.OUT_TAG}}'
+      BACKEND_PORT: '{{.BACKEND_PORT | default ""}}'
+    cmds:
+      - |
+        set -e
+        COMPONENT="{{.COMPONENT}}"
+        REF="{{.REF}}"
+        OUT_TAG="{{.OUT_TAG}}"
+        BACKEND_PORT="{{.BACKEND_PORT}}"
+
+        case "$REF" in
+          workdir|.|local|"")
+            SRC="{{.ROOT_DIR}}"
+            SRCTAG="workdir"
+            echo "Building $COMPONENT from working directory..."
+            ;;
+          *)
+            FULL_SHA=$(git rev-parse "$REF^{commit}")
+            SHA=$(git rev-parse --short=7 "$FULL_SHA")
+            SRC="{{.WORKTREE_DIR}}/ref-$SHA"
+            SRCTAG="ref-$SHA"
+            if [ -d "$SRC" ]; then
+              WT_SHA=$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo "")
+              if [ "$WT_SHA" != "$FULL_SHA" ]; then
+                git worktree remove --force "$SRC" >/dev/null 2>&1 || rm -rf "$SRC"
+                git worktree prune >/dev/null 2>&1 || true
+                git worktree add --detach "$SRC" "$FULL_SHA"
+              fi
+            else
+              mkdir -p "{{.WORKTREE_DIR}}"
+              git worktree add --detach "$SRC" "$FULL_SHA"
+            fi
+            echo "Building $COMPONENT from $REF ($SHA)..."
+            ;;
+        esac
+
+        if [ "$COMPONENT" = "backend" ]; then
+          docker build -t "trades-exporter-backend:$SRCTAG" -f "$SRC/backend/Dockerfile" "$SRC"
+          docker tag "trades-exporter-backend:$SRCTAG" "trades-exporter-backend:$OUT_TAG"
+        elif [ "$COMPONENT" = "frontend" ]; then
+          docker build -t "trades-exporter-frontend:$SRCTAG" \
+            --build-arg VITE_API_URL=http://localhost:${BACKEND_PORT:-8000} \
+            "$SRC/frontend"
+          docker tag "trades-exporter-frontend:$SRCTAG" "trades-exporter-frontend:$OUT_TAG"
+        else
+          echo "❌ Unknown COMPONENT: $COMPONENT (expected backend|frontend)"
+          exit 1
+        fi
+
+        echo "✅ $COMPONENT → trades-exporter-$COMPONENT:$OUT_TAG (source: $SRCTAG)"
+
   dirty:
     desc: Build images from current working directory (uncommitted changes)
     dotenv:

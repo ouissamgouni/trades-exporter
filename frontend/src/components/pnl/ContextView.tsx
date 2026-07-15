@@ -60,7 +60,7 @@ const MiniSparkline: React.FC<{ points: TimelinePoint[]; width?: number; height?
     ).join(' ');
     const isPositive = values[values.length - 1] >= values[0];
     return (
-        <svg width={width} height={height} style={{ display: 'block', flexShrink: 0, border: '1px solid #E2E8F0', borderRadius: 3 }}>
+        <svg width={width} height={height} style={{ display: 'block', flexShrink: 0, border: '1px solid #E2E8F0' }}>
             <polyline fill="none" stroke={isPositive ? '#38A169' : '#E53E3E'} strokeWidth={1.5} points={coords} />
         </svg>
     );

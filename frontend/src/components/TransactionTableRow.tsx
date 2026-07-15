@@ -254,8 +254,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
     return (
         <React.Fragment key={tx.id}>
             <tr
-                className="hover:bg-blue-50"
-                style={{ backgroundColor: rowBgColor }}
+                className="group bg-[var(--row-bg)] transition-colors hover:bg-blue-50"
+                style={{ ['--row-bg' as string]: rowBgColor } as React.CSSProperties}
                 onMouseEnter={() => {
                     if (suggestionEntry) setHoveredSuggestionGroup(suggestionEntry.groupIndex);
                     if (tx.user_calculation_unit_id && !suggestionEntry) setHoveredBundleId(tx.user_calculation_unit_id);
@@ -267,7 +267,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                     if (duplicateEntry) setHoveredDuplicateGroup(null);
                 }}
             >
-                <td className="sticky left-0 z-[5] border-r-2 border-slate-300 p-0" style={{ backgroundColor: rowBgColor }}>
+                <td className="sticky left-0 z-[5] border-r-2 border-slate-300 bg-[var(--row-bg)] p-0 group-hover:bg-blue-50">
                     {/* Review status band — full cell height */}
                     <div className="absolute bottom-0 left-0 top-0 w-1" style={{ backgroundColor: rowBorderColor }} />
                     {/* Suggestion / Bundle color band — right next to review status (mutually exclusive) */}

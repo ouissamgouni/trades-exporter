@@ -6,6 +6,7 @@ import { FiChevronDown, FiChevronRight, FiPieChart, FiEdit2, FiPlus, FiTrash2 } 
 import { LuEraser } from 'react-icons/lu';
 import { BalanceDrawer } from './BalanceDrawer';
 import { Account, API_URL } from '../types';
+import { FOCUS_RING } from '../lib/ui';
 import AccountConnectors from './AccountConnectors';
 import AccountFormDialog from './AccountFormDialog';
 import { DeleteAccountDialog } from './DeleteAccountDialog';
@@ -19,7 +20,7 @@ const ToggleSwitch: React.FC<{ checked: boolean; onChange: () => void; title?: s
         aria-checked={checked}
         title={title}
         onClick={onChange}
-        className={`relative h-3 w-[22px] shrink-0 transition-colors ${checked ? 'bg-blue-500' : 'bg-gray-300'}`}
+        className={`relative h-3 w-[22px] shrink-0 transition-colors ${FOCUS_RING} ${checked ? 'bg-blue-500' : 'bg-gray-300'}`}
     >
         <span
             className={`absolute top-0.5 h-2.5 w-2.5 bg-white transition-transform ${checked ? 'translate-x-[10px]' : 'translate-x-0.5'}`}
@@ -316,7 +317,7 @@ const AccountsManagement: React.FC = () => {
                                         key={type}
                                         type="button"
                                         onClick={() => toggleTypeFilter(type)}
-                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium hover:opacity-80 ${isActive ? chipColors.active : chipColors.inactive}`}
+                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium transition-colors hover:opacity-80 ${FOCUS_RING} ${isActive ? chipColors.active : chipColors.inactive}`}
                                     >
                                         {meta?.label || type} ({count})
                                     </button>
@@ -334,7 +335,7 @@ const AccountsManagement: React.FC = () => {
                                         key={group}
                                         type="button"
                                         onClick={() => toggleGroupFilter(group)}
-                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium hover:opacity-80 ${isActive ? chipColors.active : chipColors.inactive}`}
+                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium transition-colors hover:opacity-80 ${FOCUS_RING} ${isActive ? chipColors.active : chipColors.inactive}`}
                                     >
                                         {group} ({count})
                                     </button>
@@ -361,7 +362,7 @@ const AccountsManagement: React.FC = () => {
                         <Text className="text-sm text-gray-500">No accounts match the selected filters</Text>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {displayedAccounts.map((account) => {
                             const isExpanded = expandedAccountIds.has(account.id);
                             const isEnabled = account.enabled !== false;
@@ -370,7 +371,7 @@ const AccountsManagement: React.FC = () => {
                             return (
                                 <div
                                     key={account.id}
-                                    className={`border border-gray-200 border-l-[3px] ${meta?.borderColor || 'border-l-gray-300'} ${isEnabled ? 'opacity-100' : 'opacity-60'} ${isExpanded ? 'col-span-full' : ''}`}
+                                    className={`border border-slate-200 border-l-[3px] bg-white shadow-sm transition-shadow hover:shadow ${meta?.borderColor || 'border-l-gray-300'} ${isEnabled ? 'opacity-100' : 'opacity-60'} ${isExpanded ? 'col-span-full' : ''}`}
                                 >
                                     <div
                                         className={`cursor-pointer px-1.5 py-0.5 transition-all duration-100 hover:bg-gray-50 ${isEnabled ? 'bg-white' : 'bg-gray-50'} ${isExpanded ? 'border-b border-gray-200' : ''}`}
@@ -459,23 +460,27 @@ const AccountsManagement: React.FC = () => {
                                     </div>
 
                                     {isExpanded && (
-                                        <div className="relative overflow-x-auto bg-white p-3">
+                                        <div className="border-t border-slate-200 bg-slate-50 p-3">
                                             {/* ID + address + tags */}
-                                            <div className="mb-2 flex items-center justify-between">
-                                                <div className="flex items-center gap-1.5">
-                                                    <Text className="font-mono text-[10px] text-gray-400">
+                                            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                                                <div className="flex min-w-0 items-center gap-3">
+                                                    <span className="inline-flex items-center gap-1 font-mono text-[11px] text-slate-500">
+                                                        <span className="uppercase tracking-wide text-slate-400">ID</span>
                                                         #{account.id}
-                                                    </Text>
+                                                    </span>
                                                     {account.address_or_identifier && (
-                                                        <Text className="max-w-[160px] truncate font-mono text-[10px] text-gray-400">
+                                                        <span
+                                                            className="min-w-0 truncate font-mono text-[11px] text-slate-500"
+                                                            title={account.address_or_identifier}
+                                                        >
                                                             {account.address_or_identifier.length > 24
                                                                 ? `${account.address_or_identifier.slice(0, 8)}...${account.address_or_identifier.slice(-6)}`
                                                                 : account.address_or_identifier}
-                                                        </Text>
+                                                        </span>
                                                     )}
                                                 </div>
                                                 {account.tags && account.tags.length > 0 && (
-                                                    <div className="flex flex-wrap justify-end gap-0.5">
+                                                    <div className="flex flex-wrap justify-end gap-1">
                                                         {account.tags.map((tagObj, idx) => {
                                                             const tagKey = typeof tagObj === 'string' ? tagObj : Object.keys(tagObj)[0];
                                                             return tagKey ? (

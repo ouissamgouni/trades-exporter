@@ -31,7 +31,7 @@ const Sparkline: React.FC<{ points: TimelinePoint[]; width?: number; height?: nu
     ).join(' ');
     const isPositive = values[values.length - 1] >= values[0];
     return (
-        <svg width={width} height={height} style={{ display: 'block', flexShrink: 0, border: '1px solid #E2E8F0', borderRadius: 4 }}>
+        <svg width={width} height={height} style={{ display: 'block', flexShrink: 0, border: '1px solid #E2E8F0' }}>
             <polyline fill="none" stroke={isPositive ? '#16a34a' : '#dc2626'} strokeWidth={1.5} points={coords} />
         </svg>
     );

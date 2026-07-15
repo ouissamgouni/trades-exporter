@@ -87,7 +87,7 @@ const DIRECTION_ROW_HEX: Record<string, string> = {
 };
 
 // Small pill-style bulk-action button classes (replaces Chakra Button size="2xs" variant="outline"/"solid")
-const BULK_ACTION_BASE = 'inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] disabled:opacity-50 disabled:cursor-not-allowed';
+const BULK_ACTION_BASE = 'inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed';
 const BULK_ACTION_OUTLINE: Record<string, string> = {
     gray: 'border border-slate-300 text-slate-700 hover:bg-slate-50',
     green: 'border border-green-300 text-green-700 hover:bg-green-50',
@@ -1685,8 +1685,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             {/* Floating Bulk Actions Bar - pinned to viewport bottom */}
             {selectedIds.size > 0 && !embeddedMode && createPortal(
                 <div
-                    className="fixed inset-x-0 bottom-0 z-[1000] animate-slide-up border-t border-slate-200 backdrop-blur-sm"
-                    style={{ backgroundColor: 'rgba(255, 255, 255, 0.85)', boxShadow: '0 -2px 8px rgba(0,0,0,0.08)' }}
+                    className="fixed inset-x-0 bottom-0 z-[1000] animate-slide-up border-t border-slate-200 bg-white/85 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] backdrop-blur-sm"
                 >
                     <div className="mx-auto max-w-[1400px] px-4 py-1.5">
                         <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -1989,9 +1988,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
                 {/* Transaction table - only show when not loading or erroring */}
                 {!loading && !error && (
-                    <div className="relative overflow-x-auto bg-white shadow-sm" style={{ fontSize: '8px' }}>
+                    <div className="relative overflow-x-auto border border-slate-200 bg-white text-[9px] shadow-sm">
                         <table className="w-full">
-                            <thead style={{ fontSize: '9px' }}>
+                            <thead className="font-semibold uppercase tracking-wide text-slate-500">
                                 <tr>
                                     <th className="sticky left-0 z-10 min-w-[50px] border-r-2 border-slate-300 bg-slate-100">
                                         {(!embeddedMode || showSelectionInEmbedded) && (
