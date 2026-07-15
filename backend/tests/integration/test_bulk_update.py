@@ -2,11 +2,9 @@
 Test bulk update operations using FastAPI TestClient.
 Tests the full request → handler → session → commit → read-back cycle.
 """
+
 import os
 import sys
-
-# Ensure test mode
-os.environ["TEST_MODE"] = "1"
 
 import pytest
 from decimal import Decimal
@@ -23,6 +21,19 @@ from backend.db.models import NormalizedTransaction, ReviewStatus
 
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _ensure_test_mode(monkeypatch):
+    """Scope TEST_MODE to this module's tests only.
+
+    A bare module-level `os.environ["TEST_MODE"] = "1"` would leak into every
+    other test collected in the same process/worker (pytest imports a module
+    during collection even if its tests are later deselected by markers),
+    polluting unrelated connector tests. `monkeypatch.setenv` is automatically
+    undone after each test.
+    """
+    monkeypatch.setenv("TEST_MODE", "1")
 
 
 @pytest.fixture
@@ -72,7 +83,9 @@ class TestBulkUpdateStatus:
         with Session(engine) as session:
             for tx_id in tx_ids:
                 tx = session.get(NormalizedTransaction, tx_id)
-                assert tx.review_status == "pending", f"Expected 'pending', got '{tx.review_status}'"
+                assert tx.review_status == "pending", (
+                    f"Expected 'pending', got '{tx.review_status}'"
+                )
 
         # Call the bulk update endpoint
         response = client.post(
@@ -132,7 +145,9 @@ class TestBulkUpdateStatus:
         with Session(engine) as session:
             for tx_id in tx_ids:
                 tx = session.get(NormalizedTransaction, tx_id)
-                assert tx is None, f"Transaction {tx_id} should be deleted but still exists"
+                assert tx is None, (
+                    f"Transaction {tx_id} should be deleted but still exists"
+                )
 
     def test_single_patch_review_status_persists(self, client, test_transactions):
         """Verify single PATCH works for comparison."""

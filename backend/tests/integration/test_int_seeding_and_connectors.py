@@ -110,45 +110,62 @@ def etherscan_test_account(pg_session):
     )
 
 
-class TestDatabaseSeeding:
-    """Test database seeding from accounts.yaml."""
+@pytest.fixture
+def seeded_test_data(pg_session):
+    """Create a small, self-contained set of accounts/connectors.
 
-    def test_accounts_exist(self, pg_session):
-        """Test that expected accounts were seeded."""
+    Independent of scenarios/default/accounts.yaml, which is a deliberately
+    minimal generic dev/demo fixture (see _make_account_with_connector) and
+    not meant to cover every connector type or relationship shape.
+    """
+    cex_account, _ = _make_account_with_connector(
+        pg_session,
+        name="Test CEX",
+        account_type="cex",
+        connector_type="binance-transactions",
+    )
+    for ctype in ("binance-deposits", "binance-withdrawals"):
+        pg_session.add(
+            AccountConnector(account_id=cex_account.id, connector_type=ctype, config={})
+        )
+    pg_session.commit()
+
+    wallet_account, _ = _make_account_with_connector(
+        pg_session,
+        name="Test Wallet",
+        account_type="wallet",
+        connector_type="etherscan",
+        address=TEST_WALLET,
+        config={"chain": "ethereum"},
+    )
+
+    return cex_account, wallet_account
+
+
+@pytest.mark.integration
+class TestDatabaseSeeding:
+    """Test that Account/AccountConnector records can be created and queried."""
+
+    def test_accounts_exist(self, pg_session, seeded_test_data):
+        """Test that seeded accounts are queryable."""
+        cex_account, wallet_account = seeded_test_data
         accounts = pg_session.exec(select(Account)).all()
         account_names = [a.name for a in accounts]
 
-        # Check expected accounts exist
-        expected_accounts = [
-            "Binance",
-            "MEXC",
-            "OKX",
-            "Coinbase",
-            "Degiro",
-            "Base Wallet",
-            "ETH Wallet",
-        ]
-
-        for name in expected_accounts:
+        for name in (cex_account.name, wallet_account.name):
             assert name in account_names, f"Account '{name}' should exist"
 
         log.info(f"✅ Found {len(accounts)} accounts: {account_names}")
 
-    def test_connectors_exist(self, pg_session):
-        """Test that expected connectors were seeded."""
+    def test_connectors_exist(self, pg_session, seeded_test_data):
+        """Test that seeded connectors are queryable."""
         connectors = pg_session.exec(select(AccountConnector)).all()
         connector_types = [c.connector_type for c in connectors]
 
-        # Check expected connector types exist
         expected_types = [
             "binance-transactions",
             "binance-deposits",
             "binance-withdrawals",
-            "mexc-transactions",
-            "okx-transactions",
-            "okx-convert",
-            "coinbase-transactions",
-            "blockscout",
             "etherscan",
         ]
 
@@ -157,32 +174,31 @@ class TestDatabaseSeeding:
 
         log.info(f"✅ Found {len(connectors)} connectors: {connector_types}")
 
-    def test_connector_account_relationships(self, pg_session):
+    def test_connector_account_relationships(self, pg_session, seeded_test_data):
         """Test that connectors are linked to correct accounts."""
-        # Check Binance account has all 3 connectors
-        binance = pg_session.exec(
-            select(Account).where(Account.name == "Binance")
-        ).first()
-        assert binance is not None
+        cex_account, _ = seeded_test_data
 
-        binance_connectors = pg_session.exec(
-            select(AccountConnector).where(AccountConnector.account_id == binance.id)
+        cex_connectors = pg_session.exec(
+            select(AccountConnector).where(
+                AccountConnector.account_id == cex_account.id
+            )
         ).all()
-        assert len(binance_connectors) == 3
-        binance_types = {c.connector_type for c in binance_connectors}
-        assert binance_types == {
+        assert len(cex_connectors) == 3
+        cex_types = {c.connector_type for c in cex_connectors}
+        assert cex_types == {
             "binance-transactions",
             "binance-deposits",
             "binance-withdrawals",
         }
 
-        log.info(f"✅ Binance account has correct connectors: {binance_types}")
+        log.info(f"✅ {cex_account.name} account has correct connectors: {cex_types}")
 
 
+@pytest.mark.integration
 class TestConnectorLoader:
-    """Test connector loading from database."""
+    """Test connector loading from database, using a self-contained enabled connector."""
 
-    def test_get_enabled_connectors(self, loader_service):
+    def test_get_enabled_connectors(self, loader_service, mexc_test_account):
         """Test that enabled connectors can be retrieved."""
         enabled = loader_service.get_enabled_connectors()
         assert len(enabled) > 0, "Should have enabled connectors"
@@ -194,7 +210,9 @@ class TestConnectorLoader:
                 f"  - {connector.connector_type} for {account.name} (priority={connector.sync_priority})"
             )
 
-    def test_build_connector_config(self, loader_service, pg_session):
+    def test_build_connector_config(
+        self, loader_service, pg_session, mexc_test_account
+    ):
         """Test that connector config is properly built."""
         # Get a connector
         connector, account = loader_service.get_enabled_connectors()[0]
@@ -492,6 +510,7 @@ class TestConnectorApiConnection:
         log.info(f"✅ Blockscout API connected, fetched {count} records")
 
 
+@pytest.mark.integration
 class TestConnectorRegistryIntegration:
     """Test that all seeded connector types are in the registry."""
 

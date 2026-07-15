@@ -28,7 +28,11 @@ tasks:
         "{{.ROOT_DIR}}/config/secrets.dev.env",
       ]
     cmds:
-      - '{{.ROOT_DIR}}/.venv/bin/python -m pytest tests/unit/ tests/api/ -v -n auto -m "not integration" --timeout=30'
+      # tests/integration/ is included here (filtered by -m "not integration")
+      # because some no-network/no-DB logic tests live alongside their live
+      # integration counterparts (e.g. ticker-resolution tests next to live
+      # price-getter tests) — this is the only path that collects them.
+      - '{{.ROOT_DIR}}/.venv/bin/python -m pytest tests/unit/ tests/api/ tests/integration/ -v -n auto -m "not integration" --timeout=30'
 
   frontend:unit:
     desc: Run frontend build, type check, and Vitest unit tests

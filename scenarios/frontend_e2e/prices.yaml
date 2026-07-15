@@ -1,0 +1,13 @@
+# Frontend Backend-E2E Fixture — Deterministic Mock Prices
+# ==========================================================
+# BTC priced directly in EUR (matches base_currency default and the
+# seeded transaction's quote currency) so P&L math needs no cross-rate.
+# Bought at 40000 EUR (see transactions.yaml) — 45000 gives a clear,
+# deterministic unrealized gain for e2e assertions.
+
+prices:
+  - asset_symbol: BTC
+    quote_currency: EUR
+    entries:
+      - at: current
+        price: "45000.00"
