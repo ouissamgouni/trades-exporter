@@ -111,14 +111,14 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
             </Button>
 
             {isOpen && (
-                <div className="absolute right-0 top-full z-[1000] mt-1 max-h-[400px] w-[280px] overflow-y-auto border border-slate-200 bg-white p-3 shadow-lg">
+                <div className="absolute right-0 top-full z-[1000] mt-1 max-h-[400px] w-[280px] max-w-[calc(100vw-1rem)] overflow-y-auto border border-slate-200 bg-white p-3 shadow-lg">
                     <div className="mb-3 flex items-center justify-between">
-                        <span className="text-sm font-medium">
+                        <span className="text-xs font-medium">
                             Visible Columns
                         </span>
                         {onReset && (
                             <Button
-                                size="sm"
+                                size="xs"
                                 variant="ghost"
                                 onClick={onReset}
                             >
@@ -131,14 +131,14 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
                     {/* Quick Actions */}
                     <div className="mb-3 flex gap-2">
                         <Button
-                            size="sm"
+                            size="xs"
                             variant="outline"
                             onClick={() => table.toggleAllColumnsVisible(true)}
                         >
                             Show All
                         </Button>
                         <Button
-                            size="sm"
+                            size="xs"
                             variant="outline"
                             onClick={() => {
                                 // Hide all except essential
@@ -186,7 +186,7 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
                                                             }}
                                                             disabled={!canHide}
                                                         />
-                                                        <span className="text-sm">
+                                                        <span className="text-xs">
                                                             {meta?.header || column.id}
                                                         </span>
                                                     </label>

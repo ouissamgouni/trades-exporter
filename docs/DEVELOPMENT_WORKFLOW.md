@@ -61,9 +61,9 @@ task start:dev        # DB + backend (--reload) + frontend (vite)
 | **scenario** | Isolated manual QA with seeded data | localhost:5435+ | localhost:8002+ | localhost:3002+ |
 | **prod:local** | Local production-like stack from tagged images | localhost:5434 | localhost:8080 | localhost:3000 |
 
-Remote deployment is intentionally out of scope for this workflow. The local workflow mirrors the salsa-events-calendar structure where it applies, but omits Fly.io, Neon, Cloudflare Pages, deployment refs, and remote component release flows.
+All environments are local Docker Compose stacks — there is no remote hosting. The workflow mirrors the salsa-events-calendar structure (dev-as-scenario, `<env>.local.env` config, per-component releases, deployment refs) without its Fly.io / Neon / Cloudflare parts.
 
-Note: some remote/Fly tasks still exist in the Taskfile implementation from the parity refactor. They are intentionally not part of this local workflow guide; see [Known Gaps vs Reference Workflow](#known-gaps-vs-reference-workflow).
+**Prod data lives in `prod:local`** (DB `trades_db_prod`, volume `trades_prod_data`, port 5434). Dev (`trades_dev_data`) is for development only.
 
 ---
 
@@ -74,14 +74,14 @@ Tasks load environment files in layers. Shared defaults come from `config/base.e
 | File | Committed | Loaded by |
 |------|-----------|-----------|
 | `config/base.env` | yes | all tasks; shared non-secret defaults |
-| `config/dev.env` | yes | `dev` tasks |
-| `config/staging.env` | yes | `staging:local` tasks |
-| `config/prod.env` | yes | `prod:local` tasks |
+| `scenarios/dev/config.env` | yes | `dev` tasks (dev is a scenario named `dev` with pinned ports) |
+| `config/staging.local.env` | yes | `staging:local` tasks |
+| `config/prod.local.env` | yes | `prod:local` tasks |
 | `config/scenario.env` | yes | scenario tasks |
 | `config/secrets.env` | no | shared local secrets |
 | `config/secrets.dev.env` | no | dev-only secrets |
-| `config/secrets.staging.env` | no | local staging secrets |
-| `config/secrets.prod.env` | no | local prod secrets |
+| `config/secrets.staging.local.env` | no | local staging secrets |
+| `config/secrets.prod.local.env` | no | local prod secrets |
 | `config/secrets.scenario.env` | no | scenario secrets |
 
 Rule: local tasks resolve database settings from the layered config stack instead of duplicating shared values in every env file. For example, `POSTGRES_USER` and `POSTGRES_PASSWORD` live in `config/base.env`, while each environment file provides its database name and port.
@@ -293,7 +293,7 @@ DRY_RUN=1 task deploy:staging:local:ref -- feature/x
 DRY_RUN=1 task deploy:staging:local:cwd
 ```
 
-The local staging stack uses `config/base.env`, `config/staging.env`, `config/secrets.env`, and `config/secrets.staging.env`.
+The local staging stack uses `config/base.env`, `config/staging.local.env`, `config/secrets.env`, and `config/secrets.staging.local.env`.
 
 ### Production Local
 
@@ -305,18 +305,23 @@ Release tagging and production builds use detached `.worktrees/main` snapshots o
 task git:release:prepare
 task git:release:ready
 task git:release:merge
-task git:release:tag -- v1.2.0
-task deploy:prod:local -- v1.2.0
-DRY_RUN=1 task deploy:prod:local -- v1.2.0
+task release:prod:backend  -- v1.2.0   # tag backend-v1.2.0 on main + deploy
+task release:prod:frontend -- v1.2.0   # tag frontend-v1.2.0 + deploy
+task release:prod:db       -- v1.2.0   # tag db-v1.2.0 + run migrations
+task release:prod                      # interactive, prompts per component
+task release:prod -- --fast            # changed components + suggested tags, one confirm
+task release:prod -- --dry-run         # show the --fast plan only
 ```
 
-The shortcut below tags and deploys local prod in one flow:
+Components (`db`, `backend`, `frontend`) release independently with annotated `<component>-vX.Y.Z` tags. Each `deploy:prod:local:<component> -- <tag>` builds from a SHA-pinned `.worktrees/ref-<sha>` checkout, retags the image as `trades-exporter-<component>:prod` (what `start:prod:local` runs), and records the deployed SHA in the local ref `refs/deploys/prod/<component>`.
 
 ```bash
-task release -- v1.2.0
+task deploy:prod:status                # released tag vs deployed SHA + drift
+task deploy:prod:status:diff           # commits/files deployed vs origin/main
+task deploy:prod:local:cwd             # deploy the working directory (not recorded)
 ```
 
-`task deploy:prod:local -- <ref>` first looks for an existing `trades-exporter-backend:<ref>` image. If no image exists, it attempts to build from the git ref and deploys the resulting `ref-<sha>` image tag. Omitting the ref deploys `latest`.
+The deploy gate checks CI is green for the tagged commit (needs `gh`); bypass with `SKIP_CI_CHECK=1`.
 
 ---
 
@@ -488,8 +493,7 @@ task test
 task git:pr
 task git:pr:ready
 
-task git:release:tag -- v1.2.1
-task deploy:prod:local -- v1.2.1
+task release:prod -- --fast
 
 # Back-merge so develop has the fix
 git checkout develop && git pull
@@ -558,10 +562,13 @@ task stop:staging:local
 
 | Command | Description |
 |---------|-------------|
-| `task deploy:prod:local -- <tag-or-ref>` | Deploy local prod from a version tag or image tag |
-| `task deploy:prod:local REF=<tag-or-ref>` | Same using named parameter |
-| `DRY_RUN=1 task deploy:prod:local -- <tag-or-ref>` | Preview prod-local deploy |
-| `task start:prod:local` | Start local prod with existing images |
+| `task release:prod[:<component>]` | Tag `<component>-vX.Y.Z` on main + deploy (see above) |
+| `task deploy:prod:local:<component> -- <tag>` | Deploy one component (`db`, `backend`, `frontend`) from a release tag |
+| `task deploy:prod:local:cwd` | Deploy all components from the working directory (`DRY_RUN=1` to preview) |
+| `task deploy:prod:local -- <tag-or-ref>` | Legacy: deploy backend + frontend from an image tag or git ref |
+| `task deploy:prod:status[:<component>][:diff]` | What is deployed vs released / origin/main |
+| `task deploy:staging:status` | What is deployed to local staging vs origin/develop |
+| `task start:prod:local` | Start local prod with the deployed `:prod` images |
 | `task start:prod:local RESET=1 FORCE=1` | Tear down prod-local before starting; `FORCE=1` is required |
 | `task start:prod:local BROWSER=isolated COUNT=1 RESET_BROWSER=1` | Same, with an isolated browser session |
 | `task stop:prod:local` | Stop local prod stack |
@@ -573,26 +580,28 @@ task stop:staging:local
 
 | Command | Description |
 |---------|-------------|
-| `task db:migrate:dev` | Dev alembic upgrade head |
-| `task db:migrate:staging` | Local staging migrations |
-| `task db:migrate:prod` | Local prod migrations |
-| `task db:seed:dev` | Seed dev DB |
-| `task db:seed:staging` | Seed local staging DB |
+| `task db:migrate:dev` (alias `db:migrate`) | Dev alembic upgrade head |
+| `task db:migrate:staging:local` | Local staging migrations |
+| `task db:migrate:prod:local` | Local prod migrations |
+| `task db:seed:dev` (alias `db:seed`) | Seed dev DB |
+| `task db:seed:staging:local` | Seed local staging DB |
 | `task db:reset:dev` | Drop + reseed dev DB |
 | `DRY_RUN=1 task db:reset:dev` | Preview dev DB reset |
-| `task db:reset:staging` | Drop + reseed local staging DB |
-| `DRY_RUN=1 task db:reset:staging` | Preview local staging DB reset |
-| `task db:reset:prod` | Drop + reseed local prod DB |
+| `task db:reset:staging:local` | Drop + reseed local staging DB |
+| `DRY_RUN=1 task db:reset:staging:local` | Preview local staging DB reset |
+| `task db:reset:prod:local` | Drop + reseed local prod DB |
 | `task start:scenario:db SCENARIO=<name>` | Create and seed a scenario DB (used by integration/e2e tests too) |
 | `task stop:scenario SCENARIO=<name>` | Tear down a scenario instance (DB + volume) |
 | `task db:copy:dev-to-staging` | Copy dev -> staging (`DRY_RUN=1` to preview) |
 | `task db:copy:staging-to-dev` | Copy staging -> dev and run migrations |
 | `task db:copy:staging-to-prod` | Copy staging -> prod-local |
-| `task db:copy -- <src> <dst> [--dry-run]` | Generic copy between local envs |
+| `task db:copy -- <src> <dst> [--dry-run]` | Generic copy between local envs (`dev`, `staging`, `prod`, `scenario`) |
 | `task db:copy -- staging dev --migrate` | Generic copy plus Alembic upgrade on target |
 | `task db:copy -- dev staging DRY_RUN=1` | Generic copy dry run; accepted after `--` |
 | `task db:status:dev` | Alembic current/head status |
-| `task db:status:staging` | Alembic status inside local staging backend container |
+| `task db:status:staging:local` | Alembic status inside local staging backend container |
+| `task db:status:prod:local` | Alembic status inside local prod backend container |
+| `task script ENV=dev\|staging:local\|prod:local -- <script> [args]` | Run `backend/scripts/<script>` with that env's config (prod prompts; `YES=1` skips) |
 | `task db:check:dev` | Validate migration health |
 | `task db:history:dev` | Show verbose Alembic history |
 | `task db:merge:dev -- "message"` | Merge multiple Alembic heads |
@@ -601,7 +610,7 @@ task stop:staging:local
 | `task db:cleanup-tags:dev DRY_RUN=1` | Preview dev transaction tag cleanup |
 | `task db:cleanup-tags:dev KEY=<tag-key>` | Clean only one tag key in dev |
 | `task db:cleanup-tags:dev ALL=1` | Include system tags; prompts again before execution |
-| `task db:cleanup-tags:staging DRY_RUN=1` | Preview local staging tag cleanup |
+| `task db:cleanup-tags:staging:local DRY_RUN=1` | Preview local staging tag cleanup |
 
 ### Scenario
 
@@ -664,12 +673,12 @@ All scenario commands accept `SCENARIO=<name>`.
 | `task git:pr:checks` | Show CI status |
 | `task git:pr:merge` | Squash merge |
 | `task git:release:prepare` | Create develop -> main release PR |
-| `task git:release:tag -- v1.0.0` | Tag release on main |
-| `task git:release:tag VERSION=v1.0.0` | Same using named parameter |
+| `task git:release:tag-component COMPONENT=<c> VERSION=v1.0.0` | Tag `<c>-v1.0.0` on main (used by `release:prod:*`) |
+| `task git:release:tag -- v1.0.0` | Legacy whole-app tag on main |
 | `task git:release:ready` | Mark develop -> main release PR ready |
 | `task git:release:merge` | Merge develop -> main release PR |
-| `task git:tags` | List version tags |
-| `task release -- v1.0.0` | Tag main + deploy local prod |
+| `task git:tags` | List version tags (per-component + legacy) |
+| `task release` | Alias of `task release:prod` |
 
 Git worktree commands used by builds:
 
@@ -738,8 +747,8 @@ The document now matches the implemented local workflow. Remaining differences f
 
 | Gap | Status | Plan |
 |-----|--------|------|
-| Remote deployment sections and commands | Intentionally omitted from this doc because this project is expected to be local-only for now. Current taskfiles still contain `deploy:*:remote`, `fly:*`, and remote `open:*` tasks from the earlier refactor. | Decide whether to remove those task namespaces entirely or keep them undocumented as experimental. If local-only is final, delete `.taskfiles/fly.yml`, remote deploy tasks, remote open tasks, and remote env examples in a follow-up cleanup. |
-| `task help` still advertises remote commands | Implementation mismatch with this local-only workflow guide. `task help` currently lists remote staging/prod deploy and Fly status commands. | Update `Taskfile.yml` help output after deciding whether remote tasks are removed or kept experimental. If removed, also remove remote log/open entries from `task --list`. |
+| Remote hosting (Fly.io, Neon, Cloudflare) | Removed by design — staging and prod are local Docker Compose stacks. | — |
+| App-specific reference features (Umami, MinIO objects, notify, showcase, secrets sync) | Not applicable to this app. | — |
 | Browser cleanup for local staging/prod | Not needed today. Browser cleanup is automatic for scenario stop tasks only. | If isolated staging/prod sessions become common, add `KEEP_BROWSER=1` and cleanup calls to `stop:staging:local` and `stop:prod:local`. |
 | Performance testing section | Intentionally omitted because this repo has no `perf:*` task namespace. | Add k6/perf taskfiles and scenarios first, then mirror the reference performance section. |
 

@@ -90,7 +90,7 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
     const accountSuggestions = externalSuggestions ?? (needsSuggestions ? fetchedSuggestions : []);
 
     return (
-        <div className="flex min-w-[100px] max-w-[200px] flex-col gap-1">
+        <div className="flex w-full min-w-[160px] flex-col gap-1">
             {/* First row: Account badge + Source badge */}
             <div className="flex flex-wrap items-center gap-1">
                 {/* Account badge */}

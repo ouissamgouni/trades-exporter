@@ -199,7 +199,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    colorScheme="red"
+                                    colorScheme="gray"
                                     onClick={onRetryFailed}
                                     disabled={loadingCount > 0}
                                     className="h-6 px-2 text-xs"

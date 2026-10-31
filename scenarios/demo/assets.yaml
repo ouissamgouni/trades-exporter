@@ -35,10 +35,6 @@ assets:
     label: XRP
     price_type: crypto
 
-  - symbol: BNB
-    label: BNB
-    price_type: crypto
-
   # ── Stocks & Funds ────────────────────────────────────────────
   - symbol: AAPL
     label: Apple Inc.
@@ -52,12 +48,12 @@ assets:
     label: Alphabet Inc.
     price_type: stock
 
-  - symbol: ASML
-    label: ASML Holding N.V.
-    price_type: stock
-
   - symbol: CW8
     label: "Amundi MSCI World UCITS ETF"
+    price_type: stock
+
+  - symbol: GOLD
+    label: "iShares Physical Gold ETC"
     price_type: stock
 
   # ── Prediction Markets (Polymarket) ───────────────────────────
@@ -83,4 +79,3 @@ assets:
   - symbol: "^GSPC"
     label: "S&P 500 (benchmark)"
     price_type: stock
-

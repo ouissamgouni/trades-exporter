@@ -9,21 +9,21 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
     cmds:
-      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev logs -f
+      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.db.yml -p trades-exporter-dev logs -f
 
   staging:local:
     desc: View staging stack logs
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     cmds:
       - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging logs -f
@@ -33,22 +33,12 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     cmds:
       - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod logs -f
-
-  staging:remote:
-    desc: View remote staging backend logs on Fly.io
-    cmds:
-      - task: :fly:staging:logs
-
-  prod:remote:
-    desc: View remote prod backend logs on Fly.io
-    cmds:
-      - task: :fly:logs
 
   scenario:
     desc: "View scenario logs. SCENARIO=<name> to target instance."
@@ -68,5 +58,5 @@ tasks:
         if docker ps --filter "name=$SC_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$SC_BACKEND_CONTAINER"; then
           docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME logs -f --tail 50
         else
-          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $SC_PROJECT_NAME logs -f --tail 50
+          docker compose -f infra/docker/docker-compose.db.yml -p $SC_PROJECT_NAME logs -f --tail 50
         fi

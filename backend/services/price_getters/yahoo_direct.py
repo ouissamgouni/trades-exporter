@@ -148,32 +148,32 @@ class YahooDirectPriceGetter(BasePriceGetter):
             raise PriceGetterError(
                 message=f"[yahoo_direct] HTTP request failed for {ticker}: {e}",
                 reason=PriceErrorReason.API_ERROR,
-                source="yahoo_direct",
-                ticker=ticker,
+                getter_name="yahoo_direct",
+                ticker_used=ticker,
             )
 
         if response.status_code == 404:
             raise PriceGetterError(
                 message=f"[yahoo_direct] Ticker '{ticker}' not found on Yahoo Finance (404)",
                 reason=PriceErrorReason.TICKER_NOT_FOUND,
-                source="yahoo_direct",
-                ticker=ticker,
+                getter_name="yahoo_direct",
+                ticker_used=ticker,
             )
 
         if response.status_code == 429:
             raise PriceGetterError(
                 message=f"[yahoo_direct] Rate limited by Yahoo Finance (429) for {ticker}",
-                reason=PriceErrorReason.RATE_LIMITED,
-                source="yahoo_direct",
-                ticker=ticker,
+                reason=PriceErrorReason.API_RATE_LIMITED,
+                getter_name="yahoo_direct",
+                ticker_used=ticker,
             )
 
         if response.status_code != 200:
             raise PriceGetterError(
                 message=f"[yahoo_direct] Yahoo API returned HTTP {response.status_code} for {ticker}",
                 reason=PriceErrorReason.API_ERROR,
-                source="yahoo_direct",
-                ticker=ticker,
+                getter_name="yahoo_direct",
+                ticker_used=ticker,
             )
 
         try:
@@ -182,8 +182,8 @@ class YahooDirectPriceGetter(BasePriceGetter):
             raise PriceGetterError(
                 message=f"[yahoo_direct] Invalid JSON response for {ticker}",
                 reason=PriceErrorReason.API_ERROR,
-                source="yahoo_direct",
-                ticker=ticker,
+                getter_name="yahoo_direct",
+                ticker_used=ticker,
             )
 
         chart = data.get("chart", {})
@@ -192,17 +192,17 @@ class YahooDirectPriceGetter(BasePriceGetter):
             raise PriceGetterError(
                 message=f"[yahoo_direct] API error for {ticker}: {error.get('description', error)}",
                 reason=PriceErrorReason.API_ERROR,
-                source="yahoo_direct",
-                ticker=ticker,
+                getter_name="yahoo_direct",
+                ticker_used=ticker,
             )
 
         results = chart.get("result")
         if not results:
             raise PriceGetterError(
                 message=f"[yahoo_direct] No chart data returned for {ticker}",
-                reason=PriceErrorReason.NO_DATA,
-                source="yahoo_direct",
-                ticker=ticker,
+                reason=PriceErrorReason.NO_DATA_RETURNED,
+                getter_name="yahoo_direct",
+                ticker_used=ticker,
             )
 
         return results[0]

@@ -185,11 +185,11 @@ const AccountCard: React.FC<{
 
         return (
             <div
-                className={`min-w-[280px] flex-[1_1_280px] border ${hasOverride ? 'border-orange-300 bg-orange-50' : 'border-slate-200 bg-white'} ${accountDisabled && !allEnabled ? 'opacity-80' : 'opacity-100'}`}
+                className={`w-full min-w-0 border ${hasOverride ? 'border-orange-300 bg-orange-50' : 'border-slate-200 bg-white'} ${accountDisabled && !allEnabled ? 'opacity-80' : 'opacity-100'}`}
             >
                 <div className="px-3 pb-2 pt-3">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
                             <button
                                 type="button"
                                 aria-label="Toggle account details"
@@ -197,13 +197,13 @@ const AccountCard: React.FC<{
                                     e.stopPropagation();
                                     onToggleCollapse();
                                 }}
-                                className="text-slate-400 hover:text-slate-600"
+                                className="flex-shrink-0 text-slate-400 hover:text-slate-600"
                             >
                                 <LuChevronDown size={14} />
                             </button>
-                            <div className="flex flex-col items-start gap-0">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-semibold text-slate-700">
+                            <div className="flex min-w-0 flex-col items-start gap-0">
+                                <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+                                    <span className="truncate text-sm font-semibold text-slate-700">
                                         {account.name}
                                     </span>
                                     <Badge colorScheme={account.account_type === 'exchange' ? 'purple' : 'green'}>
@@ -222,7 +222,7 @@ const AccountCard: React.FC<{
                                 )}
                             </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-shrink-0 items-center gap-2">
                             {onRemove && (
                                 <Tooltip content="Remove from sync config" openDelay={300}>
                                     <Button
@@ -1277,7 +1277,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                 <p className="text-sm text-red-600">
                     Failed to load connectors: {error}
                 </p>
-                <Button size="sm" className="mt-2" onClick={fetchConnectors} colorScheme="red" variant="outline">
+                <Button size="sm" className="mt-2" onClick={fetchConnectors} colorScheme="gray" variant="outline">
                     Retry
                 </Button>
             </div>
@@ -1324,10 +1324,10 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
             {expanded && (
                 <div className="border-t border-slate-100 bg-white p-3">
                     {/* Action buttons */}
-                    <div className="mb-3 flex items-center justify-between gap-1">
-                        <div className="flex gap-1">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap gap-1">
                             <Button
-                                size="sm"
+                                size="xs"
                                 colorScheme="blue"
                                 variant="outline"
                                 onClick={(e) => {
@@ -1341,9 +1341,9 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                             </Button>
                             {configStore.hasSelection && (
                                 <Button
-                                    size="sm"
+                                    size="xs"
                                     variant="ghost"
-                                    colorScheme="red"
+                                    colorScheme="gray"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         configStore.clearAll();
@@ -1355,11 +1355,11 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                 </Button>
                             )}
                         </div>
-                        <div className="flex gap-1">
+                        <div className="flex flex-wrap gap-1">
                             {connectors.length > 0 && (
                                 <>
                                     <Button
-                                        size="sm"
+                                        size="xs"
                                         variant="ghost"
                                         onClick={(e) => {
                                             e.stopPropagation();
@@ -1370,7 +1370,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                         All
                                     </Button>
                                     <Button
-                                        size="sm"
+                                        size="xs"
                                         variant="ghost"
                                         onClick={(e) => {
                                             e.stopPropagation();
@@ -1384,7 +1384,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                             )}
                             {hasOverrides && (
                                 <Button
-                                    size="sm"
+                                    size="xs"
                                     variant="ghost"
                                     colorScheme="gray"
                                     className="border-orange-300 text-orange-700 hover:bg-orange-50"
@@ -1398,7 +1398,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                 </Button>
                             )}
                             <Button
-                                size="sm"
+                                size="xs"
                                 variant="ghost"
                                 colorScheme="blue"
                                 onClick={(e) => {
@@ -1410,7 +1410,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                 🔄 Refresh
                             </Button>
                             <Button
-                                size="sm"
+                                size="xs"
                                 variant="ghost"
                                 colorScheme="green"
                                 onClick={(e) => {
@@ -1511,7 +1511,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
 
                                     {/* Account Cards Grid */}
                                     {!isCollapsed && (
-                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3">
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
                                             {allTypeAccounts.map((account) => {
                                                 const accountConnectors = connectorsByAccount.get(account.id) || [];
                                                 if (accountConnectors.length === 0) return null;

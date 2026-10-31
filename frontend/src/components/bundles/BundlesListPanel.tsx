@@ -174,7 +174,8 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
                     <Button
                         className="mt-3"
                         size="sm"
-                        colorScheme="red"
+                        colorScheme="gray"
+                        variant="outline"
                         onClick={() => refetch()}
                     >
                         🔄 Retry

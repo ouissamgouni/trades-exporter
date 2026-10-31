@@ -3,8 +3,9 @@
 # Uses ENV_NAME and IMAGE_TAG from config/*.env files.
 #
 # Usage (via Taskfile):
-#   task start:staging  # config/base.env + config/staging.env + config/secrets*.env
-#   task start:prod     # config/base.env + config/prod.env    + config/secrets*.env
+#   task start:staging:local  # config/base.env + config/staging.local.env + config/secrets*.env
+#   task start:prod:local     # config/base.env + config/prod.local.env    + config/secrets*.env
+#   task start:scenario:ref   # config/scenario-<name>.local.env -> config/scenario.env symlink
 
 services:
   postgres:
@@ -12,7 +13,7 @@ services:
     container_name: trades_db_${ENV_NAME}
     env_file:
       - ../../config/base.env
-      - path: ../../config/${ENV_NAME}.env
+      - path: ../../config/${ENV_NAME}.local.env
         required: false
     ports:
       - "${POSTGRES_PORT}:5432"
@@ -32,9 +33,11 @@ services:
     container_name: trades_backend_${ENV_NAME}
     env_file:
       - ../../config/base.env
-      - path: ../../config/${ENV_NAME}.env
+      - path: ../../config/${ENV_NAME}.local.env
         required: false
       - path: ../../config/secrets.env
+        required: false
+      - path: ../../config/secrets.${ENV_NAME}.local.env
         required: false
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -64,7 +67,8 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80" ]
+      # 127.0.0.1, not localhost: busybox wget resolves localhost to ::1 and nginx listens on IPv4 only.
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80" ]
       interval: 10s
       timeout: 5s
       retries: 3

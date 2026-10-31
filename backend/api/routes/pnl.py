@@ -56,6 +56,7 @@ from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.services.pnl.models import PnLResult
 from backend.services.price_service import PriceService
 from backend.services.pnl.filter_utils import resolve_filtered_unit_ids
+from backend.services.pnl.portfolio_timeline import clear_portfolio_timeline_cache
 from backend.api.routes.pnl_filter_depends import (
     PnLTransactionFilters,
     get_pnl_transaction_filters,
@@ -5458,6 +5459,86 @@ def get_pnl_filter_options(
     )
 
 
+# Registered before /units/{unit_id} so "filter-options" isn't parsed as a unit id.
+@router.get(
+    "/versions/{version_id}/units/filter-options",
+    response_model=UnitsFilterOptionsResponse,
+)
+def get_units_filter_options(
+    version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get available filter values for the units list.
+    Returns patterns with counts, and boolean-filter counts, scoped by context filters.
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # Base scope: all units in version, filtered by context (tx_filters)
+    base_q = select(CalculationUnit.id).where(CalculationUnit.version_id == version_id)
+    base_q, _ = _apply_unit_filter(
+        base_q, tx_filters, version_id, session, unit_column=CalculationUnit.id
+    )
+    scoped_ids_sq = base_q.subquery()
+
+    # Pattern options with counts
+    pattern_q = (
+        select(CalculationUnit.pattern, func.count(CalculationUnit.id))
+        .where(CalculationUnit.id.in_(select(scoped_ids_sq)))
+        .group_by(CalculationUnit.pattern)
+    )
+    pattern_rows = session.exec(pattern_q).all()
+    patterns = [
+        FilterOptionWithCount(value=p or "unknown", count=c) for p, c in pattern_rows
+    ]
+
+    # Counts for boolean toggles
+    total_scoped = sum(c for _, c in pattern_rows)
+
+    has_warnings_q = select(func.count(func.distinct(PnlWarning.unit_id))).where(
+        PnlWarning.unit_id.in_(select(scoped_ids_sq))
+    )
+    has_warnings_count = session.exec(has_warnings_q).one() or 0
+
+    has_realized_q = select(
+        func.count(func.distinct(RealizedPnl.origin_unit_id))
+    ).where(RealizedPnl.origin_unit_id.in_(select(scoped_ids_sq)))
+    has_realized_pnl_count = session.exec(has_realized_q).one() or 0
+
+    has_fees_q = select(func.count(func.distinct(FeeEntry.unit_id))).where(
+        FeeEntry.unit_id.in_(select(scoped_ids_sq))
+    )
+    has_fees_count = session.exec(has_fees_q).one() or 0
+
+    # Warning types with per-type unit counts (for multi-select dropdown)
+    warning_type_q = (
+        select(PnlWarning.warning_type, func.count(func.distinct(PnlWarning.unit_id)))
+        .where(PnlWarning.unit_id.in_(select(scoped_ids_sq)))
+        .group_by(PnlWarning.warning_type)
+    )
+    wt_rows = session.exec(warning_type_q).all()
+    warning_types = [
+        FilterOptionWithCount(
+            value=wt,
+            label=wt.replace("_", " ").title(),
+            count=c,
+        )
+        for wt, c in wt_rows
+    ]
+
+    return UnitsFilterOptionsResponse(
+        patterns=patterns,
+        total_units=total_scoped,
+        has_warnings_count=has_warnings_count,
+        has_realized_pnl_count=has_realized_pnl_count,
+        has_fees_count=has_fees_count,
+        warning_types=warning_types,
+    )
+
+
 # =============================================================================
 # Unit Detail Endpoints (for drill-down from units list)
 # =============================================================================
@@ -6278,85 +6359,6 @@ def get_version_units(
     return {"items": result, "total": total, "page": page, "limit": limit}
 
 
-@router.get(
-    "/versions/{version_id}/units/filter-options",
-    response_model=UnitsFilterOptionsResponse,
-)
-def get_units_filter_options(
-    version_id: int,
-    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
-    session: Session = Depends(get_session_dependency),
-):
-    """
-    Get available filter values for the units list.
-    Returns patterns with counts, and boolean-filter counts, scoped by context filters.
-    """
-    version = session.get(CalculationVersion, version_id)
-    if not version:
-        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
-
-    # Base scope: all units in version, filtered by context (tx_filters)
-    base_q = select(CalculationUnit.id).where(CalculationUnit.version_id == version_id)
-    base_q, _ = _apply_unit_filter(
-        base_q, tx_filters, version_id, session, unit_column=CalculationUnit.id
-    )
-    scoped_ids_sq = base_q.subquery()
-
-    # Pattern options with counts
-    pattern_q = (
-        select(CalculationUnit.pattern, func.count(CalculationUnit.id))
-        .where(CalculationUnit.id.in_(select(scoped_ids_sq)))
-        .group_by(CalculationUnit.pattern)
-    )
-    pattern_rows = session.exec(pattern_q).all()
-    patterns = [
-        FilterOptionWithCount(value=p or "unknown", count=c) for p, c in pattern_rows
-    ]
-
-    # Counts for boolean toggles
-    total_scoped = sum(c for _, c in pattern_rows)
-
-    has_warnings_q = select(func.count(func.distinct(PnlWarning.unit_id))).where(
-        PnlWarning.unit_id.in_(select(scoped_ids_sq))
-    )
-    has_warnings_count = session.exec(has_warnings_q).one() or 0
-
-    has_realized_q = select(
-        func.count(func.distinct(RealizedPnl.origin_unit_id))
-    ).where(RealizedPnl.origin_unit_id.in_(select(scoped_ids_sq)))
-    has_realized_pnl_count = session.exec(has_realized_q).one() or 0
-
-    has_fees_q = select(func.count(func.distinct(FeeEntry.unit_id))).where(
-        FeeEntry.unit_id.in_(select(scoped_ids_sq))
-    )
-    has_fees_count = session.exec(has_fees_q).one() or 0
-
-    # Warning types with per-type unit counts (for multi-select dropdown)
-    warning_type_q = (
-        select(PnlWarning.warning_type, func.count(func.distinct(PnlWarning.unit_id)))
-        .where(PnlWarning.unit_id.in_(select(scoped_ids_sq)))
-        .group_by(PnlWarning.warning_type)
-    )
-    wt_rows = session.exec(warning_type_q).all()
-    warning_types = [
-        FilterOptionWithCount(
-            value=wt,
-            label=wt.replace("_", " ").title(),
-            count=c,
-        )
-        for wt, c in wt_rows
-    ]
-
-    return UnitsFilterOptionsResponse(
-        patterns=patterns,
-        total_units=total_scoped,
-        has_warnings_count=has_warnings_count,
-        has_realized_pnl_count=has_realized_pnl_count,
-        has_fees_count=has_fees_count,
-        warning_types=warning_types,
-    )
-
-
 @router.post("/versions/{version_id}/commit")
 def commit_version(
     version_id: int,
@@ -6483,7 +6485,7 @@ def get_portfolio_timeline(
     session: Session = Depends(get_session_dependency),
 ):
     """Get portfolio value timeline for charts."""
-    from backend.services.pnl.portfolio_timeline import compute_portfolio_timeline
+    from backend.services.pnl.portfolio_timeline import compute_portfolio_timeline_cached
     from datetime import datetime as dt_cls
 
     parsed_date_from = dt_cls.fromisoformat(date_from) if date_from else None
@@ -6498,7 +6500,7 @@ def get_portfolio_timeline(
         [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
     )
 
-    points = compute_portfolio_timeline(
+    points = compute_portfolio_timeline_cached(
         session=session,
         version_id=version_id,
         granularity=granularity,
@@ -7012,6 +7014,7 @@ def force_settle_single(
     try:
         force_settle_lot(session, lot_id)
         session.commit()
+        clear_portfolio_timeline_cache()
         return ForceSettleResponse(lot_id=lot_id, settled=True, message="Settled")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -7036,6 +7039,7 @@ def force_settle_bulk(
                 ForceSettleResponse(lot_id=lid, settled=False, message=str(e))
             )
     session.commit()
+    clear_portfolio_timeline_cache()
     return BulkForceSettleResponse(settled=settled, rejected=rejected)
 
 

@@ -252,6 +252,30 @@ class TestPriceService:
         assert price == 1.0
 
 
+    def test_manual_only_asset_skips_live_fetch_and_uses_old_stored_price(self):
+        """Manually priced assets (no market feed) use the last stored price, however old."""
+        service = PriceService(base_currency="EUR")
+        asset = Asset(asset_id=306, symbol="FDS:EUR:NGEN", price_type="stock")
+        dt = datetime(2026, 10, 30, tzinfo=timezone.utc)
+        snapshot = Mock(price=Decimal("1.072"), source="csv_import",
+                        snapshot_time=datetime(2025, 11, 12, tzinfo=timezone.utc))
+
+        with patch.object(service, "_get_session", return_value=Mock()), \
+                patch.object(service, "_close_session"), \
+                patch.object(service, "_get_asset", return_value=asset), \
+                patch.object(service, "_get_quote_asset_id", return_value=1), \
+                patch.object(service, "_get_cache_exclude_sources", return_value=[]), \
+                patch.object(service.cache, "get_with_source", return_value=None), \
+                patch.object(service.cache, "get_latest_before", return_value=snapshot) as latest, \
+                patch.object(service.resolver, "resolve", return_value=[("manual", PriceGetterConfig())]), \
+                patch.object(service, "_fetch_price_with_timeout") as live_fetch:
+            result = service.get_price_with_fallback(306, dt)
+
+        live_fetch.assert_not_called()
+        assert latest.call_args.kwargs["max_days_back"] > 352
+        assert result.price == 1.072
+        assert result.is_fallback is True
+
 class TestAssetTypeMappings:
     """Tests for asset type to price getter mappings."""
 

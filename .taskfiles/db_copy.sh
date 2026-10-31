@@ -4,10 +4,14 @@
 # ─────────────────────────────────────────────────────────────
 #
 # Usage:
-#   ./db_copy.sh <src_env_file> <dst_env_file> [--dry-run] [--migrate]
+#   ./db_copy.sh <src_env> <dst_env> [--dry-run] [--migrate]
+#   env = dev | staging | prod | scenario
 #
-# Environment files are loaded using the same layered convention as Taskfile:
-#   config/base.env → config/<env>.env → config/secrets.env → config/secrets.<env>.env
+# Config layers per env (same convention as the Taskfile):
+#   dev:      config/base.env → scenarios/dev/config.env → config/secrets.env → config/secrets.dev.env
+#   staging:  config/base.env → config/staging.local.env → config/secrets.env → config/secrets.staging.local.env
+#   prod:     config/base.env → config/prod.local.env    → config/secrets.env → config/secrets.prod.local.env
+#   scenario: config/base.env → config/scenario.env      → config/secrets.env → config/secrets.scenario.env
 # The final resolved configuration must define:
 #   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT
 #
@@ -18,9 +22,9 @@
 #                 and ROOT_DIR env vars (set by Taskfile).
 #
 # Examples:
-#   ./db_copy.sh config/dev.env config/staging.env
-#   ./db_copy.sh config/staging.env config/dev.env --migrate
-#   ./db_copy.sh config/staging.env config/prod.env --dry-run
+#   ./db_copy.sh dev staging
+#   ./db_copy.sh staging dev --migrate
+#   ./db_copy.sh dev prod --dry-run
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -29,28 +33,27 @@ set -euo pipefail
 die()  { echo "❌ $*" >&2; exit 1; }
 info() { echo "   $*"; }
 
-env_name_from_file() {
-  local file="$1" name
-  name="$(basename "$file")"
-  name="${name%.env}"
-  # staging.remote/prod.remote share the staging/prod secret layer.
-  name="${name%%.remote}"
-  printf '%s' "$name"
+REPO_ROOT="${ROOT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+env_layers() {
+  # env_layers <env> — prints the config layer files for an env, one per line.
+  local c="$REPO_ROOT/config"
+  case "$1" in
+    dev)      printf '%s\n' "$c/base.env" "$REPO_ROOT/scenarios/dev/config.env" "$c/secrets.env" "$c/secrets.dev.env" ;;
+    staging)  printf '%s\n' "$c/base.env" "$c/staging.local.env" "$c/secrets.env" "$c/secrets.staging.local.env" ;;
+    prod)     printf '%s\n' "$c/base.env" "$c/prod.local.env" "$c/secrets.env" "$c/secrets.prod.local.env" ;;
+    scenario) printf '%s\n' "$c/base.env" "$c/scenario.env" "$c/secrets.env" "$c/secrets.scenario.env" ;;
+    *) die "Unknown env '$1' (expected dev | staging | prod | scenario)" ;;
+  esac
 }
 
 env_value_from_layers() {
-  # env_value_from_layers <key> <env_file> — prints the last value found across layers.
-  local key="$1" env_file="$2"
-  local config_dir env_name layers value layer line
+  # env_value_from_layers <key> <env> — prints the last value found across layers.
+  local key="$1" env_name="$2"
+  local layers value layer line
 
-  config_dir="$(cd "$(dirname "$env_file")" && pwd)"
-  env_name="$(env_name_from_file "$env_file")"
-  layers=(
-    "$config_dir/base.env"
-    "$env_file"
-    "$config_dir/secrets.env"
-    "$config_dir/secrets.$env_name.env"
-  )
+  layers=()
+  while IFS= read -r layer; do layers+=("$layer"); done < <(env_layers "$env_name")
 
   value=""
   for layer in "${layers[@]}"; do
@@ -65,9 +68,9 @@ env_value_from_layers() {
 }
 
 parse_env() {
-  # parse_env <file> <prefix> — sets PREFIX_USER, PREFIX_PASS, etc.
+  # parse_env <env> <prefix> — sets PREFIX_USER, PREFIX_PASS, etc.
   local file="$1" prefix="$2"
-  [[ -f "$file" ]] || die "Env file not found: $file"
+  env_layers "$file" >/dev/null
 
   local user pass db host port
   user=$(env_value_from_layers POSTGRES_USER "$file")
@@ -249,9 +252,8 @@ echo ""
 if $MIGRATE; then
   # Resolve paths: BACKEND_DIR and ROOT_DIR are passed by Taskfile.
   # Fall back to reasonable defaults relative to this script.
-  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  _BACKEND_DIR="${BACKEND_DIR:-$(dirname "$SCRIPT_DIR")}"
-  _ROOT_DIR="${ROOT_DIR:-$(dirname "$_BACKEND_DIR")}"
+  _BACKEND_DIR="${BACKEND_DIR:-$REPO_ROOT/backend}"
+  _ROOT_DIR="$REPO_ROOT"
   ALEMBIC_INI="$_BACKEND_DIR/alembic.ini"
   ALEMBIC_BIN="$_ROOT_DIR/.venv/bin/alembic"
 

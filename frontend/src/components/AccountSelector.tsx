@@ -173,6 +173,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                 onFocus={() => setIsOpen(true)}
                 placeholder={placeholder}
                 disabled={disabled}
+                className="h-6 px-1.5 text-[11px]"
             />
 
             {isOpen && (

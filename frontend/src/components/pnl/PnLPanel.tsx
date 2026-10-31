@@ -364,7 +364,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
             {(status === 'preview' || status === 'persisted') && summary && (
                 <>
                     {/* ═══ Tab bar — Portfolio / Tax + Status Cards ═══ */}
-                    <div className="flex items-center gap-0 border-b border-gray-200">
+                    <div className="flex flex-wrap items-center gap-0 border-b border-gray-200">
                         {(['portfolio', 'tax'] as const).map(tab => {
                             const active = pnlActiveTab === tab;
                             const label = tab === 'portfolio' ? 'Portfolio' : 'Tax (FR)';
@@ -384,7 +384,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                         })}
 
                         {/* Status cards — right of tab strip */}
-                        <div className="ml-auto flex flex-shrink-0 items-center gap-1.5 py-1 pr-1">
+                        <div className="ml-auto flex flex-shrink-0 flex-wrap items-center gap-1.5 py-1 pr-1">
                             <RefreshPricesCard
                                 onRefreshPrices={handleRefreshPrices}
                                 isRefreshingPrices={isRefreshingPrices || isLoadingBalances}

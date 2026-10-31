@@ -15,7 +15,6 @@ dimensions:
           - SOL
           - USDC
           - XRP
-          - BNB
 
       - label: "Stocks"
         color: "#2E86C1"
@@ -24,13 +23,18 @@ dimensions:
           - AAPL
           - MSFT
           - GOOGL
-          - ASML
 
       - label: "Funds"
         color: "#16A085"
         ordinal: 30
         assets:
           - CW8
+
+      - label: "Commodities"
+        color: "#D4AC0D"
+        ordinal: 35
+        assets:
+          - GOLD
 
       - label: "Prediction Markets"
         color: "#8B5CF6"

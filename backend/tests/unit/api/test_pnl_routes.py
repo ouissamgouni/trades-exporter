@@ -1044,3 +1044,12 @@ class TestFrTaxEffectiveInResponse:
         assert items[0].fr_tax_effective is True
         # entry2 (tx 200): override False → fr_tax_effective = False
         assert items[1].fr_tax_effective is False
+
+
+def test_units_filter_options_route_is_not_shadowed_by_unit_detail():
+    from backend.api.routes.pnl import router
+
+    paths = [route.path for route in router.routes]
+    assert paths.index("/pnl/versions/{version_id}/units/filter-options") < paths.index(
+        "/pnl/versions/{version_id}/units/{unit_id}"
+    )

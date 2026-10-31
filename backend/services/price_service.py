@@ -42,8 +42,11 @@ from backend.services.price_getters.base import (
     PriceGetterAggregateError,
     PriceErrorReason,
 )
+from backend.services.price_getters.manual import MANUAL_GETTER_NAME
 
 log = configure_logging("price_service")
+
+MANUAL_FALLBACK_SEARCH_DAYS = 36500
 
 
 # ============================================================================
@@ -926,37 +929,46 @@ class PriceService:
 
             # Get price getters for this asset
             price_getters = self.resolver.resolve(session, asset)
+            stored_prices_only = bool(price_getters) and all(
+                name == MANUAL_GETTER_NAME for name, _ in price_getters
+            )
 
-            # Try to fetch price normally (with optional timeout)
             original_error: Optional[str] = None
-            try:
-                result = self._fetch_price_with_timeout(
-                    session,
-                    asset,
-                    dt,
-                    price_getters,
-                    requested_quote,
-                    quote_asset_id,
-                    max_timeout_seconds=max_timeout_seconds,
-                )
-                return result
-
-            except (PriceGetterAggregateError, FuturesTimeoutError, Exception) as e:
-                original_error = str(e)
-                if isinstance(e, FuturesTimeoutError):
-                    original_error = (
-                        f"Live price fetch timed out after {max_timeout_seconds}s"
+            if stored_prices_only:
+                original_error = "No live price source (manual pricing)"
+            else:
+                try:
+                    return self._fetch_price_with_timeout(
+                        session,
+                        asset,
+                        dt,
+                        price_getters,
+                        requested_quote,
+                        quote_asset_id,
+                        max_timeout_seconds=max_timeout_seconds,
                     )
-                log.warning(
-                    f"Price fetch failed for {asset.symbol} at {dt.date()}: {original_error}"
-                )
 
-                if not use_fallback:
-                    raise
+                except (PriceGetterAggregateError, FuturesTimeoutError, Exception) as e:
+                    original_error = str(e)
+                    if isinstance(e, FuturesTimeoutError):
+                        original_error = (
+                            f"Live price fetch timed out after {max_timeout_seconds}s"
+                        )
+                    log.warning(
+                        f"Price fetch failed for {asset.symbol} at {dt.date()}: {original_error}"
+                    )
+
+                    if not use_fallback:
+                        raise
 
             # Fallback: look for latest cached price before requested date
-            # Search window = max of staleness_window * 10 or 90 days (always search wider than staleness threshold)
-            fallback_search_days = max(staleness_window_days * 10, 90)
+            # Search window = max of staleness_window * 10 or 90 days (always search wider than staleness threshold).
+            # Manually priced assets have no other source, so any stored price is acceptable.
+            fallback_search_days = (
+                MANUAL_FALLBACK_SEARCH_DAYS
+                if stored_prices_only
+                else max(staleness_window_days * 10, 90)
+            )
             log.info(
                 f"Attempting fallback lookup for {asset.symbol}, "
                 f"looking back up to {fallback_search_days} days (staleness threshold: {staleness_window_days}d)"

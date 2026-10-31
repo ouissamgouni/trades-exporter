@@ -40,17 +40,25 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
                 onClick={(e) => { e.stopPropagation(); onClose(); }}
             />
 
-            {/* Panel */}
+            {/*
+             * Panel: mobile = bottom sheet (slides up, full width, max 90vh);
+             * sm+ = right-side panel with the configured width.
+             */}
             <div
-                className="fixed bottom-0 right-0 top-0 overflow-y-auto border-l border-slate-200 bg-white shadow-xl"
-                style={{ width, maxWidth: '90vw', zIndex }}
+                className={
+                    'fixed inset-x-0 bottom-0 top-auto flex max-h-[90vh] w-full max-w-full flex-col ' +
+                    'overflow-hidden border-t border-slate-200 bg-white shadow-xl animate-slide-up ' +
+                    'sm:inset-x-auto sm:right-0 sm:top-0 sm:max-h-none sm:w-[var(--sheet-w)] sm:max-w-[90vw] ' +
+                    'sm:border-l sm:border-t-0 sm:animate-none'
+                }
+                style={{ ['--sheet-w' as string]: width, zIndex }}
                 onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
             >
                 {/* Header */}
-                <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-slate-200 bg-slate-50 p-4">
-                    <div className="flex items-center gap-2">
+                <div className="sticky top-0 z-[1] flex flex-shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50 p-4">
+                    <div className="flex min-w-0 items-center gap-2">
                         {titleIcon}
-                        <span className="text-base font-semibold">{title}</span>
+                        <span className="truncate text-base font-semibold">{title}</span>
                     </div>
                     <Button variant="ghost" size="sm" onClick={onClose}>
                         <FiX size={20} />
@@ -58,7 +66,7 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
                 </div>
 
                 {/* Content */}
-                <div className="p-4">
+                <div className="flex-1 overflow-y-auto p-4">
                     {children}
                 </div>
             </div>

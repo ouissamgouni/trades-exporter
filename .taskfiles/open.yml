@@ -17,7 +17,7 @@ tasks:
 
   shared:dev:
     desc: Focus or open dev in the default Chrome profile
-    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/scenarios/dev/config.env"]
     cmds:
       - task: _open
         vars:
@@ -41,7 +41,7 @@ tasks:
   shared:staging:local:
     desc: Focus or open local staging in the default Chrome profile
     dotenv:
-      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/staging.env"]
+      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/staging.local.env"]
     cmds:
       - task: _open
         vars:
@@ -49,23 +49,9 @@ tasks:
           MODE: shared
           LABEL: staging-local
 
-  shared:staging:remote:
-    desc: Focus or open remote staging in the default Chrome profile
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/staging.remote.env",
-      ]
-    cmds:
-      - task: _open
-        vars:
-          URL: "${CLOUDFLARE_PAGES_URL:-https://develop.trades-exporter.pages.dev}"
-          MODE: shared
-          LABEL: staging-remote
-
   shared:prod:local:
     desc: Focus or open local prod in the default Chrome profile
-    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.env"]
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.local.env"]
     cmds:
       - task: _open
         vars:
@@ -73,20 +59,9 @@ tasks:
           MODE: shared
           LABEL: prod-local
 
-  shared:prod:remote:
-    desc: Focus or open remote prod in the default Chrome profile
-    dotenv:
-      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.remote.env"]
-    cmds:
-      - task: _open
-        vars:
-          URL: "${CLOUDFLARE_PAGES_URL:-https://trades-exporter.pages.dev}"
-          MODE: shared
-          LABEL: prod-remote
-
   isolated:dev:
     desc: Open isolated dev Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
-    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/scenarios/dev/config.env"]
     cmds:
       - task: _open
         vars:
@@ -114,7 +89,7 @@ tasks:
   isolated:staging:local:
     desc: Open isolated local staging Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
     dotenv:
-      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/staging.env"]
+      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/staging.local.env"]
     cmds:
       - task: _open
         vars:
@@ -124,44 +99,15 @@ tasks:
           COUNT: '{{.COUNT | default "1"}}'
           RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
 
-  isolated:staging:remote:
-    desc: Open isolated remote staging Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
-    dotenv:
-      [
-        "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/staging.remote.env",
-      ]
-    cmds:
-      - task: _open
-        vars:
-          URL: "${CLOUDFLARE_PAGES_URL:-https://develop.trades-exporter.pages.dev}"
-          MODE: isolated
-          LABEL: staging-remote
-          COUNT: '{{.COUNT | default "1"}}'
-          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
-
   isolated:prod:local:
     desc: Open isolated local prod Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
-    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.env"]
+    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.local.env"]
     cmds:
       - task: _open
         vars:
           URL: "http://localhost:${FRONTEND_PORT:-3000}"
           MODE: isolated
           LABEL: prod-local
-          COUNT: '{{.COUNT | default "1"}}'
-          RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
-
-  isolated:prod:remote:
-    desc: Open isolated remote prod Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
-    dotenv:
-      ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.remote.env"]
-    cmds:
-      - task: _open
-        vars:
-          URL: "${CLOUDFLARE_PAGES_URL:-https://trades-exporter.pages.dev}"
-          MODE: isolated
-          LABEL: prod-remote
           COUNT: '{{.COUNT | default "1"}}'
           RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
 

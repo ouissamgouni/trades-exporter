@@ -124,7 +124,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 }}
                 onFocus={() => setIsOpen(true)}
                 placeholder={placeholder}
-                className="bg-white"
+                className="h-6 bg-white px-1.5 text-[11px]"
             />
 
             {isOpen && (

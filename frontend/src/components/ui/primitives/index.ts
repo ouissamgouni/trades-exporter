@@ -14,3 +14,8 @@ export { Skeleton } from './Skeleton';
 export type { SkeletonProps } from './Skeleton';
 export { Progress } from './Progress';
 export type { ProgressProps, ProgressColorScheme, ProgressSize } from './Progress';
+export { FilterPill, FilterPillGroup } from './FilterPill';
+export type { FilterPillProps, FilterPillGroupProps, FilterPillColor } from './FilterPill';
+export { PageHeader, SectionHeader } from './SectionHeader';
+export { ResponsiveTable } from './ResponsiveTable';
+export type { ResponsiveTableProps } from './ResponsiveTable';

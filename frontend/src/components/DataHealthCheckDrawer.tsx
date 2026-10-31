@@ -157,15 +157,15 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                 onClick={onClose}
             />
 
-            {/* Panel */}
+            {/* Panel: bottom sheet on mobile, right-side panel on sm+ */}
             <div
-                className="fixed bottom-0 right-0 top-0 z-[100] max-w-[95vw] overflow-y-auto border-l border-gray-200 bg-white shadow-xl"
-                style={{ width: `${drawerWidth}px` }}
+                className="fixed inset-x-0 bottom-0 top-auto z-[100] max-h-[90vh] w-full max-w-full overflow-y-auto border-t border-gray-200 bg-white shadow-xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[var(--sheet-w)] sm:max-w-[95vw] sm:border-l sm:border-t-0"
+                style={{ ['--sheet-w' as string]: `${drawerWidth}px` }}
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Resize Handle */}
+                {/* Resize Handle (desktop only) */}
                 <div
-                    className={`absolute bottom-0 left-0 top-0 z-[1] w-[4px] cursor-col-resize transition-colors hover:bg-blue-200 ${isResizing ? 'bg-blue-400' : 'bg-transparent'}`}
+                    className={`absolute bottom-0 left-0 top-0 z-[1] hidden w-[4px] cursor-col-resize transition-colors hover:bg-blue-200 sm:block ${isResizing ? 'bg-blue-400' : 'bg-transparent'}`}
                     onMouseDown={handleResizeStart}
                 />
 

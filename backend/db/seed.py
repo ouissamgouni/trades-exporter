@@ -619,6 +619,92 @@ class DatabaseSeeder:
 
         return processed
 
+    def seed_price_snapshots_from_yaml(self, prices_path: Optional[Path] = None) -> int:
+        """
+        Materialize the deterministic mock prices from prices.yaml into the
+        ``price_snapshots`` table.
+
+        The mock price getter config seeded by ``seed_prices_from_yaml`` is
+        only consulted by live price lookups. Historical portfolio valuation
+        (portfolio timeline + best/worst breakdown) reads ``price_snapshots``
+        directly with last-observation-carried-forward. Without dense
+        snapshots the timeline freezes each asset at its last transaction
+        price, producing wrong valuations and a flat curve. This step inserts
+        one snapshot per dated waypoint so valuations track the seeded series.
+
+        Idempotent: uses ``ON CONFLICT DO NOTHING`` on
+        (asset_id, quote_asset_id, snapshot_time, source).
+
+        Args:
+            prices_path: Path to prices.yaml. Skips silently if not provided
+                         or if the file does not exist.
+
+        Returns:
+            Number of snapshot rows inserted.
+        """
+        if prices_path is None or not prices_path.exists():
+            return 0
+
+        with open(prices_path) as f:
+            config = yaml.safe_load(f) or {}
+
+        price_entries = config.get("prices", [])
+        if not price_entries:
+            return 0
+
+        rows: List[Dict[str, Any]] = []
+        for entry in price_entries:
+            symbol = entry.get("asset_symbol")
+            if not symbol:
+                continue
+
+            asset_id = self._resolve_asset_id(symbol)
+            if asset_id is None:
+                continue
+
+            quote_symbol = entry.get("quote_currency")
+            quote_asset_id = (
+                self._resolve_asset_id(quote_symbol) if quote_symbol else None
+            )
+
+            for price_entry in entry.get("entries", []):
+                at_key = str(price_entry.get("at", "")).strip()
+                price_val = price_entry.get("price")
+                if not at_key or at_key == "current" or price_val is None:
+                    continue
+                try:
+                    snapshot_time = datetime.fromisoformat(at_key)
+                except ValueError:
+                    continue
+                rows.append(
+                    {
+                        "asset_id": asset_id,
+                        "quote_asset_id": quote_asset_id,
+                        "price": Decimal(str(price_val)),
+                        "snapshot_time": snapshot_time,
+                        "source": "mock",
+                    }
+                )
+
+        if not rows:
+            return 0
+
+        stmt = text(
+            """
+            INSERT INTO price_snapshots
+                (asset_id, quote_asset_id, price, snapshot_time, source, created_at)
+            VALUES
+                (:asset_id, :quote_asset_id, :price, :snapshot_time, :source, NOW())
+            ON CONFLICT (asset_id, quote_asset_id, snapshot_time, source)
+            DO NOTHING
+            """
+        )
+        self.session.execute(stmt, rows)
+        self.session.commit()
+
+        log.info(f"✅ Materialized {len(rows)} price snapshots from {prices_path.name}")
+        return len(rows)
+
     # ------------------------------------------------------------------
     # Categories from YAML
     # ------------------------------------------------------------------
@@ -1258,6 +1344,7 @@ class DatabaseSeeder:
             "transactions": 0,
             "positions": 0,
             "prices": 0,
+            "price_snapshots": 0,
             "categories": 0,
         }
 
@@ -1282,6 +1369,11 @@ class DatabaseSeeder:
 
         # 2. Seed deterministic mock prices (if prices.yaml exists)
         results["prices"] = self.seed_prices_from_yaml(prices_path)
+
+        # 2b. Materialize those prices into price_snapshots so historical
+        #     valuation (timeline + breakdown) tracks the seeded series
+        #     instead of freezing at last-transaction prices.
+        results["price_snapshots"] = self.seed_price_snapshots_from_yaml(prices_path)
 
         # 3. Seed categories / dimensions from categories.yaml (after assets)
         results["categories"] = self.seed_categories_from_yaml(categories_path)
