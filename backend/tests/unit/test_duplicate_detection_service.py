@@ -323,8 +323,36 @@ def _make_mock_tx(**kwargs):
     return tx
 
 
+def _no_pairs():
+    result = MagicMock()
+    result.all.return_value = []
+    return result
+
+
 class TestDetectDuplicateGroups:
     """Test fuzzy duplicate group detection via SQL self-join + union-find."""
+
+    def test_detects_same_onchain_tx_from_two_providers(self, mock_session):
+        """Same tx hash/contract/direction from two sources groups even when symbols differ."""
+        dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
+        tx1 = _make_mock_tx(id=1, source="blockscout_polygon_normal_tx", source_asset_symbol="MATIC", date_time=dt)
+        tx2 = _make_mock_tx(id=2, source="ankr_polygon", source_asset_symbol="POL", date_time=dt)
+
+        onchain_pairs = MagicMock()
+        onchain_pairs.all.return_value = [(1, 2)]
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+        mock_session.exec.side_effect = [_no_pairs(), onchain_pairs, mock_txs]
+        mock_session.get.return_value = None
+
+        groups = detect_duplicate_groups(session=mock_session, account_id=1)
+
+        assert len(groups) == 1
+        assert {tx["id"] for tx in groups[0].transactions} == {1, 2}
+        onchain_sql = str(mock_session.exec.call_args_list[1].args[0])
+        assert "network_transaction_id" in onchain_sql
+        assert "token_contract_address" in onchain_sql
+        assert "t1.source != t2.source" in onchain_sql
 
     def test_detects_fuzzy_duplicates(self, mock_session):
         """Should detect transactions matched by fuzzy self-join pairs."""
@@ -340,7 +368,7 @@ class TestDetectDuplicateGroups:
         mock_txs = MagicMock()
         mock_txs.all.return_value = [tx1, tx2]
 
-        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.exec.side_effect = [mock_pairs, _no_pairs(), mock_txs]
         mock_session.get.return_value = None
 
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
@@ -373,7 +401,7 @@ class TestDetectDuplicateGroups:
         mock_txs = MagicMock()
         mock_txs.all.return_value = [tx1, tx2]
 
-        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.exec.side_effect = [mock_pairs, _no_pairs(), mock_txs]
         mock_session.get.return_value = None
 
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
@@ -401,7 +429,7 @@ class TestDetectDuplicateGroups:
         mock_txs = MagicMock()
         mock_txs.all.return_value = [tx1, tx2]
 
-        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.exec.side_effect = [mock_pairs, _no_pairs(), mock_txs]
         mock_session.get.return_value = None
 
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
@@ -432,7 +460,7 @@ class TestDetectDuplicateGroups:
         groups = detect_duplicate_groups(session=mock_session, account_id=42)
 
         assert len(groups) == 0
-        mock_session.exec.assert_called_once()
+        assert mock_session.exec.call_count == 2  # fuzzy + on-chain pair queries
 
     def test_excludes_same_run_different_source_id(self, mock_session):
         """Should exclude same-run transactions with different source_transaction_id."""
@@ -453,7 +481,7 @@ class TestDetectDuplicateGroups:
         mock_txs = MagicMock()
         mock_txs.all.return_value = [tx1, tx2]
 
-        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.exec.side_effect = [mock_pairs, _no_pairs(), mock_txs]
         mock_session.get.return_value = None
 
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
@@ -479,7 +507,7 @@ class TestDetectDuplicateGroups:
         mock_txs = MagicMock()
         mock_txs.all.return_value = [tx1, tx2]
 
-        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.exec.side_effect = [mock_pairs, _no_pairs(), mock_txs]
         mock_session.get.return_value = None
 
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
@@ -511,7 +539,7 @@ class TestDetectDuplicateGroups:
         mock_txs = MagicMock()
         mock_txs.all.return_value = [tx1, tx2]
 
-        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.exec.side_effect = [mock_pairs, _no_pairs(), mock_txs]
         mock_session.get.return_value = None
 
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
@@ -539,7 +567,7 @@ class TestDetectDuplicateSuspicions:
         mock_txs = MagicMock()
         mock_txs.all.return_value = [tx1, tx2]
 
-        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.exec.side_effect = [mock_pairs, _no_pairs(), mock_txs]
         mock_session.get.return_value = None
 
         suspicions = detect_duplicate_suspicions(session=mock_session, account_id=1)

@@ -26,7 +26,7 @@ from backend.core.spam_detection import (
     apply_spam_markers,
     has_suspicious_unicode,
 )
-from backend.db.models import NormalizedTransaction
+from backend.db.models import NormalizedTransaction, ensure_utc
 
 log = configure_logging("ankr")
 
@@ -185,7 +185,8 @@ class ConnectorAnkr(BaseConnector):
             "descOrder": False,
         }
         if self.since_datetime:
-            base_params["fromTimestamp"] = int(self.since_datetime.timestamp())
+            # +1s: the boundary tx is already stored, possibly by a previous provider.
+            base_params["fromTimestamp"] = int(ensure_utc(self.since_datetime).timestamp()) + 1
 
         txs = list(
             self._paginate(

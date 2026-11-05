@@ -1,16 +1,13 @@
 """
-SUI connector using SUI JSON-RPC API via Ankr (free tier with archival data).
+SUI connector using the Sui GraphQL RPC (JSON-RPC was sunset in 2026).
 Fetches transactions for a SUI wallet address and normalizes balance changes.
 
-Uses a two-step pattern:
-1. Collect transaction digests via suix_queryTransactionBlocks (FromAddress + ToAddress)
-2. Batch-fetch full details via sui_multiGetTransactionBlocks (with showBalanceChanges)
+Transactions are paged via `transactions(filter: {affectedAddress})` and
+converted to the legacy JSON-RPC transaction-block shape, so raw rows stored
+before the migration and new ones normalize identically.
 
 Multi-yield normalization: each balance change entry becomes a NormalizedTransaction,
 plus a dedicated fee transaction per on-chain transaction.
-
-⚠️ SUI JSON-RPC is deprecated — sunset target April 2026.
-   Migration to gRPC or GraphQL RPC will be needed.
 """
 
 import json
@@ -33,9 +30,97 @@ SUI_NATIVE_COIN_TYPE = "0x2::sui::SUI"
 SUI_DECIMALS = 9
 SUI_DIVISOR = Decimal(10 ** SUI_DECIMALS)
 
+SUI_GRAPHQL_URL = "https://graphql.mainnet.sui.io/graphql"
+
+TRANSACTIONS_QUERY = """
+query($address: SuiAddress!, $after: String) {
+  transactions(first: 50, after: $after, filter: { affectedAddress: $address }) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      digest
+      sender { address }
+      kind { __typename }
+      effects {
+        status
+        timestamp
+        checkpoint { sequenceNumber }
+        gasEffects { gasSummary { computationCost storageCost storageRebate nonRefundableStorageFee } }
+        balanceChanges(first: 50) {
+          pageInfo { hasNextPage }
+          nodes { owner { address } amount coinType { repr } }
+        }
+      }
+    }
+  }
+}
+"""
+
+COIN_METADATA_QUERY = """
+query($coinType: String!) { coinMetadata(coinType: $coinType) { symbol decimals } }
+"""
+
+BALANCES_QUERY = """
+query($address: SuiAddress!) {
+  address(address: $address) { balances(first: 50) { nodes { coinType { repr } totalBalance } } }
+}
+"""
+
+
+def normalize_coin_type(repr_: str) -> str:
+    """Shorten system-package addresses like JSON-RPC did (0x000…02::sui::SUI → 0x2::sui::SUI)."""
+    address, sep, rest = (repr_ or "").partition("::")
+    if not sep or not address.startswith("0x"):
+        return repr_
+    try:
+        value = int(address, 16)
+    except ValueError:
+        return repr_
+    if value < 0x10000:
+        return f"{hex(value)}::{rest}"
+    return f"0x{address[2:].rjust(64, '0')}::{rest}"
+
+
+def _iso_to_ms(timestamp: Optional[str]) -> Optional[str]:
+    if not timestamp:
+        return None
+    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    return str(round(dt.timestamp() * 1000))
+
+
+def graphql_tx_to_legacy(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a GraphQL transaction node into the legacy JSON-RPC transaction-block shape."""
+    effects = node.get("effects") or {}
+    gas = ((effects.get("gasEffects") or {}).get("gasSummary")) or {}
+    balance_changes = []
+    for bc in ((effects.get("balanceChanges") or {}).get("nodes")) or []:
+        owner_address = (bc.get("owner") or {}).get("address")
+        balance_changes.append(
+            {
+                "owner": {"AddressOwner": owner_address} if owner_address else {},
+                "coinType": normalize_coin_type((bc.get("coinType") or {}).get("repr", "")),
+                "amount": str(bc.get("amount", "0")),
+            }
+        )
+    return {
+        "digest": node.get("digest"),
+        "timestampMs": _iso_to_ms(effects.get("timestamp")),
+        "checkpoint": str(((effects.get("checkpoint") or {}).get("sequenceNumber")) or ""),
+        "transaction": {
+            "data": {
+                "sender": (node.get("sender") or {}).get("address", ""),
+                "transaction": {"kind": (node.get("kind") or {}).get("__typename", "")},
+            }
+        },
+        "effects": {
+            "status": {"status": str(effects.get("status", "")).lower()},
+            "gasUsed": {k: str(v) for k, v in gas.items() if v is not None},
+        },
+        "balanceChanges": balance_changes,
+    }
+
 
 class ConnectorSui(BaseConnector):
-    """SUI JSON-RPC connector for wallet transactions via Ankr."""
+    """SUI connector for wallet transactions via the Sui GraphQL RPC."""
 
     @property
     def connector_name(self) -> str:
@@ -88,38 +173,14 @@ class ConnectorSui(BaseConnector):
         self._coin_cache[SUI_NATIVE_COIN_TYPE] = ("SUI", SUI_DECIMALS)
 
         # Set default values
-        self.request_delay = 0.5
+        self.request_delay = 0.3
         self.max_retries = 5
-        self.digest_page_limit = 50  # Max per suix_queryTransactionBlocks page
-        self.detail_batch_size = 50  # Max per sui_multiGetTransactionBlocks call
 
-        # In test/renormalize mode, skip API-related configuration
         if self.test_mode or self.renormalize_mode:
-            if self.test_mode:
-                log.warning(
-                    "⚠️ SUI JSON-RPC is deprecated (sunset: April 2026). "
-                    "Plan migration to gRPC or GraphQL RPC."
-                )
             return
 
-        # Live mode: API configuration
-        # Support configurable RPC URL for different providers (Ankr, BlockPI, etc.)
-        ankr_api_key = os.getenv("ANKR_API_KEY")
-        custom_rpc = os.getenv("SUI_RPC_URL")
-
-        if custom_rpc:
-            self.base_url = custom_rpc
-        elif ankr_api_key:
-            self.base_url = f"https://rpc.ankr.com/sui/{ankr_api_key}"
-        else:
-            # Ankr public endpoint (free, rate-limited)
-            self.base_url = "https://rpc.ankr.com/sui"
-
-        log.info(f"Using SUI RPC endpoint: {self.base_url[:50]}...")
-        log.warning(
-            "⚠️ SUI JSON-RPC is deprecated (sunset: April 2026). "
-            "Plan migration to gRPC or GraphQL RPC."
-        )
+        self.base_url = os.getenv("SUI_GRAPHQL_URL") or SUI_GRAPHQL_URL
+        log.info(f"Using SUI GraphQL endpoint: {self.base_url}")
 
     def _get_default_test_file(self) -> str:
         """Get the default test fixture file path."""
@@ -133,169 +194,68 @@ class ConnectorSui(BaseConnector):
             "sui_transactions.json",
         )
 
-    def safe_request(self, method: str, params: list) -> Any:
-        """
-        Perform JSON-RPC request with retry, backoff, and rate limiting.
-
-        Args:
-            method: JSON-RPC method name (e.g., "suix_queryTransactionBlocks")
-            params: JSON-RPC params array
-
-        Returns:
-            The "result" field from the JSON-RPC response
-
-        Raises:
-            RuntimeError: If all retries fail
-        """
+    def graphql_request(self, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
+        """POST a GraphQL query with retry/backoff; returns the `data` object."""
         delay = self.request_delay
+        last_error = None
 
         for attempt in range(1, self.max_retries + 1):
             try:
                 time.sleep(delay)
-
-                payload = {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": method,
-                    "params": params,
-                }
-
                 response = requests.post(
                     self.base_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
+                    json={"query": query, "variables": variables},
                     timeout=30,
                 )
-
-                # Check HTTP status
-                if response.status_code == 429:
-                    log.warning(f"⚠️ Rate limited (attempt {attempt}): HTTP 429")
+                if response.status_code == 429 or response.status_code >= 500:
+                    last_error = f"HTTP {response.status_code}"
+                    log.warning(f"⚠️ SUI GraphQL {last_error} (attempt {attempt})")
                     delay *= 2
                     continue
-                elif response.status_code >= 400:
-                    error_text = response.text[:200]
-                    log.error(f"HTTP {response.status_code}: {error_text}")
-                    raise RuntimeError(f"HTTP {response.status_code}: {error_text}")
-
-                data = response.json()
-
-                # Check for JSON-RPC errors
-                if "error" in data:
-                    error = data["error"]
-                    error_msg = error.get("message", str(error))
-                    log.error(f"JSON-RPC error: {error_msg}")
-                    raise RuntimeError(f"JSON-RPC error: {error_msg}")
-
-                return data.get("result")
-
+                if response.status_code >= 400:
+                    raise RuntimeError(
+                        f"HTTP {response.status_code}: {response.text[:200]}"
+                    )
+                payload = response.json()
+                if payload.get("errors"):
+                    raise RuntimeError(f"GraphQL error: {payload['errors'][0].get('message')}")
+                return payload.get("data") or {}
             except requests.exceptions.RequestException as e:
+                last_error = str(e)
                 log.warning(f"⚠️ Network error (attempt {attempt}): {e}")
-                if attempt < self.max_retries:
-                    delay *= 2
-                    continue
-                raise RuntimeError(
-                    f"Network error after {self.max_retries} retries: {e}"
-                )
-            except RuntimeError:
-                if attempt < self.max_retries:
-                    delay *= 2
-                    continue
-                raise
-            except Exception as e:
-                log.error(f"⚠️ API error: {e}")
-                if attempt < self.max_retries:
-                    delay *= 2
-                    continue
-                raise RuntimeError(
-                    f"API error after {self.max_retries} retries: {e}"
-                )
+                delay *= 2
 
         raise RuntimeError(
-            f"Failed after {self.max_retries} retries - API request failed"
+            f"SUI GraphQL request failed after {self.max_retries} retries: {last_error}"
         )
 
-    def _collect_digests(self, filter_key: str) -> set:
-        """
-        Collect all transaction digests for a given address filter.
-
-        Args:
-            filter_key: Either "FromAddress" or "ToAddress"
-
-        Returns:
-            Set of transaction digest strings
-        """
-        digests = set()
-        cursor = None
-
+    def _fetch_transactions(self) -> list:
+        """Page through every transaction affecting the wallet."""
+        transactions = []
+        after = None
         while True:
-            params = [
-                {
-                    "filter": {filter_key: self.wallet_address},
-                    "options": {"showInput": False, "showEffects": False},
-                },
-                cursor,  # cursor (null for first page)
-                self.digest_page_limit,  # limit
-                False,  # descending order (False = ascending, oldest first)
-            ]
-
-            result = self.safe_request("suix_queryTransactionBlocks", params)
-
-            items = result.get("data", [])
-            for item in items:
-                digest = item.get("digest") if isinstance(item, dict) else item
-                if digest:
-                    digests.add(digest)
-
-            has_next = result.get("hasNextPage", False)
-            next_cursor = result.get("nextCursor")
-
-            if not has_next or not next_cursor:
-                break
-
-            cursor = next_cursor
-
-        return digests
-
-    def _batch_fetch_details(self, digests: list) -> list:
-        """
-        Batch-fetch full transaction details for a list of digests.
-
-        Args:
-            digests: List of transaction digest strings
-
-        Returns:
-            List of full transaction block dicts
-        """
-        all_txs = []
-
-        for i in range(0, len(digests), self.detail_batch_size):
-            batch = digests[i : i + self.detail_batch_size]
-
-            params = [
-                batch,
-                {
-                    "showInput": True,
-                    "showEffects": True,
-                    "showBalanceChanges": True,
-                },
-            ]
-
-            result = self.safe_request("sui_multiGetTransactionBlocks", params)
-
-            if isinstance(result, list):
-                all_txs.extend(result)
-            else:
-                log.warning(f"Unexpected result type from multiGet: {type(result)}")
-
-            done = min(i + self.detail_batch_size, len(digests))
-            self.update_progress(
-                operation="Fetching transaction details",
-                current=done,
-                total=len(digests),
-                log_message=f"Fetched details: {done}/{len(digests)} transactions",
+            data = self.graphql_request(
+                TRANSACTIONS_QUERY, {"address": self.wallet_address, "after": after}
             )
-
-        return all_txs
+            page = data.get("transactions") or {}
+            for node in page.get("nodes") or []:
+                if ((node.get("effects") or {}).get("balanceChanges") or {}).get(
+                    "pageInfo", {}
+                ).get("hasNextPage"):
+                    log.warning(
+                        f"Transaction {node.get('digest')} has >50 balance changes; extra changes ignored"
+                    )
+                transactions.append(graphql_tx_to_legacy(node))
+            self.update_progress(
+                operation="Fetching transactions",
+                current=len(transactions),
+                total=len(transactions),
+                log_message=f"Fetched {len(transactions)} transactions",
+            )
+            page_info = page.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                return transactions
+            after = page_info.get("endCursor")
 
     def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
         """Fetch and yield raw transactions with two-step digest + batch-fetch pattern."""
@@ -326,55 +286,13 @@ class ConnectorSui(BaseConnector):
                 log.info(f"🧪 [TEST MODE] Loaded {len(items)} test transactions")
                 return
 
-            # Live mode: Two-step fetch
             self.update_progress(
-                operation="Collecting transaction digests",
+                operation="Fetching transactions",
                 current=0,
                 total=1,
-                log_message=f"Collecting digests for {self.wallet_address[:10]}... on SUI",
+                log_message=f"Fetching transactions for {self.wallet_address[:10]}... on SUI",
             )
-
-            # Phase 1: Collect digests from both FromAddress and ToAddress queries
-            log.info("Phase 1: Collecting sent transaction digests (FromAddress)...")
-            sent_digests = self._collect_digests("FromAddress")
-            log.info(f"  Found {len(sent_digests)} sent digests")
-
-            log.info("Phase 1: Collecting received transaction digests (ToAddress)...")
-            received_digests = self._collect_digests("ToAddress")
-            log.info(f"  Found {len(received_digests)} received digests")
-
-            # Merge and deduplicate
-            all_digests = sent_digests | received_digests
-            log.info(
-                f"  Total unique digests: {len(all_digests)} "
-                f"(sent={len(sent_digests)}, received={len(received_digests)}, "
-                f"overlap={len(sent_digests & received_digests)})"
-            )
-
-            if not all_digests:
-                log.info("No transactions found for this wallet")
-                self.update_progress(
-                    operation="Completed",
-                    current=1,
-                    total=1,
-                    log_message="✅ No transactions found on SUI",
-                )
-                return
-
-            # Phase 2: Batch-fetch full transaction details
-            digest_list = sorted(all_digests)  # Sort for deterministic ordering
-            log.info(
-                f"Phase 2: Fetching full details for {len(digest_list)} transactions..."
-            )
-
-            self.update_progress(
-                operation="Fetching transaction details",
-                current=0,
-                total=len(digest_list),
-                log_message=f"Fetching details for {len(digest_list)} transactions",
-            )
-
-            transactions = self._batch_fetch_details(digest_list)
+            transactions = self._fetch_transactions()
 
             # Sort by timestampMs for chronological order
             transactions.sort(key=lambda tx: int(tx.get("timestampMs", "0")))
@@ -405,7 +323,7 @@ class ConnectorSui(BaseConnector):
         """
         Resolve coin type to (symbol, decimals) with caching.
 
-        Uses suix_getCoinMetadata JSON-RPC call for non-SUI tokens.
+        Uses the GraphQL coinMetadata query for non-SUI tokens.
         Falls back to extracting symbol from coin type string.
 
         Args:
@@ -426,7 +344,9 @@ class ConnectorSui(BaseConnector):
 
         # Live mode: query RPC
         try:
-            result = self.safe_request("suix_getCoinMetadata", [coin_type])
+            result = self.graphql_request(
+                COIN_METADATA_QUERY, {"coinType": coin_type}
+            ).get("coinMetadata")
 
             if result:
                 symbol = result.get("symbol", None)
@@ -477,7 +397,7 @@ class ConnectorSui(BaseConnector):
         NormalizedTransaction, plus a dedicated fee transaction.
 
         Args:
-            tx: Raw transaction block from sui_multiGetTransactionBlocks
+            tx: Raw transaction block (legacy JSON-RPC shape, see graphql_tx_to_legacy)
 
         Yields:
             NormalizedTransaction: One or more standardized transaction objects
@@ -702,29 +622,21 @@ class ConnectorSui(BaseConnector):
 
         entries = []
         try:
-            data = self.safe_request("suix_getAllBalances", [self.wallet_address])
-            if isinstance(data, list):
-                for item in data:
-                    coin_type = item.get("coinType", "")
-                    balance_str = item.get("totalBalance", "0")
-                    if int(balance_str) > 0:
-                        # SUI native uses 9 decimals, other tokens vary
-                        if "sui::SUI" in coin_type:
-                            symbol = "SUI"
-                            decimals = 9
-                        else:
-                            # Extract symbol from coin type (e.g. 0x...::usdc::USDC)
-                            parts = coin_type.split("::")
-                            symbol = parts[-1] if parts else "UNKNOWN"
-                            decimals = 9  # default
-                        total = Decimal(balance_str) / Decimal(10 ** decimals)
-                        entries.append(BalanceEntry(
-                            asset_symbol=symbol,
-                            total=total,
-                            available=total,
-                            chain="sui",
-                            raw=item,
-                        ))
+            data = self.graphql_request(BALANCES_QUERY, {"address": self.wallet_address})
+            nodes = (((data.get("address") or {}).get("balances")) or {}).get("nodes") or []
+            for item in nodes:
+                coin_type = normalize_coin_type((item.get("coinType") or {}).get("repr", ""))
+                balance_str = str(item.get("totalBalance") or "0")
+                if int(balance_str) > 0:
+                    symbol, decimals = self._resolve_coin_metadata(coin_type)
+                    total = Decimal(balance_str) / Decimal(10**decimals)
+                    entries.append(BalanceEntry(
+                        asset_symbol=symbol,
+                        total=total,
+                        available=total,
+                        chain="sui",
+                        raw=item,
+                    ))
         except Exception as e:
             log.warning(f"Failed to fetch SUI balance: {e}")
         return entries

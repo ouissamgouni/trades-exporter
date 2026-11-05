@@ -1,7 +1,8 @@
 """
 Polymarket connector: Fetch prediction market trades and redemptions.
-Uses CLOB API (https://clob.polymarket.com) for trades (authenticated)
-and Gamma API (https://gamma-api.polymarket.com) for market resolution (public).
+Uses the public Data API v2 (https://data-api.polymarket.com/v2) for trades and
+redemptions, and the public CLOB /markets endpoint for market resolution.
+No API key or private key is required — only the proxy wallet address.
 
 Stock model: outcome shares are treated as tradeable assets (like stocks).
 BUY = inflow of shares (creates cost lot), SELL/REDEEM = outflow (disposes cost lot).
@@ -10,25 +11,41 @@ Asset symbol format: PM:{slug}-{outcome} (e.g. PM:rain-friday-Yes).
 
 import json
 import os
+import re
 import time
 import requests
 from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Dict, Any, Generator, List, Optional
-from urllib.parse import urlencode
 
 from backend.connectors.base.base_connector import BaseConnector, BalanceEntry
-from backend.connectors.onchain.clob_hmac import build_clob_headers
 from backend.config.loader import configure_logging, load_settings
 from backend.core.network_normalizer import normalize_network
-from backend.db.models import NormalizedTransaction, ensure_utc
+from backend.db.models import NormalizedTransaction
 
 log = configure_logging("polymarket")
 
 CLOB_BASE_URL = "https://clob.polymarket.com"
 GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
-END_CURSOR = "LTE="
-PAGE_SIZE = 100
+DATA_API_BASE_URL = "https://data-api.polymarket.com/v2"
+PAGE_SIZE = 500
+GAMMA_BATCH = 20
+
+
+def _parse_closed_time(value: Any) -> Optional[int]:
+    """Gamma closedTime ("2025-11-08 00:51:23+00" or ISO) → unix seconds."""
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    if re.search(r"[+-]\d{2}$", text):
+        text += ":00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 
 class ConnectorPolymarket(BaseConnector):
@@ -79,22 +96,6 @@ class ConnectorPolymarket(BaseConnector):
         self.request_delay = web3_config.get("request_delay", 1.0)
         self.max_retries = web3_config.get("max_retries", 7)
 
-        # CLOB API credentials (from connector config or env vars)
-        self.clob_api_key = (config or {}).get("clob_api_key") or os.environ.get(
-            "POLYMARKET_CLOB_API_KEY", ""
-        )
-        self.clob_api_secret = (config or {}).get("clob_api_secret") or os.environ.get(
-            "POLYMARKET_CLOB_SECRET", ""
-        )
-        self.clob_passphrase = (config or {}).get("clob_passphrase") or os.environ.get(
-            "POLYMARKET_CLOB_PASSPHRASE", ""
-        )
-        # Signer address (Magic Link EOA) — used for POLY_ADDRESS auth header.
-        # Different from wallet_address (proxy wallet) used for maker_address queries.
-        self.signer_address = (config or {}).get("signer_address") or os.environ.get(
-            "POLYMARKET_SIGNER_ADDRESS", ""
-        )
-
         # Gamma market cache: conditionId → market data (built during sync)
         self._gamma_cache: Dict[str, Dict] = {}
         # Token ID → (slug, outcome) mapping (built from Gamma data)
@@ -104,66 +105,39 @@ class ConnectorPolymarket(BaseConnector):
     # HTTP helpers
     # ------------------------------------------------------------------
 
-    def _clob_request(self, path: str, params: Dict = None) -> Any:
-        """
-        Perform authenticated CLOB API request with retry and backoff.
-
-        Args:
-            path: API path (e.g. "/data/trades")
-            params: Optional query parameters
-
-        Returns:
-            JSON response data
-        """
+    def _data_api_request(self, path: str, params: Dict) -> Any:
+        """Public Data API v2 GET with retry and backoff (honours Retry-After on 429)."""
         delay = self.request_delay
-        query = f"?{urlencode(params)}" if params else ""
+        url = f"{DATA_API_BASE_URL}{path}"
 
         for attempt in range(1, self.max_retries + 1):
             try:
                 time.sleep(delay)
-                # Sign only the bare path (no query params) — matches official py-clob-client
-                headers = build_clob_headers(
-                    api_key=self.clob_api_key,
-                    api_secret=self.clob_api_secret,
-                    passphrase=self.clob_passphrase,
-                    address=self.signer_address,
-                    method="GET",
-                    path=path,
-                )
-                url = f"{CLOB_BASE_URL}{path}{query}"
-                response = requests.get(url, headers=headers, timeout=15)
+                response = requests.get(url, params=params, timeout=30)
 
                 if response.status_code == 429:
-                    log.warning(f"⚠️ CLOB rate limited (attempt {attempt}): HTTP 429")
-                    delay *= 2
+                    retry_after = response.headers.get("Retry-After")
+                    delay = float(retry_after) if retry_after else delay * 2
+                    log.warning(f"⚠️ Data API rate limited (attempt {attempt})")
                     continue
-                elif response.status_code in (401, 403):
-                    # Auth errors are not retryable — fail immediately
-                    raise RuntimeError(
-                        f"CLOB auth failed (HTTP {response.status_code}): {response.text[:200]}"
-                    )
-                elif response.status_code >= 400:
+                if response.status_code >= 500:
                     log.error(
-                        f"⚠️ CLOB HTTP {response.status_code} (attempt {attempt}): {response.text[:200]}"
+                        f"⚠️ Data API HTTP {response.status_code} (attempt {attempt}): {response.text[:200]}"
                     )
                     delay *= 2
                     continue
-
+                if response.status_code >= 400:
+                    raise RuntimeError(
+                        f"Data API HTTP {response.status_code}: {response.text[:200]}"
+                    )
                 return response.json()
 
             except requests.exceptions.RequestException as e:
-                log.error(f"⚠️ CLOB network error (attempt {attempt}): {e}")
+                log.error(f"⚠️ Data API network error (attempt {attempt}): {e}")
                 delay *= 2
-                continue
-            except RuntimeError:
-                raise  # Don't swallow auth / non-retryable errors
-            except Exception as e:
-                log.error(f"⚠️ CLOB API error (attempt {attempt}): {e}")
-                delay *= 2
-                continue
 
         raise RuntimeError(
-            f"Failed after {self.max_retries} retries - CLOB API request failed"
+            f"Failed after {self.max_retries} retries - Data API request failed"
         )
 
     def _gamma_request(self, path: str, params: Dict = None) -> Any:
@@ -244,7 +218,7 @@ class ConnectorPolymarket(BaseConnector):
         In test mode, loads from fixture file.
 
         Flow (live mode):
-        1. Fetch CLOB /data/trades (cursor-paginated, authenticated)
+        1. Fetch Data API v2 /activity (TRADE + REDEEM, cursor-paginated, public)
         2. Collect unique conditionIds from trades
         3. Query Gamma /markets for resolution data and slug/outcome mapping
         4. Enrich raw items with slug/outcome from Gamma data
@@ -276,10 +250,10 @@ class ConnectorPolymarket(BaseConnector):
                 ts = item.get("timestamp")
                 if activity_type == "TRADE" and outcome and condition_id:
                     self._condition_outcome_map[condition_id] = outcome
-                elif activity_type == "REDEEM" and condition_id:
+                elif activity_type == "REDEEM" and condition_id and float(item.get("usdcSize") or 0) > 0:
                     self._redeemed_conditions.add(condition_id)
-                # Track latest timestamp per conditionId (for synthetic close timing)
-                if condition_id and ts and activity_type in ("TRADE", "REDEEM"):
+                # Track latest trade timestamp per conditionId (for synthetic close timing)
+                if condition_id and ts and activity_type == "TRADE":
                     prev = self._condition_latest_timestamp.get(condition_id, 0)
                     if ts > prev:
                         self._condition_latest_timestamp[condition_id] = ts
@@ -300,40 +274,18 @@ class ConnectorPolymarket(BaseConnector):
                 yield item
             return
 
-        # ------ Live mode: fetch from CLOB + Gamma ------
+        # ------ Live mode: fetch from Data API + CLOB markets ------
         try:
-            # Validate CLOB credentials before making any requests
-            if (
-                not self.clob_api_key
-                or not self.clob_api_secret
-                or not self.clob_passphrase
-                or not self.signer_address
-            ):
-                missing = [
-                    name
-                    for name, val in [
-                        ("clob_api_key", self.clob_api_key),
-                        ("clob_api_secret", self.clob_api_secret),
-                        ("clob_passphrase", self.clob_passphrase),
-                        ("signer_address", self.signer_address),
-                    ]
-                    if not val
-                ]
-                raise RuntimeError(
-                    f"Missing CLOB API credentials: {', '.join(missing)}. "
-                    f"Run: python scripts/setup_polymarket_creds.py"
-                )
-
             self.update_progress(
                 operation="Fetching Polymarket trades",
                 current=0,
                 total=1,
-                log_message=f"Fetching CLOB trades for {self.wallet_address[:10]}...",
+                log_message=f"Fetching Polymarket activity for {self.wallet_address[:10]}...",
             )
 
-            # Phase A: Fetch all trades from CLOB API (cursor pagination)
-            raw_trades = self._fetch_clob_trades()
-            log.info(f"   Fetched {len(raw_trades)} trades from CLOB API")
+            # Phase A: Fetch all trades + redemptions from the Data API
+            raw_trades = self._fetch_activity()
+            log.info(f"   Fetched {len(raw_trades)} activities from Data API")
 
             # Phase B: Collect unique conditionIds and fetch Gamma market data
             condition_ids = set()
@@ -366,7 +318,7 @@ class ConnectorPolymarket(BaseConnector):
 
                 if activity_type == "TRADE" and outcome and condition_id:
                     self._condition_outcome_map[condition_id] = outcome
-                elif activity_type == "REDEEM" and condition_id:
+                elif activity_type == "REDEEM" and condition_id and float(item.get("usdcSize") or 0) > 0:
                     self._redeemed_conditions.add(condition_id)
 
                 if condition_id and activity_type == "TRADE":
@@ -379,7 +331,7 @@ class ConnectorPolymarket(BaseConnector):
                             self._condition_net_shares.get(condition_id, 0) - size
                         )
 
-                if condition_id and ts and activity_type in ("TRADE", "REDEEM"):
+                if condition_id and ts and activity_type == "TRADE":
                     prev = self._condition_latest_timestamp.get(condition_id, 0)
                     if ts > prev:
                         self._condition_latest_timestamp[condition_id] = ts
@@ -429,90 +381,66 @@ class ConnectorPolymarket(BaseConnector):
             raise
 
     # ------------------------------------------------------------------
-    # CLOB trade fetching
+    # Data API activity fetching
     # ------------------------------------------------------------------
 
-    def _fetch_clob_trades(self) -> List[Dict[str, Any]]:
+    def _fetch_activity(self) -> List[Dict[str, Any]]:
         """
-        Fetch all trades from CLOB /data/trades using cursor pagination.
+        Fetch the wallet's TRADE and REDEEM history from Data API v2 /activity.
 
-        Returns list of raw trade items in the connector's standard format.
+        Always fetches the full history (ignores since_datetime): synthetic closes
+        need every trade of a condition to compute net shares and the held outcome.
+        Rows are upserted by source_transaction_id, so re-fetching is idempotent.
         """
-        trades = []
-        next_cursor = "MA=="  # Base64("0") — start cursor
-        page = 0
+        items: List[Dict[str, Any]] = []
+        skipped: Dict[str, int] = {}
+        cursor = None
 
-        while next_cursor != END_CURSOR:
+        while True:
             if self.is_abort_requested():
-                log.info("🛑 Abort requested, stopping CLOB fetch")
+                log.info("🛑 Abort requested, stopping Data API fetch")
                 break
 
-            page += 1
-            params = {"maker_address": self.wallet_address, "cursor": next_cursor}
+            params: Dict[str, Any] = {"user": self.wallet_address, "limit": PAGE_SIZE}
+            if cursor:
+                params["cursor"] = cursor
+            result = self._data_api_request("/activity", params) or {}
 
-            # Apply since_datetime as 'after' param (Unix timestamp in seconds)
-            if self.since_datetime:
-                after_ts = int(ensure_utc(self.since_datetime).timestamp())
-                params["after"] = after_ts
+            for activity in result.get("data") or []:
+                activity_type = (activity.get("type") or "").upper()
+                if activity_type in ("TRADE", "REDEEM"):
+                    items.append(self._activity_to_raw(activity))
+                else:
+                    skipped[activity_type] = skipped.get(activity_type, 0) + 1
 
-            result = self._clob_request("/data/trades", params)
-
-            data = result.get("data", [])
-            next_cursor = result.get("next_cursor", END_CURSOR)
-
-            for clob_trade in data:
-                raw_item = self._clob_trade_to_raw(clob_trade)
-                trades.append(raw_item)
-
-            log.info(f"   CLOB page {page}: {len(data)} trades")
-
-            if not data:
+            cursor = (result.get("pagination") or {}).get("next_cursor")
+            if not cursor:
                 break
 
-        return trades
+        if skipped:
+            log.warning(f"⚠️ Unsupported Polymarket activity types skipped: {skipped}")
+        items.sort(key=lambda item: item.get("timestamp") or 0)
+        return items
 
-    def _clob_trade_to_raw(self, clob_trade: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Convert a CLOB API trade to the connector's raw item format.
-
-        CLOB trade fields → raw item mapping:
-            market       → conditionId
-            side         → side (BUY/SELL)
-            size         → size (shares)
-            price        → price (per share)
-            size*price   → usdcSize
-            match_time   → timestamp (Unix epoch string)
-            id           → transactionHash
-            asset_id     → asset (token ID, used for Gamma slug lookup)
-        """
-        size = float(clob_trade.get("size", 0))
-        price = float(clob_trade.get("price", 0))
-
-        # Parse match_time to Unix timestamp
-        # CLOB API returns match_time as a Unix timestamp string (e.g. "1762995934")
-        match_time = clob_trade.get("match_time", "")
-        timestamp = None
-        if match_time:
-            try:
-                timestamp = int(match_time)
-            except (ValueError, TypeError):
-                pass
-
+    @staticmethod
+    def _activity_to_raw(activity: Dict[str, Any]) -> Dict[str, Any]:
+        """Map a Data API v2 activity row to the connector's raw item format (v1 field names)."""
+        timestamp = activity.get("timestamp")
         return {
-            "type": "TRADE",
-            "side": clob_trade.get("side", "").upper(),
-            "size": size,
-            "price": price,
-            "usdcSize": size * price,
-            "transactionHash": clob_trade.get("id", ""),
-            "conditionId": clob_trade.get("market", ""),
-            "timestamp": timestamp,
-            "title": "",  # Enriched later from Gamma
-            "outcome": "",  # Enriched later from Gamma
-            "outcomeIndex": None,
-            "slug": "",  # Enriched later from Gamma
-            "eventSlug": "",  # Enriched later from Gamma
-            "asset": clob_trade.get("asset_id", ""),  # Token ID
+            "type": (activity.get("type") or "").upper(),
+            "side": (activity.get("side") or "").upper(),
+            "size": float(activity.get("size") or 0),
+            "price": float(activity.get("price") or 0),
+            "usdcSize": float(activity.get("usdc_size") or 0),
+            "transactionHash": activity.get("transaction_hash") or "",
+            "conditionId": activity.get("condition_id") or "",
+            "timestamp": int(timestamp) if timestamp else None,
+            "title": activity.get("title") or "",
+            "outcome": activity.get("outcome") or "",
+            "outcomeIndex": activity.get("outcome_index"),
+            "slug": activity.get("slug") or "",
+            "eventSlug": activity.get("event_slug") or "",
+            "asset": str(activity.get("token_id") or ""),
         }
 
     # ------------------------------------------------------------------
@@ -571,6 +499,27 @@ class ConnectorPolymarket(BaseConnector):
                     self._token_outcome_map[tid] = (slug, outcome)
 
             time.sleep(0.1)  # rate-limit courtesy
+
+        self._fetch_resolution_times(
+            [cid for cid, market in self._gamma_cache.items() if market.get("closed")]
+        )
+
+    def _fetch_resolution_times(self, condition_ids: List[str]) -> None:
+        """Add Gamma closedTime (actual resolution time) to closed markets; CLOB lacks it."""
+        for start in range(0, len(condition_ids), GAMMA_BATCH):
+            batch = condition_ids[start : start + GAMMA_BATCH]
+            try:
+                markets = self._gamma_request(
+                    "/markets",
+                    {"condition_ids": batch, "closed": "true", "limit": len(batch)},
+                )
+            except RuntimeError as e:
+                log.warning(f"Gamma resolution time fetch failed: {e}")
+                continue
+            for market in markets if isinstance(markets, list) else []:
+                cid = market.get("conditionId")
+                if cid in self._gamma_cache and market.get("closedTime"):
+                    self._gamma_cache[cid]["closedTime"] = market["closedTime"]
 
     def _build_token_map(self, market: Dict) -> None:
         """
@@ -632,19 +581,20 @@ class ConnectorPolymarket(BaseConnector):
         self, redeem_item: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """
-        Generate a SYNTHETIC_CLOSE resolution item from a REDEEM activity.
+        Generate a SYNTHETIC_CLOSE from a paid REDEEM (winning shares → USDC).
 
-        When a user redeems winning shares, the REDEEM records the cash settlement.
-        We generate a resolution synthetic BEFORE the REDEEM so the PnL engine
-        can properly dispose the cost lot (REDEEM becomes a memo with no PnL).
+        The close is dated 1s before the REDEEM: that is when the shares are
+        exchanged for USDC, so realized P&L and the wallet's USDC balance agree.
+        The REDEEM itself stays a memo with no PnL.
 
-        Returns None if we can't determine the resolution price.
+        Returns None for losing (0 USDC) redeems — those positions are closed
+        at market resolution by _generate_synthetic_closes().
         """
         condition_id = redeem_item.get("conditionId", "")
         usdc_size = Decimal(str(redeem_item.get("usdcSize", 0)))
         shares = Decimal(str(redeem_item.get("size", 0)))
 
-        if not condition_id or shares <= 0:
+        if not condition_id or shares <= 0 or usdc_size <= 0:
             return None
 
         # Resolution price: usdcSize / shares (typically 1.0 for winners)
@@ -653,18 +603,14 @@ class ConnectorPolymarket(BaseConnector):
         # Resolve outcome from condition map (REDEEM has outcome="" in API)
         outcome = self._condition_outcome_map.get(condition_id, "")
 
-        # Timestamp: latest activity + 1 (before the REDEEM timestamp)
+        redeem_ts = redeem_item.get("timestamp")
         latest_ts = self._condition_latest_timestamp.get(condition_id)
-        if latest_ts:
+        if redeem_ts:
+            timestamp = redeem_ts - 1
+        elif latest_ts:
             timestamp = latest_ts + 1
         else:
-            # Fallback: use REDEEM timestamp - 1 (ensure synthetic is before REDEEM)
-            redeem_ts = redeem_item.get("timestamp")
-            timestamp = (
-                (redeem_ts - 1)
-                if redeem_ts
-                else int(datetime.now(timezone.utc).timestamp())
-            )
+            timestamp = int(datetime.now(timezone.utc).timestamp())
 
         return {
             "type": "SYNTHETIC_CLOSE",
@@ -686,13 +632,11 @@ class ConnectorPolymarket(BaseConnector):
 
     def _generate_synthetic_closes(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Generate synthetic closes from Gamma resolution data.
+        Close losing positions at $0 on the market's resolution time (Gamma closedTime).
 
-        For each closed market in _gamma_cache:
-        - Determine winner from outcomePrices (e.g. ["1","0"] → index 0 won)
-        - Map user's token_ids to outcome index → winner/loser
-        - Generate SYNTHETIC_CLOSE after the latest activity timestamp
-        Only generates synthetics for conditionIds NOT already covered by a REDEEM.
+        Winning (or partially paid) outcomes are not closed here: they stay open
+        until redeemed, and the paid REDEEM closes them (_synthetic_from_redeem).
+        This keeps each close date fixed once written.
         """
         for condition_id, market in self._gamma_cache.items():
             if not market.get("closed", False):
@@ -724,13 +668,6 @@ class ConnectorPolymarket(BaseConnector):
             if not outcome_prices or not outcomes:
                 continue
 
-            # Find winning outcome index (price == "1" or 1)
-            winning_idx = None
-            for i, p in enumerate(outcome_prices):
-                if str(p) == "1":
-                    winning_idx = i
-                    break
-
             # Determine the user's outcome for this condition
             user_outcome = self._condition_outcome_map.get(condition_id, "")
             if not user_outcome:
@@ -742,27 +679,29 @@ class ConnectorPolymarket(BaseConnector):
             except ValueError:
                 continue
 
-            is_winner = (user_idx == winning_idx) if winning_idx is not None else False
+            try:
+                user_price = float(outcome_prices[user_idx])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if user_price > 0:
+                continue  # paying outcome: stays open until its REDEEM
 
-            latest_ts = self._condition_latest_timestamp.get(condition_id)
-            if latest_ts:
-                timestamp = latest_ts + 1
-            else:
-                closed_time = market.get("closedTime", "")
-                timestamp = None
-                if closed_time:
-                    try:
-                        dt = datetime.fromisoformat(closed_time.replace("Z", "+00:00"))
-                        timestamp = int(dt.timestamp())
-                    except (ValueError, TypeError):
-                        pass
-                if timestamp is None:
-                    timestamp = int(datetime.now(timezone.utc).timestamp())
+            timestamp = _parse_closed_time(market.get("closedTime"))
+            if timestamp is None:
+                latest_ts = self._condition_latest_timestamp.get(condition_id)
+                timestamp = (
+                    latest_ts + 1
+                    if latest_ts
+                    else int(datetime.now(timezone.utc).timestamp())
+                )
+                log.warning(
+                    f"No resolution time for {condition_id[:16]}..., closing after last trade"
+                )
 
             slug = market.get("slug", "")
             title = market.get("question", "") or market.get("title", "")
-            close_price = 1.0 if is_winner else 0
-            # Use tracked net shares from CLOB trades
+            close_price = 0
+            # Use tracked net shares from Data API trades
             close_size = max(0, self._condition_net_shares.get(condition_id, 0))
 
             yield {
@@ -938,9 +877,7 @@ class ConnectorPolymarket(BaseConnector):
 
     def get_balance(self) -> List[BalanceEntry]:
         """
-        Balance not available via CLOB/Gamma APIs.
-
-        The old data-api /positions endpoint is no longer used.
-        Balance can be computed from on-chain data or the PnL engine's lot state.
+        Position balances are not reported here; USDC cash comes from the
+        Polygon child, and open positions from the PnL engine's lot state.
         """
         return []

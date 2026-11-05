@@ -20,6 +20,20 @@ from backend.db.models import NormalizedTransaction
 log = configure_logging("database_connector_hub")
 
 
+def _floor_at_history_cutoff(since, history_cutoff):
+    """A full or earlier sync must not re-fetch history owned by a previous provider."""
+    if not history_cutoff:
+        return since
+    from datetime import datetime
+
+    from backend.db.models import ensure_utc
+
+    cutoff = ensure_utc(datetime.fromisoformat(str(history_cutoff)))
+    if since is None or ensure_utc(since) < cutoff:
+        return cutoff
+    return since
+
+
 class DatabaseConnectorHub(BaseHubConnector):
     """
     DatabaseConnectorHub loads connectors from the database.
@@ -161,7 +175,9 @@ class DatabaseConnectorHub(BaseHubConnector):
                 
                 # Add since_datetime if provided for this connector
                 if connector_id in self._connector_since_map:
-                    since_dt = self._connector_since_map[connector_id]
+                    since_dt = _floor_at_history_cutoff(
+                        self._connector_since_map[connector_id], config.get("history_cutoff")
+                    )
                     if since_dt:
                         config["since_datetime"] = since_dt
                         log.info(f"📅 Connector {connector_key} will sync since: {since_dt}")

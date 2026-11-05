@@ -4,6 +4,27 @@ import { Badge, Button, Input, Textarea } from './ui/primitives';
 import { Account, AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
 import { ColorPaletteField } from './ColorPaletteField';
 import { getNextAvailableEntityColor } from '../hooks/useEntityColors';
+import {
+    canonicalForValue,
+    chainOptions,
+    chainValueFor,
+    detectChainFromAddress,
+    evmNetworks,
+    filterTypesByChain,
+    formatTypeOption,
+    groupTypes,
+    isDegradedOn,
+    isRecommended,
+    listNetworks,
+    switchCandidates,
+} from '../utils/connectorTypes';
+
+const chipClass = (type: ConnectorTypeInfo, canonical: string, active: string | null): string => {
+    if (canonical === active) return 'border-blue-400 bg-blue-50 text-blue-700';
+    if (type.degraded_chains?.length && isDegradedOn(type, canonical)) return 'border-amber-300 bg-amber-50 text-amber-700';
+    if (isRecommended(type, canonical)) return 'border-green-300 bg-green-50 text-green-700';
+    return 'border-slate-200 bg-white text-slate-600';
+};
 
 interface ConnectorFormDialogProps {
     isOpen: boolean;
@@ -48,6 +69,12 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     } | null>(null);
     const [uploadingFixture, setUploadingFixture] = useState(false);
 
+    // Network filter (canonical chain, '' = all) for wallet accounts
+    const [networkFilter, setNetworkFilter] = useState('');
+    const [switchOpen, setSwitchOpen] = useState(false);
+    const [switchTarget, setSwitchTarget] = useState('');
+    const [switching, setSwitching] = useState(false);
+
     // Track previous isOpen state to detect when dialog opens
     const prevIsOpenRef = React.useRef(isOpen);
 
@@ -57,6 +84,17 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         : connectorTypes.filter(t => !existingConnectorTypes.includes(t.type));
 
     const selectedTypeInfo = connectorTypes.find(t => t.type === formData.connector_type);
+
+    const isWalletAccount = account.account_type === 'wallet';
+    const addressFamily = isWalletAccount ? detectChainFromAddress(account.address_or_identifier) : null;
+    const networkOptions = listNetworks(
+        availableTypes.filter(t => t.category === 'onchain'),
+        addressFamily === 'evm' ? evmNetworks(connectorTypes) : null,
+    );
+    const visibleTypes = filterTypesByChain(availableTypes, networkFilter || null);
+    const swapCandidates = connector && selectedTypeInfo
+        ? switchCandidates(connectorTypes, selectedTypeInfo, connector.config?.chain, existingConnectorTypes)
+        : [];
 
     useEffect(() => {
         // Only reset form when dialog opens (not on every render)
@@ -90,17 +128,22 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             }
         } else {
             // Reset form for creating new connector
-            const firstAvailable = connectorTypes.find(t => !existingConnectorTypes.includes(t.type));
-
-            // Auto-detect chain from account address for wallet accounts
-            const isWalletAccount = account.account_type === 'wallet';
-            const accountAddress = account.address_or_identifier;
-            const detectedChain = isWalletAccount ? detectChainFromAddress(accountAddress) : null;
+            const remaining = connectorTypes.filter(t => !existingConnectorTypes.includes(t.type));
+            // Unambiguous address formats (XRP, Solana) pre-select their network
+            const detected = account.account_type === 'wallet'
+                ? detectChainFromAddress(account.address_or_identifier)
+                : null;
+            const initialNetwork = detected && detected !== 'evm' && remaining.some(t => chainValueFor(t, detected))
+                ? detected
+                : '';
+            const firstAvailable = initialNetwork ? filterTypesByChain(remaining, initialNetwork)[0] : remaining[0];
 
             const initialConfig: Record<string, any> = {};
-            if (detectedChain && firstAvailable?.supported_chains?.includes(detectedChain)) {
-                initialConfig.chain = detectedChain;
+            const initialChain = initialNetwork && firstAvailable ? chainValueFor(firstAvailable, initialNetwork) : undefined;
+            if (initialChain) {
+                initialConfig.chain = initialChain;
             }
+            setNetworkFilter(initialNetwork);
 
             setFormData({
                 connector_type: firstAvailable?.type || '',
@@ -114,7 +157,56 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             setTestFixtureFile(null);
         }
         setError('');
+        setSwitchOpen(false);
+        setSwitchTarget('');
     }, [isOpen, connector, connectorTypes, existingConnectorTypes, account]);
+
+    const handleNetworkChange = (canonical: string) => {
+        setNetworkFilter(canonical);
+        if (!canonical) return;
+        const type = filterTypesByChain(availableTypes, canonical)[0];
+        const chain = type ? chainValueFor(type, canonical) : undefined;
+        setFormData(prev => ({
+            ...prev,
+            connector_type: type?.type ?? '',
+            config: chain ? { chain } : {},
+        }));
+    };
+
+    const handleTypeChange = (typeKey: string) => {
+        const type = connectorTypes.find(t => t.type === typeKey);
+        const chain = type && networkFilter ? chainValueFor(type, networkFilter) : undefined;
+        setFormData(prev => ({
+            ...prev,
+            connector_type: typeKey,
+            config: chain ? { chain } : {}, // Reset config when type changes
+        }));
+    };
+
+    const handleSwitchProvider = async () => {
+        if (!connector || !switchTarget) return;
+        setSwitching(true);
+        setError('');
+        try {
+            const response = await fetch(
+                `${API_URL}/accounts/${account.id}/connectors/${connector.connector_type}/switch`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_connector_type: switchTarget }),
+                }
+            );
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to switch provider');
+            }
+            onClose();
+        } catch (err: any) {
+            setError(err.message || 'Failed to switch provider');
+        } finally {
+            setSwitching(false);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -243,28 +335,108 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         }
     };
 
-    // Detect blockchain chain from address format
-    const detectChainFromAddress = (address?: string): string | null => {
-        if (!address) return null;
+    const renderTypeDetails = (type: ConnectorTypeInfo) => {
+        const chains = chainOptions(type);
+        const activeCanonical = networkFilter || canonicalForValue(type, formData.config.chain) || null;
+        const statusNote = type.status && type.status !== 'active' ? type.status_note : null;
+        const missingEnv = type.missing_env ?? [];
+        if (chains.length === 0 && !statusNote && missingEnv.length === 0) return null;
 
-        // EVM chains (Ethereum, Base, etc.) start with 0x
-        if (address.startsWith('0x')) {
-            // Default to ethereum for EVM addresses
-            // Could be any EVM chain, but we'll let user choose if needed
-            return 'ethereum';
+        return (
+            <div className="mt-2 flex flex-col gap-1.5" data-testid="connector-type-details">
+                {chains.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                        {chains.map(c => (
+                            <span
+                                key={c.value}
+                                title={
+                                    isRecommended(type, c.canonical)
+                                        ? 'Recommended for this chain'
+                                        : type.degraded_chains?.includes(c.canonical)
+                                            ? 'Degraded on this chain'
+                                            : undefined
+                                }
+                                className={`border px-1.5 py-0.5 text-[10px] ${chipClass(type, c.canonical, activeCanonical)}`}
+                            >
+                                {c.label}
+                            </span>
+                        ))}
+                    </div>
+                )}
+                {statusNote && (
+                    <span className={`block text-xs ${type.status === 'legacy' ? 'text-slate-500' : 'text-amber-700'}`}>
+                        {type.status === 'legacy' ? 'Legacy' : 'Degraded'}: {statusNote}
+                    </span>
+                )}
+                {missingEnv.length > 0 && (
+                    <span className="block bg-red-50 px-2 py-1 text-xs text-red-700">
+                        Not set on the server: {missingEnv.join(', ')}
+                    </span>
+                )}
+            </div>
+        );
+    };
+
+    const renderSwitchProvider = () => {
+        if (!switchOpen) {
+            return (
+                <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    onClick={() => {
+                        setSwitchOpen(true);
+                        setSwitchTarget(swapCandidates[0]?.type ?? '');
+                    }}
+                >
+                    Switch provider
+                </Button>
+            );
         }
+        const canonical = selectedTypeInfo ? canonicalForValue(selectedTypeInfo, connector?.config?.chain) : undefined;
 
-        // XRP addresses start with 'r'
-        if (address.startsWith('r') && address.length >= 25 && address.length <= 35) {
-            return 'xrp';
-        }
-
-        // Solana addresses are base58 encoded, typically 32-44 characters
-        if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
-            return 'solana';
-        }
-
-        return null;
+        return (
+            <div className="mt-2 flex flex-col gap-2 border border-slate-200 bg-slate-50 p-3" data-testid="switch-provider">
+                {swapCandidates.length === 0 ? (
+                    <span className="text-xs text-slate-500">No other provider supports this chain.</span>
+                ) : (
+                    <>
+                        <select
+                            aria-label="New provider"
+                            value={switchTarget}
+                            onChange={(e) => setSwitchTarget(e.target.value)}
+                            className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
+                        >
+                            {swapCandidates.map(t => (
+                                <option key={t.type} value={t.type}>
+                                    {formatTypeOption(t, canonical)}
+                                </option>
+                            ))}
+                        </select>
+                        <span className="text-xs text-slate-500">
+                            Keeps this connector's ID, history and settings; only future syncs use the new
+                            provider. Unsaved edits in this dialog are discarded.
+                        </span>
+                    </>
+                )}
+                <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setSwitchOpen(false)} disabled={switching}>
+                        Cancel
+                    </Button>
+                    {swapCandidates.length > 0 && (
+                        <Button
+                            size="sm"
+                            colorScheme="blue"
+                            onClick={handleSwitchProvider}
+                            loading={switching}
+                            disabled={!switchTarget}
+                        >
+                            Switch
+                        </Button>
+                    )}
+                </div>
+            </div>
+        );
     };
 
     const renderConfigFields = () => {
@@ -272,10 +444,10 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
 
         const fields = [];
 
-        // Check if this is a wallet account with an address
-        const isWalletAccount = account.account_type === 'wallet';
         const accountAddress = account.address_or_identifier;
-        const detectedChain = isWalletAccount ? detectChainFromAddress(accountAddress) : null;
+        const detectedChain = addressFamily && addressFamily !== 'evm'
+            ? chainValueFor(selectedTypeInfo, addressFamily) ?? null
+            : null;
         const shouldInheritAddress = !!(isWalletAccount && accountAddress);
 
         // Chain selector for on-chain connectors
@@ -284,8 +456,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             // 3) auto-detected from address, 4) empty
             const chainValue = formData.config.chain || connector?.config?.chain || detectedChain || '';
             // Only lock chain for unambiguous address formats (XRP, Solana)
-            // EVM addresses (0x) are valid on multiple chains, so pre-select but don't lock
-            const isChainInherited = !!(isWalletAccount && detectedChain && detectedChain !== 'ethereum');
+            const isChainInherited = !!detectedChain;
 
             fields.push(
                 <div key="chain">
@@ -293,15 +464,22 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                         Chain <span className="text-red-500">*</span>
                     </span>
                     <select
+                        aria-label="Chain"
                         disabled={isChainInherited}
                         value={chainValue}
-                        onChange={(e) => updateConfig('chain', e.target.value)}
+                        onChange={(e) => {
+                            updateConfig('chain', e.target.value);
+                            if (networkFilter) {
+                                setNetworkFilter(canonicalForValue(selectedTypeInfo, e.target.value) ?? '');
+                            }
+                        }}
                         className="h-9 w-full border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
                     >
                         <option value="">Select chain...</option>
-                        {selectedTypeInfo.supported_chains.map(chain => (
-                            <option key={chain} value={chain}>
-                                {chain.toUpperCase()}
+                        {chainOptions(selectedTypeInfo).map(c => (
+                            <option key={c.value} value={c.value}>
+                                {c.label}
+                                {selectedTypeInfo.degraded_chains?.includes(c.canonical) ? ' (degraded)' : ''}
                             </option>
                         ))}
                     </select>
@@ -310,9 +488,9 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                             Detected from account address
                         </span>
                     )}
-                    {isWalletAccount && detectedChain === 'ethereum' && (
+                    {addressFamily === 'evm' && (
                         <span className="mt-1 block text-xs text-slate-500">
-                            Pre-selected from address (EVM-compatible)
+                            EVM address — valid on every EVM chain
                         </span>
                     )}
                 </div>
@@ -531,30 +709,71 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                                     </div>
                                 )}
 
+                                {/* Network first (wallet accounts) */}
+                                {!connector && isWalletAccount && networkOptions.length > 0 && (
+                                    <div>
+                                        <span className="mb-1 block font-medium">Network</span>
+                                        <select
+                                            aria-label="Network"
+                                            value={networkFilter}
+                                            onChange={(e) => handleNetworkChange(e.target.value)}
+                                            className="h-9 w-full border border-slate-200 bg-white px-2 text-sm"
+                                        >
+                                            <option value="">All networks and connector types</option>
+                                            {networkOptions.map(n => (
+                                                <option key={n.canonical} value={n.canonical}>
+                                                    {n.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {addressFamily === 'evm' && (
+                                            <span className="mt-1 block text-xs text-slate-500">
+                                                EVM address — choose the network this wallet is used on
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+
                                 {/* Connector Type */}
                                 <div>
                                     <span className="mb-1 block font-medium">
                                         Connector Type <span className="text-red-500">*</span>
                                     </span>
                                     <select
+                                        aria-label="Connector Type"
                                         disabled={!!connector}
                                         value={formData.connector_type}
-                                        onChange={(e) => {
-                                            setFormData(prev => ({
-                                                ...prev,
-                                                connector_type: e.target.value,
-                                                config: {}, // Reset config when type changes
-                                            }));
-                                        }}
+                                        onChange={(e) => handleTypeChange(e.target.value)}
                                         className="h-9 w-full border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
                                     >
                                         {!connector && <option value="">Select connector...</option>}
-                                        {(connector ? connectorTypes : availableTypes).map(type => (
-                                            <option key={type.type} value={type.type}>
-                                                {type.display_name} ({type.category})
-                                            </option>
-                                        ))}
+                                        {connector ? (
+                                            connectorTypes.map(type => (
+                                                <option key={type.type} value={type.type}>
+                                                    {type.display_name}
+                                                </option>
+                                            ))
+                                        ) : networkFilter ? (
+                                            visibleTypes.map(type => (
+                                                <option key={type.type} value={type.type}>
+                                                    {formatTypeOption(type, networkFilter)}
+                                                </option>
+                                            ))
+                                        ) : (
+                                            groupTypes(visibleTypes).map(g => (
+                                                <optgroup key={g.group} label={g.label}>
+                                                    {g.types.map(type => (
+                                                        <option key={type.type} value={type.type}>
+                                                            {formatTypeOption(type)}
+                                                        </option>
+                                                    ))}
+                                                </optgroup>
+                                            ))
+                                        )}
                                     </select>
+                                    {selectedTypeInfo && renderTypeDetails(selectedTypeInfo)}
+                                    {connector && selectedTypeInfo?.category === 'onchain' &&
+                                        selectedTypeInfo.group !== 'app' && renderSwitchProvider()}
                                 </div>
 
                                 {/* Dynamic Config Fields */}

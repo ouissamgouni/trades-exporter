@@ -113,6 +113,15 @@ export interface ConnectorWithAccount extends AccountConnector {
     account_type: string;
 }
 
+export interface ConnectorChainOption {
+    /** Value stored in connector config.chain (provider-specific, e.g. "eth") */
+    value: string;
+    canonical: string;
+    label: string;
+}
+
+export type ConnectorTypeGroup = 'exchange' | 'evm' | 'chain' | 'app' | 'file';
+
 export interface ConnectorTypeInfo {
     type: string;
     category: `${ConnectorCategory}`;
@@ -122,6 +131,14 @@ export interface ConnectorTypeInfo {
     optional_config: string[];
     supports_balance?: boolean;
     is_file_connector?: boolean;
+    group?: ConnectorTypeGroup;
+    chains?: ConnectorChainOption[];
+    status?: 'active' | 'legacy' | 'degraded';
+    status_note?: string | null;
+    degraded_chains?: string[];
+    recommended_for?: string[];
+    required_env?: string[];
+    missing_env?: string[];
 }
 
 /**

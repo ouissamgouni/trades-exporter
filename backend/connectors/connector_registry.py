@@ -8,12 +8,46 @@ This module provides the authoritative mapping between:
 - Chain configurations (for on-chain connectors)
 """
 
+import os
+import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Type, Any
+from typing import Dict, List, Optional, Tuple, Type, Any
 
 from backend.config.loader import configure_logging
+from backend.core.network_normalizer import get_network_display_name, normalize_network
 
 log = configure_logging("connector_registry")
+
+# Raw source name -> provider leaf class that produced it, so stored raws stay
+# readable after a connector switches provider.
+_RAW_SOURCE_ORIGINS: List[Tuple["re.Pattern[str]", str, str]] = [
+    (re.compile(r"^ankr_(?P<chain>\w+)$"), "backend.connectors.onchain.connector_ankr", "ConnectorAnkr"),
+    (
+        re.compile(r"^moralis_wallet_history_(?P<chain>\w+)$"),
+        "backend.connectors.onchain.connector_moralis_wallet_history",
+        "ConnectorMoralisWalletHistory",
+    ),
+    (
+        re.compile(r"^blockscout_(?P<chain>\w+?)_normal_tx$"),
+        "backend.connectors.onchain.blockscout.connector_blockscout_normal_tx",
+        "ConnectorBlockscoutNormalTx",
+    ),
+    (
+        re.compile(r"^blockscout_token_transfers_(?P<chain>\w+)$"),
+        "backend.connectors.onchain.blockscout.connector_blockscout_token_transfers",
+        "ConnectorBlockscoutTokenTransfers",
+    ),
+    (
+        re.compile(r"^etherscan_normal_tx_(?P<chain>\w+)$"),
+        "backend.connectors.onchain.etherscan.connector_etherscan_normal_tx",
+        "ConnectorEtherscanNormalTx",
+    ),
+    (
+        re.compile(r"^etherscan_token_transfers_(?P<chain>\w+)$"),
+        "backend.connectors.onchain.etherscan.connector_etherscan_token_transfers",
+        "ConnectorEtherscanTokenTransfers",
+    ),
+]
 
 
 @dataclass
@@ -53,6 +87,46 @@ class ConnectorInfo:
     # Only set for connectors that produce derivative positions (perps, futures)
     derivative_exchange: Optional[str] = None
 
+    # Provider picker metadata
+    status: str = "active"  # "active" | "legacy" | "degraded"
+    status_note: Optional[str] = None
+    degraded_chains: List[str] = field(default_factory=list)  # canonical names
+    recommended_for: List[str] = field(default_factory=list)  # canonical names
+    required_env: List[str] = field(default_factory=list)
+    # UI grouping: "exchange" | "evm" | "chain" | "app" | "file"; derived when empty
+    group: str = ""
+
+    def __post_init__(self):
+        if not self.group:
+            if self.is_file_connector:
+                self.group = "file"
+            elif self.category != "onchain":
+                self.group = "exchange"
+            else:
+                self.group = "chain"
+
+    def chain_options(self) -> List[Dict[str, str]]:
+        """Supported chains as stored value + canonical name + display label."""
+        options = []
+        for value in self.supported_chains or []:
+            canonical = normalize_network(value) or value
+            options.append(
+                {
+                    "value": value,
+                    "canonical": canonical,
+                    "label": get_network_display_name(canonical),
+                }
+            )
+        return options
+
+    def chain_value_for(self, chain: Optional[str]) -> Optional[str]:
+        """Map any chain alias (e.g. "eth") to this connector's stored value."""
+        canonical = normalize_network(chain)
+        for option in self.chain_options():
+            if option["canonical"] == canonical:
+                return option["value"]
+        return None
+
     def to_api_dict(self) -> Dict[str, Any]:
         """Convert to API-friendly dictionary."""
         return {
@@ -66,6 +140,15 @@ class ConnectorInfo:
             "connector_family": self.connector_family,
             "is_file_connector": self.is_file_connector,
             "supports_balance": self.supports_balance,
+            "group": self.group,
+            "chains": self.chain_options(),
+            "status": self.status,
+            "status_note": self.status_note,
+            "degraded_chains": self.degraded_chains,
+            "recommended_for": self.recommended_for,
+            "required_env": self.required_env,
+            # Only names are exposed, never values
+            "missing_env": [v for v in self.required_env if not os.getenv(v)],
         }
 
 
@@ -402,8 +485,13 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="blockscout",
                 category="onchain",
-                display_name="Blockscout",
+                display_name="EVM · Blockscout",
                 hub_key="on-chain",
+                group="evm",
+                status="degraded",
+                status_note="Cloudflare blocks API requests on Base, Polygon and Arbitrum",
+                degraded_chains=["base", "polygon", "arbitrum"],
+                recommended_for=["hyperevm"],
                 supported_chains=[
                     "base",
                     "ethereum",
@@ -426,8 +514,11 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="etherscan",
                 category="onchain",
-                display_name="Etherscan",
+                display_name="EVM · Etherscan",
                 hub_key="on-chain",
+                group="evm",
+                recommended_for=["ethereum"],
+                required_env=["ETHERSCAN_API_KEY"],
                 supported_chains=["ethereum"],
                 required_config=["address"],
                 optional_config=[
@@ -443,8 +534,12 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="moralis",
                 category="onchain",
-                display_name="Moralis",
+                display_name="EVM · Moralis (legacy)",
                 hub_key="on-chain",
+                group="evm",
+                status="legacy",
+                status_note="Superseded by Ankr; kept for existing connectors",
+                required_env=["MORALIS_API_KEY"],
                 supported_chains=[
                     "eth",
                     "bsc",
@@ -465,8 +560,11 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="ankr",
                 category="onchain",
-                display_name="Ankr",
+                display_name="EVM · Ankr",
                 hub_key="on-chain",
+                group="evm",
+                recommended_for=["bsc", "arbitrum", "polygon", "base", "optimism", "avalanche"],
+                required_env=["ANKR_API_KEY"],
                 supported_chains=[
                     "bsc",
                     "arbitrum",
@@ -489,6 +587,8 @@ class ConnectorRegistry:
                 category="onchain",
                 display_name="Solana (Helius)",
                 hub_key="on-chain",
+                recommended_for=["solana"],
+                required_env=["HELIUS_API_KEY"],
                 supported_chains=["solana"],
                 required_config=["address"],
                 optional_config=["api_key"],
@@ -500,8 +600,9 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="xrp",
                 category="onchain",
-                display_name="XRP Ledger",
+                display_name="XRP Ledger (XRPScan)",
                 hub_key="on-chain",
+                recommended_for=["xrp"],
                 supported_chains=["xrp"],
                 required_config=["address"],
                 optional_config=[],
@@ -515,6 +616,7 @@ class ConnectorRegistry:
                 category="onchain",
                 display_name="Cardano (Cardanoscan)",
                 hub_key="on-chain",
+                recommended_for=["cardano"],
                 supported_chains=["cardano"],
                 required_config=["address"],
                 optional_config=["api_key"],
@@ -526,8 +628,9 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="sui",
                 category="onchain",
-                display_name="SUI",
+                display_name="Sui (GraphQL)",
                 hub_key="on-chain",
+                recommended_for=["sui"],
                 supported_chains=["sui"],
                 required_config=["address"],
                 optional_config=[],
@@ -539,8 +642,9 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="bitcoin_esplora",
                 category="onchain",
-                display_name="Bitcoin (Blockstream)",
+                display_name="Bitcoin (Esplora)",
                 hub_key="on-chain",
+                recommended_for=["bitcoin"],
                 supported_chains=["bitcoin"],
                 required_config=["address"],
                 optional_config=[],
@@ -552,8 +656,10 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="near",
                 category="onchain",
-                display_name="NEAR Protocol (NearBlocks)",
+                display_name="NEAR (NearBlocks)",
                 hub_key="on-chain",
+                recommended_for=["near"],
+                required_env=["NEARBLOCKS_API_KEY"],
                 supported_chains=["near"],
                 required_config=["address"],
                 optional_config=["api_key"],
@@ -565,8 +671,9 @@ class ConnectorRegistry:
             ConnectorInfo(
                 type="bittensor",
                 category="onchain",
-                display_name="Bittensor (TAO)",
+                display_name="Bittensor (Taostats)",
                 hub_key="on-chain",
+                recommended_for=["bittensor"],
                 supported_chains=["bittensor"],
                 required_config=["address"],
                 optional_config=["api_key"],
@@ -580,14 +687,11 @@ class ConnectorRegistry:
                 category="onchain",
                 display_name="Polymarket",
                 hub_key="on-chain",
+                group="app",
+                required_env=["ANKR_API_KEY"],
                 supported_chains=["polygon"],
                 required_config=["address"],
-                optional_config=[
-                    "clob_api_key",
-                    "clob_api_secret",
-                    "clob_passphrase",
-                    "signer_address",
-                ],
+                optional_config=[],
                 supports_incremental_sync=True,
                 supports_balance=True,
             )
@@ -689,8 +793,8 @@ class ConnectorRegistry:
         # SUI
         self._chain_configs["sui"] = {
             "sui": ChainConfig(
-                explorer_type="ankr",
-                base_url="https://rpc.ankr.com/sui",
+                explorer_type="sui_graphql",
+                base_url="https://graphql.mainnet.sui.io/graphql",
                 chain_id=None,
                 native_currency="SUI",
                 native_token_decimals=9,
@@ -734,7 +838,7 @@ class ConnectorRegistry:
         self._chain_configs["polymarket"] = {
             "polygon": ChainConfig(
                 explorer_type="polymarket",
-                base_url="https://clob.polymarket.com",
+                base_url="https://data-api.polymarket.com/v2",
                 chain_id=137,
                 native_currency="USDC",
                 native_token_decimals=6,
@@ -954,6 +1058,17 @@ class ConnectorRegistry:
     def get_api_connectors(self) -> Dict[str, Dict[str, Any]]:
         """Get connector info formatted for API responses."""
         return {ctype: info.to_api_dict() for ctype, info in self._connectors.items()}
+
+    def resolve_raw_origin(self, raw_source: str) -> Optional[Tuple[Type, str]]:
+        """(leaf connector class, chain) that produced raws stored under raw_source."""
+        import importlib
+
+        for pattern, module_name, class_name in _RAW_SOURCE_ORIGINS:
+            match = pattern.match(raw_source or "")
+            if match:
+                module = importlib.import_module(module_name)
+                return getattr(module, class_name), match.group("chain")
+        return None
 
     def validate_connector_type(self, connector_type: str) -> bool:
         """Check if a connector type is valid."""
