@@ -41,7 +41,9 @@ class ConnectorInfo:
     supports_incremental_sync: bool = False
 
     # File connector support - groups related API and file connectors in UI
-    connector_family: Optional[str] = None  # e.g., "mexc-transactions" for both API and file variants
+    connector_family: Optional[str] = (
+        None  # e.g., "mexc-transactions" for both API and file variants
+    )
     is_file_connector: bool = False  # True for file-based import connectors
 
     # Balance support - True for connectors that can fetch live balances
@@ -461,6 +463,28 @@ class ConnectorRegistry:
 
         self._register(
             ConnectorInfo(
+                type="ankr",
+                category="onchain",
+                display_name="Ankr",
+                hub_key="on-chain",
+                supported_chains=[
+                    "bsc",
+                    "arbitrum",
+                    "ethereum",
+                    "polygon",
+                    "base",
+                    "optimism",
+                    "avalanche",
+                ],
+                required_config=["chain", "address"],
+                optional_config=["start_datetime"],
+                supports_incremental_sync=True,
+                supports_balance=True,
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
                 type="solana",
                 category="onchain",
                 display_name="Solana (Helius)",
@@ -558,12 +582,16 @@ class ConnectorRegistry:
                 hub_key="on-chain",
                 supported_chains=["polygon"],
                 required_config=["address"],
-                optional_config=["clob_api_key", "clob_api_secret", "clob_passphrase", "signer_address"],
+                optional_config=[
+                    "clob_api_key",
+                    "clob_api_secret",
+                    "clob_passphrase",
+                    "signer_address",
+                ],
                 supports_incremental_sync=True,
                 supports_balance=True,
             )
         )
-
 
     def _register_chain_configs(self):
         """Register chain configurations for on-chain connectors."""
@@ -713,7 +741,6 @@ class ConnectorRegistry:
             ),
         }
 
-
     def _register(self, info: ConnectorInfo):
         """Register a connector type."""
         self._connectors[info.type] = info
@@ -727,17 +754,27 @@ class ConnectorRegistry:
         from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
         from backend.connectors.cex.connector_mexc_trx_file import MEXCTrxFileConnector
         from backend.connectors.cex.connector_mexc_deposits import MEXCDepositsConnector
-        from backend.connectors.cex.connector_mexc_deposits_file import MEXCDepositsFileConnector
-        from backend.connectors.cex.connector_mexc_withdrawals import MEXCWithdrawalsConnector
-        from backend.connectors.cex.connector_mexc_withdrawals_file import MEXCWithdrawalsFileConnector
+        from backend.connectors.cex.connector_mexc_deposits_file import (
+            MEXCDepositsFileConnector,
+        )
+        from backend.connectors.cex.connector_mexc_withdrawals import (
+            MEXCWithdrawalsConnector,
+        )
+        from backend.connectors.cex.connector_mexc_withdrawals_file import (
+            MEXCWithdrawalsFileConnector,
+        )
         from backend.connectors.cex.connector_binance_trx import BinanceTrxConnector
         from backend.connectors.cex.connector_okx_trx import OKXConnectorTrx
         from backend.connectors.cex.connector_okx_convert import OKXConvertConnector
         from backend.connectors.cex.connector_okx_deposits import OKXDepositsConnector
-        from backend.connectors.cex.connector_okx_withdrawals import OKXWithdrawalsConnector
+        from backend.connectors.cex.connector_okx_withdrawals import (
+            OKXWithdrawalsConnector,
+        )
         from backend.connectors.cex.connector_okx_file import OKXFileConnector
         from backend.connectors.cex.connector_degiro_file import DeGiroFileConnector
-        from backend.connectors.cex.connector_degiro_account_file import DeGiroAccountFileConnector
+        from backend.connectors.cex.connector_degiro_account_file import (
+            DeGiroAccountFileConnector,
+        )
         from backend.connectors.cex.connector_coinbase_trx import ConnectorCoinbaseTrx
         from backend.connectors.cex.connector_coinbase_deposits import (
             ConnectorCoinbaseDeposits,
@@ -769,6 +806,7 @@ class ConnectorRegistry:
         from backend.connectors.onchain.connector_moralis_wallet_history import (
             ConnectorMoralisWalletHistory,
         )
+        from backend.connectors.onchain.connector_ankr import ConnectorAnkr
         from backend.connectors.onchain.connector_xrp_ledger import (
             ConnectorXRPLedger,
         )
@@ -826,6 +864,7 @@ class ConnectorRegistry:
             "blockscout": ConnectorBlockscoutHub,
             "etherscan": ConnectorEtherscanHub,
             "moralis": ConnectorMoralisWalletHistory,
+            "ankr": ConnectorAnkr,
             "xrp": ConnectorXRPLedger,
             "cardano_scan": ConnectorCardanoScan,
             "sui": ConnectorSui,
@@ -929,24 +968,26 @@ class ConnectorRegistry:
 
     def get_native_token(self, connector_type: str, chain: str) -> Optional[str]:
         """Get native token symbol for a chain.
-        
+
         Args:
             connector_type: Connector type (e.g., 'blockscout', 'cardano_scan')
             chain: Chain name (e.g., 'ethereum', 'cardano')
-            
+
         Returns:
             Native token symbol (e.g., 'ETH', 'ADA') or None if not found
         """
         config = self.get_chain_config(connector_type, chain)
         return config.native_currency if config else None
 
-    def get_native_token_decimals(self, connector_type: str, chain: str) -> Optional[int]:
+    def get_native_token_decimals(
+        self, connector_type: str, chain: str
+    ) -> Optional[int]:
         """Get native token decimals for a chain.
-        
+
         Args:
             connector_type: Connector type (e.g., 'blockscout', 'cardano_scan')
             chain: Chain name (e.g., 'ethereum', 'cardano')
-            
+
         Returns:
             Native token decimals (e.g., 18, 6) or None if not found
         """
@@ -955,11 +996,11 @@ class ConnectorRegistry:
 
     def get_chain_id(self, connector_type: str, chain: str) -> Optional[int]:
         """Get chain ID for a chain.
-        
+
         Args:
             connector_type: Connector type (e.g., 'blockscout', 'etherscan')
             chain: Chain name (e.g., 'ethereum', 'base')
-            
+
         Returns:
             Chain ID (e.g., 1 for Ethereum) or None if not applicable
         """

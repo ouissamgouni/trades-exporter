@@ -1,0 +1,110 @@
+{
+    "transactions": [
+        {
+            "blockchain": "bsc",
+            "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "from": "0xbeef000000000000000000000000000000000001",
+            "to": "0xdead000000000000000000000000000000000001",
+            "value": "0x214e8348c4f0000",
+            "gasUsed": "0x5208",
+            "gasPrice": "0x5f5e100",
+            "timestamp": "0x68e1ad61",
+            "status": "0x1"
+        },
+        {
+            "blockchain": "bsc",
+            "hash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "from": "0xdead000000000000000000000000000000000001",
+            "to": "0xbeef000000000000000000000000000000000002",
+            "value": "0xde0b6b3a7640000",
+            "gasUsed": "0x5208",
+            "gasPrice": "0x3b9aca00",
+            "timestamp": "0x68e1b000",
+            "status": "0x1"
+        },
+        {
+            "blockchain": "bsc",
+            "hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "from": "0xdead000000000000000000000000000000000001",
+            "to": "0xbeef0000000000000000000000000000000000c0",
+            "value": "0x0",
+            "gasUsed": "0xb3b0",
+            "gasPrice": "0x3b9aca00",
+            "timestamp": "0x68e1c000",
+            "status": "0x1"
+        },
+        {
+            "blockchain": "bsc",
+            "hash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "from": "0xdead000000000000000000000000000000000001",
+            "to": "0xbeef000000000000000000000000000000000002",
+            "value": "0xde0b6b3a7640000",
+            "gasUsed": "0x5208",
+            "gasPrice": "0x3b9aca00",
+            "timestamp": "0x68e1d000",
+            "status": "0x0"
+        }
+    ],
+    "transfers": [
+        {
+            "blockchain": "bsc",
+            "transactionHash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+            "fromAddress": "0xbeef000000000000000000000000000000000003",
+            "toAddress": "0xdead000000000000000000000000000000000001",
+            "contractAddress": "0x55d398326f99059ff775485246999027b3197955",
+            "tokenSymbol": "USDT",
+            "tokenName": "Tether USD",
+            "tokenDecimals": 18,
+            "value": "25.5",
+            "valueRawInteger": "25500000000000000000",
+            "logIndex": 7,
+            "timestamp": 1759620000,
+            "direction": "in"
+        },
+        {
+            "blockchain": "bsc",
+            "transactionHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "fromAddress": "0xdead000000000000000000000000000000000001",
+            "toAddress": "0xbeef000000000000000000000000000000000004",
+            "contractAddress": "0x55d398326f99059ff775485246999027b3197955",
+            "tokenSymbol": "USDT",
+            "tokenName": "Tether USD",
+            "tokenDecimals": 18,
+            "value": "10",
+            "valueRawInteger": "10000000000000000000",
+            "logIndex": 3,
+            "timestamp": 1759625216,
+            "direction": "out"
+        },
+        {
+            "blockchain": "bsc",
+            "transactionHash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+            "fromAddress": "0xdead000000000000000000000000000000000001",
+            "toAddress": "0xbeef000000000000000000000000000000000005",
+            "contractAddress": "0x55d398326f99059ff775485246999027b3197955",
+            "tokenSymbol": "USDT",
+            "tokenName": "Tether USD",
+            "tokenDecimals": 18,
+            "value": "0",
+            "valueRawInteger": "0",
+            "logIndex": 1,
+            "timestamp": 1759630000,
+            "direction": "out"
+        },
+        {
+            "blockchain": "bsc",
+            "transactionHash": "0x7777777777777777777777777777777777777777777777777777777777777777",
+            "fromAddress": "0xbeef000000000000000000000000000000000006",
+            "toAddress": "0xdead000000000000000000000000000000000001",
+            "contractAddress": "0xbeef0000000000000000000000000000000000aa",
+            "tokenSymbol": "\ua4f4\ua4e2\ua4d3\u0421",
+            "tokenName": "Claim at usdc-rewards.com",
+            "tokenDecimals": 6,
+            "value": "1000",
+            "valueRawInteger": "1000000000",
+            "logIndex": 2,
+            "timestamp": 1759640000,
+            "direction": "in"
+        }
+    ]
+}
