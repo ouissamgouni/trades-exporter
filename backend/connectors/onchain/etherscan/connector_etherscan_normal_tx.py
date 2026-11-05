@@ -12,7 +12,7 @@ from typing import Dict, Any, Generator, List
 
 from backend.connectors.base.base_connector import BaseConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.config.loader import configure_logging, load_settings
+from backend.config.loader import configure_logging, get_etherscan_api_key, load_settings
 from backend.core.network_normalizer import normalize_network
 from backend.db.models import NormalizedTransaction
 
@@ -83,7 +83,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
 
         # Live mode: API configuration
         web3_config = load_settings().get("web3_wallets", {})
-        self.api_key = api_key or web3_config.get("etherscan_api_key", "")
+        self.api_key = api_key or get_etherscan_api_key()
 
         if not self.api_key:
             raise ValueError("Missing API KEY")

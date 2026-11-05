@@ -145,7 +145,7 @@ tasks:
           echo "   task build:ref REF=feature/my-branch"
           exit 1
         fi
-      - task: :git:worktree:setup:ref
+      - task: :git:worktree:create
         vars: { REF: "{{.REF}}" }
       - |
         REF="{{.REF}}"
@@ -174,7 +174,7 @@ tasks:
         echo "   Backend:  trades-exporter-backend:$TAG"
         echo "   Frontend: trades-exporter-frontend:$TAG"
         echo ""
-        echo "Deploy with: task deploy:staging:local -- $TAG"
+        echo "Deploy with: task deploy:staging:local:ref -- $REF"
 
   scenario-component:
     # Internal helper: build a SINGLE component (backend|frontend) from a git
@@ -237,8 +237,9 @@ tasks:
 
         echo "✅ $COMPONENT → trades-exporter-$COMPONENT:$OUT_TAG (source: $SRCTAG)"
 
-  dirty:
+  cwd:
     desc: Build images from current working directory (uncommitted changes)
+    aliases: [dirty]
     dotenv:
       [
         config/base.env,
@@ -286,7 +287,7 @@ tasks:
         echo "   Backend:  trades-exporter-backend:$TAG"
         echo "   Frontend: trades-exporter-frontend:$TAG"
         echo ""
-        echo "Deploy with: task deploy:staging:local -- $TAG"
+        echo "Deploy with: task deploy:staging:local:cwd"
 
   list:
     desc: List all trades-exporter Docker images

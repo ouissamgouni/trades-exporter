@@ -103,6 +103,7 @@ tasks:
       - echo "✅ Staging stack stopped"
 
   prod:local:
+    aliases: [prod]
     desc: Stop prod stack
     dotenv:
       [
@@ -162,6 +163,7 @@ tasks:
       - echo "✅ Staging containers and volumes removed"
 
   prod:local:volumes:
+    aliases: [prod:volumes]
     desc: "🚨 Remove prod containers and volumes (DANGEROUS!). DRY_RUN=1 to preview."
     dotenv:
       [

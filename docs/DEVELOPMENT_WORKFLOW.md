@@ -280,18 +280,19 @@ Integration and e2e tests each run against their own dedicated, self-provisioned
 
 Validates Docker images in a fully containerized stack.
 
-This path builds from a detached `.worktrees/develop` snapshot of `origin/develop`; it does not switch or mutate your current checkout.
+`deploy:staging:local` deploys a develop commit from a SHA-pinned `.worktrees/ref-<sha>` checkout (it never touches your working tree). It only deploys components (`db`, `backend`, `frontend`) whose files changed since their last staging deploy, recorded in `refs/deploys/staging/<component>`.
 
 ```bash
-task deploy:staging:local                   # build from develop branch
-task deploy:staging:local:ref -- feature/x  # build from any git ref
-task deploy:staging:local:ref REF=feature/x # equivalent named parameter
-task deploy:staging:local:cwd               # build from working directory
-
-DRY_RUN=1 task deploy:staging:local          # preview without executing
-DRY_RUN=1 task deploy:staging:local:ref -- feature/x
-DRY_RUN=1 task deploy:staging:local:cwd
+task deploy:staging:local                        # changed components @ origin/develop
+task deploy:staging:local -- <ref> --all         # all components @ a develop ref
+task deploy:staging:local -- backend             # only backend
+task deploy:staging:local -- --dry-run           # show the plan only
+task deploy:staging:local:backend -- <ref>       # one component
+task deploy:staging:local:ref -- feature/x       # quick full rebuild from ANY ref (not recorded)
+task deploy:staging:local:cwd[:<component>]      # deploy the working directory
 ```
+
+Staging deploys require green CI on the commit (needs `gh`); bypass with `--skip-ci-check` or `SKIP_CI_CHECK=1`.
 
 The local staging stack uses `config/base.env`, `config/staging.local.env`, `config/secrets.env`, and `config/secrets.staging.local.env`.
 
@@ -313,12 +314,12 @@ task release:prod -- --fast            # changed components + suggested tags, on
 task release:prod -- --dry-run         # show the --fast plan only
 ```
 
-Components (`db`, `backend`, `frontend`) release independently with annotated `<component>-vX.Y.Z` tags. Each `deploy:prod:local:<component> -- <tag>` builds from a SHA-pinned `.worktrees/ref-<sha>` checkout, retags the image as `trades-exporter-<component>:prod` (what `start:prod:local` runs), and records the deployed SHA in the local ref `refs/deploys/prod/<component>`.
+Components (`db`, `backend`, `frontend`) release independently with annotated `<component>-vX.Y.Z` tags. Each `deploy:prod:local:<component> -- <tag>` shows `current → next (N commits ahead)` before prompting, refuses another component's tag, builds from a SHA-pinned `.worktrees/ref-<sha>` checkout via the `deploy:prod:local:cwd:<component>` primitive, tags the image as `trades-exporter-<component>:prod` (what `start:prod:local` runs) and `:<tag>`, health-checks the backend, and records the deployed SHA in the local ref `refs/deploys/prod/<component>`.
 
 ```bash
 task deploy:prod:status                # released tag vs deployed SHA + drift
 task deploy:prod:status:diff           # commits/files deployed vs origin/main
-task deploy:prod:local:cwd             # deploy the working directory (not recorded)
+task deploy:prod:local:cwd[:<component>]   # deploy the working directory (not recorded)
 ```
 
 The deploy gate checks CI is green for the tagged commit (needs `gh`); bypass with `SKIP_CI_CHECK=1`.
@@ -352,7 +353,7 @@ Common parameters:
 | `SEED_DIR=<path>` | scenario start/seed/reset | auto from `scenarios/<name>/` | Explicit seed directory. |
 | `WITH_DEFAULTS=1` | scenario start/seed | `0` | Seed default data before scenario seed files. |
 | `REF=<git-ref>` | build/deploy/scenario-ref/worktree-ref | CLI args | Equivalent to passing the ref after `--`. |
-| `TAG=<image-tag>` | `build:dirty` | `dirty-<timestamp>` | Custom tag for uncommitted working-directory images. |
+| `TAG=<image-tag>` | `build:cwd` | `dirty-<timestamp>` | Custom tag for uncommitted working-directory images. |
 | `VERSION=<tag>` | release/build prod | CLI args | Equivalent to passing the version after `--`. |
 | `LOG_LEVEL=<level>` | backend start tasks | `INFO` | Overrides backend log level. |
 | `DONT_RELOAD=true` | full dev start tasks | `false` | Disables uvicorn reload. |
@@ -386,9 +387,9 @@ Tasks that prompt for confirmation before executing:
 - All `db:reset:*` tasks
 - All `db:copy:*` tasks
 - All `stop:*:volumes` tasks
-- `build:ref`, `build:dirty`, and `build:clean:all`
+- `build:ref`, `build:cwd`, and `build:clean:all`
 - `git:feature`, `git:fix`, `git:hotfix`, `git:release:tag`, and worktree cleanup tasks
-- `deploy:prod:local`
+- `deploy:prod:local[:<component>]` and `deploy:prod:local:cwd`
 - `stop:scenario` and `stop:scenario:all`
 - `db:stamp:dev` and `db:downgrade:dev`
 
@@ -543,13 +544,10 @@ task stop:staging:local
 
 | Command | Description |
 |---------|-------------|
-| `task deploy:staging:local` | Build from develop + docker-compose up |
-| `DRY_RUN=1 task deploy:staging:local` | Preview develop -> local staging deploy |
-| `task deploy:staging:local:ref -- <ref>` | Build from git ref + docker-compose up |
-| `task deploy:staging:local:ref REF=<ref>` | Same using named parameter |
-| `DRY_RUN=1 task deploy:staging:local:ref -- <ref>` | Preview git-ref local staging deploy |
-| `task deploy:staging:local:cwd` | Build from working directory + docker-compose up |
-| `DRY_RUN=1 task deploy:staging:local:cwd` | Preview dirty working-directory local staging deploy |
+| `task deploy:staging:local -- [<ref>] [db backend frontend] [--all] [--dry-run] [--skip-ci-check]` | Deploy changed components of a develop commit (default `origin/develop`) |
+| `task deploy:staging:local:<component> -- <ref>` | Deploy one component from a develop commit |
+| `task deploy:staging:local:ref -- <ref>` | Quick full rebuild from any git ref (`DRY_RUN=1` to preview, not recorded) |
+| `task deploy:staging:local:cwd[:<component>]` | Deploy from the working directory |
 | `task start:staging:local` | Start local staging with existing images |
 | `task start:staging:local RESET=1` | Tear down local staging before starting |
 | `task start:staging:local BROWSER=isolated COUNT=1 RESET_BROWSER=1` | Same, with an isolated browser session |
@@ -564,8 +562,9 @@ task stop:staging:local
 |---------|-------------|
 | `task release:prod[:<component>]` | Tag `<component>-vX.Y.Z` on main + deploy (see above) |
 | `task deploy:prod:local:<component> -- <tag>` | Deploy one component (`db`, `backend`, `frontend`) from a release tag |
-| `task deploy:prod:local:cwd` | Deploy all components from the working directory (`DRY_RUN=1` to preview) |
-| `task deploy:prod:local -- <tag-or-ref>` | Legacy: deploy backend + frontend from an image tag or git ref |
+| `task deploy:prod:local:cwd[:<component>]` | Deploy from the working directory (not recorded) |
+| `task deploy:prod:local -- <vX.Y.Z>` | Full db + backend + frontend deploy from one legacy release tag |
+| `task deploy:prod:current` | Current prod backend tag |
 | `task deploy:prod:status[:<component>][:diff]` | What is deployed vs released / origin/main |
 | `task deploy:staging:status` | What is deployed to local staging vs origin/develop |
 | `task start:prod:local` | Start local prod with the deployed `:prod` images |
@@ -603,6 +602,8 @@ task stop:staging:local
 | `task db:status:prod:local` | Alembic status inside local prod backend container |
 | `task script ENV=dev\|staging:local\|prod:local -- <script> [args]` | Run `backend/scripts/<script>` with that env's config (prod prompts; `YES=1` skips) |
 | `task db:check:dev` | Validate migration health |
+| `task db:check:staging:local` / `db:check:prod:local` (aliases `db:check:staging` / `db:check:prod`) | Connectivity + migration state |
+| `task db:migrate:scenario SCENARIO=<name>` | Migrate a scenario DB |
 | `task db:history:dev` | Show verbose Alembic history |
 | `task db:merge:dev -- "message"` | Merge multiple Alembic heads |
 | `task db:stamp:dev -- <revision>` | Stamp DB revision without running migrations |
@@ -684,10 +685,9 @@ Git worktree commands used by builds:
 
 | Command | Description |
 |---------|-------------|
-| `task git:worktree:setup` | Create detached `.worktrees/main` and `.worktrees/develop` snapshots from origin refs |
-| `task git:worktree:setup:ref -- <ref>` | Create detached `.worktrees/ref-<sha>` snapshot for a git ref |
+| `task git:worktree:create -- <branch\|ref>` | `main`/`develop` → persistent snapshot; any other ref → detached `.worktrees/ref-<sha>` |
 | `task git:worktree:status` | List active worktrees and disk usage |
-| `task git:worktree:update` | Refresh detached main/develop snapshots from origin refs |
+| `task git:worktree:update` (alias `setup`) | Create/refresh detached main/develop snapshots from origin refs |
 | `task git:worktree:clean:ref` | Remove temporary ref worktrees only |
 | `task git:worktree:clean` | Remove all managed worktrees |
 
@@ -703,8 +703,8 @@ Git worktree commands used by builds:
 | `task build:prod:frontend -- v1.0.0` | Build frontend image from main and tag latest |
 | `task build:ref -- <ref>` | Build from any git ref |
 | `task build:ref REF=<ref>` | Same using named parameter; creates temp ref worktree |
-| `task build:dirty` | Build from working directory |
-| `task build:dirty TAG=<tag>` | Build from working directory using explicit tag |
+| `task build:cwd` (alias `build:dirty`) | Build from working directory |
+| `task build:cwd TAG=<tag>` | Build from working directory using explicit tag |
 | `task build:list` | List Docker images |
 | `task build:clean` | Remove old images |
 | `task build:clean:all` | Remove all trades-exporter images |

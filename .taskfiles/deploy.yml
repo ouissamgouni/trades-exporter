@@ -2,269 +2,121 @@ version: "3"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Deploy tasks — all environments are LOCAL docker-compose stacks (no remote
-# hosting).
-#
-#   staging:local            — localhost:5433 / 8001 / 3001 (from develop)
-#   prod:local               — localhost:5434 / 8080 / 3000 (from release tags)
+# hosting). Structure mirrors the reference project's remote envs.
 #
 # Naming convention:
-#   deploy:<env>:local:<component>   — atomic single-component deploy
-#   deploy:<env>:local:cwd           — deploy from the working directory
-#   deploy:<env>:status              — what's deployed (per component)
+#   deploy:<env>:local:<component>        — atomic single-component deploy
+#                                           (worktree-aware, runs git gates)
+#   deploy:<env>:local                    — orchestrator (components in order)
+#   deploy:<env>:local:cwd[:component]    — CWD variant: deploys SOURCE_DIR (default:
+#                                           working directory) — no git gates,
+#                                           no worktree. Used by the orchestrators
+#                                           after worktree provisioning.
+#   deploy:staging:local:ref -- <ref>     — quick full rebuild from any git ref
+#
+# Envs:
+#   staging:local   — localhost:5433 / 8001 / 3001 (commits on develop)
+#   prod:local      — localhost:5434 / 8080 / 3000 (annotated release tags on main)
+#
+# Status / introspection:
+#   deploy:<env>:status            — what's currently deployed (per component, per env)
+#   deploy:prod:current            — short form: just the prod backend tag
+#
+# Deployment tracking:
+#   After each successful component deploy the deployed SHA is written to the
+#   LOCAL ref refs/deploys/<env>/<component> (envs are local-only, nothing is
+#   pushed). `git reflog refs/deploys/prod/backend` gives the audit log.
 # ════════════════════════════════════════════════════════════════════════════
 
 tasks:
-  staging:local:
-    desc: Build from develop and deploy to local staging environment. DRY_RUN=1 to preview.
-    dotenv:
-      [
-        config/base.env,
-        config/staging.local.env,
-        config/secrets.env,
-        config/secrets.staging.local.env,
-      ]
-    vars:
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
-    cmds:
-      - |
-        if [ "{{.DRY_RUN}}" = "1" ]; then
-          echo "🔍 DRY RUN — would deploy to LOCAL STAGING (from develop)"
-          echo ""
-          echo "Steps:"
-          echo "  1. Build images from develop (task build:staging)"
-          echo "  2. docker compose down (trades-exporter-staging)"
-          echo "  3. docker compose up -d"
-          echo ""
-          echo "Compose config:"
-          ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging config
-          exit 0
-        fi
+  # ──────────────────────────────────────────────────────────────────────────
+  # Internal: ref → worktree provisioner (called as deps by deploy tasks)
+  #
+  # Deploys use SHA-pinned worktrees so they NEVER touch the user's working
+  # tree. Each deploy resolves REF → SHA, ensures a worktree exists at
+  # .worktrees/ref-<sha>, and runs from inside it via the `:cwd` primitive.
+  #
+  # Gates:
+  #   • REF must be supplied and resolvable (after `git fetch`)
+  #   • staging: REF must be reachable from origin/develop
+  #   • prod:    REF must be an annotated release tag reachable from origin/main
+  #   • CI must be green for the resolved commit (verified via `gh run list`).
+  #     Bypass with SKIP_CI_CHECK=1 — as a Task var or an env var (the latter
+  #     also propagates through the multi-step release flow).
+  #
+  # Secrets (config/secrets.*) live only in the host repo and are read from
+  # there by docker compose — they are NOT copied into the worktree.
+  # ──────────────────────────────────────────────────────────────────────────
 
-        task build:staging
-        ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
-        ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
-        SHA=$(git -C {{.WORKTREE_DEVELOP}} rev-parse HEAD)
-        for C in backend frontend; do
-          git update-ref --create-reflog -m "deploy staging $C" "refs/deploys/staging/$C" "$SHA"
-        done
-        sleep 5
-
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Deployed to LOCAL STAGING (from develop branch)"
-        echo ""
-        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
-        echo "   Backend:  http://localhost:${BACKEND_PORT}"
-        echo "   Database: localhost:${POSTGRES_PORT}"
-        echo ""
-        echo "Next steps:"
-        echo "   task logs:staging:local   → View logs"
-        echo "═══════════════════════════════════════════════════════════════"
-
-  staging:local:ref:
-    desc: Build from any git ref and deploy to local staging. DRY_RUN=1 to preview. (e.g., task deploy:staging:local:ref -- feature/my-branch)
-    dotenv:
-      [
-        config/base.env,
-        config/staging.local.env,
-        config/secrets.env,
-        config/secrets.staging.local.env,
-      ]
-    vars:
-      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+  _prepare-ref-staging:
+    internal: true
     cmds:
       - |
         REF="{{.REF}}"
         if [ -z "$REF" ]; then
-          echo "❌ Usage:"
-          echo "   task deploy:staging:local:ref -- feature/my-branch"
-          echo "   task deploy:staging:local:ref REF=feature/my-branch"
+          echo "❌ REF required."
+          echo "   Usage:   task deploy:staging:local:<component> -- <branch|sha>"
+          echo "   Example: task deploy:staging:local:backend -- origin/develop"
           exit 1
         fi
-
-        if [ "{{.DRY_RUN}}" = "1" ]; then
-          SHA=$(git rev-parse --short=7 "$REF" 2>/dev/null || echo "unknown")
-          TAG="ref-$SHA"
-          echo "🔍 DRY RUN — would deploy to LOCAL STAGING (from $REF)"
-          echo ""
-          echo "Steps:"
-          echo "  1. Build images from $REF (task build:ref)"
-          echo "  2. docker compose down (trades-exporter-staging)"
-          echo "  3. docker compose up -d with tag :$TAG"
-          echo ""
-          echo "Compose config:"
-          ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging config
-          exit 0
+        git fetch origin develop --quiet 2>/dev/null || true
+        if ! git rev-parse --verify "$REF" >/dev/null 2>&1; then
+          echo "❌ Git ref '$REF' not found locally or on origin."
+          exit 1
         fi
-
-        task build:ref REF="$REF"
-        SHA=$(git rev-parse --short=7 "$REF")
-        TAG="ref-$SHA"
-
-        echo "Deploying $TAG to staging environment..."
-
-        # Set image tag and deploy
-        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
-        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
-        sleep 5
-
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Deployed to LOCAL STAGING (from $REF)"
-        echo ""
-        echo "   Git ref:  $REF"
-        echo "   SHA:      $SHA"
-        echo "   Tag:      :$TAG"
-        echo ""
-        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
-        echo "   Backend:  http://localhost:${BACKEND_PORT}"
-        echo "   Database: localhost:${POSTGRES_PORT}"
-        echo ""
-        echo "Next steps:"
-        echo "   task logs:staging:local      → View logs"
-        echo "   task git:worktree:clean:ref  → Clean temp worktrees"
-        echo "═══════════════════════════════════════════════════════════════"
-
-  staging:local:cwd:
-    desc: Build from current working directory and deploy to local staging. DRY_RUN=1 to preview.
-    dotenv:
-      [
-        config/base.env,
-        config/staging.local.env,
-        config/secrets.env,
-        config/secrets.staging.local.env,
-      ]
-    vars:
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
-    cmds:
-      - |
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        TAG="dirty-$TIMESTAMP"
-
-        if [ "{{.DRY_RUN}}" = "1" ]; then
-          echo "🔍 DRY RUN — would deploy to LOCAL STAGING (from working directory)"
-          echo ""
-          echo "Steps:"
-          echo "  1. Build images from current directory (task build:dirty)"
-          echo "  2. docker compose down (trades-exporter-staging)"
-          echo "  3. docker compose up -d with tag :$TAG"
-          echo ""
-          echo "Compose config:"
-          ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging config
-          exit 0
+        REF_SHA=$(git rev-parse "$REF^{commit}")
+        if ! git merge-base --is-ancestor "$REF_SHA" origin/develop 2>/dev/null; then
+          echo "❌ '$REF' ($REF_SHA) is not reachable from origin/develop."
+          echo "   Staging only deploys commits on the develop branch."
+          echo "   For any other ref use: task deploy:staging:local:ref -- $REF"
+          exit 1
         fi
-
-        task build:dirty TAG="$TAG"
-
-        echo "Deploying $TAG to staging environment..."
-
-        # Set image tag and deploy
-        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
-        ENV_NAME=staging IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
-        sleep 5
-
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Deployed to LOCAL STAGING (from working directory)"
-        echo ""
-        echo "   ⚠️  Built from uncommitted changes"
-        echo "   Tag: :$TAG"
-        echo ""
-        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
-        echo "   Backend:  http://localhost:${BACKEND_PORT}"
-        echo "   Database: localhost:${POSTGRES_PORT}"
-        echo "═══════════════════════════════════════════════════════════════"
-
-  prod:local:
-    desc: "Deploy backend + frontend to local prod from an image tag or git ref. DRY_RUN=1 to preview. Prefer the per-component deploy:prod:local:<component> / release:prod:* flow. (e.g., task deploy:prod:local -- v1.2.0)"
-    prompt: "This will deploy to PRODUCTION. Continue?"
-    dotenv:
-      [
-        config/base.env,
-        config/prod.local.env,
-        config/secrets.env,
-        config/secrets.prod.local.env,
-      ]
-    vars:
-      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
-    cmds:
-      - |
-        REF="{{.REF}}"
-        if [ -z "$REF" ]; then
-          REF="latest"
-        fi
-
-        if [ "{{.DRY_RUN}}" = "1" ]; then
-          echo "🔍 DRY RUN — would deploy to LOCAL PROD: $REF"
-          echo ""
-          if docker image inspect trades-exporter-backend:$REF > /dev/null 2>&1; then
-            echo "Image found: trades-exporter-backend:$REF"
-          else
-            echo "No image found for :$REF — would attempt to build from git ref"
+        SHORT=$(git rev-parse --short=7 "$REF_SHA")
+        # ── CI green-check gate (skippable: SKIP_CI_CHECK=1) ─────────────────
+        SKIP_CI="{{.SKIP_CI_CHECK | default ""}}"
+        [ -z "$SKIP_CI" ] && SKIP_CI="${SKIP_CI_CHECK:-0}"
+        case "$SKIP_CI" in
+          1|true|yes)
+            echo "⏭️  SKIP_CI_CHECK=$SKIP_CI — skipping CI green-check for $SHORT (deploying an unverified commit)." ;;
+          *)
+            if ! command -v gh >/dev/null 2>&1; then
+              echo "❌ GitHub CLI 'gh' not found — cannot verify CI passed for $SHORT." >&2
+              echo "   Install it (brew install gh) or bypass with SKIP_CI_CHECK=1." >&2
+              exit 1
+            fi
+            echo "→ Verifying CI passed for $REF ($SHORT)..."
+            CI_RESULT=$(gh run list --workflow=ci.yml --commit "$REF_SHA" --limit 1 --json status,conclusion --jq '.[0] | "\(.status):\(.conclusion)"' 2>/dev/null || echo "error")
+            case "$CI_RESULT" in
+              completed:success)
+                echo "✅ CI green for $SHORT" ;;
+              completed:*)
+                echo "❌ CI for $SHORT did not pass (conclusion: ${CI_RESULT#completed:})." >&2
+                echo "   Fix CI on this commit, or bypass with SKIP_CI_CHECK=1." >&2
+                exit 1 ;;
+              error|:|null:null|"")
+                echo "❌ No CI run found for $SHORT (or 'gh' could not reach GitHub)." >&2
+                echo "   Push the commit and let CI finish, or bypass with SKIP_CI_CHECK=1." >&2
+                exit 1 ;;
+              *)
+                echo "❌ CI for $SHORT has not finished (status: ${CI_RESULT%%:*})." >&2
+                echo "   Wait for CI to complete, or bypass with SKIP_CI_CHECK=1." >&2
+                exit 1 ;;
+            esac ;;
+        esac
+        WT="{{.WORKTREE_DIR}}/ref-$SHORT"
+        if [ -d "$WT" ]; then
+          WT_SHA=$(git -C "$WT" rev-parse HEAD 2>/dev/null || echo "")
+          if [ "$WT_SHA" != "$REF_SHA" ]; then
+            echo "→ Recreating stale worktree $WT (expected $SHORT, found ${WT_SHA:-unknown})..."
+            git worktree remove --force "$WT" >/dev/null
           fi
-          echo ""
-          echo "Steps:"
-          echo "  1. docker compose down (trades-exporter-prod)"
-          echo "  2. docker compose up -d with tag :$REF"
-          echo ""
-          echo "Compose config:"
-          ENV_NAME=prod IMAGE_TAG=$REF docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod config
-          exit 0
         fi
-
-        # Check if it's an existing image tag first
-        if docker image inspect trades-exporter-backend:$REF > /dev/null 2>&1; then
-          VERSION="$REF"
-          echo "Deploying existing image: $VERSION"
-        else
-          # Try to build from git ref
-          echo "No image found for :$REF — attempting to build from git ref..."
-          # Outer prompt already confirmed; bake the prod API port into the frontend.
-          task --yes build:ref REF="$REF" BACKEND_PORT="$BACKEND_PORT" || { echo "❌ Failed to build from $REF"; exit 1; }
-          SHA=$(git rev-parse --short=7 "$REF")
-          VERSION="ref-$SHA"
-          echo "Built $REF → :$VERSION"
+        if [ ! -d "$WT" ]; then
+          echo "→ Creating worktree $WT from $REF ($SHORT)..."
+          mkdir -p "{{.WORKTREE_DIR}}"
+          git worktree add --detach "$WT" "$REF_SHA" >/dev/null
         fi
-
-        docker tag "trades-exporter-backend:$VERSION" "trades-exporter-backend:$IMAGE_TAG"
-        docker tag "trades-exporter-frontend:$VERSION" "trades-exporter-frontend:$IMAGE_TAG"
-        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
-        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
-        if SHA=$(git rev-parse --verify --quiet "$REF^{commit}" 2>/dev/null); then
-          for C in backend frontend; do
-            git update-ref --create-reflog -m "deploy prod $C" "refs/deploys/prod/$C" "$SHA"
-          done
-          echo "📌 Recorded deploy: refs/deploys/prod/{backend,frontend} → $(git rev-parse --short=7 "$SHA")"
-        fi
-        sleep 5
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Deployed to LOCAL PROD: $VERSION"
-        echo ""
-        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
-        echo "   Backend:  http://localhost:${BACKEND_PORT}"
-        echo "   Database: localhost:${POSTGRES_PORT}"
-        echo "═══════════════════════════════════════════════════════════════"
-
-  # ════════════════════════════════════════════════════════════════════════
-  # PROD (local docker-compose) — per-component deploys
-  #
-  #   deploy:prod:local:<component> -- <tag>   atomic single-component deploy
-  #                                             from a SHA-pinned worktree
-  #   deploy:prod:local:cwd                     all components from the working
-  #                                             directory (no git gates, not recorded)
-  #
-  # The currently deployed image of each component is tagged
-  # trades-exporter-<component>:prod (IMAGE_TAG=prod in config/prod.local.env),
-  # so `task start:prod:local` always restarts what was last deployed.
-  #
-  # Deployment tracking: after each successful component deploy the deployed
-  # SHA is written to the LOCAL ref refs/deploys/<env>/<component> (prod is
-  # local-only, so nothing is pushed). `git reflog refs/deploys/prod/backend`
-  # gives the audit log.
-  # ════════════════════════════════════════════════════════════════════════
+        echo "✅ Staging deploy worktree ready: $WT (ref $REF @ $SHORT)"
 
   _prepare-ref-prod:
     internal: true
@@ -362,21 +214,67 @@ tasks:
         git update-ref --create-reflog -m "deploy $ENV $COMPONENT" "$REF_PATH" "$SHA"
         echo "📌 Recorded deploy: $REF_PATH → $(git rev-parse --short=7 "$SHA")"
 
-  _prod-db-up:
-    internal: true
+  # ══════════════════════════════════════════════════════════════════════════
+  # CWD primitives — deploy SOURCE_DIR (default: working directory), no git
+  # gates, no worktree. GIT_SHA (when given) is recorded in refs/deploys.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  staging:local:cwd:db:
+    desc: "[CWD primitive] Run local staging DB migrations from CWD/SOURCE_DIR."
     dotenv:
       [
         config/base.env,
-        config/prod.local.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.prod.local.env,
+        config/secrets.staging.local.env,
       ]
+    vars:
+      SOURCE_DIR: '{{.SOURCE_DIR | default "."}}'
     cmds:
-      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --wait postgres
+      - bash .taskfiles/deploy_component.sh db "{{.SOURCE_DIR}}"
+      - task: _record-deploy
+        vars: { ENV: staging, COMPONENT: db, SHA: '{{.GIT_SHA | default ""}}' }
 
-  prod:local:db:
-    desc: "Run prod DB migrations from a release tag (e.g. task deploy:prod:local:db -- db-v1.2.0)."
-    prompt: "This will migrate the PRODUCTION database. Continue?"
+  staging:local:cwd:backend:
+    desc: "[CWD primitive] Build + deploy the local staging backend from CWD/SOURCE_DIR."
+    dotenv:
+      [
+        config/base.env,
+        config/staging.local.env,
+        config/secrets.env,
+        config/secrets.staging.local.env,
+      ]
+    vars:
+      SOURCE_DIR: '{{.SOURCE_DIR | default "."}}'
+    cmds:
+      - bash .taskfiles/deploy_component.sh backend "{{.SOURCE_DIR}}"
+      - task: _record-deploy
+        vars:
+          { ENV: staging, COMPONENT: backend, SHA: '{{.GIT_SHA | default ""}}' }
+
+  staging:local:cwd:frontend:
+    desc: "[CWD primitive] Build + deploy the local staging frontend from CWD/SOURCE_DIR."
+    dotenv:
+      [
+        config/base.env,
+        config/staging.local.env,
+        config/secrets.env,
+        config/secrets.staging.local.env,
+      ]
+    vars:
+      SOURCE_DIR: '{{.SOURCE_DIR | default "."}}'
+    cmds:
+      - bash .taskfiles/deploy_component.sh frontend "{{.SOURCE_DIR}}"
+      - task: _record-deploy
+        vars:
+          {
+            ENV: staging,
+            COMPONENT: frontend,
+            SHA: '{{.GIT_SHA | default ""}}',
+          }
+
+  prod:local:cwd:db:
+    desc: "[CWD primitive] Run local prod DB migrations from CWD/SOURCE_DIR."
     dotenv:
       [
         config/base.env,
@@ -385,27 +283,14 @@ tasks:
         config/secrets.prod.local.env,
       ]
     vars:
-      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      SOURCE_DIR: '{{.SOURCE_DIR | default "."}}'
     cmds:
-      - task: _prepare-ref-prod
-        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
-      - task: _prod-db-up
-      - |
-        SHA=$(git rev-parse "{{.REF}}^{commit}")
-        WT="{{.WORKTREE_DIR}}/ref-$(git rev-parse --short=7 "$SHA")"
-        echo "Running migrations from $WT against $(echo "$DATABASE_URL" | sed 's/:[^:@]*@/@/')..."
-        # Run from inside the worktree: alembic.ini prepends the cwd to sys.path.
-        cd "$WT" && PYTHONPATH="$PWD" {{.ROOT_DIR}}/.venv/bin/alembic -c backend/alembic.ini upgrade head
+      - bash .taskfiles/deploy_component.sh db "{{.SOURCE_DIR}}"
       - task: _record-deploy
-        vars:
-          ENV: prod
-          COMPONENT: db
-          SHA:
-            sh: git rev-parse "{{.REF}}^{commit}"
+        vars: { ENV: prod, COMPONENT: db, SHA: '{{.GIT_SHA | default ""}}' }
 
-  prod:local:backend:
-    desc: "Build + deploy the prod backend from a release tag (e.g. task deploy:prod:local:backend -- backend-v1.2.0)."
-    prompt: "This will deploy the backend to PRODUCTION. Continue?"
+  prod:local:cwd:backend:
+    desc: "[CWD primitive] Build + deploy the local prod backend from CWD/SOURCE_DIR."
     dotenv:
       [
         config/base.env,
@@ -414,27 +299,16 @@ tasks:
         config/secrets.prod.local.env,
       ]
     vars:
-      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      SOURCE_DIR: '{{.SOURCE_DIR | default "."}}'
+      VERSION_TAG: '{{.VERSION_TAG | default ""}}'
     cmds:
-      - task: _prepare-ref-prod
-        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
-      - |
-        SHA=$(git rev-parse "{{.REF}}^{commit}")
-        WT="{{.WORKTREE_DIR}}/ref-$(git rev-parse --short=7 "$SHA")"
-        docker build -t "trades-exporter-backend:{{.REF}}" -f "$WT/backend/Dockerfile" "$WT"
-        docker tag "trades-exporter-backend:{{.REF}}" "trades-exporter-backend:$IMAGE_TAG"
-        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --no-deps --wait backend
-        echo "✅ Backend {{.REF}} running on http://localhost:${BACKEND_PORT}"
+      - bash .taskfiles/deploy_component.sh backend "{{.SOURCE_DIR}}" "{{.VERSION_TAG}}"
       - task: _record-deploy
         vars:
-          ENV: prod
-          COMPONENT: backend
-          SHA:
-            sh: git rev-parse "{{.REF}}^{commit}"
+          { ENV: prod, COMPONENT: backend, SHA: '{{.GIT_SHA | default ""}}' }
 
-  prod:local:frontend:
-    desc: "Build + deploy the prod frontend from a release tag (e.g. task deploy:prod:local:frontend -- frontend-v1.2.0)."
-    prompt: "This will deploy the frontend to PRODUCTION. Continue?"
+  prod:local:cwd:frontend:
+    desc: "[CWD primitive] Build + deploy the local prod frontend from CWD/SOURCE_DIR."
     dotenv:
       [
         config/base.env,
@@ -443,59 +317,480 @@ tasks:
         config/secrets.prod.local.env,
       ]
     vars:
-      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      SOURCE_DIR: '{{.SOURCE_DIR | default "."}}'
+      VERSION_TAG: '{{.VERSION_TAG | default ""}}'
     cmds:
-      - task: _prepare-ref-prod
-        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
-      - |
-        SHA=$(git rev-parse "{{.REF}}^{commit}")
-        WT="{{.WORKTREE_DIR}}/ref-$(git rev-parse --short=7 "$SHA")"
-        docker build -t "trades-exporter-frontend:{{.REF}}" \
-          --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
-          "$WT/frontend"
-        docker tag "trades-exporter-frontend:{{.REF}}" "trades-exporter-frontend:$IMAGE_TAG"
-        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --no-deps frontend
-        echo "✅ Frontend {{.REF}} running on http://localhost:${FRONTEND_PORT}"
+      - bash .taskfiles/deploy_component.sh frontend "{{.SOURCE_DIR}}" "{{.VERSION_TAG}}"
       - task: _record-deploy
         vars:
-          ENV: prod
-          COMPONENT: frontend
-          SHA:
-            sh: git rev-parse "{{.REF}}^{commit}"
+          { ENV: prod, COMPONENT: frontend, SHA: '{{.GIT_SHA | default ""}}' }
+
+  staging:local:cwd:
+    desc: "[CWD] Full local staging deploy from the working directory: db + backend + frontend (no git checks)."
+    cmds:
+      - task: staging:local:cwd:db
+      - task: staging:local:cwd:backend
+      - task: staging:local:cwd:frontend
 
   prod:local:cwd:
-    desc: "Build all components from the WORKING DIRECTORY and deploy to local prod (db migrations + backend + frontend). Not recorded in refs/deploys. DRY_RUN=1 to preview."
+    desc: "[CWD] Full local prod deploy from the working directory: db + backend + frontend (no git checks, not recorded)."
     prompt: "This will deploy UNCOMMITTED working-directory code to PRODUCTION. Continue?"
+    cmds:
+      - task: prod:local:cwd:db
+      - task: prod:local:cwd:backend
+      - task: prod:local:cwd:frontend
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # STAGING LOCAL — worktree-aware deploys of develop commits
+  # ══════════════════════════════════════════════════════════════════════════
+
+  staging:local:db:
+    desc: "Run local staging DB migrations. REF must be a develop commit."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      WT_ABS:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          SHORT=$(git rev-parse --short=7 "$REF^{commit}" 2>/dev/null) || exit 0
+          echo "$(pwd)/{{.WORKTREE_DIR}}/ref-$SHORT"
+      GIT_SHA:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          git rev-parse "$REF^{commit}" 2>/dev/null || true
+    deps:
+      - task: _prepare-ref-staging
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+    cmds:
+      - task: staging:local:cwd:db
+        vars: { SOURCE_DIR: "{{.WT_ABS}}", GIT_SHA: "{{.GIT_SHA}}" }
+
+  staging:local:backend:
+    desc: "Build + deploy the local staging backend. REF must be a develop commit."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      WT_ABS:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          SHORT=$(git rev-parse --short=7 "$REF^{commit}" 2>/dev/null) || exit 0
+          echo "$(pwd)/{{.WORKTREE_DIR}}/ref-$SHORT"
+      GIT_SHA:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          git rev-parse "$REF^{commit}" 2>/dev/null || true
+    deps:
+      - task: _prepare-ref-staging
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+    cmds:
+      - task: staging:local:cwd:backend
+        vars: { SOURCE_DIR: "{{.WT_ABS}}", GIT_SHA: "{{.GIT_SHA}}" }
+
+  staging:local:frontend:
+    desc: "Build + deploy the local staging frontend. REF must be a develop commit."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      WT_ABS:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          SHORT=$(git rev-parse --short=7 "$REF^{commit}" 2>/dev/null) || exit 0
+          echo "$(pwd)/{{.WORKTREE_DIR}}/ref-$SHORT"
+      GIT_SHA:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          git rev-parse "$REF^{commit}" 2>/dev/null || true
+    deps:
+      - task: _prepare-ref-staging
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+    cmds:
+      - task: staging:local:cwd:frontend
+        vars: { SOURCE_DIR: "{{.WT_ABS}}", GIT_SHA: "{{.GIT_SHA}}" }
+
+  staging:local:
+    desc: "Local staging deploy of components changed since their last staging
+      deploy (db → backend → frontend). Args after --: [<ref>] [db backend
+      frontend] [--all] [--dry-run] [--skip-ci-check]. Default ref: origin/develop."
+    silent: true
+    cmds:
+      - |
+        TASK_SKIP="{{.SKIP_CI_CHECK | default ""}}"
+        [ -n "$TASK_SKIP" ] && export SKIP_CI_CHECK="$TASK_SKIP"
+
+        usage() {
+          echo "Usage: task deploy:staging:local -- [<ref>] [db] [backend] [frontend] [--all] [--dry-run] [--skip-ci-check]"
+          echo "  <ref>            develop commit/branch (default: origin/develop)"
+          echo "  (default)        deploy only components whose files differ from the staging-deployed SHA"
+          echo "  db backend ...   deploy exactly these components"
+          echo "  --all            deploy all three"
+          echo "  --dry-run        show the plan and exit"
+          echo "  --skip-ci-check  skip CI green-check before deploy"
+        }
+
+        REF="{{.REF}}"; ALL=""; DRY=""; LIST=""
+        [ "{{.DRY_RUN}}" = "1" ] && DRY=1
+        set -- {{.CLI_ARGS}}
+        for ARG in "$@"; do
+          case "$ARG" in
+            --all) ALL=1 ;;
+            --dry-run) DRY=1 ;;
+            --skip-ci-check) export SKIP_CI_CHECK=1 ;;
+            -h|--help) usage; exit 0 ;;
+            -*) echo "❌ Unknown flag '$ARG'."; usage; exit 1 ;;
+            db|backend|frontend) LIST="$LIST $ARG" ;;
+            *)
+              if [ -z "$REF" ]; then
+                REF="$ARG"
+              else
+                echo "❌ Unknown component '$ARG'."; usage; exit 1
+              fi ;;
+          esac
+        done
+        [ -z "$REF" ] && REF="origin/develop"
+
+        # Echo-based: a non-zero function return trips errexit in Task's shell.
+        listed() {
+          case " $LIST " in *" $1 "*) echo 1 ;; esac
+        }
+        get() { eval "echo \"\${$1_$2}\""; }
+        comp_path() {
+          case "$1" in
+            db) echo "backend/db/alembic" ;;
+            backend) echo "backend" ;;
+            frontend) echo "frontend" ;;
+          esac
+        }
+
+        git fetch origin develop --quiet 2>/dev/null || true
+        REF_SHA=$(git rev-parse --verify --quiet "$REF^{commit}" 2>/dev/null || true)
+        if [ -z "$REF_SHA" ]; then
+          echo "❌ Git ref '$REF' not found locally or on origin."; exit 1
+        fi
+        SHORT=$(git rev-parse --short=7 "$REF_SHA")
+
+        for C in db backend frontend; do
+          CUR=$(git rev-parse --verify --quiet "refs/deploys/staging/$C" 2>/dev/null || true)
+          if [ -n "$CUR" ]; then
+            CUR_NAME=$(git rev-parse --short=7 "$CUR")
+            # diff (not rev-list) so redeploying an older ref (rollback) is detected too
+            FILES=$(git diff --name-only "$CUR" "$REF_SHA" -- "$(comp_path "$C")" 2>/dev/null | wc -l | tr -d ' ')
+            CH="$FILES files changed"
+          else
+            CUR_NAME="(none)"; FILES=1; CH="never deployed"
+          fi
+          SEL=""
+          if [ -n "$ALL" ]; then
+            SEL=1
+          elif [ -n "$LIST" ]; then
+            SEL=$(listed "$C")
+          elif [ "$FILES" != "0" ]; then
+            SEL=1
+          fi
+          eval "SEL_$C=\$SEL; CUR_$C=\$CUR_NAME; CH_$C=\$CH"
+        done
+
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Deploying LOCAL STAGING"
+        echo "  Ref:      $REF ($SHORT) — from worktree {{.WORKTREE_DIR}}/ref-$SHORT"
+        echo "  Backend:  http://localhost:8001"
+        echo "  Frontend: http://localhost:3001"
+        echo ""
+        printf "  %-3s  %-9s %-10s %s\n" "" "COMPONENT" "DEPLOYED" "CHANGES"
+        ANY=""
+        for C in db backend frontend; do
+          MARK="[ ]"
+          if [ -n "$(get SEL $C)" ]; then MARK="[x]"; ANY=1; fi
+          printf "  %-3s  %-9s %-10s %s\n" "$MARK" "$C" "$(get CUR $C)" "$(get CH $C)"
+        done
+        if [ -n "$SKIP_CI_CHECK" ]; then echo "  ⏭️  CI green-check will be skipped."; fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        if [ -z "$ANY" ]; then
+          echo "Nothing to deploy (use --all or list components to force)."
+          exit 0
+        fi
+        if [ -n "$DRY" ]; then
+          echo ""
+          echo "Dry run — would run:"
+          for C in db backend frontend; do
+            if [ -n "$(get SEL $C)" ]; then echo "  task deploy:staging:local:$C REF=$REF"; fi
+          done
+          exit 0
+        fi
+
+        BEFORE=""
+        for C in db backend frontend; do
+          BEFORE="$BEFORE $C=$(git rev-parse --verify --quiet "refs/deploys/staging/$C" 2>/dev/null || echo -)"
+        done
+        FAILED=""
+        for C in db backend frontend; do
+          [ -n "$(get SEL $C)" ] || continue
+          echo ""
+          echo "━━━━ $C ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if ! task deploy:staging:local:$C REF="$REF"; then
+            echo "❌ $C deploy failed; stopping."; FAILED="$C"; break
+          fi
+        done
+        task deploy:_recap ENV=staging BEFORE="$BEFORE" FAILED="$FAILED"
+        [ -z "$FAILED" ] || exit 1
+
+  staging:local:ref:
+    desc: "Quick full rebuild of local staging from ANY git ref (no develop/CI gates, not recorded). DRY_RUN=1 to preview. (e.g., task deploy:staging:local:ref -- feature/my-branch)"
     dotenv:
       [
         config/base.env,
-        config/prod.local.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.prod.local.env,
+        config/secrets.staging.local.env,
       ]
     vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
       - |
-        TAG="dirty-$(date +%Y%m%d-%H%M%S)"
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ Usage:"
+          echo "   task deploy:staging:local:ref -- feature/my-branch"
+          echo "   task deploy:staging:local:ref REF=feature/my-branch"
+          exit 1
+        fi
+        SHA=$(git rev-parse --short=7 "$REF" 2>/dev/null || echo "unknown")
+        TAG="ref-$SHA"
+        COMPOSE="docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging"
         if [ "{{.DRY_RUN}}" = "1" ]; then
-          echo "🔍 DRY RUN — would deploy working directory to LOCAL PROD as :$TAG → :$IMAGE_TAG"
-          echo "  1. docker build backend + frontend"
-          echo "  2. alembic upgrade head on localhost:$POSTGRES_PORT/$POSTGRES_DB"
-          echo "  3. docker compose up -d (trades-exporter-prod)"
+          echo "🔍 DRY RUN — would deploy to LOCAL STAGING (from $REF @ $SHA)"
+          echo "  1. task build:ref REF=$REF"
+          echo "  2. $COMPOSE down && up -d with tag :$TAG"
           exit 0
         fi
-        docker build -t "trades-exporter-backend:$TAG" -f backend/Dockerfile .
-        docker build -t "trades-exporter-frontend:$TAG" --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT ./frontend
-        docker tag "trades-exporter-backend:$TAG" "trades-exporter-backend:$IMAGE_TAG"
-        docker tag "trades-exporter-frontend:$TAG" "trades-exporter-frontend:$IMAGE_TAG"
-        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --wait postgres
-        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/alembic -c {{.ROOT_DIR}}/backend/alembic.ini upgrade head
-        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
+        task build:ref REF="$REF"
+        IMAGE_TAG=$TAG $COMPOSE down
+        IMAGE_TAG=$TAG $COMPOSE up -d
         echo ""
-        echo "✅ Deployed working directory to LOCAL PROD (:$TAG)"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to LOCAL STAGING (from $REF @ $SHA, tag :$TAG)"
         echo "   Frontend: http://localhost:${FRONTEND_PORT}"
         echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo ""
+        echo "Next steps:"
+        echo "   task open:isolated:staging:local   → Open in isolated browser"
+        echo "   task logs:staging:local            → View logs"
+        echo "   task git:worktree:clean            → Clean temp worktrees"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # PROD LOCAL — worktree-aware deploys of release tags
+  #
+  # Each prod deploy displays "current → next + diff" before prompting.
+  # The prompt text is computed at parse time via vars.sh:.
+  # The deployed image is also tagged trades-exporter-<component>:prod
+  # (IMAGE_TAG in config/prod.local.env), which `task start:prod:local` runs.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  prod:local:db:
+    desc: "Run local prod DB migrations. REF must be an annotated release tag (e.g. task deploy:prod:local:db -- db-v1.2.0)."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      WT_ABS:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          SHORT=$(git rev-parse --short=7 "$REF^{commit}" 2>/dev/null) || exit 0
+          echo "$(pwd)/{{.WORKTREE_DIR}}/ref-$SHORT"
+      GIT_SHA:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          git rev-parse "$REF^{commit}" 2>/dev/null || true
+      DEPLOY_INFO:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          CUR=$(git rev-parse refs/deploys/prod/db 2>/dev/null || echo "")
+          CUR_NAME="(none)"
+          [ -n "$CUR" ] && CUR_NAME=$(git describe --tags --always --match "db-v*" "$CUR" 2>/dev/null || echo "$CUR")
+          echo "current=$CUR_NAME → next=$REF"
+    deps:
+      - task: _prepare-ref-prod
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+    preconditions:
+      - sh: |
+          REF="{{.REF}}"
+          case "$REF" in
+            db-v[0-9]*|v[0-9]*) exit 0 ;;
+            backend-v[0-9]*|frontend-v[0-9]*)
+              echo "❌ Tag '$REF' is for a different component. Use 'task deploy:prod:local:db -- db-vX.Y.Z'." >&2; exit 1 ;;
+          esac
+        msg: "REF must be db-vX.Y.Z (or legacy vX.Y.Z)"
+    prompt: |
+      PROD DB MIGRATION
+      {{.DEPLOY_INFO}}
+      Continue?
+    cmds:
+      - task: prod:local:cwd:db
+        vars: { SOURCE_DIR: "{{.WT_ABS}}", GIT_SHA: "{{.GIT_SHA}}" }
+
+  prod:local:backend:
+    desc: "Build + deploy the local prod backend. REF must be an annotated release tag (e.g. task deploy:prod:local:backend -- backend-v1.2.0)."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      WT_ABS:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          SHORT=$(git rev-parse --short=7 "$REF^{commit}" 2>/dev/null) || exit 0
+          echo "$(pwd)/{{.WORKTREE_DIR}}/ref-$SHORT"
+      GIT_SHA:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          git rev-parse "$REF^{commit}" 2>/dev/null || true
+      DEPLOY_INFO:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          CUR=$(git rev-parse refs/deploys/prod/backend 2>/dev/null || echo "")
+          CUR_NAME="(none)"
+          [ -n "$CUR" ] && CUR_NAME=$(git describe --tags --always --match "backend-v*" "$CUR" 2>/dev/null || echo "$CUR")
+          DIFF=""
+          if [ -n "$CUR" ] && git rev-parse --verify "$REF" >/dev/null 2>&1; then
+            COUNT=$(git rev-list --count "$CUR..$REF^{commit}" 2>/dev/null || echo "?")
+            DIFF=" ($COUNT commits ahead)"
+          fi
+          echo "current=$CUR_NAME → next=$REF$DIFF"
+    deps:
+      - task: _prepare-ref-prod
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+    preconditions:
+      - sh: |
+          REF="{{.REF}}"
+          case "$REF" in
+            backend-v[0-9]*|v[0-9]*) exit 0 ;;
+            db-v[0-9]*|frontend-v[0-9]*)
+              echo "❌ Tag '$REF' is for a different component. Use 'task deploy:prod:local:backend -- backend-vX.Y.Z'." >&2; exit 1 ;;
+          esac
+        msg: "REF must be backend-vX.Y.Z (or legacy vX.Y.Z)"
+    prompt: |
+      PROD BACKEND DEPLOY
+      {{.DEPLOY_INFO}}
+      Continue?
+    cmds:
+      - task: prod:local:cwd:backend
+        vars:
+          {
+            SOURCE_DIR: "{{.WT_ABS}}",
+            GIT_SHA: "{{.GIT_SHA}}",
+            VERSION_TAG: "{{.REF}}",
+          }
+
+  prod:local:frontend:
+    desc: "Build + deploy the local prod frontend. REF must be an annotated release tag (e.g. task deploy:prod:local:frontend -- frontend-v1.2.0)."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      WT_ABS:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          SHORT=$(git rev-parse --short=7 "$REF^{commit}" 2>/dev/null) || exit 0
+          echo "$(pwd)/{{.WORKTREE_DIR}}/ref-$SHORT"
+      GIT_SHA:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          git rev-parse "$REF^{commit}" 2>/dev/null || true
+      DEPLOY_INFO:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          CUR=$(git rev-parse refs/deploys/prod/frontend 2>/dev/null || echo "")
+          CUR_NAME="(none)"
+          [ -n "$CUR" ] && CUR_NAME=$(git describe --tags --always --match "frontend-v*" "$CUR" 2>/dev/null || echo "$CUR")
+          echo "current=$CUR_NAME → next=$REF"
+    deps:
+      - task: _prepare-ref-prod
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+    preconditions:
+      - sh: |
+          REF="{{.REF}}"
+          case "$REF" in
+            frontend-v[0-9]*|v[0-9]*) exit 0 ;;
+            db-v[0-9]*|backend-v[0-9]*)
+              echo "❌ Tag '$REF' is for a different component. Use 'task deploy:prod:local:frontend -- frontend-vX.Y.Z'." >&2; exit 1 ;;
+          esac
+        msg: "REF must be frontend-vX.Y.Z (or legacy vX.Y.Z)"
+    prompt: |
+      PROD FRONTEND DEPLOY
+      {{.DEPLOY_INFO}}
+      Continue?
+    cmds:
+      - task: prod:local:cwd:frontend
+        vars:
+          {
+            SOURCE_DIR: "{{.WT_ABS}}",
+            GIT_SHA: "{{.GIT_SHA}}",
+            VERSION_TAG: "{{.REF}}",
+          }
+
+  prod:local:
+    desc: "Full local prod deploy: DB migrations + backend + frontend from ONE
+      legacy release tag (e.g., task deploy:prod:local -- v1.2.0). For
+      per-component tags use task release:prod."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      DEPLOY_INFO:
+        sh: |
+          REF="{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+          [ -z "$REF" ] && exit 0
+          CUR=$(git rev-parse refs/deploys/prod/backend 2>/dev/null || echo "")
+          CUR_NAME="(none)"
+          [ -n "$CUR" ] && CUR_NAME=$(git describe --tags --always --match "backend-v*" "$CUR" 2>/dev/null || echo "$CUR")
+          DIFF=""
+          LOG=""
+          if [ -n "$CUR" ] && git rev-parse --verify "$REF" >/dev/null 2>&1; then
+            COUNT=$(git rev-list --count "$CUR..$REF^{commit}" 2>/dev/null || echo "?")
+            DIFF=" ($COUNT commits)"
+            LOG=$(git log --oneline "$CUR..$REF^{commit}" 2>/dev/null | head -20)
+          fi
+          printf "current=%s → next=%s%s\n%s" "$CUR_NAME" "$REF" "$DIFF" "$LOG"
+      BEFORE:
+        sh: |
+          for C in db backend frontend; do
+            printf "%s=%s " "$C" "$(git rev-parse --verify --quiet "refs/deploys/prod/$C" 2>/dev/null || echo -)"
+          done
+    deps:
+      - task: _prepare-ref-prod
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+    prompt: |
+      ⚠️  DEPLOY TO PRODUCTION
+
+      {{.DEPLOY_INFO}}
+
+      Continue?
+    cmds:
+      - |
+        SHORT=$(git rev-parse --short=7 "{{.REF}}^{commit}")
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Deploying LOCAL PRODUCTION"
+        echo "  Tag:      {{.REF}} ($SHORT) — from worktree {{.WORKTREE_DIR}}/ref-$SHORT"
+        echo "  Backend:  http://localhost:8080"
+        echo "  Frontend: http://localhost:3000"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - echo "━━━━ [1/3] DB migrations ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - task: prod:local:db
+        vars: { REF: "{{.REF}}" }
+      - echo "━━━━ [2/3] Backend ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - task: prod:local:backend
+        vars: { REF: "{{.REF}}" }
+      - echo "━━━━ [3/3] Frontend ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - task: prod:local:frontend
+        vars: { REF: "{{.REF}}" }
+      - task: _recap
+        vars: { ENV: prod, BEFORE: "{{.BEFORE}}" }
 
   # ──────────────────────────────────────────────────────────────────────────
   # Recap: what an orchestrator run deployed, by comparing refs/deploys/<env>/*
@@ -507,7 +802,6 @@ tasks:
 
   _recap:
     silent: true
-    dotenv: [config/prod.local.env]
     cmds:
       - |
         ENV="{{.ENV}}"; FAILED="{{.FAILED}}"
@@ -570,8 +864,9 @@ tasks:
           exit 0
         fi
         echo ""
-        case " $DONE " in *" backend "*) echo "  Backend:  http://localhost:${BACKEND_PORT:-8080}" ;; esac
-        case " $DONE " in *" frontend "*) echo "  Frontend: http://localhost:${FRONTEND_PORT:-3000}" ;; esac
+        if [ "$ENV" = "prod" ]; then API_PORT=8080; WEB_PORT=3000; else API_PORT=8001; WEB_PORT=3001; fi
+        case " $DONE " in *" backend "*) echo "  Backend:  http://localhost:$API_PORT" ;; esac
+        case " $DONE " in *" frontend "*) echo "  Frontend: http://localhost:$WEB_PORT" ;; esac
         echo ""
         echo "  Verify:"
         echo "    task open:isolated:$ENV:local    → open in isolated browser"
@@ -629,7 +924,8 @@ tasks:
             RELEASED="${T:-(none)}"
           fi
           if SHA=$(git rev-parse --verify --quiet "$REF_PATH" 2>/dev/null); then
-            NAME=$(git describe --tags --always "$SHA" 2>/dev/null || git rev-parse --short=7 "$SHA")
+            NAME=$(git describe --tags --exact-match --match "${COMP}-v*" "$SHA" 2>/dev/null \
+              || git describe --tags --always --match "${COMP}-v*" "$SHA" 2>/dev/null || git rev-parse --short=7 "$SHA")
             DATE=$(git log -1 --format=%cd --date=short "$SHA" 2>/dev/null || echo "?")
             if [ -n "$LATEST" ] && [ "$SHA" != "$LATEST" ]; then
               AHEAD=$(git rev-list --count "$SHA..$LATEST" 2>/dev/null || echo "?")
