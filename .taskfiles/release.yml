@@ -126,8 +126,10 @@ tasks:
             echo "  ⚠️  Uncommitted changes detected in your working tree."
             echo "      The release flow deploys the TAG on main from a clean"
             echo "      worktree — your local edits will NOT be included."
-            echo "      To deploy the working directory instead, use:"
-            echo "        task deploy:prod:local:cwd"
+            echo "      For a working-directory redeploy (e.g. Dockerfile, env),"
+            echo "      use the CWD path instead:"
+            echo "        task deploy:prod:local:cwd:${COMPONENT}"
+            echo "      (or :staging:local:cwd:${COMPONENT} to test on staging first)"
           fi
           echo "═══════════════════════════════════════════════════════════════"
           printf "Type the version to release [%s]: " "$SUGGESTED"

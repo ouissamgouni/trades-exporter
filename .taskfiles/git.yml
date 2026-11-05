@@ -163,10 +163,12 @@ tasks:
 
         # Print next steps based on target
         if [ "$TARGET" = "main" ]; then
-          echo "Next steps:"
-          echo "   task git:release:tag -- vX.Y.Z     → Tag the release"
-          echo "   task deploy:prod:local -- vX.Y.Z   → Deploy to local prod"
-          echo "   task release -- vX.Y.Z             → Tag + deploy combined"
+          # Suggest next patch version per component from the latest tags
+          git fetch origin main --tags --quiet 2>/dev/null || true
+          echo "Next steps (latest tags: $(for C in db backend frontend; do git tag -l "$C-v*" --sort=-version:refname | head -1; done | tr '\n' ' '))"
+          echo "   task release:prod -- --fast            → Tag + deploy changed components (one confirm)"
+          echo "   task release:prod -- --dry-run         → Show the --fast plan only"
+          echo "   task release:prod                      → Interactive: prompts per component"
           echo ""
           echo "⚠️  Don't forget to cherry-pick into develop if needed:"
           echo "   git checkout develop && git cherry-pick <commit>"
@@ -251,10 +253,12 @@ tasks:
         echo ""
         echo "✅ Release merged: develop → main"
         echo ""
-        echo "Next steps:"
-        echo "   task git:release:tag -- vX.Y.Z      → Tag the release"
-        echo "   task deploy:prod:local -- vX.Y.Z    → Deploy to local prod"
-        echo "   task release -- vX.Y.Z              → Tag + deploy combined"
+        # Suggest next patch version per component from the latest tags
+        git fetch origin main --tags --quiet 2>/dev/null || true
+        echo "Next steps (latest tags: $(for C in db backend frontend; do git tag -l "$C-v*" --sort=-version:refname | head -1; done | tr '\n' ' '))"
+        echo "   task release:prod -- --fast            → Tag + deploy changed components (one confirm)"
+        echo "   task release:prod -- --dry-run         → Show the --fast plan only"
+        echo "   task release:prod                      → Interactive: prompts per component"
 
   release:tag:
     desc: Tag a release on main and push (e.g., task git:release:tag -- v1.2.0)
@@ -304,8 +308,7 @@ tasks:
         echo "✅ Tagged $VERSION"
         echo ""
         echo "Next steps:"
-        echo "   task deploy:prod:local -- $VERSION   → Build + deploy to local prod"
-        echo "   task release -- $VERSION             → Deploy to prod (combined)"
+        echo "   task deploy:prod:local -- $VERSION   → Deploy to local prod (no checkout needed)"
 
   release:tag-component:
     desc: "Tag a per-component release on main and push
@@ -459,27 +462,35 @@ tasks:
   # Worktree Management
   # ════════════════════════════════════════════════════════════════
 
-  worktree:setup:
-    desc: Create persistent worktrees for main and develop branches
-    cmds:
-      - task: _provision-main-worktree
-      - task: _provision-develop-worktree
-      - |
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Worktrees ready"
-        echo ""
-        echo "   {{.WORKTREE_MAIN}}     → origin/main snapshot"
-        echo "   {{.WORKTREE_DEVELOP}} → origin/develop snapshot"
-        echo ""
-        echo "These detached snapshots are used for safe builds/deploys"
-        echo "without disrupting your current working directory."
-        echo "═══════════════════════════════════════════════════════════════"
-
-  worktree:setup:ref:
-    desc: Create temporary worktree for specific git ref
+  worktree:create:
+    desc:
+      "Create a worktree for any branch/ref (e.g., task git:worktree:create -- main,
+      or task git:worktree:create -- origin/develop). main/develop → persistent
+      snapshot; anything else → detached .worktrees/ref-<sha>."
+    aliases: [worktree:setup:ref]
     vars:
-      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      REF: "{{if .BRANCH}}{{.BRANCH}}{{else if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+    cmds:
+      - |
+        if [ -z "{{.REF}}" ]; then
+          echo "❌ BRANCH required"
+          echo "   Usage: task git:worktree:create -- <branch|ref>"
+          echo "   Examples:"
+          echo "      task git:worktree:create -- main"
+          echo "      task git:worktree:create -- origin/develop"
+          echo "      task git:worktree:create -- feature/my-feature"
+          exit 1
+        fi
+      - task: _provision-main-worktree
+        if: '[ "{{.REF}}" = "main" ]'
+      - task: _provision-develop-worktree
+        if: '[ "{{.REF}}" = "develop" ]'
+      - task: _create-ref-worktree
+        if: '[ "{{.REF}}" != "main" ] && [ "{{.REF}}" != "develop" ]'
+        vars: { REF: "{{.REF}}" }
+
+  _create-ref-worktree:
+    internal: true
     deps:
       - task: _resolve-ref
         vars: { REF: "{{.REF}}" }
@@ -637,7 +648,8 @@ tasks:
         [ -d "{{.WORKTREE_DEVELOP}}" ] && echo "  ✅ {{.WORKTREE_DEVELOP}}"
 
   worktree:update:
-    desc: Update persistent worktrees from origin/main and origin/develop
+    desc: Update persistent worktrees (main + develop snapshots from origin)
+    aliases: [worktree:setup]
     cmds:
       - task: _provision-main-worktree
       - task: _provision-develop-worktree

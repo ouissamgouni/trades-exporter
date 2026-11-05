@@ -50,6 +50,7 @@ tasks:
           LABEL: staging-local
 
   shared:prod:local:
+    aliases: [shared:prod]
     desc: Focus or open local prod in the default Chrome profile
     dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.local.env"]
     cmds:
@@ -100,6 +101,7 @@ tasks:
           RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
 
   isolated:prod:local:
+    aliases: [isolated:prod]
     desc: Open isolated local prod Chrome session(s). COUNT=N RESET_BROWSER=1 supported.
     dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/prod.local.env"]
     cmds:

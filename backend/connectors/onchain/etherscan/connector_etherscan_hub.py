@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.config.loader import configure_logging, load_settings
+from backend.config.loader import configure_logging, get_etherscan_api_key, load_settings
 
 log = configure_logging(__name__)
 
@@ -69,8 +69,7 @@ class ConnectorEtherscanHub(BaseHubConnector):
         
         if not test_mode and not renormalize_mode:
             # Live mode: validate API key
-            web3_config = load_settings().get("web3_wallets", {})
-            api_key = web3_config.get("etherscan_api_key", "")
+            api_key = get_etherscan_api_key()
             if not api_key:
                 raise ValueError("Missing API KEY")
         
@@ -128,8 +127,7 @@ class ConnectorEtherscanHub(BaseHubConnector):
         from decimal import Decimal
         from backend.connectors.base.base_connector import BalanceEntry
 
-        web3_config = load_settings().get("web3_wallets", {})
-        api_key = web3_config.get("etherscan_api_key", "")
+        api_key = get_etherscan_api_key()
         registry = get_connector_registry()
         chain_config = registry.get_chain_config("etherscan", self.chain_name)
         chain_id = chain_config.chain_id if chain_config else 1

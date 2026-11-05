@@ -29,6 +29,7 @@ tasks:
       - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging logs -f
 
   prod:local:
+    aliases: [prod]
     desc: View prod stack logs
     dotenv:
       [

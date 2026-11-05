@@ -201,6 +201,7 @@ tasks:
         '
 
   status:prod:local:
+    aliases: [status:prod]
     desc: Show migration status on prod
     dotenv:
       [
@@ -257,6 +258,55 @@ tasks:
         else
           echo "✅ Migration chain is healthy (single head, up to date)"
         fi
+
+  check:staging:local:
+    aliases: [check:staging]
+    desc: "Test connectivity + validate migration state for the local staging DB (port 5433)"
+    dotenv:
+      [
+        config/base.env,
+        config/staging.local.env,
+        config/secrets.env,
+        config/secrets.staging.local.env,
+      ]
+    cmds:
+      - |
+        echo "Checking local staging DB ($(echo "$DATABASE_URL" | sed 's/:[^:@]*@/@/'))..."
+        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini check 2>&1 && \
+          echo "✅ Connected. Migrations are up to date" || \
+          echo "⚠️  Connected but migrations need attention"
+        echo "Current revision:"
+        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current
+
+  check:prod:local:
+    aliases: [check:prod]
+    desc: "Test connectivity + validate migration state for the local prod DB (port 5434)"
+    dotenv:
+      [
+        config/base.env,
+        config/prod.local.env,
+        config/secrets.env,
+        config/secrets.prod.local.env,
+      ]
+    cmds:
+      - |
+        echo "Checking local prod DB ($(echo "$DATABASE_URL" | sed 's/:[^:@]*@/@/'))..."
+        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini check 2>&1 && \
+          echo "✅ Connected. Migrations are up to date" || \
+          echo "⚠️  Connected but migrations need attention"
+        echo "Current revision:"
+        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current
+
+  migrate:scenario:
+    desc: "Run migrations on scenario database (SCENARIO=name)"
+    dotenv: [config/base.env, config/scenario.env]
+    vars:
+      SCENARIO: '{{.SCENARIO | default "default"}}'
+    cmds:
+      - |
+        source {{.ROOT_DIR}}/{{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${SC_DB_PORT}/${SC_DB_NAME}" \
+        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini upgrade head
 
   history:dev:
     desc: Show migration history

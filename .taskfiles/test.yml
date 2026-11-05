@@ -18,6 +18,7 @@ tasks:
       - cmd: echo "All unit tests passed"
 
   backend:unit:
+    aliases: [unit:backend]
     desc: Run backend unit + API tests in parallel
     dir: "{{.BACKEND_DIR}}"
     dotenv:
@@ -35,6 +36,7 @@ tasks:
       - '{{.ROOT_DIR}}/.venv/bin/python -m pytest tests/unit/ tests/api/ tests/integration/ -v -n auto -m "not integration" --timeout=30'
 
   frontend:unit:
+    aliases: [unit:frontend]
     desc: Run frontend build, type check, and Vitest unit tests
     dir: "{{.FRONTEND_DIR}}"
     dotenv:
@@ -54,6 +56,7 @@ tasks:
   # =========================================================================
 
   backend:int:
+    aliases: [int]
     desc: "Run all integration tests against a dedicated scenario database. Self-contained — provisions its own scenario DB via start:scenario:db (default SCENARIO=backend-integration-tests; pass a different SCENARIO=<name> to run against another scenario fixture). Includes live-API/network tests — these self-skip on rate-limit/auth/quota errors instead of hard-failing (see pytest.mark.network tests)."
     dir: "{{.BACKEND_DIR}}"
     dotenv:
@@ -157,3 +160,14 @@ tasks:
       - cmd: echo "=== Phase 3 - Full-Stack E2E ==="
       - task: e2e
       - cmd: echo "All tests passed!"
+
+  ci:
+    desc: Simulate CI pipeline locally (requires act)
+    cmds:
+      - |
+        if ! command -v act &>/dev/null; then
+          echo "❌ 'act' is not installed. Install with:"
+          echo "   brew install act"
+          exit 1
+        fi
+        act push --container-architecture linux/amd64
