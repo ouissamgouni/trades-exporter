@@ -249,7 +249,8 @@ tasks:
     cmds:
       - bash .taskfiles/deploy_component.sh backend "{{.SOURCE_DIR}}"
       - task: _record-deploy
-        vars: { ENV: staging, COMPONENT: backend, SHA: '{{.GIT_SHA | default ""}}' }
+        vars:
+          { ENV: staging, COMPONENT: backend, SHA: '{{.GIT_SHA | default ""}}' }
 
   staging:local:cwd:frontend:
     desc: "[CWD primitive] Build + deploy the local staging frontend from CWD/SOURCE_DIR."
@@ -265,7 +266,12 @@ tasks:
     cmds:
       - bash .taskfiles/deploy_component.sh frontend "{{.SOURCE_DIR}}"
       - task: _record-deploy
-        vars: { ENV: staging, COMPONENT: frontend, SHA: '{{.GIT_SHA | default ""}}' }
+        vars:
+          {
+            ENV: staging,
+            COMPONENT: frontend,
+            SHA: '{{.GIT_SHA | default ""}}',
+          }
 
   prod:local:cwd:db:
     desc: "[CWD primitive] Run local prod DB migrations from CWD/SOURCE_DIR."
@@ -298,7 +304,8 @@ tasks:
     cmds:
       - bash .taskfiles/deploy_component.sh backend "{{.SOURCE_DIR}}" "{{.VERSION_TAG}}"
       - task: _record-deploy
-        vars: { ENV: prod, COMPONENT: backend, SHA: '{{.GIT_SHA | default ""}}' }
+        vars:
+          { ENV: prod, COMPONENT: backend, SHA: '{{.GIT_SHA | default ""}}' }
 
   prod:local:cwd:frontend:
     desc: "[CWD primitive] Build + deploy the local prod frontend from CWD/SOURCE_DIR."
@@ -315,7 +322,8 @@ tasks:
     cmds:
       - bash .taskfiles/deploy_component.sh frontend "{{.SOURCE_DIR}}" "{{.VERSION_TAG}}"
       - task: _record-deploy
-        vars: { ENV: prod, COMPONENT: frontend, SHA: '{{.GIT_SHA | default ""}}' }
+        vars:
+          { ENV: prod, COMPONENT: frontend, SHA: '{{.GIT_SHA | default ""}}' }
 
   staging:local:cwd:
     desc: "[CWD] Full local staging deploy from the working directory: db + backend + frontend (no git checks)."
@@ -673,7 +681,12 @@ tasks:
       Continue?
     cmds:
       - task: prod:local:cwd:backend
-        vars: { SOURCE_DIR: "{{.WT_ABS}}", GIT_SHA: "{{.GIT_SHA}}", VERSION_TAG: "{{.REF}}" }
+        vars:
+          {
+            SOURCE_DIR: "{{.WT_ABS}}",
+            GIT_SHA: "{{.GIT_SHA}}",
+            VERSION_TAG: "{{.REF}}",
+          }
 
   prod:local:frontend:
     desc: "Build + deploy the local prod frontend. REF must be an annotated release tag (e.g. task deploy:prod:local:frontend -- frontend-v1.2.0)."
@@ -716,7 +729,12 @@ tasks:
       Continue?
     cmds:
       - task: prod:local:cwd:frontend
-        vars: { SOURCE_DIR: "{{.WT_ABS}}", GIT_SHA: "{{.GIT_SHA}}", VERSION_TAG: "{{.REF}}" }
+        vars:
+          {
+            SOURCE_DIR: "{{.WT_ABS}}",
+            GIT_SHA: "{{.GIT_SHA}}",
+            VERSION_TAG: "{{.REF}}",
+          }
 
   prod:local:
     desc: "Full local prod deploy: DB migrations + backend + frontend from ONE

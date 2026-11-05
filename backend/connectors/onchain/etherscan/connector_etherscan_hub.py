@@ -8,7 +8,11 @@ from typing import Optional, Dict, Any
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.config.loader import configure_logging, get_etherscan_api_key, load_settings
+from backend.config.loader import (
+    configure_logging,
+    get_etherscan_api_key,
+    load_settings,
+)
 
 log = configure_logging(__name__)
 
@@ -66,13 +70,13 @@ class ConnectorEtherscanHub(BaseHubConnector):
         # Get test/renormalize mode from config
         test_mode = (config or {}).get("test_mode", False)
         renormalize_mode = (config or {}).get("renormalize_mode", False)
-        
+
         if not test_mode and not renormalize_mode:
             # Live mode: validate API key
             api_key = get_etherscan_api_key()
             if not api_key:
                 raise ValueError("Missing API KEY")
-        
+
         # Initialize parent first to get output_path
         super().__init__(
             child_connectors=[],  # Will populate after creating children
@@ -89,7 +93,7 @@ class ConnectorEtherscanHub(BaseHubConnector):
             child_config["test_mode"] = True
         if renormalize_mode:
             child_config["renormalize_mode"] = True
-        
+
         normal_tx_connector = ConnectorEtherscanNormalTx(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
@@ -110,7 +114,7 @@ class ConnectorEtherscanHub(BaseHubConnector):
             ("normal transactions", normal_tx_connector),
             ("token transfers", token_transfers_connector),
         ]
-        
+
         # Update child connectors after creation
         self.child_connectors = child_connectors
 
@@ -150,14 +154,16 @@ class ConnectorEtherscanHub(BaseHubConnector):
             data = resp.json()
             result = data.get("result", "0")
             if result and int(result) > 0:
-                total = Decimal(result) / Decimal(10 ** 18)
-                entries.append(BalanceEntry(
-                    asset_symbol="ETH",
-                    total=total,
-                    available=total,
-                    chain=self.chain_name,
-                    raw=data,
-                ))
+                total = Decimal(result) / Decimal(10**18)
+                entries.append(
+                    BalanceEntry(
+                        asset_symbol="ETH",
+                        total=total,
+                        available=total,
+                        chain=self.chain_name,
+                        raw=data,
+                    )
+                )
         except Exception as e:
             log.warning(f"Failed to fetch native balance from Etherscan: {e}")
 
