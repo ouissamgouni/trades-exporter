@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock, Mock
 
 from backend.services.price_getters.yahoo_direct import YahooDirectPriceGetter
-from backend.services.price_getters.base import PriceGetterConfig, PriceGetterError, PriceResult
+from backend.services.price_getters.base import PriceErrorReason, PriceGetterConfig, PriceGetterError, PriceResult
 
 
 @pytest.fixture
@@ -227,3 +227,24 @@ class TestYahooDirectErrors:
 
         with pytest.raises(PriceGetterError):
             getter.get_current_price(mock_asset)
+
+    @pytest.mark.parametrize(
+        "status_code, expected_reason",
+        [
+            (404, PriceErrorReason.TICKER_NOT_FOUND),
+            (429, PriceErrorReason.API_RATE_LIMITED),
+            (500, PriceErrorReason.API_ERROR),
+        ],
+    )
+    @patch("backend.services.price_getters.yahoo_direct.requests.Session")
+    def test_http_errors_keep_their_reason(self, MockSession, mock_asset, status_code, expected_reason):
+        getter = YahooDirectPriceGetter()
+        getter.max_retries = 1
+        mock_resp = Mock()
+        mock_resp.status_code = status_code
+        getter._session.get = Mock(return_value=mock_resp)
+
+        with pytest.raises(PriceGetterError) as exc_info:
+            getter.get_current_price(mock_asset)
+        assert exc_info.value.reason == expected_reason
+        assert exc_info.value.getter_name == "yahoo_direct"

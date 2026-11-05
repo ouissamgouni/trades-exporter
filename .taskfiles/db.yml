@@ -2,11 +2,12 @@ version: "3"
 
 tasks:
   migrate:dev:
+    aliases: [migrate]
     desc: Run database migrations on dev
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -15,38 +16,41 @@ tasks:
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini upgrade head
       - echo "✅ Dev database migrated"
 
-  migrate:staging:
+  migrate:staging:local:
+    aliases: [migrate:staging]
     desc: Run database migrations on staging
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend python -m alembic upgrade head
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend python -m alembic -c backend/alembic.ini upgrade head
       - echo "✅ Staging database migrated"
 
-  migrate:prod:
+  migrate:prod:local:
+    aliases: [migrate:prod]
     desc: Run database migrations on prod
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend python -m alembic upgrade head
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend python -m alembic -c backend/alembic.ini upgrade head
       - echo "✅ Prod database migrated"
 
   seed:dev:
+    aliases: [seed]
     desc: Seed dev database
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -55,26 +59,28 @@ tasks:
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Dev database seeded"
 
-  seed:staging:
+  seed:staging:local:
+    aliases: [seed:staging]
     desc: Seed staging database
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     cmds:
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend python -m backend.scripts.seed
       - echo "✅ Staging database seeded"
 
   reset:dev:
+    aliases: [reset]
     desc: "⚠️ Reset dev database (drops all tables). DRY_RUN=1 to preview."
     prompt: This will DELETE all data in dev database. Continue?
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -95,15 +101,16 @@ tasks:
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Dev database reset and seeded"
 
-  reset:staging:
+  reset:staging:local:
+    aliases: [reset:staging]
     desc: "⚠️ Reset staging database (drops all tables). DRY_RUN=1 to preview."
     prompt: This will DELETE all data in staging database. Continue?
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
@@ -124,15 +131,16 @@ tasks:
   # directly by the `test:backend:int` / `test:backend:e2e` tasks themselves
   # (see .taskfiles/test.yml).
 
-  reset:prod:
+  reset:prod:local:
+    aliases: [reset:prod]
     desc: "🚨 Reset prod database (DANGEROUS!)"
     prompt: "🚨 This will DELETE ALL PRODUCTION DATA. Are you absolutely sure?"
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     cmds:
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
@@ -145,7 +153,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -170,14 +178,15 @@ tasks:
           echo "✅ Single head - migration chain is clean"
         fi
 
-  status:staging:
+  status:staging:local:
+    aliases: [status:staging]
     desc: Show migration status on staging
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     cmds:
       - |
@@ -185,10 +194,31 @@ tasks:
         echo "========================"
         docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend sh -c '
           echo "Current version:"
-          python -m alembic current
+          python -m alembic -c backend/alembic.ini current
           echo ""
           echo "Head(s):"
-          python -m alembic heads
+          python -m alembic -c backend/alembic.ini heads
+        '
+
+  status:prod:local:
+    desc: Show migration status on prod
+    dotenv:
+      [
+        config/base.env,
+        config/prod.local.env,
+        config/secrets.env,
+        config/secrets.prod.local.env,
+      ]
+    cmds:
+      - |
+        echo "📊 Migration Status (prod)"
+        echo "========================"
+        docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend sh -c '
+          echo "Current version:"
+          python -m alembic -c backend/alembic.ini current
+          echo ""
+          echo "Head(s):"
+          python -m alembic -c backend/alembic.ini heads
         '
 
   check:dev:
@@ -196,7 +226,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -233,7 +263,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -249,7 +279,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -273,7 +303,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -294,7 +324,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -319,7 +349,7 @@ tasks:
   #
   # Generic (any direction):
   #   task db:copy -- dev staging      Same as copy:dev-to-staging
-  #   task db:copy -- dev prod         Any custom combination
+  #   task db:copy -- dev prod         Any custom combination (dev | staging | prod | scenario)
   #
   # Dry-run (preview only):
   #   task db:copy:dry-run -- dev test
@@ -334,7 +364,7 @@ tasks:
       - |
         FLAGS=""
         if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="--dry-run"; fi
-        {{.BACKEND_DIR}}/scripts/db_copy.sh {{.ROOT_DIR}}/config/dev.env {{.ROOT_DIR}}/config/staging.env $FLAGS
+        ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh dev staging $FLAGS
 
   copy:staging-to-dev:
     desc: "🔄 Copy staging database → dev (with schema migration). DRY_RUN=1 to preview."
@@ -345,7 +375,7 @@ tasks:
       - |
         FLAGS="--migrate"
         if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="$FLAGS --dry-run"; fi
-        BACKEND_DIR={{.BACKEND_DIR}} ROOT_DIR={{.ROOT_DIR}} {{.BACKEND_DIR}}/scripts/db_copy.sh {{.ROOT_DIR}}/config/staging.env {{.ROOT_DIR}}/config/dev.env $FLAGS
+        BACKEND_DIR={{.BACKEND_DIR}} ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh staging dev $FLAGS
 
   copy:staging-to-prod:
     desc: "⚠️ Copy staging database → prod (promotes to production). DRY_RUN=1 to preview."
@@ -356,7 +386,7 @@ tasks:
       - |
         FLAGS=""
         if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="--dry-run"; fi
-        {{.BACKEND_DIR}}/scripts/db_copy.sh {{.ROOT_DIR}}/config/staging.env {{.ROOT_DIR}}/config/prod.env $FLAGS
+        ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh staging prod $FLAGS
 
   copy:
     desc: "🔄 Copy a database between any two envs. DRY_RUN=1 to preview. (usage: task db:copy -- <src> <dst> [--migrate])"
@@ -409,15 +439,13 @@ tasks:
           exit 1
         fi
 
-        SRC_ENV="{{.ROOT_DIR}}/config/$SRC.env"
-        DST_ENV="{{.ROOT_DIR}}/config/$DST.env"
 
         if [ "{{.DRY_RUN}}" = "1" ]; then
           EXTRA_FLAGS="$EXTRA_FLAGS --dry-run"
         fi
 
         exec env BACKEND_DIR="{{.BACKEND_DIR}}" ROOT_DIR="{{.ROOT_DIR}}" \
-          "{{.BACKEND_DIR}}/scripts/db_copy.sh" "$SRC_ENV" "$DST_ENV" $EXTRA_FLAGS
+          "{{.ROOT_DIR}}/.taskfiles/db_copy.sh" "$SRC" "$DST" $EXTRA_FLAGS
 
   # === Tag Cleanup ===
 
@@ -426,7 +454,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -466,15 +494,16 @@ tasks:
           {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.cleanup_tags $FLAGS
         echo "✅ Tag cleanup complete"
 
-  cleanup-tags:staging:
+  cleanup-tags:staging:local:
+    aliases: [cleanup-tags:staging]
     desc: "🧹 Clean up user tags from staging database. DRY_RUN=1 to preview."
     prompt: "This will remove user tags from staging transactions. Continue?"
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'

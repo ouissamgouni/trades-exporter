@@ -98,7 +98,7 @@ run_migration() {
 
 # Run dev migration
 if [ "$RUN_PROD" = true ]; then
-    run_migration "DEV" "$ROOT_DIR/config/dev.env"
+    run_migration "DEV" "$ROOT_DIR/scenarios/dev/config.env"
 fi
 
 # Run test migration

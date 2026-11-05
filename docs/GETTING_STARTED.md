@@ -44,7 +44,7 @@ task start:dev
 
 The dev stack starts:
 
-- Database on the dev PostgreSQL port from `config/dev.env`.
+- Database on the dev PostgreSQL port from `scenarios/dev/config.env`.
 - Backend API on <http://localhost:8000> by default.
 - Frontend on <http://localhost:5173> by default.
 

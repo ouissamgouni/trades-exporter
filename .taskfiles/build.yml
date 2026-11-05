@@ -6,9 +6,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     cmds:
       - task: staging:backend
@@ -20,9 +20,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     deps: [":git:_provision-develop-worktree"]
     cmds:
@@ -36,9 +36,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     deps: [":git:_provision-develop-worktree"]
     cmds:
@@ -54,9 +54,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     cmds:
       - task: prod:backend
@@ -70,9 +70,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     deps: [":git:_provision-main-worktree"]
     cmds:
@@ -94,9 +94,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     deps: [":git:_provision-main-worktree"]
     cmds:
@@ -120,9 +120,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
@@ -242,9 +242,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       TAG: '{{.TAG | default ""}}'

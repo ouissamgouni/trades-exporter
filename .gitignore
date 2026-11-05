@@ -16,9 +16,9 @@ scenarios/*/secrets.env
 # wallet addresses, and transactions. Purged from history; do not re-commit.
 scenarios/private-accounts/
 
-# Runtime symlinks created by `task start:scenario:ref` (config/scenario-default.env,
-# config/scenario-<name>.env -> config/scenario.env) so docker-compose.unified.yml's
-# env_file: config/${ENV_NAME}.env lookup resolves.
+# Runtime symlinks created by `task start:scenario:ref` (config/scenario-<name>.local.env
+# -> config/scenario.env) so docker-compose.unified.yml's
+# env_file: config/${ENV_NAME}.local.env lookup resolves.
 config/scenario-*.env
 
 # Persisted scenario port state (written by start:scenario/start:scenario:ref, read by

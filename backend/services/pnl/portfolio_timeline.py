@@ -14,6 +14,7 @@ Strategy:
   5. Compute cumulative realized P&L from RealizedPnl records
 """
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
@@ -28,6 +29,7 @@ from backend.db.models import (
     CostLot,
     CostLotEvent,
     IncomeEvent,
+    PriceSnapshot,
 )
 from backend.config.loader import configure_logging
 from backend.services.pnl.metrics_service import (
@@ -367,3 +369,79 @@ def compute_portfolio_timeline(
     )
 
     return timeline
+
+
+# ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+
+_TIMELINE_CACHE: "OrderedDict[tuple, List[TimelinePoint]]" = OrderedDict()
+_TIMELINE_CACHE_MAX = 32
+
+
+def _price_fingerprint(session: Session) -> tuple:
+    # Version data only changes via force-settle (which clears the cache); prices change independently.
+    return tuple(
+        session.exec(
+            select(
+                func.count(PriceSnapshot.snapshot_id),
+                func.max(PriceSnapshot.snapshot_id),
+                func.sum(PriceSnapshot.price),
+            )
+        ).one()
+    )
+
+
+def compute_portfolio_timeline_cached(
+    session: Session,
+    version_id: int,
+    granularity: str = "daily",
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    asset_ids: Optional[List[int]] = None,
+    account_ids: Optional[List[int]] = None,
+    category_ids: Optional[List[int]] = None,
+    include_unsettled_negative: bool = False,
+) -> List[TimelinePoint]:
+    """compute_portfolio_timeline, memoized per version/filters/price data/day."""
+    kwargs = dict(
+        session=session,
+        version_id=version_id,
+        granularity=granularity,
+        date_from=date_from,
+        date_to=date_to,
+        asset_ids=asset_ids,
+        account_ids=account_ids,
+        category_ids=category_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    # Category membership is mutable and not fingerprinted.
+    if category_ids:
+        return compute_portfolio_timeline(**kwargs)
+
+    key = (
+        version_id,
+        granularity,
+        date_from,
+        date_to,
+        tuple(sorted(asset_ids)) if asset_ids else None,
+        tuple(sorted(account_ids)) if account_ids else None,
+        include_unsettled_negative,
+        # The timeline extends to "now" when date_to is open.
+        datetime.now(timezone.utc).date(),
+        _price_fingerprint(session),
+    )
+    cached = _TIMELINE_CACHE.get(key)
+    if cached is not None:
+        _TIMELINE_CACHE.move_to_end(key)
+        return cached
+
+    points = compute_portfolio_timeline(**kwargs)
+    _TIMELINE_CACHE[key] = points
+    if len(_TIMELINE_CACHE) > _TIMELINE_CACHE_MAX:
+        _TIMELINE_CACHE.popitem(last=False)
+    return points
+
+
+def clear_portfolio_timeline_cache() -> None:
+    _TIMELINE_CACHE.clear()

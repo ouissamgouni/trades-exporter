@@ -72,6 +72,7 @@ def _get_price_getter_classes() -> List[Type["BasePriceGetter"]]:
     from backend.services.price_getters.marketstack import MarketstackPriceGetter
 
     from backend.services.price_getters.mock_getter import MockPriceGetter
+    from backend.services.price_getters.manual import ManualPriceGetter
 
     classes = [
         DataReaderPriceGetter,  # Default for stocks - uses pandas_datareader with Stooq
@@ -82,6 +83,7 @@ def _get_price_getter_classes() -> List[Type["BasePriceGetter"]]:
         AlphaVantagePriceGetter,  # Alpha Vantage (free tier: 25 req/day)
         MarketstackPriceGetter,  # Marketstack (free tier: 100 req/month)
         MockPriceGetter,  # Always registered — enabled/disabled per-asset via DB
+        ManualPriceGetter,  # Stored prices only (assets with no market feed)
     ]
     
     return classes

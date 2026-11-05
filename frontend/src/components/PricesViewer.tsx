@@ -1,6 +1,6 @@
 
 import * as RadixDialog from '@radix-ui/react-dialog';
-import { Button, Heading, Input, Spinner, Text } from './ui/primitives';
+import { Button, Heading, Input, Spinner, Text, PageHeader } from './ui/primitives';
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_URL, Asset, PaginatedPriceSnapshotsResponse, PriceSnapshot } from '../types';
 import { useAssets } from '../hooks/useAssets';
@@ -244,46 +244,48 @@ export const PricesViewer: React.FC = () => {
 
     return (
         <div>
-            <div className="mb-6 flex items-center justify-between border-b border-gray-200 pb-2">
-                <div>
-                    <Heading as="h2" className="mb-1 text-base">💰 Price Snapshots</Heading>
-                    <Text className="text-sm text-gray-600">
-                        {viewMode === 'health'
-                            ? 'Monitor price data freshness and detect anomalies across all assets.'
-                            : 'View and manage historical cryptocurrency price snapshots.'}
-                    </Text>
-                </div>
-                <div className="flex items-center gap-2">
-                    <PriceGapBulkFix
-                        quoteAssetId={baseCurrency.assetId ?? null}
-                        onComplete={viewMode === 'table' ? fetchPrices : undefined}
-                    />
-                    {/* View mode toggle */}
-                    <div className="inline-flex overflow-hidden border border-gray-200">
-                        {([{ value: 'health' as const, label: '🩺 Health' }, { value: 'table' as const, label: '📋 Table' }]).map(opt => (
-                            <Button
-                                key={opt.value}
-                                variant={viewMode === opt.value ? 'solid' : 'ghost'}
-                                colorScheme={viewMode === opt.value ? 'blue' : 'gray'}
-                                onClick={() => setViewMode(opt.value)}
-                                className="px-3 text-sm"
-                            >
-                                {opt.label}
-                            </Button>
-                        ))}
-                    </div>
-                    {viewMode === 'table' && (
-                        <>
-                            <Button colorScheme="blue" onClick={handleAddPrice}>
-                                ➕ Add Price
-                            </Button>
-                            <Button onClick={fetchPrices} variant="outline">
-                                🔄 Refresh
-                            </Button>
-                        </>
-                    )}
-                </div>
-            </div>
+            <PageHeader
+                className="mb-6 border-b border-gray-200 pb-2"
+                title="💰 Price Snapshots"
+                description={
+                    viewMode === 'health'
+                        ? 'Monitor price data freshness and detect anomalies across all assets.'
+                        : 'View and manage historical cryptocurrency price snapshots.'
+                }
+                actions={
+                    <>
+                        <PriceGapBulkFix
+                            quoteAssetId={baseCurrency.assetId ?? null}
+                            onComplete={viewMode === 'table' ? fetchPrices : undefined}
+                        />
+                        {/* View mode toggle */}
+                        <div className="inline-flex overflow-hidden border border-gray-200">
+                            {([{ value: 'health' as const, label: '🩺 Health' }, { value: 'table' as const, label: '📋 Table' }]).map(opt => (
+                                <Button
+                                    key={opt.value}
+                                    size="xs"
+                                    variant={viewMode === opt.value ? 'solid' : 'ghost'}
+                                    colorScheme={viewMode === opt.value ? 'blue' : 'gray'}
+                                    onClick={() => setViewMode(opt.value)}
+                                    className="px-3"
+                                >
+                                    {opt.label}
+                                </Button>
+                            ))}
+                        </div>
+                        {viewMode === 'table' && (
+                            <>
+                                <Button size="xs" colorScheme="blue" onClick={handleAddPrice}>
+                                    ➕ Add Price
+                                </Button>
+                                <Button size="xs" onClick={fetchPrices} variant="outline">
+                                    🔄 Refresh
+                                </Button>
+                            </>
+                        )}
+                    </>
+                }
+            />
 
             {/* === HEALTH VIEW === */}
             {viewMode === 'health' && (

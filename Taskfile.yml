@@ -30,11 +30,6 @@ includes:
     dir: "{{.ROOT_DIR}}"
     vars:
       ROOT_DIR: "{{.ROOT_DIR}}"
-  fly:
-    taskfile: .taskfiles/fly.yml
-    dir: "{{.ROOT_DIR}}"
-    vars:
-      ROOT_DIR: "{{.ROOT_DIR}}"
   git:
     taskfile: .taskfiles/git.yml
     dir: "{{.ROOT_DIR}}"
@@ -112,7 +107,7 @@ tasks:
         echo "  Environment Status"
         echo "═══════════════════════════════════════════════════════════════"
         echo ""
-        docker ps --filter "name=trades_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  No containers running"
+        docker ps --filter "name=trades_" --format 'table {{`{{.Names}}`}}\t{{`{{.Status}}`}}\t{{`{{.Ports}}`}}' 2>/dev/null || echo "  No containers running"
         echo ""
 
   scenarios:
@@ -143,12 +138,21 @@ tasks:
         fi
         printf "  %-34s  %6s  %-5s  %-5s  %-5s  %s\n" "default" "0" "5435" "8002" "3002" "$STATUS"
 
+        # ── Dev scenario (pinned ports) ──
+        STATUS="—"
+        if docker ps --filter "name=^/trades_db_dev$" --format '{{`{{.Names}}`}}' 2>/dev/null | grep -q .; then
+          STATUS="🟢 db"
+          lsof -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1 && STATUS="🟢 local"
+        fi
+        printf "  %-34s  %6s  %-5s  %-5s  %-5s  %s\n" "dev" "pinned" "5432" "8000" "5173" "$STATUS"
+
         # ── Named scenarios from seed directories ──
         if [ -d "$SCENARIOS_DIR" ]; then
           for DIR in "$SCENARIOS_DIR"/*/; do
             [ -d "$DIR" ] || continue
             NAME=$(basename "$DIR")
             [ "$NAME" = "default" ] && continue
+            [ "$NAME" = "dev" ] && continue
 
             # Hash-based offset: cksum of name mod 9999 + 1
             OFFSET=$(printf '%s' "$NAME" | cksum | awk '{print ($1 % 9999) + 1}')
@@ -194,8 +198,77 @@ tasks:
         echo "═══════════════════════════════════════════════════════════════"
 
   default:
+    desc: Show help
     cmds:
       - task: help
+
+  script:
+    desc:
+      "Run any backend script with an env's config. ENV=dev|staging:local|prod:local|scenario
+      (default dev), YES=1 skips the prod prompt. Usage: task script ENV=prod:local -- <script> [args...]"
+    dir: "{{.ROOT_DIR}}"
+    interactive: true
+    silent: true
+    vars:
+      ENV: '{{.ENV | default "dev"}}'
+      YES: '{{.YES | default "0"}}'
+    cmds:
+      - |
+        set -- {{.CLI_ARGS}}
+        if [ $# -eq 0 ]; then
+          echo "Usage: task script [ENV=dev|staging:local|prod:local|scenario] [YES=1] -- <script> [args...]"
+          echo "Scripts:"
+          for f in backend/scripts/*.py; do
+            n=$(basename "$f" .py)
+            [ "$n" = "__init__" ] || echo "  $n"
+          done
+          exit 0
+        fi
+        case "{{.ENV}}" in
+          dev) FILES="config/base.env scenarios/dev/config.env config/secrets.env config/secrets.dev.env" ;;
+          staging:local) FILES="config/base.env config/staging.local.env config/secrets.env config/secrets.staging.local.env" ;;
+          prod:local) FILES="config/base.env config/prod.local.env config/secrets.env config/secrets.prod.local.env" ;;
+          scenario) FILES="config/base.env config/scenario.env config/secrets.env config/secrets.scenario.env" ;;
+          *) echo "❌ Unknown ENV '{{.ENV}}' — use dev | staging:local | prod:local | scenario"; exit 1 ;;
+        esac
+        for f in $FILES; do
+          # secrets files are optional (gitignored)
+          [ -f "$f" ] || continue
+          # Parsed, not sourced: unquoted values like `...?a=b&c=d` break `. file`.
+          while IFS= read -r line || [ -n "$line" ]; do
+            line=${line#export }
+            case "$line" in ''|\#*) continue ;; *=*) ;; *) continue ;; esac
+            key=${line%%=*}
+            val=${line#*=}
+            case "$val" in
+              \"*\") val=${val#\"}; val=${val%\"} ;;
+              \'*\') val=${val#\'}; val=${val%\'} ;;
+            esac
+            export "$key=$val"
+          done < "$f"
+        done
+        if [ "{{.ENV}}" = "scenario" ]; then
+          source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+          export POSTGRES_PORT=$SC_DB_PORT POSTGRES_DB=$SC_DB_NAME
+        fi
+        [ -n "$DATABASE_URL" ] || export DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
+        MODULE=$(echo "$1" | sed -e 's/\.py$//' -e 's#/#.#g')
+        case "$MODULE" in
+          *.*) ;;
+          *) MODULE="backend.scripts.$MODULE" ;;
+        esac
+        shift
+        echo "DB: $(echo "$DATABASE_URL" | sed 's/:[^:@]*@/@/')"
+        if [ "{{.ENV}}" = "prod:local" ] && [ "{{.YES}}" != "1" ]; then
+          printf "⚠️  Run %s %s against PRODUCTION? Type 'prod' to continue: " "$MODULE" "$*"
+          read -r ANSWER
+          if [ "$ANSWER" != "prod" ]; then
+            echo "Aborted."
+            exit 1
+          fi
+        fi
+        echo "▶ [{{.ENV}}] python -m $MODULE $*"
+        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/python -m "$MODULE" "$@"
 
   help:
     desc: Show categorized help
@@ -237,10 +310,18 @@ tasks:
         echo "  task test:e2e                    Full-stack e2e (db + backend + frontend)"
         echo "  task test:all                    Run the full test suite (backend+frontend+e2e)"
         echo ""
-        echo "STAGING"
+        echo "DATABASE"
+        echo "  task db:migrate                 Run migrations (dev)"
+        echo "  task db:seed                    Seed database (dev)"
+        echo "  task db:reset                   Reset database (dev) ⚠️"
+        echo "  task db:status:dev              Migration status"
+        echo "  task db:copy -- dev prod        Copy a DB between envs (dev|staging|prod|scenario)"
+        echo "  task script ENV=prod:local -- <script> [args]   Run backend/scripts/<script>"
+        echo ""
+        echo "STAGING (local docker-compose)"
         echo "  task deploy:staging:local       Build from develop + deploy local staging"
         echo "  task deploy:staging:local:cwd   Deploy local staging from working directory"
-        echo "  task deploy:staging:remote      Deploy Fly + Cloudflare remote staging"
+        echo "  task deploy:staging:status      Deployed SHA vs origin/develop"
         echo "  task start:staging:local        Start local staging (existing images)"
         echo "  task stop:staging:local         Stop local staging stack"
         echo ""
@@ -252,19 +333,24 @@ tasks:
         echo "  task stop:scenario               Stop scenario instance"
         echo "  task stop:scenario:all           Stop all scenario instances"
         echo ""
-        echo "PRODUCTION"
-        echo "  task release                    Tag release + deploy to prod"
-        echo "  task git:release:prepare        Check develop is ahead of main"
-        echo "  task git:release:tag v1.0       Tag release on main"
-        echo "  task deploy:prod:local -- v1.2.0 Deploy to local prod"
-        echo "  task deploy:prod:remote         Deploy Fly + Cloudflare remote prod"
-        echo "  task start:prod:local           Start local prod (existing images)"
+        echo "PRODUCTION (local docker-compose, per-component releases)"
+        echo "  task release:prod:backend  -- v1.2.0   Tag backend-v1.2.0 + deploy"
+        echo "  task release:prod:frontend -- v1.2.0   Tag frontend-v1.2.0 + deploy"
+        echo "  task release:prod:db       -- v1.2.0   Tag db-v1.2.0 + migrate"
+        echo "  task release:prod                      Aggregate: prompts per component"
+        echo "  task release:prod -- --fast            Changed components + suggested tags, one confirm"
+        echo "  task release:prod -- --dry-run         Show the --fast plan only"
+        echo "  task deploy:prod:local:backend -- backend-v1.2.0   Deploy only"
+        echo "  task deploy:prod:local:cwd             Deploy working directory (all components)"
+        echo "  task deploy:prod:status[:<component>][:diff]       Released vs deployed (drift)"
+        echo "  task git:release:prepare               Check develop is ahead of main"
+        echo "  task start:prod:local                  Start local prod (deployed images)"
         echo ""
         echo "UTILITIES"
         echo "  task status                     Show all running containers"
         echo "  task logs:dev                   Tail dev logs"
         echo "  task logs:staging:local         Tail local staging logs"
-        echo "  task fly:staging:status         Show staging Fly app status"
+        echo "  task logs:prod:local            Tail local prod logs"
         echo "  task db:reset:dev               Reset dev database"
         echo ""
         echo "Run 'task --list' for all commands"

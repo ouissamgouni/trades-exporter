@@ -1,10 +1,11 @@
-# Docker Compose - Scenario Database Only
-# Used by start:scenario:dirty for isolated per-scenario PostgreSQL instances.
-# No env_file dependency — all config comes from shell environment.
+# Docker Compose - Database only (dev + scenarios)
+# Dev is a scenario named "dev" (pinned ports); every other scenario gets
+# hash-derived ports. All config comes from the shell environment set by
+# .taskfiles/scenario_ports.sh + .taskfiles/scenario_compose.sh.
 #
 # Usage (via Taskfile only):
-#   task start:scenario:dirty                        → default instance
-#   task start:scenario:dirty SCENARIO=fr_tax        → fr_tax instance (port 5440)
+#   task start:dev:db                       → trades_db_dev        (project trades-exporter-dev)
+#   task start:scenario:db SCENARIO=fr_tax  → trades_db_scenario-fr_tax
 
 services:
   postgres:

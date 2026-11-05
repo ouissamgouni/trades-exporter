@@ -63,7 +63,7 @@ export const TabErrorState: React.FC<{ error: string; onRetry?: () => void }> = 
         {onRetry && (
             <Button
                 size="sm"
-                colorScheme="red"
+                colorScheme="gray"
                 variant="outline"
                 onClick={onRetry}
             >

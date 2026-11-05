@@ -1,6 +1,8 @@
 import {
-    Badge, Button, Heading, Input, Text,
+    Badge, Button, Input, Text,
+    PageHeader, FilterPill, FilterPillGroup,
 } from './ui/primitives';
+import type { FilterPillColor } from './ui/primitives';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FiChevronDown, FiChevronRight, FiPieChart, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
 import { LuEraser } from 'react-icons/lu';
@@ -27,16 +29,6 @@ const ToggleSwitch: React.FC<{ checked: boolean; onChange: () => void; title?: s
         />
     </button>
 );
-
-const FILTER_CHIP_COLORS: Record<string, { active: string; inactive: string }> = {
-    blue: { active: 'bg-blue-600 text-white', inactive: 'border border-blue-300 text-blue-700' },
-    cyan: { active: 'bg-cyan-600 text-white', inactive: 'border border-cyan-300 text-cyan-700' },
-    purple: { active: 'bg-purple-600 text-white', inactive: 'border border-purple-300 text-purple-700' },
-    green: { active: 'bg-green-600 text-white', inactive: 'border border-green-300 text-green-700' },
-    teal: { active: 'bg-teal-600 text-white', inactive: 'border border-teal-300 text-teal-700' },
-    orange: { active: 'bg-orange-600 text-white', inactive: 'border border-orange-300 text-orange-700' },
-    gray: { active: 'bg-gray-600 text-white', inactive: 'border border-gray-300 text-gray-700' },
-};
 
 const AccountsManagement: React.FC = () => {
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -271,31 +263,26 @@ const AccountsManagement: React.FC = () => {
         <div className="p-6">
             <div className="flex flex-col gap-4">
                 {/* Header */}
-                <div className="flex items-center justify-between">
-                    <div>
-                        <Heading className="text-lg">Accounts & Connectors</Heading>
-                        <Text className="mt-1 block text-sm text-gray-600">
-                            Manage accounts with their data connectors inline. Click an account to configure connectors.
-                        </Text>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button size="sm" variant="ghost" onClick={handleGlobalBalanceClick}>
-                            <FiPieChart /> Balance
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={expandAll}>
-                            Expand All
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={collapseAll}>
-                            Collapse All
-                        </Button>
-                        <Button
-                            colorScheme="blue"
-                            onClick={handleCreate}
-                        >
-                            <FiPlus /> Add Account
-                        </Button>
-                    </div>
-                </div>
+                <PageHeader
+                    title="Accounts & Connectors"
+                    description="Manage accounts with their data connectors inline. Click an account to configure connectors."
+                    actions={
+                        <>
+                            <Button size="xs" variant="ghost" onClick={handleGlobalBalanceClick}>
+                                <FiPieChart /> Balance
+                            </Button>
+                            <Button size="xs" variant="ghost" onClick={expandAll}>
+                                Expand All
+                            </Button>
+                            <Button size="xs" variant="ghost" onClick={collapseAll}>
+                                Collapse All
+                            </Button>
+                            <Button size="xs" colorScheme="blue" onClick={handleCreate}>
+                                <FiPlus /> Add Account
+                            </Button>
+                        </>
+                    }
+                />
 
                 {/* Search + Filter Chips */}
                 <div className="flex flex-col gap-2">
@@ -306,42 +293,42 @@ const AccountsManagement: React.FC = () => {
                         className="max-w-[400px]"
                     />
                     {(availableTypes.length > 1 || availableGroups.length > 0) && (
-                        <div className="flex flex-wrap gap-1.5">
+                        <FilterPillGroup>
                             {availableTypes.map(type => {
                                 const meta = TYPE_META[type];
                                 const isActive = activeTypeFilters.has(type);
                                 const count = filteredAccounts.filter(a => a.account_type === type).length;
-                                const chipColors = FILTER_CHIP_COLORS[meta?.color || 'gray'];
                                 return (
-                                    <button
+                                    <FilterPill
                                         key={type}
-                                        type="button"
+                                        active={isActive}
+                                        color={(meta?.color || 'gray') as FilterPillColor}
                                         onClick={() => toggleTypeFilter(type)}
-                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium transition-colors hover:opacity-80 ${FOCUS_RING} ${isActive ? chipColors.active : chipColors.inactive}`}
+                                        count={count}
                                     >
-                                        {meta?.label || type} ({count})
-                                    </button>
+                                        {meta?.label || type}
+                                    </FilterPill>
                                 );
                             })}
                             {availableGroups.length > 0 && (
-                                <div className="mx-1 h-[20px] border-l border-gray-300" />
+                                <div className="mx-1 h-[20px] shrink-0 border-l border-gray-300" />
                             )}
                             {availableGroups.map(group => {
                                 const isActive = activeGroupFilters.has(group);
                                 const count = filteredAccounts.filter(a => a.group === group).length;
-                                const chipColors = FILTER_CHIP_COLORS.gray;
                                 return (
-                                    <button
+                                    <FilterPill
                                         key={group}
-                                        type="button"
+                                        active={isActive}
+                                        color="gray"
                                         onClick={() => toggleGroupFilter(group)}
-                                        className={`cursor-pointer select-none px-2 py-0.5 text-xs font-medium transition-colors hover:opacity-80 ${FOCUS_RING} ${isActive ? chipColors.active : chipColors.inactive}`}
+                                        count={count}
                                     >
-                                        {group} ({count})
-                                    </button>
+                                        {group}
+                                    </FilterPill>
                                 );
                             })}
-                        </div>
+                        </FilterPillGroup>
                     )}
                 </div>
 

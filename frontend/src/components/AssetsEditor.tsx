@@ -3016,9 +3016,9 @@ export const AssetsEditor: React.FC = () => {
                         onClick={() => setDrawerAsset(null)}
                     />
 
-                    {/* Panel */}
+                    {/* Panel: bottom sheet on mobile, right-side panel on sm+ */}
                     <div
-                        className="fixed bottom-0 right-0 top-0 z-[2001] w-[75vw] max-w-[1400px] overflow-y-auto border-l border-slate-200 bg-white shadow-xl"
+                        className="fixed inset-x-0 bottom-0 top-auto z-[2001] max-h-[90vh] w-full max-w-full overflow-y-auto border-t border-slate-200 bg-white shadow-xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[75vw] sm:max-w-[1400px] sm:border-l sm:border-t-0"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Sticky header */}

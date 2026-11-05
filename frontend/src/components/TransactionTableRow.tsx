@@ -280,7 +280,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                     {duplicateEntry && (
                         <div className="absolute bottom-0 top-0 z-[1] w-1" style={{ left: '10px', backgroundColor: duplicateEntry.color }} />
                     )}
-                    <div className="flex min-h-[28px] items-center gap-1 pr-1" style={{ paddingLeft: duplicateEntry ? '17px' : (suggestionEntry || tx.user_calculation_unit_id) ? '12px' : '7px' }}>
+                    <div className="flex min-h-[28px] max-w-[92px] flex-wrap items-center gap-1 pr-1" style={{ paddingLeft: duplicateEntry ? '17px' : (suggestionEntry || tx.user_calculation_unit_id) ? '12px' : '7px' }}>
                         {/* Duplicate icon — clickable, opens popover */}
                         {duplicateEntry && (
                             <DuplicatePopover

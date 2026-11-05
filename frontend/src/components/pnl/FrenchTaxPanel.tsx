@@ -502,7 +502,7 @@ const TaxContent: React.FC<{
                         {view.type === 'all' ? (
                             /* ── ALL view: combined annual summary, no category sub-cards ── */
                             <>
-                                <div className="flex items-center justify-between mb-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                                     <Button
                                         size="sm"
                                         variant="outline"
@@ -514,7 +514,7 @@ const TaxContent: React.FC<{
                                         <LuRefreshCw size={12} />
                                         <span className="ml-1">Recalc All</span>
                                     </Button>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-wrap gap-2">
                                         {hasCrypto && (
                                             <Button size="sm" variant="outline" colorScheme="blue" className="h-6 px-2 text-xs" onClick={() => handleExportAll('fr-crypto-tax')}>
                                                 <FiDownload size={12} />
@@ -544,7 +544,7 @@ const TaxContent: React.FC<{
                             /* ── Year view: Crypto / Securities sub-cards ── */
                             <>
                                 {/* Category sub-cards — Approach A */}
-                                <div className="flex gap-0 mb-0">
+                                <div className="flex flex-col gap-0 mb-0 sm:flex-row">
                                     {hasCrypto && (
                                         <SummaryCard
                                             label="Crypto"
@@ -782,14 +782,14 @@ const SummaryCard: React.FC<{
                 }`}
             onClick={onClick}
         >
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-baseline gap-2">
                     <span className={`text-sm font-bold ${active ? p.textActive : 'text-gray-700'}`}>
                         {label}
                     </span>
                     <span className="text-[10px] text-gray-400">{subtitle}</span>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
                     <span className="text-[10px] text-gray-500">{totals.taxableDisposals} disposals</span>
                     <span className="text-xs font-semibold text-green-600">+{formatCurrency(totals.totalGains, baseCurrency)}</span>
                     <span className="text-xs font-semibold text-red-600">{totals.totalLosses > 0 ? `-${formatCurrency(totals.totalLosses, baseCurrency)}` : formatCurrency(0, baseCurrency)}</span>
@@ -1155,8 +1155,8 @@ const DisposalTable: React.FC<{
 
         return (
             <div>
-                <div className="mb-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <div className="text-xs font-semibold text-gray-600">
                             {headingText}
                         </div>

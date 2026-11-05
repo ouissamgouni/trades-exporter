@@ -30,31 +30,6 @@ import { PAGE_SIZE_OPTIONS, type UsePaginationReturn } from '../hooks/usePaginat
 import { Button } from './ui/primitives';
 
 /**
- * Compute the list of page numbers (with 'ellipsis' markers) to display,
- * mirroring the page-range algorithm previously provided by Chakra's Pagination.Context.
- */
-const getPageItems = (current: number, total: number, siblingCount: number): (number | 'ellipsis')[] => {
-    const totalPageNumbers = siblingCount * 2 + 5;
-    if (total <= totalPageNumbers) {
-        return Array.from({ length: total }, (_, i) => i + 1);
-    }
-
-    const leftSibling = Math.max(current - siblingCount, 1);
-    const rightSibling = Math.min(current + siblingCount, total);
-    const showLeftEllipsis = leftSibling > 2;
-    const showRightEllipsis = rightSibling < total - 1;
-
-    const items: (number | 'ellipsis')[] = [1];
-    if (showLeftEllipsis) items.push('ellipsis');
-    for (let i = Math.max(leftSibling, 2); i <= Math.min(rightSibling, total - 1); i++) {
-        items.push(i);
-    }
-    if (showRightEllipsis) items.push('ellipsis');
-    if (total > 1) items.push(total);
-    return items;
-};
-
-/**
  * Convert a Chakra-style spacing token (number, on the 0.25rem-per-unit scale)
  * or raw CSS size string into a CSS length.
  */
@@ -120,12 +95,9 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
     const endItem = pagination?.endItem ?? Math.min(page * pageSize, total);
 
     const handlePageChange = (newPage: number) => {
-        console.log('[TablePagination] handlePageChange called with:', newPage, 'pagination:', !!pagination);
         if (pagination) {
-            console.log('[TablePagination] Calling pagination.setPage');
             pagination.setPage(newPage);
         } else if (controlledOnPageChange) {
-            console.log('[TablePagination] Calling controlledOnPageChange');
             controlledOnPageChange(newPage);
         }
     };
@@ -151,98 +123,85 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
     }
 
     return (
-        <div style={{ marginTop: toCssSize(mt), marginBottom: toCssSize(mb), padding: toCssSize(p) }} className="bg-slate-50 dark:bg-slate-800">
-            <div className="flex flex-col flex-wrap items-center justify-between gap-3 md:flex-row">
-                {/* Left: Item count info */}
+        <div
+            style={{ marginTop: toCssSize(mt), marginBottom: toCssSize(mb), padding: toCssSize(p) }}
+            className="bg-slate-50 dark:bg-slate-800"
+        >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* Left: page size selector as compact toggle buttons */}
+                {showPageSizeSelector ? (
+                    <div className="flex items-center gap-0">
+                        {pageSizeOptions.map(option => (
+                            <Button
+                                key={option}
+                                size="xs"
+                                variant={pageSize === option ? 'solid' : 'outline'}
+                                colorScheme={pageSize === option ? 'blue' : 'gray'}
+                                onClick={() => handlePageSizeChange(option)}
+                                className="h-6 px-2 font-normal"
+                                aria-label={`${option} per page`}
+                            >
+                                {option}
+                            </Button>
+                        ))}
+                    </div>
+                ) : (
+                    <span />
+                )}
+
+                {/* Center: item count / range */}
                 {showItemCount && (
-                    <span className="text-xs text-slate-600 dark:text-slate-400">
-                        Showing {startItem}-{endItem} of <strong>{total}</strong> items
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {startItem}–{endItem} of {total}
                     </span>
                 )}
 
-                {/* Center: Page navigation */}
+                {/* Right: page navigation */}
                 {totalPages > 1 && (
                     <div className="flex items-center gap-1">
                         <Button
-                            size={size === 'xs' ? 'sm' : size}
-                            variant="outline"
+                            size="xs"
+                            variant="ghost"
                             aria-label="First page"
+                            className="h-6 px-1"
                             onClick={() => handlePageChange(1)}
                             disabled={page === 1}
-                            className="px-2"
                         >
-                            <LuChevronsLeft />
+                            <LuChevronsLeft size={14} />
                         </Button>
-
                         <Button
-                            size={size === 'xs' ? 'sm' : size}
-                            variant="outline"
+                            size="xs"
+                            variant="ghost"
                             aria-label="Previous page"
-                            className="px-2"
+                            className="h-6 px-1"
                             disabled={page === 1}
                             onClick={() => handlePageChange(page - 1)}
                         >
-                            <LuChevronLeft />
+                            <LuChevronLeft size={14} />
                         </Button>
-
-                        {getPageItems(page, totalPages, compact ? 0 : 1).map((pageItem, index) =>
-                            pageItem === 'ellipsis' ? (
-                                <span key={`ellipsis-${index}`}>…</span>
-                            ) : (
-                                <Button
-                                    key={pageItem}
-                                    size={size === 'xs' ? 'sm' : size}
-                                    variant={pageItem === page ? 'solid' : 'outline'}
-                                    colorScheme={pageItem === page ? 'blue' : undefined}
-                                    onClick={() => handlePageChange(pageItem)}
-                                >
-                                    {pageItem}
-                                </Button>
-                            )
-                        )}
-
+                        <span className="px-1 text-xs text-slate-600 dark:text-slate-300">
+                            {page}/{totalPages}
+                        </span>
                         <Button
-                            size={size === 'xs' ? 'sm' : size}
-                            variant="outline"
+                            size="xs"
+                            variant="ghost"
                             aria-label="Next page"
-                            className="px-2"
-                            disabled={page === totalPages}
+                            className="h-6 px-1"
+                            disabled={page >= totalPages}
                             onClick={() => handlePageChange(page + 1)}
                         >
-                            <LuChevronRight />
+                            <LuChevronRight size={14} />
                         </Button>
-
                         <Button
-                            size={size === 'xs' ? 'sm' : size}
-                            variant="outline"
+                            size="xs"
+                            variant="ghost"
                             aria-label="Last page"
+                            className="h-6 px-1"
+                            disabled={page >= totalPages}
                             onClick={() => handlePageChange(totalPages)}
-                            disabled={page === totalPages}
-                            className="px-2"
                         >
-                            <LuChevronsRight />
+                            <LuChevronsRight size={14} />
                         </Button>
-                    </div>
-                )}
-
-                {/* Right: Page size selector */}
-                {showPageSizeSelector && (
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-600 dark:text-slate-400">
-                            Per page:
-                        </span>
-                        <select
-                            className="h-8 w-[75px] border border-slate-300 bg-white px-1 text-sm"
-                            value={pageSize}
-                            onChange={e => handlePageSizeChange(Number(e.target.value))}
-                            aria-label="Items per page"
-                        >
-                            {pageSizeOptions.map(option => (
-                                <option key={option} value={option}>
-                                    {option}
-                                </option>
-                            ))}
-                        </select>
                     </div>
                 )}
             </div>

@@ -1,14 +1,27 @@
 version: "3"
 
+# ════════════════════════════════════════════════════════════════════════════
+# Deploy tasks — all environments are LOCAL docker-compose stacks (no remote
+# hosting).
+#
+#   staging:local            — localhost:5433 / 8001 / 3001 (from develop)
+#   prod:local               — localhost:5434 / 8080 / 3000 (from release tags)
+#
+# Naming convention:
+#   deploy:<env>:local:<component>   — atomic single-component deploy
+#   deploy:<env>:local:cwd           — deploy from the working directory
+#   deploy:<env>:status              — what's deployed (per component)
+# ════════════════════════════════════════════════════════════════════════════
+
 tasks:
   staging:local:
     desc: Build from develop and deploy to local staging environment. DRY_RUN=1 to preview.
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
@@ -30,6 +43,10 @@ tasks:
         task build:staging
         ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
         ENV_NAME=staging IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
+        SHA=$(git -C {{.WORKTREE_DEVELOP}} rev-parse HEAD)
+        for C in backend frontend; do
+          git update-ref --create-reflog -m "deploy staging $C" "refs/deploys/staging/$C" "$SHA"
+        done
         sleep 5
 
         echo ""
@@ -49,9 +66,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
@@ -114,9 +131,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
@@ -160,14 +177,14 @@ tasks:
         echo "═══════════════════════════════════════════════════════════════"
 
   prod:local:
-    desc: "Deploy to local prod. DRY_RUN=1 to preview. (e.g., task deploy:prod:local -- v1.2.0 or task deploy:prod:local -- feature/hotfix)"
+    desc: "Deploy backend + frontend to local prod from an image tag or git ref. DRY_RUN=1 to preview. Prefer the per-component deploy:prod:local:<component> / release:prod:* flow. (e.g., task deploy:prod:local -- v1.2.0)"
     prompt: "This will deploy to PRODUCTION. Continue?"
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
@@ -204,14 +221,23 @@ tasks:
         else
           # Try to build from git ref
           echo "No image found for :$REF — attempting to build from git ref..."
-          task build:ref -- "$REF" || { echo "❌ Failed to build from $REF"; exit 1; }
+          # Outer prompt already confirmed; bake the prod API port into the frontend.
+          task --yes build:ref REF="$REF" BACKEND_PORT="$BACKEND_PORT" || { echo "❌ Failed to build from $REF"; exit 1; }
           SHA=$(git rev-parse --short=7 "$REF")
           VERSION="ref-$SHA"
           echo "Built $REF → :$VERSION"
         fi
 
-        ENV_NAME=prod IMAGE_TAG=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
-        ENV_NAME=prod IMAGE_TAG=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
+        docker tag "trades-exporter-backend:$VERSION" "trades-exporter-backend:$IMAGE_TAG"
+        docker tag "trades-exporter-frontend:$VERSION" "trades-exporter-frontend:$IMAGE_TAG"
+        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
+        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
+        if SHA=$(git rev-parse --verify --quiet "$REF^{commit}" 2>/dev/null); then
+          for C in backend frontend; do
+            git update-ref --create-reflog -m "deploy prod $C" "refs/deploys/prod/$C" "$SHA"
+          done
+          echo "📌 Recorded deploy: refs/deploys/prod/{backend,frontend} → $(git rev-parse --short=7 "$SHA")"
+        fi
         sleep 5
         echo ""
         echo "═══════════════════════════════════════════════════════════════"
@@ -221,153 +247,573 @@ tasks:
         echo "   Backend:  http://localhost:${BACKEND_PORT}"
         echo "   Database: localhost:${POSTGRES_PORT}"
         echo "═══════════════════════════════════════════════════════════════"
-  # ────────────────────────────────────────────────────────────────
-  # REMOTE DEPLOYMENTS — Fly.io (backend) + Cloudflare Pages (frontend) + Neon (DB)
-  # ────────────────────────────────────────────────────────────────
 
-  staging:remote:db:
-    desc: "Run Alembic migrations on Neon staging (develop branch)"
-    dotenv: [config/secrets.env, config/secrets.staging.env]
+  # ════════════════════════════════════════════════════════════════════════
+  # PROD (local docker-compose) — per-component deploys
+  #
+  #   deploy:prod:local:<component> -- <tag>   atomic single-component deploy
+  #                                             from a SHA-pinned worktree
+  #   deploy:prod:local:cwd                     all components from the working
+  #                                             directory (no git gates, not recorded)
+  #
+  # The currently deployed image of each component is tagged
+  # trades-exporter-<component>:prod (IMAGE_TAG=prod in config/prod.local.env),
+  # so `task start:prod:local` always restarts what was last deployed.
+  #
+  # Deployment tracking: after each successful component deploy the deployed
+  # SHA is written to the LOCAL ref refs/deploys/<env>/<component> (prod is
+  # local-only, so nothing is pushed). `git reflog refs/deploys/prod/backend`
+  # gives the audit log.
+  # ════════════════════════════════════════════════════════════════════════
+
+  _prepare-ref-prod:
+    internal: true
     cmds:
       - |
-        if [ -z "${DATABASE_URL:-}" ]; then
-          echo "❌ DATABASE_URL not set — fill in config/secrets.staging.env"
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ REF required."
+          echo "   Usage:   task deploy:prod:local:<component> -- <release-tag>"
+          echo "   Example: task deploy:prod:local:backend -- backend-v1.2.0"
+          echo ""
+          echo "   Production only deploys annotated release tags on main."
+          echo "   Create one with: task release:prod:<component>"
           exit 1
         fi
-        echo "Running migrations on Neon staging: $(echo "$DATABASE_URL" | sed 's|.*@||' | cut -d'/' -f1)"
-        PYTHONPATH=. .venv/bin/alembic -c backend/alembic.ini upgrade head
-        echo "✅ Migrations applied"
+        git fetch origin main --tags --quiet 2>/dev/null || true
+        OBJ_TYPE=$(git cat-file -t "$REF" 2>/dev/null || echo "")
+        if [ "$OBJ_TYPE" != "tag" ]; then
+          echo "❌ '$REF' is not an annotated tag."
+          echo "   Production only deploys annotated release tags."
+          exit 1
+        fi
+        case "$REF" in
+          v[0-9]*|db-v[0-9]*|backend-v[0-9]*|frontend-v[0-9]*) ;;
+          *)
+            echo "❌ Tag '$REF' does not match release pattern."
+            echo "   Expected: <component>-vX.Y.Z (e.g. backend-v1.2.0) or vX.Y.Z (legacy)."
+            exit 1
+            ;;
+        esac
+        REF_SHA=$(git rev-parse "$REF^{commit}")
+        if ! git merge-base --is-ancestor "$REF_SHA" origin/main 2>/dev/null; then
+          echo "❌ Tag '$REF' is not reachable from origin/main."
+          exit 1
+        fi
+        SHORT=$(git rev-parse --short=7 "$REF_SHA")
+        # ── CI green-check gate (skippable: SKIP_CI_CHECK=1) ─────────────────
+        SKIP_CI="{{.SKIP_CI_CHECK | default ""}}"
+        [ -z "$SKIP_CI" ] && SKIP_CI="${SKIP_CI_CHECK:-0}"
+        case "$SKIP_CI" in
+          1|true|yes)
+            echo "⏭️  SKIP_CI_CHECK=$SKIP_CI — skipping CI green-check for $SHORT." ;;
+          *)
+            if ! command -v gh >/dev/null 2>&1; then
+              echo "❌ GitHub CLI 'gh' not found — cannot verify CI passed for $SHORT." >&2
+              echo "   Install it (brew install gh) or bypass with SKIP_CI_CHECK=1." >&2
+              exit 1
+            fi
+            echo "→ Verifying CI passed for $REF ($SHORT)..."
+            CI_RESULT=$(gh run list --workflow=ci.yml --commit "$REF_SHA" --limit 1 --json status,conclusion --jq '.[0] | "\(.status):\(.conclusion)"' 2>/dev/null || echo "error")
+            case "$CI_RESULT" in
+              completed:success)
+                echo "✅ CI green for $SHORT" ;;
+              completed:*)
+                echo "❌ CI for $SHORT did not pass (conclusion: ${CI_RESULT#completed:})." >&2
+                echo "   Fix CI on this commit, or bypass with SKIP_CI_CHECK=1." >&2
+                exit 1 ;;
+              error|:|null:null|"")
+                echo "❌ No CI run found for $SHORT (or 'gh' could not reach GitHub)." >&2
+                echo "   Push the commit and let CI finish, or bypass with SKIP_CI_CHECK=1." >&2
+                exit 1 ;;
+              *)
+                echo "❌ CI for $SHORT has not finished (status: ${CI_RESULT%%:*})." >&2
+                echo "   Wait for CI to complete, or bypass with SKIP_CI_CHECK=1." >&2
+                exit 1 ;;
+            esac ;;
+        esac
+        WT="{{.WORKTREE_DIR}}/ref-$SHORT"
+        if [ -d "$WT" ]; then
+          WT_SHA=$(git -C "$WT" rev-parse HEAD 2>/dev/null || echo "")
+          if [ "$WT_SHA" != "$REF_SHA" ]; then
+            echo "→ Recreating stale worktree $WT (expected $SHORT, found ${WT_SHA:-unknown})..."
+            git worktree remove --force "$WT" >/dev/null
+          fi
+        fi
+        if [ ! -d "$WT" ]; then
+          echo "→ Creating worktree $WT from $REF ($SHORT)..."
+          mkdir -p "{{.WORKTREE_DIR}}"
+          git worktree add --detach "$WT" "$REF_SHA" >/dev/null
+        fi
+        echo "✅ Prod deploy worktree ready: $WT (tag $REF @ $SHORT)"
 
-  staging:remote:backend:
-    desc: "Stage Fly secrets + deploy backend to trades-exporter-staging.fly.dev"
+  _record-deploy:
+    internal: true
+    cmds:
+      - |
+        ENV="{{.ENV}}"
+        COMPONENT="{{.COMPONENT}}"
+        SHA="{{.SHA}}"
+        if [ -z "$ENV" ] || [ -z "$COMPONENT" ] || [ -z "$SHA" ]; then
+          echo "⚠️  _record-deploy: missing ENV/COMPONENT/SHA, skipping"
+          exit 0
+        fi
+        REF_PATH="refs/deploys/$ENV/$COMPONENT"
+        git update-ref --create-reflog -m "deploy $ENV $COMPONENT" "$REF_PATH" "$SHA"
+        echo "📌 Recorded deploy: $REF_PATH → $(git rev-parse --short=7 "$SHA")"
+
+  _prod-db-up:
+    internal: true
     dotenv:
       [
-        config/staging.remote.env,
+        config/base.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.prod.local.env,
       ]
     cmds:
-      - task: :fly:staging:secrets
-      - task: :fly:staging:deploy
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --wait postgres
 
-  staging:remote:frontend:
-    desc: "Build + deploy staging frontend to Cloudflare Pages (develop branch)"
+  prod:local:db:
+    desc: "Run prod DB migrations from a release tag (e.g. task deploy:prod:local:db -- db-v1.2.0)."
+    prompt: "This will migrate the PRODUCTION database. Continue?"
     dotenv:
       [
-        config/staging.remote.env,
+        config/base.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.prod.local.env,
       ]
     vars:
-      PROJECT_NAME: '{{.PROJECT_NAME | default "trades-exporter"}}'
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
     cmds:
+      - task: _prepare-ref-prod
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+      - task: _prod-db-up
       - |
-        if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-          echo "❌ CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set in config/secrets.staging.env"
-          exit 1
-        fi
-        if [ -z "${VITE_API_URL:-}" ]; then
-          echo "❌ VITE_API_URL not set in config/staging.remote.env"
-          exit 1
-        fi
-        echo "Validating Cloudflare token..."
-        if ! npx --yes wrangler whoami >/dev/null 2>&1; then
-          echo "❌ Cloudflare authentication failed"
-          exit 1
-        fi
-        echo "Building staging frontend (VITE_API_URL=$VITE_API_URL)..."
-        cd frontend && VITE_API_URL="$VITE_API_URL" npm run build
-      - |
-        echo "Deploying to Cloudflare Pages (branch: develop)..."
-        npx --yes wrangler pages deploy frontend/dist \
-          --project-name={{.PROJECT_NAME}} \
-          --branch=develop
-        echo "✅ Staging frontend deployed"
+        SHA=$(git rev-parse "{{.REF}}^{commit}")
+        WT="{{.WORKTREE_DIR}}/ref-$(git rev-parse --short=7 "$SHA")"
+        echo "Running migrations from $WT against $(echo "$DATABASE_URL" | sed 's/:[^:@]*@/@/')..."
+        # Run from inside the worktree: alembic.ini prepends the cwd to sys.path.
+        cd "$WT" && PYTHONPATH="$PWD" {{.ROOT_DIR}}/.venv/bin/alembic -c backend/alembic.ini upgrade head
+      - task: _record-deploy
+        vars:
+          ENV: prod
+          COMPONENT: db
+          SHA:
+            sh: git rev-parse "{{.REF}}^{commit}"
 
-  staging:remote:
-    desc: "Full remote staging deploy (DB migrations + Fly backend + CF Pages frontend)"
+  prod:local:backend:
+    desc: "Build + deploy the prod backend from a release tag (e.g. task deploy:prod:local:backend -- backend-v1.2.0)."
+    prompt: "This will deploy the backend to PRODUCTION. Continue?"
     dotenv:
       [
-        config/staging.remote.env,
+        config/base.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.prod.local.env,
       ]
-    cmds:
-      - |
-        if [ ! -f config/secrets.staging.env ]; then
-          echo "❌ config/secrets.staging.env not found — copy config/secrets.staging.env.example and fill in values"
-          exit 1
-        fi
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Deploying REMOTE STAGING"
-        echo "  Backend:  https://trades-exporter-staging.fly.dev"
-        echo "  Frontend: https://develop.trades-exporter.pages.dev"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      - task: staging:remote:db
-      - task: staging:remote:backend
-      - task: staging:remote:frontend
-      - echo "✅ Remote staging fully deployed"
-
-  prod:remote:db:
-    desc: "Run Alembic migrations on Neon prod (main branch)"
-    dotenv: [config/secrets.env, config/secrets.prod.env]
-    cmds:
-      - |
-        if [ -z "${DATABASE_URL:-}" ]; then
-          echo "❌ DATABASE_URL not set — fill in config/secrets.prod.env"
-          exit 1
-        fi
-        echo "Running migrations on Neon prod: $(echo "$DATABASE_URL" | sed 's|.*@||' | cut -d'/' -f1)"
-        PYTHONPATH=. .venv/bin/alembic -c backend/alembic.ini upgrade head
-
-  prod:remote:backend:
-    desc: "Stage Fly secrets + deploy backend to trades-exporter.fly.dev"
-    dotenv:
-      [config/prod.remote.env, config/secrets.env, config/secrets.prod.env]
-    cmds:
-      - task: :fly:secrets
-      - task: :fly:deploy
-
-  prod:remote:frontend:
-    desc: "Build + deploy prod frontend to Cloudflare Pages (main branch)"
-    dotenv:
-      [config/prod.remote.env, config/secrets.env, config/secrets.prod.env]
     vars:
-      PROJECT_NAME: '{{.PROJECT_NAME | default "trades-exporter"}}'
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
     cmds:
+      - task: _prepare-ref-prod
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
       - |
-        if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-          echo "❌ CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set in config/secrets.prod.env"
-          exit 1
-        fi
-        if [ -z "${VITE_API_URL:-}" ]; then
-          echo "❌ VITE_API_URL not set in config/prod.remote.env"
-          exit 1
-        fi
-        cd frontend && VITE_API_URL="$VITE_API_URL" npm run build
-      - |
-        npx --yes wrangler pages deploy frontend/dist \
-          --project-name={{.PROJECT_NAME}} \
-          --branch=main
-        echo "✅ Prod frontend deployed"
+        SHA=$(git rev-parse "{{.REF}}^{commit}")
+        WT="{{.WORKTREE_DIR}}/ref-$(git rev-parse --short=7 "$SHA")"
+        docker build -t "trades-exporter-backend:{{.REF}}" -f "$WT/backend/Dockerfile" "$WT"
+        docker tag "trades-exporter-backend:{{.REF}}" "trades-exporter-backend:$IMAGE_TAG"
+        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --no-deps --wait backend
+        echo "✅ Backend {{.REF}} running on http://localhost:${BACKEND_PORT}"
+      - task: _record-deploy
+        vars:
+          ENV: prod
+          COMPONENT: backend
+          SHA:
+            sh: git rev-parse "{{.REF}}^{commit}"
 
-  prod:remote:
-    desc: "Full remote PROD deploy (DB migrations + Fly backend + CF Pages frontend)"
-    prompt: "This will deploy to PRODUCTION. Continue?"
+  prod:local:frontend:
+    desc: "Build + deploy the prod frontend from a release tag (e.g. task deploy:prod:local:frontend -- frontend-v1.2.0)."
+    prompt: "This will deploy the frontend to PRODUCTION. Continue?"
     dotenv:
-      [config/prod.remote.env, config/secrets.env, config/secrets.prod.env]
+      [
+        config/base.env,
+        config/prod.local.env,
+        config/secrets.env,
+        config/secrets.prod.local.env,
+      ]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+    cmds:
+      - task: _prepare-ref-prod
+        vars: { REF: "{{.REF}}", SKIP_CI_CHECK: "{{.SKIP_CI_CHECK}}" }
+      - |
+        SHA=$(git rev-parse "{{.REF}}^{commit}")
+        WT="{{.WORKTREE_DIR}}/ref-$(git rev-parse --short=7 "$SHA")"
+        docker build -t "trades-exporter-frontend:{{.REF}}" \
+          --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
+          "$WT/frontend"
+        docker tag "trades-exporter-frontend:{{.REF}}" "trades-exporter-frontend:$IMAGE_TAG"
+        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --no-deps frontend
+        echo "✅ Frontend {{.REF}} running on http://localhost:${FRONTEND_PORT}"
+      - task: _record-deploy
+        vars:
+          ENV: prod
+          COMPONENT: frontend
+          SHA:
+            sh: git rev-parse "{{.REF}}^{commit}"
+
+  prod:local:cwd:
+    desc: "Build all components from the WORKING DIRECTORY and deploy to local prod (db migrations + backend + frontend). Not recorded in refs/deploys. DRY_RUN=1 to preview."
+    prompt: "This will deploy UNCOMMITTED working-directory code to PRODUCTION. Continue?"
+    dotenv:
+      [
+        config/base.env,
+        config/prod.local.env,
+        config/secrets.env,
+        config/secrets.prod.local.env,
+      ]
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
       - |
-        if [ ! -f config/secrets.prod.env ]; then
-          echo "❌ config/secrets.prod.env not found — copy config/secrets.prod.env.example and fill in values"
+        TAG="dirty-$(date +%Y%m%d-%H%M%S)"
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would deploy working directory to LOCAL PROD as :$TAG → :$IMAGE_TAG"
+          echo "  1. docker build backend + frontend"
+          echo "  2. alembic upgrade head on localhost:$POSTGRES_PORT/$POSTGRES_DB"
+          echo "  3. docker compose up -d (trades-exporter-prod)"
+          exit 0
+        fi
+        docker build -t "trades-exporter-backend:$TAG" -f backend/Dockerfile .
+        docker build -t "trades-exporter-frontend:$TAG" --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT ./frontend
+        docker tag "trades-exporter-backend:$TAG" "trades-exporter-backend:$IMAGE_TAG"
+        docker tag "trades-exporter-frontend:$TAG" "trades-exporter-frontend:$IMAGE_TAG"
+        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d --wait postgres
+        PYTHONPATH={{.ROOT_DIR}} {{.ROOT_DIR}}/.venv/bin/alembic -c {{.ROOT_DIR}}/backend/alembic.ini upgrade head
+        ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
+        echo ""
+        echo "✅ Deployed working directory to LOCAL PROD (:$TAG)"
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Recap: what an orchestrator run deployed, by comparing refs/deploys/<env>/*
+  # against a snapshot taken before the run.
+  #   ENV=prod|staging  BEFORE="db=<sha|-> backend=<sha|-> frontend=<sha|->"
+  #   FAILED=<component> (optional — the component that stopped the run)
+  # Not internal: release.yml calls it via `task deploy:_recap`.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  _recap:
+    silent: true
+    dotenv: [config/prod.local.env]
+    cmds:
+      - |
+        ENV="{{.ENV}}"; FAILED="{{.FAILED}}"
+        for P in {{.BEFORE}}; do
+          eval "B_${P%%=*}=\${P#*=}"
+        done
+        get() { eval "echo \"\${$1_$2}\""; }
+        comp_path() {
+          case "$1" in
+            db) echo "backend/db/alembic" ;;
+            backend) echo "backend" ;;
+            frontend) echo "frontend" ;;
+          esac
+        }
+        label() {
+          T=""
+          if [ -z "$2" ]; then
+            T="(none)"
+          elif [ "$ENV" = "prod" ]; then
+            T=$(git describe --tags --exact-match --match "$1-v*" "$2" 2>/dev/null || true)
+          fi
+          if [ -z "$T" ]; then T=$(git rev-parse --short=7 "$2"); fi
+          echo "$T"
+        }
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════════════"
+        echo "  RECAP — LOCAL $(echo "$ENV" | tr '[:lower:]' '[:upper:]')"
+        echo ""
+        DONE=""
+        for C in db backend frontend; do
+          B=$(get B "$C")
+          if [ "$B" = "-" ]; then B=""; fi
+          A=$(git rev-parse --verify --quiet "refs/deploys/$ENV/$C" 2>/dev/null || true)
+          if [ "$C" = "$FAILED" ]; then
+            printf "  ❌ %-9s failed — still %s\n" "$C" "$(label "$C" "$B")"
+          elif [ "$A" = "$B" ]; then
+            printf "  ·  %-9s unchanged (%s)\n" "$C" "$(label "$C" "$B")"
+          else
+            DONE="$DONE $C"
+            if [ -n "$B" ]; then
+              N=$(git rev-list --count --no-merges "$B..$A" -- "$(comp_path "$C")" 2>/dev/null || echo "?")
+              INFO="$N commits"
+              if [ "$N" = "0" ]; then INFO="no new commits (rollback/redeploy)"; fi
+            else
+              INFO="first deploy"
+            fi
+            printf "  ✅ %-9s %s → %s  (%s)\n" "$C" "$(label "$C" "$B")" "$(label "$C" "$A")" "$INFO"
+            if [ -n "$B" ]; then
+              git log --oneline --no-merges -8 "$B..$A" -- "$(comp_path "$C")" 2>/dev/null | sed 's/^/        /'
+              if [ "$N" != "?" ] && [ "$N" -gt 8 ]; then echo "        … $((N-8)) more"; fi
+            fi
+          fi
+        done
+
+        if [ -z "$DONE" ]; then
+          echo ""
+          echo "  Nothing was deployed."
+          echo "═══════════════════════════════════════════════════════════════════════"
+          exit 0
+        fi
+        echo ""
+        case " $DONE " in *" backend "*) echo "  Backend:  http://localhost:${BACKEND_PORT:-8080}" ;; esac
+        case " $DONE " in *" frontend "*) echo "  Frontend: http://localhost:${FRONTEND_PORT:-3000}" ;; esac
+        echo ""
+        echo "  Verify:"
+        echo "    task open:isolated:$ENV:local    → open in isolated browser"
+        case " $DONE " in *" db "*) echo "    task db:status:$ENV:local    → DB migration state" ;; esac
+        case " $DONE " in *" backend "*) echo "    task logs:$ENV:local    → backend logs" ;; esac
+        echo "═══════════════════════════════════════════════════════════════════════"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Status: what is currently deployed
+  # ──────────────────────────────────────────────────────────────────────────
+
+  _status:
+    internal: true
+    vars:
+      ENV: "{{.ENV}}"
+      COMPONENT: '{{.COMPONENT | default ""}}'
+    cmds:
+      - |
+        ENV="{{.ENV}}"
+        COMPONENT="{{.COMPONENT}}"
+        case "$ENV" in
+          prod)    BRANCH=main ;;
+          staging) BRANCH=develop ;;
+          *)
+            echo "❌ Internal error: ENV must be prod|staging (got '$ENV')"
+            exit 1 ;;
+        esac
+        case "$COMPONENT" in
+          ""|db|backend|frontend) ;;
+          *)
+            echo "❌ COMPONENT must be db, backend, or frontend (got '$COMPONENT')"
+            exit 1 ;;
+        esac
+        git fetch origin "$BRANCH" --tags --quiet 2>/dev/null || true
+        LATEST=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+        LATEST_NAME=""
+        if [ -n "$LATEST" ]; then
+          LATEST_NAME=$(git describe --tags --always "$LATEST" 2>/dev/null || git rev-parse --short=7 "$LATEST")
+        fi
+
+        if [ -n "$COMPONENT" ]; then
+          COMPONENTS="$COMPONENT"
+        else
+          COMPONENTS="db backend frontend"
+        fi
+
+        printf "\n%-12s %-22s %-22s %-10s %s\n" "Component" "Released (latest tag)" "Deployed" "Drift" "When"
+        echo "------------------------------------------------------------------------------------------"
+        for COMP in $COMPONENTS; do
+          REF_PATH="refs/deploys/$ENV/$COMP"
+          RELEASED="(n/a)"
+          if [ "$ENV" = "prod" ]; then
+            T=$(git tag -l "${COMP}-v*" --sort=-version:refname | head -1)
+            [ -z "$T" ] && T=$(git tag -l "v*" --sort=-version:refname | head -1)
+            RELEASED="${T:-(none)}"
+          fi
+          if SHA=$(git rev-parse --verify --quiet "$REF_PATH" 2>/dev/null); then
+            NAME=$(git describe --tags --always "$SHA" 2>/dev/null || git rev-parse --short=7 "$SHA")
+            DATE=$(git log -1 --format=%cd --date=short "$SHA" 2>/dev/null || echo "?")
+            if [ -n "$LATEST" ] && [ "$SHA" != "$LATEST" ]; then
+              AHEAD=$(git rev-list --count "$SHA..$LATEST" 2>/dev/null || echo "?")
+              DRIFT="-$AHEAD"
+            else
+              DRIFT="up-to-date"
+            fi
+            printf "%-12s %-22s %-22s %-10s %s\n" "$COMP" "$RELEASED" "$NAME" "$DRIFT" "$DATE"
+          else
+            printf "%-12s %-22s %-22s %-10s %s\n" "$COMP" "$RELEASED" "(never)" "-" "-"
+          fi
+        done
+        echo "------------------------------------------------------------------------------------------"
+        if [ -n "$LATEST" ]; then
+          printf "Latest origin/%s: %s (%s)\n\n" "$BRANCH" "$LATEST_NAME" "$(echo $LATEST | cut -c1-7)"
+        fi
+
+  prod:status:
+    desc: "Show what is deployed to local prod per component (released tag vs deployed SHA + drift)."
+    cmds:
+      - task: _status
+        vars: { ENV: "prod" }
+
+  prod:status:db:
+    desc: "Show status for the deployed prod DB component."
+    cmds:
+      - task: _status
+        vars: { ENV: "prod", COMPONENT: "db" }
+
+  prod:status:backend:
+    desc: "Show status for the deployed prod backend component."
+    cmds:
+      - task: _status
+        vars: { ENV: "prod", COMPONENT: "backend" }
+
+  prod:status:frontend:
+    desc: "Show status for the deployed prod frontend component."
+    cmds:
+      - task: _status
+        vars: { ENV: "prod", COMPONENT: "frontend" }
+
+  staging:status:
+    desc: "Show what is deployed to local staging per component (deployed SHA + drift vs origin/develop)."
+    cmds:
+      - task: _status
+        vars: { ENV: "staging" }
+
+  prod:current:
+    desc: "Print the currently deployed prod backend tag (one line)."
+    cmds:
+      - |
+        if SHA=$(git rev-parse --verify --quiet refs/deploys/prod/backend 2>/dev/null); then
+          git describe --tags --always "$SHA" 2>/dev/null || git rev-parse --short=7 "$SHA"
+        else
+          echo "(never deployed)"
           exit 1
         fi
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Deploying PRODUCTION"
-        echo "  Backend:  https://trades-exporter.fly.dev"
-        echo "  Frontend: https://trades-exporter.pages.dev"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      - task: prod:remote:db
-      - task: prod:remote:backend
-      - task: prod:remote:frontend
-      - echo "✅ Production fully deployed"
+
+  _status-diff-prod:
+    internal: true
+    vars:
+      REF: "{{.REF}}"
+      COMPONENT: '{{.COMPONENT | default ""}}'
+    cmds:
+      - |
+        TARGET_REF="{{.REF}}"
+        COMPONENT="{{.COMPONENT}}"
+        [ -z "$TARGET_REF" ] && TARGET_REF="origin/main"
+
+        case "$COMPONENT" in
+          ""|db|backend|frontend) ;;
+          *)
+            echo "❌ COMPONENT must be db, backend, or frontend (got '$COMPONENT')"
+            exit 1
+            ;;
+        esac
+
+        git fetch origin main --tags --quiet 2>/dev/null || true
+
+        if ! git rev-parse --verify "$TARGET_REF^{commit}" >/dev/null 2>&1; then
+          echo "❌ Target ref '$TARGET_REF' could not be resolved to a commit."
+          echo "   Try REF=origin/main or REF=<tag>."
+          exit 1
+        fi
+
+        TARGET_SHA=$(git rev-parse "$TARGET_REF^{commit}")
+        TARGET_SHORT=$(git rev-parse --short=7 "$TARGET_SHA")
+
+        if [ -n "$COMPONENT" ]; then
+          COMPONENTS="$COMPONENT"
+        else
+          COMPONENTS="db backend frontend"
+        fi
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "  PROD STATUS DIFF"
+        echo "  Target: $TARGET_REF ($TARGET_SHORT)"
+        echo "═══════════════════════════════════════════════════════════════"
+
+        for COMP in $COMPONENTS; do
+          REF_PATH="refs/deploys/prod/$COMP"
+          echo ""
+          echo "[$COMP]"
+
+          if ! DEPLOYED_SHA=$(git rev-parse --verify --quiet "$REF_PATH" 2>/dev/null); then
+            echo "  deployed: (never deployed)"
+            echo "  target:   $TARGET_REF ($TARGET_SHORT)"
+            continue
+          fi
+
+          DEPLOYED_SHORT=$(git rev-parse --short=7 "$DEPLOYED_SHA")
+          DEPLOYED_NAME=$(git tag -l --points-at "$DEPLOYED_SHA" "${COMP}-v*" --sort=-version:refname | head -1)
+          [ -z "$DEPLOYED_NAME" ] && DEPLOYED_NAME=$(git tag -l --points-at "$DEPLOYED_SHA" "v*" --sort=-version:refname | head -1)
+          [ -z "$DEPLOYED_NAME" ] && DEPLOYED_NAME="$DEPLOYED_SHORT"
+          TARGET_ONLY=$(git rev-list --count "$DEPLOYED_SHA..$TARGET_SHA" 2>/dev/null || echo "?")
+          PROD_ONLY=$(git rev-list --count "$TARGET_SHA..$DEPLOYED_SHA" 2>/dev/null || echo "?")
+
+          if [ "$DEPLOYED_SHA" = "$TARGET_SHA" ]; then
+            RELATION="up-to-date"
+          elif [ "$PROD_ONLY" = "0" ]; then
+            RELATION="prod behind target by $TARGET_ONLY commit(s)"
+          elif [ "$TARGET_ONLY" = "0" ]; then
+            RELATION="prod ahead of target by $PROD_ONLY commit(s)"
+          else
+            RELATION="diverged (prod-only: $PROD_ONLY, target-only: $TARGET_ONLY)"
+          fi
+
+          echo "  deployed: $DEPLOYED_NAME ($DEPLOYED_SHORT)"
+          echo "  target:   $TARGET_REF ($TARGET_SHORT)"
+          echo "  relation: $RELATION"
+
+          if [ "$DEPLOYED_SHA" = "$TARGET_SHA" ]; then
+            echo "  commits:  none"
+            echo "  files:    none"
+            continue
+          fi
+
+          echo "  commits:"
+          COMMITS=$(git log --left-right --cherry-pick --oneline "$DEPLOYED_SHA...$TARGET_SHA" 2>/dev/null || true)
+          if [ -n "$COMMITS" ]; then
+            printf '%s\n' "$COMMITS" | sed 's/^/    /'
+          else
+            echo "    (none)"
+          fi
+
+          echo "  files:"
+          FILES=$(git diff --name-status "$DEPLOYED_SHA" "$TARGET_SHA" 2>/dev/null || true)
+          if [ -n "$FILES" ]; then
+            printf '%s\n' "$FILES" | sed 's/^/    /'
+          else
+            echo "    (none)"
+          fi
+        done
+        echo ""
+
+  prod:status:diff:
+    desc: "Show git diff report between deployed prod refs and a target ref (default: origin/main)."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}origin/main{{end}}{{end}}"
+    cmds:
+      - task: _status-diff-prod
+        vars: { REF: "{{.REF}}" }
+
+  prod:status:db:diff:
+    desc: "Show git diff report between the prod DB deploy ref and a target ref (default: origin/main)."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}origin/main{{end}}{{end}}"
+    cmds:
+      - task: _status-diff-prod
+        vars: { REF: "{{.REF}}", COMPONENT: "db" }
+
+  prod:status:backend:diff:
+    desc: "Show git diff report between the prod backend deploy ref and a target ref (default: origin/main)."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}origin/main{{end}}{{end}}"
+    cmds:
+      - task: _status-diff-prod
+        vars: { REF: "{{.REF}}", COMPONENT: "backend" }
+
+  prod:status:frontend:diff:
+    desc: "Show git diff report between the prod frontend deploy ref and a target ref (default: origin/main)."
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}origin/main{{end}}{{end}}"
+    cmds:
+      - task: _status-diff-prod
+        vars: { REF: "{{.REF}}", COMPONENT: "frontend" }

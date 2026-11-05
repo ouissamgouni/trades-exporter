@@ -3,8 +3,7 @@ version: "3"
 vars:
   DONT_RELOAD: false
   AUTO_START_DB: true
-  DOCKER_COMPOSE_DEV: infra/docker/docker-compose.dev.yml
-  DOCKER_COMPOSE_SCENARIO_DB: infra/docker/docker-compose.scenario-db.yml
+  DOCKER_COMPOSE_DB: infra/docker/docker-compose.db.yml
   SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
   LOG_LEVEL: '{{.LOG_LEVEL | default "DEBUG"}}'
   UVICORN_ACCESS_LOG_EXCLUDE_PATHS: '{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS | default ""}}'
@@ -19,7 +18,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -27,12 +26,21 @@ tasks:
       RESET: '{{.RESET | default "0"}}'
     cmds:
       - |
+        # Dev is just a scenario named "dev" with pinned ports — same compose
+        # file and naming rules as every other scenario.
+        source {{.SCENARIO_PORTS_SH}} dev
+        source {{.ROOT_DIR}}/.taskfiles/scenario_compose.sh {{.ROOT_DIR}}
+
+        # A container from an older compose project holds the name we need.
+        # The data volume (trades_dev_data) is NOT touched.
+        sc_compose_adopt_containers
+
         if [ "{{.RESET}}" = "1" ]; then
-          echo "🔄 RESET: tearing down dev database..."
-          ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter down -v 2>/dev/null || true
+          echo "🔄 RESET: tearing down dev database (including volume)..."
+          docker compose -p $SC_PROJECT_NAME down -v 2>/dev/null || true
         fi
-      - ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter up -d postgres_dev
-      - sleep 2
+
+        POSTGRES_DB=$SC_DB_NAME docker compose -p $SC_PROJECT_NAME up -d --wait postgres
       - echo ""
       - echo "✅ Dev database running on localhost:$POSTGRES_PORT"
       - echo ""
@@ -63,7 +71,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -92,7 +100,7 @@ tasks:
           --prefix-colors "blue.bold,yellow.bold,green.bold,magenta.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
-          "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
+          "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DB}} -p trades-exporter-dev logs -f postgres" \
           "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS='{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}' DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB {{.ROOT_DIR}}/.venv/bin/uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
           "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT" \
           "until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}"
@@ -102,7 +110,7 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/dev.env,
+        scenarios/dev/config.env,
         config/secrets.env,
         config/secrets.dev.env,
       ]
@@ -132,7 +140,7 @@ tasks:
           --prefix-colors "blue.bold,yellow.bold,green.bold,magenta.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
-          "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
+          "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DB}} -p trades-exporter-dev logs -f postgres" \
           "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS='{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}' DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB {{.ROOT_DIR}}/.venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
           "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT" \
           "until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}"
@@ -146,7 +154,7 @@ tasks:
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/scenarios/dev/config.env",
         "{{.ROOT_DIR}}/config/secrets.env",
         "{{.ROOT_DIR}}/config/secrets.dev.env",
       ]
@@ -167,7 +175,7 @@ tasks:
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/scenarios/dev/config.env",
         "{{.ROOT_DIR}}/config/secrets.env",
         "{{.ROOT_DIR}}/config/secrets.dev.env",
       ]
@@ -190,7 +198,7 @@ tasks:
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
-        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/scenarios/dev/config.env",
         "{{.ROOT_DIR}}/config/secrets.env",
         "{{.ROOT_DIR}}/config/secrets.dev.env",
       ]
@@ -213,9 +221,9 @@ tasks:
     dotenv:
       [
         config/base.env,
-        config/staging.env,
+        config/staging.local.env,
         config/secrets.env,
-        config/secrets.staging.env,
+        config/secrets.staging.local.env,
       ]
     vars:
       RESET: '{{.RESET | default "0"}}'
@@ -263,13 +271,13 @@ tasks:
         fi
 
   prod:local:
-    desc: Start prod stack (existing images). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    desc: Start prod stack (last deployed :prod images). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
     dotenv:
       [
         config/base.env,
-        config/prod.env,
+        config/prod.local.env,
         config/secrets.env,
-        config/secrets.prod.env,
+        config/secrets.prod.local.env,
       ]
     vars:
       RESET: '{{.RESET | default "0"}}'
@@ -289,12 +297,9 @@ tasks:
         done
         if [ "$MISSING" = "1" ]; then
           echo ""
-          echo "   Build it first, then retry:"
-          echo "     task build:prod -- v1.0.0"
-          echo "     task start:prod:local"
-          echo ""
-          echo "   Or build + deploy in one step:"
-          echo "     task deploy:prod:local -- v1.0.0"
+          echo "   Nothing deployed to prod yet. Deploy first:"
+          echo "     task release:prod                 (tag + deploy per component)"
+          echo "     task deploy:prod:local:cwd        (from the working directory)"
           exit 1
         fi
       - |
@@ -393,10 +398,9 @@ tasks:
         export FRONTEND_PORT=$SC_WEB_PORT
         export LOG_LEVEL="{{.LOG_LEVEL}}"
 
-        # Ensure config/${ENV_NAME}.env exists for docker-compose.unified.yml's
-        # `env_file: config/${ENV_NAME}.env` lookup — every scenario (scenario-default, scenario-<name>)
-        # shares the same config/scenario.env, so symlink it under the resolved name.
-        ln -sf scenario.env "{{.ROOT_DIR}}/config/${ENV_NAME}.env"
+        # docker-compose.unified.yml reads config/${ENV_NAME}.local.env; every
+        # scenario shares config/scenario.env, so symlink it under the resolved name.
+        ln -sf scenario.env "{{.ROOT_DIR}}/config/${ENV_NAME}.local.env"
 
         echo "Cleaning up previous scenario environment ($ENV_NAME)..."
         docker compose -f infra/docker/docker-compose.unified.yml -p $SC_PROJECT_NAME down -v 2>/dev/null || true
@@ -682,14 +686,14 @@ tasks:
         # caller's responsibility — see scenario:'s own pkill step above)
         if [ "{{.RESET}}" = "1" ]; then
           echo "🔄 Restarting: stopping existing scenario environment ($ENV_NAME) first..."
-          docker compose -f {{.DOCKER_COMPOSE_SCENARIO_DB}} -p $SC_PROJECT_NAME down -v 2>/dev/null || true
+          docker compose -f {{.DOCKER_COMPOSE_DB}} -p $SC_PROJECT_NAME down -v 2>/dev/null || true
           pkill -f "uvicorn.*--port $SC_API_PORT" 2>/dev/null || true
           echo "✅ Previous environment cleaned"
         fi
 
         # ── Start scenario database ──
         echo "Starting scenario database ($ENV_NAME on port $SC_DB_PORT)..."
-        docker compose -f {{.DOCKER_COMPOSE_SCENARIO_DB}} -p $SC_PROJECT_NAME up -d postgres
+        docker compose -f {{.DOCKER_COMPOSE_DB}} -p $SC_PROJECT_NAME up -d postgres
 
         # ── Wait for DB healthy ──
         echo "Waiting for scenario database..."
@@ -731,7 +735,7 @@ tasks:
         DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
         SEED_DIR="$SEED_DIR" \
         WITH_DEFAULTS="{{.WITH_DEFAULTS}}" \
-          {{.ROOT_DIR}}/.taskfiles/scripts/db_bootstrap.sh
+          {{.ROOT_DIR}}/.taskfiles/db_bootstrap.sh
 
   _wait_healthy:
     internal: true

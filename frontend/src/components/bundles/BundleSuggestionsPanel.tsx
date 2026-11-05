@@ -226,7 +226,7 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
                                 <Button
                                     size="sm"
                                     variant="ghost"
-                                    colorScheme="red"
+                                    colorScheme="gray"
                                     onClick={() => refetch()}
                                 >
                                     Retry

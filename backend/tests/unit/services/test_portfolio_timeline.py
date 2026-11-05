@@ -455,3 +455,38 @@ class TestCostBasisSnapshotsFilter:
         ds = "2025-06-01"
         # 5*4000 + 3*5000 = 20000 + 15000 = 35000
         assert result[ds][275] == pytest.approx(35000.0)
+
+
+class TestPortfolioTimelineCache:
+
+    @pytest.fixture(autouse=True)
+    def _clear(self):
+        from backend.services.pnl.portfolio_timeline import clear_portfolio_timeline_cache
+
+        clear_portfolio_timeline_cache()
+        yield
+        clear_portfolio_timeline_cache()
+
+    def test_reuses_result_until_prices_change(self):
+        from backend.services.pnl import portfolio_timeline as pt
+
+        fingerprint = [(10, 99, 1.5)]
+        with patch.object(pt, "compute_portfolio_timeline", return_value=["p"]) as compute, \
+                patch.object(pt, "_price_fingerprint", side_effect=lambda s: fingerprint[0]):
+            assert pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1) == ["p"]
+            pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
+            assert compute.call_count == 1
+
+            fingerprint[0] = (11, 100, 2.5)
+            pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
+            assert compute.call_count == 2
+
+    def test_clear_forces_recompute(self):
+        from backend.services.pnl import portfolio_timeline as pt
+
+        with patch.object(pt, "compute_portfolio_timeline", return_value=[]) as compute, \
+                patch.object(pt, "_price_fingerprint", return_value=(1, 1, 1)):
+            pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
+            pt.clear_portfolio_timeline_cache()
+            pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
+            assert compute.call_count == 2

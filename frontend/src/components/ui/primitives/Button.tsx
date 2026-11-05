@@ -4,7 +4,7 @@ import { Spinner } from './Spinner';
 
 export type ButtonVariant = 'solid' | 'outline' | 'ghost' | 'subtle';
 export type ButtonColorScheme = 'blue' | 'red' | 'green' | 'gray';
-export type ButtonSize = 'sm' | 'md' | 'lg';
+export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends Omit<React.ComponentPropsWithoutRef<'button'>, 'color'> {
     variant?: ButtonVariant;
@@ -21,6 +21,7 @@ const BASE =
     'disabled:opacity-50 disabled:cursor-not-allowed';
 
 const SIZES: Record<ButtonSize, string> = {
+    xs: 'h-7 px-2.5 text-xs',
     sm: 'h-8 px-3 text-sm',
     md: 'h-9 px-4 text-sm',
     lg: 'h-10 px-5 text-base',

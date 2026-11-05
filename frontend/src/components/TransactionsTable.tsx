@@ -1876,40 +1876,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             <>
                 {/* Transactions tab header with actions */}
                 {!embeddedMode && !hideLegend && (
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        {/* Legend (left side) */}
-                        {!loading && !error && (
-                            <div className="flex flex-wrap items-center gap-3">
-                                <span className="text-xs text-slate-500">Dir:</span>
-                                <div className="flex items-center gap-1">
-                                    <div className="h-3 w-3 bg-green-100" />
-                                    <span className="text-xs">↓In</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <div className="h-3 w-3 bg-red-100" />
-                                    <span className="text-xs">↑Out</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <div className="h-3 w-3 bg-slate-100" />
-                                    <span className="text-xs">↔Int</span>
-                                </div>
-                                <span className="ml-2 text-xs text-slate-500">Review:</span>
-                                <div className="flex items-center gap-1">
-                                    <div className="h-3 w-1 bg-yellow-500" />
-                                    <span className="text-xs">Pending</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <div className="h-3 w-1 bg-green-500" />
-                                    <span className="text-xs">Valid</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <div className="h-3 w-1 bg-red-500" />
-                                    <span className="text-xs">Invalid</span>
-                                </div>
-                            </div>
-                        )}
+                    <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
                         {/* Actions (right side) */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <ColumnVisibilityPopover
                                 table={tanstackTable}
                                 onReset={() => {
@@ -1919,20 +1888,20 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         tableConfig.shownColumns
                                     ));
                                 }}
-                                size="sm"
+                                size="xs"
                             />
                             <Button
                                 onClick={error ? handleRetry : handleReset}
                                 variant="outline"
                                 colorScheme={error ? "red" : "gray"}
-                                size="sm"
+                                size="xs"
                             >
                                 {error ? "🔄 Retry" : "↺ Reset"}
                             </Button>
                             <Button
                                 onClick={() => handleRefresh()}
                                 variant="outline"
-                                size="sm"
+                                size="xs"
                             >
                                 🔄 Refresh
                             </Button>
@@ -1970,7 +1939,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     <div className="mb-4 border border-red-200 bg-red-50 py-6 text-center">
                         <span className="block font-bold text-red-600">Error loading transactions</span>
                         <span className="block text-sm text-red-600">{error}</span>
-                        <Button className="mt-3" onClick={handleRetry} colorScheme="red" size="sm">
+                        <Button className="mt-3" onClick={handleRetry} colorScheme="gray" size="sm">
                             🔄 Retry
                         </Button>
                     </div>
@@ -1990,7 +1959,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 {!loading && !error && (
                     <div className="relative overflow-x-auto border border-slate-200 bg-white text-[9px] shadow-sm">
                         <table className="w-full">
-                            <thead className="font-semibold uppercase tracking-wide text-slate-500">
+                            <thead className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                                 <tr>
                                     <th className="sticky left-0 z-10 min-w-[50px] border-r-2 border-slate-300 bg-slate-100">
                                         {(!embeddedMode || showSelectionInEmbedded) && (
@@ -2023,7 +1992,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                     {additionalColumns.map(col => (
                                         <th key={col.id} style={{ width: col.width, ...(col.headerBg ? { backgroundColor: col.headerBg } : {}) }}>{col.header}</th>
                                     ))}
-                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, 'sticky right-[50px] z-10 border-l-2 border-slate-300 bg-slate-100 px-1 text-[7px]')}
+                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, 'sticky right-[50px] z-10 w-[1%] whitespace-nowrap border-l-2 border-slate-300 bg-slate-100 px-1')}
                                     {!embeddedMode && <th className="sticky right-0 z-10 min-w-[50px] bg-slate-100 px-0" />}
                                 </tr>
                             </thead>

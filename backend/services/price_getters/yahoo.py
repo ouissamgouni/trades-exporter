@@ -58,6 +58,12 @@ class YahooPriceGetter(BasePriceGetter):
 
     name = "yahoo"
 
+    # Yahoo aggressively rate-limits/blocks rapid successive requests (e.g. in
+    # test runs). Retrying with the base default (3 attempts + backoff) just
+    # multiplies the wait for a call that's already being blocked. Fail fast
+    # instead, same pattern as marketstack.py.
+    max_retries = 1  # Keep fast — no retries
+
     # Default native quote currency for tickers
     DEFAULT_NATIVE_QUOTE = "USD"
 
@@ -143,7 +149,7 @@ class YahooPriceGetter(BasePriceGetter):
                         PriceService handles conversion to requested currency.
         """
         ticker_symbol, native_quote = self._resolve_ticker_with_quote(asset, config)
-        
+
         log.info(
             f"[yahoo] Fetching current price: asset={asset.symbol}, "
             f"ticker={ticker_symbol}, native_quote={native_quote}"
@@ -227,7 +233,7 @@ class YahooPriceGetter(BasePriceGetter):
                         PriceService handles conversion to requested currency.
         """
         ticker_symbol, native_quote = self._resolve_ticker_with_quote(asset, config)
-        
+
         log.info(
             f"[yahoo] Fetching historical price: asset={asset.symbol}, "
             f"date={dt.date()}, ticker={ticker_symbol}, native_quote={native_quote}"

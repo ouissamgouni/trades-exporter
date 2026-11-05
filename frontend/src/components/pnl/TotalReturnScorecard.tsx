@@ -587,7 +587,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                     {hidePerformers ? (
                         <div>
                             {/* Custom slot + Period Chart — side by side */}
-                            <div className={`grid items-start gap-3 ${performerSlot ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                            <div className={`grid items-start gap-3 ${performerSlot ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                                 {performerSlot && <div>{performerSlot}</div>}
                                 {/* Period chart */}
                                 <div className="border border-blue-200 bg-white p-2">
@@ -608,7 +608,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                     ) : (
                         <div>
                             {/* Best/Worst + Period Chart — side by side */}
-                            <div className="grid grid-cols-2 items-start gap-3">
+                            <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
                                 {/* Left half: Best & Worst */}
                                 {isPerformersLoading ? (
                                     <div className="border border-purple-200 bg-white p-2">
@@ -617,7 +617,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                 ) : (
                                     <div className="border border-purple-200 bg-white p-2">
                                         {/* Controls row: badges left, $/%+slider right */}
-                                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                                        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                                             {/* Left: Asset/Account/Category + sort metric badges */}
                                             <div className="flex flex-wrap items-center gap-0.5">
                                                 <Badge
@@ -956,7 +956,7 @@ export const MetricItem: React.FC<{
     compact?: boolean;
 }> = ({ label, value, color, subValue, icon, bg, onClick, compact }) => (
     <div
-        className={`flex min-w-0 flex-1 flex-col ${onClick ? 'cursor-pointer hover:opacity-85' : 'cursor-default'} ${compact ? 'px-1.5 py-0.5' : 'px-2 py-2'} ${tokenToClass(bg, 'bg', 'bg-transparent')}`}
+        className={`flex min-w-[130px] flex-1 flex-col ${onClick ? 'cursor-pointer hover:opacity-85' : 'cursor-default'} ${compact ? 'px-1.5 py-0.5' : 'px-2 py-2'} ${tokenToClass(bg, 'bg', 'bg-transparent')}`}
         onClick={onClick}
     >
         <div className="flex items-center gap-1">

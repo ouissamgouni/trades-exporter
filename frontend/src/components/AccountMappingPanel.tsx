@@ -1,5 +1,5 @@
 import * as RadixDialog from '@radix-ui/react-dialog';
-import { Badge, Button, Input, Spinner, Textarea } from './ui/primitives';
+import { Badge, Button, Input, Spinner, Textarea, FilterPill, FilterPillGroup } from './ui/primitives';
 import React, { useEffect, useState, useMemo } from 'react';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { API_URL, Account, RawAccount } from '../types';
@@ -695,7 +695,7 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
         <div>
             {mode === 'full' && (
                 <div className="mb-4">
-                    <div className="mb-3 flex items-center gap-2">
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
                         <Input
                             placeholder="Search sources..."
                             value={sourceSearch}
@@ -703,14 +703,13 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
                             className="max-w-[250px]"
                         />
                         {sourceFilter && (
-                            <Button size="sm" variant="outline" onClick={() => setSourceFilter('')}>
+                            <Button size="xs" variant="outline" onClick={() => setSourceFilter('')}>
                                 Clear filter
                             </Button>
                         )}
                         {onDismissedChange && (
                             <Button
-                                size="sm"
-                                className="text-[10px]"
+                                size="xs"
                                 variant="outline"
                                 onClick={() => onDismissedChange(!includeDismissed)}
                             >
@@ -718,33 +717,27 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
                             </Button>
                         )}
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                        <Button
-                            size="sm"
-                            variant={sourceFilter === '' ? 'solid' : 'outline'}
-                            colorScheme={sourceFilter === '' ? 'blue' : 'gray'}
+                    <FilterPillGroup>
+                        <FilterPill
+                            active={sourceFilter === ''}
+                            color="blue"
                             onClick={() => setSourceFilter('')}
+                            count={allSources.reduce((sum, s) => sum + s.count, 0)}
                         >
-                            All ({allSources.reduce((sum, s) => sum + s.count, 0)})
-                        </Button>
+                            All
+                        </FilterPill>
                         {filteredSources.map(({ source, count }) => (
-                            <Button
+                            <FilterPill
                                 key={source}
-                                size="sm"
-                                variant={sourceFilter === source ? 'solid' : 'outline'}
-                                colorScheme={sourceFilter === source ? 'blue' : 'gray'}
+                                active={sourceFilter === source}
+                                color="blue"
                                 onClick={() => setSourceFilter(source)}
+                                count={count}
                             >
                                 {source}
-                                <Badge
-                                    colorScheme="gray"
-                                    className={sourceFilter === source ? 'ml-1 bg-blue-400 text-white' : 'ml-1'}
-                                >
-                                    {count}
-                                </Badge>
-                            </Button>
+                            </FilterPill>
                         ))}
-                    </div>
+                    </FilterPillGroup>
                 </div>
             )}
 

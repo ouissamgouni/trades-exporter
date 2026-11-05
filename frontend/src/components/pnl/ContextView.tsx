@@ -367,7 +367,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
     return (
         <div>
             {/* ─── 1. Breadcrumb + Period Cards row ─── */}
-            <div className="mb-0 flex items-center gap-2 border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="mb-0 flex flex-wrap items-center gap-2 border border-gray-200 bg-gray-50 px-3 py-2">
                 {/* Breadcrumb trail */}
                 <div className="flex flex-wrap items-center gap-1.5">
                     {breadcrumbs.map((crumb, idx) => {

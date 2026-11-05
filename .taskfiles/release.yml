@@ -1,13 +1,417 @@
 version: "3"
 
+# ════════════════════════════════════════════════════════════════════════════
+# Release tasks (per-component)
+#
+# Components release independently. Each release creates an annotated tag
+# of the form `<component>-vX.Y.Z` on main, then deploys it to local prod
+# (docker-compose; refs/deploys/prod/<component> are local refs).
+#
+#   task release:prod:backend  -- v1.2.0   — tag backend-v1.2.0 + deploy backend
+#   task release:prod:frontend -- v1.2.0   — tag frontend-v1.2.0 + deploy frontend
+#   task release:prod:db       -- v1.2.0   — tag db-v1.2.0 + deploy db migrations
+#   task release:prod:backend              — interactive: suggests next patch
+#                                            from latest backend-v* tag
+#   task release:prod                      — aggregate: prompts per component
+#
+# Each per-component task computes "suggested next" from the latest
+# `<component>-v*` tag (NOT from refs/deploys/prod/<component>, which only
+# tracks the currently-deployed SHA — releases append to tag history).
+#
+# Override the suggested bump with BUMP=patch|minor|major (default: patch).
+#
+# Aggregate args (after `--`, can be combined):
+#   --fast             — auto-detect changed components + suggested tags, one
+#                        summary confirmation, then tag + deploy without prompts
+#   --dry-run          — print the --fast plan (and commands) and exit
+#   --skip-ci-check    — skip CI status checks before deployment
+#   db backend frontend — restrict to these components
+#
+# Examples:
+#   task release:prod -- --fast                    (changed components, one confirm)
+#   task release:prod -- --fast backend frontend   (only these, one confirm)
+#   task release:prod -- --dry-run                 (show what --fast would do)
+#   task release:prod -- backend                   (interactive, backend only)
+#   task release:prod -- --fast --skip-ci-check
+# ════════════════════════════════════════════════════════════════════════════
+
 tasks:
-  default:
-    desc: "Tag + deploy to prod (e.g., task release -- v1.2.0)"
-    aliases: [release]
+  # ──────────────────────────────────────────────────────────────────────────
+  # Internal: suggest next version for a component
+  # ──────────────────────────────────────────────────────────────────────────
+  _suggest-version:
+    internal: true
+    cmds:
+      - |
+        COMPONENT="{{.COMPONENT}}"
+        BUMP="{{.BUMP | default "patch"}}"
+        git fetch origin main --tags --quiet 2>/dev/null || true
+        LATEST=$(git tag -l "${COMPONENT}-v*" --sort=-version:refname | head -1)
+        if [ -z "$LATEST" ]; then
+          # Fall back to legacy bare vX.Y.Z if no per-component tag yet
+          LATEST=$(git tag -l "v*" --sort=-version:refname | head -1)
+          [ -z "$LATEST" ] && LATEST="${COMPONENT}-v0.0.0"
+        fi
+        # Strip COMPONENT- prefix if present, then strip leading v
+        CORE=$(echo "$LATEST" | sed -E "s/^${COMPONENT}-//; s/^v//; s/-.*$//")
+        MAJ=$(echo "$CORE" | cut -d. -f1); MAJ=${MAJ:-0}
+        MIN=$(echo "$CORE" | cut -d. -f2); MIN=${MIN:-0}
+        PAT=$(echo "$CORE" | cut -d. -f3); PAT=${PAT:-0}
+        case "$BUMP" in
+          major) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+          minor) MIN=$((MIN+1)); PAT=0 ;;
+          patch|*) PAT=$((PAT+1)) ;;
+        esac
+        echo "v$MAJ.$MIN.$PAT"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Internal: per-component interactive release flow
+  #
+  # Called by prod:db / prod:backend / prod:frontend. If VERSION is empty,
+  # prompts (with retype-confirm), then dispatches to tag-component + deploy
+  # via shell `task` calls (single sub-task chain — no re-exec, so the parent
+  # task does not double-run the tag step).
+  # ──────────────────────────────────────────────────────────────────────────
+  _do-component:
+    internal: true
+    vars:
+      COMPONENT: "{{.COMPONENT}}"
+      VERSION: "{{.VERSION}}"
+      BUMP: '{{.BUMP | default "patch"}}'
+    cmds:
+      - |
+        set -e
+        COMPONENT="{{.COMPONENT}}"
+        VERSION="{{.VERSION}}"
+        # Forward a Task-var SKIP_CI_CHECK to the deploy subprocess as an env
+        # var (the gate lives in deploy:_prepare-ref-prod). Don't clobber an
+        # already-inherited env value (SKIP_CI_CHECK=1 task release:...).
+        TASK_SKIP="{{.SKIP_CI_CHECK | default ""}}"
+        [ -n "$TASK_SKIP" ] && export SKIP_CI_CHECK="$TASK_SKIP"
+        if [ -z "$VERSION" ]; then
+          git fetch origin main --tags --quiet 2>/dev/null || true
+          LATEST=$(git tag -l "${COMPONENT}-v*" --sort=-version:refname | head -1)
+          [ -z "$LATEST" ] && LATEST="(none)"
+          BASE=$(git tag -l "${COMPONENT}-v*" --sort=-version:refname | head -1)
+          [ -z "$BASE" ] && BASE=$(git tag -l "v*" --sort=-version:refname | head -1)
+          [ -z "$BASE" ] && BASE="${COMPONENT}-v0.0.0"
+          CORE=$(echo "$BASE" | sed -E "s/^${COMPONENT}-//; s/^v//; s/-.*$//")
+          MAJ=$(echo "$CORE" | cut -d. -f1); MAJ=${MAJ:-0}
+          MIN=$(echo "$CORE" | cut -d. -f2); MIN=${MIN:-0}
+          PAT=$(echo "$CORE" | cut -d. -f3); PAT=${PAT:-0}
+          case "{{.BUMP}}" in
+            major) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+            minor) MIN=$((MIN+1)); PAT=0 ;;
+            patch|*) PAT=$((PAT+1)) ;;
+          esac
+          SUGGESTED="v$MAJ.$MIN.$PAT"
+          # Heads-up: any uncommitted CWD changes (Dockerfile,
+          # source code, etc.) will NOT be deployed by this flow — the
+          # release deploys the tagged commit on main from a clean worktree.
+          DIRTY=""
+          if ! git diff --quiet HEAD -- 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+            DIRTY="yes"
+          fi
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "  RELEASE ${COMPONENT} TO PRODUCTION"
+          echo ""
+          echo "  Latest ${COMPONENT} tag: $LATEST"
+          echo "  Suggested next:          ${COMPONENT}-$SUGGESTED  (bump={{.BUMP}})"
+          echo ""
+          echo "  Override with BUMP=minor or BUMP=major, or pass an explicit"
+          echo "  version: task release:prod:${COMPONENT} -- v2.0.0"
+          if [ -n "$DIRTY" ]; then
+            echo ""
+            echo "  ⚠️  Uncommitted changes detected in your working tree."
+            echo "      The release flow deploys the TAG on main from a clean"
+            echo "      worktree — your local edits will NOT be included."
+            echo "      To deploy the working directory instead, use:"
+            echo "        task deploy:prod:local:cwd"
+          fi
+          echo "═══════════════════════════════════════════════════════════════"
+          printf "Type the version to release [%s]: " "$SUGGESTED"
+          read -r INPUT
+          VERSION="${INPUT:-$SUGGESTED}"
+          echo ""
+          echo "→ Releasing ${COMPONENT}-$VERSION"
+        fi
+        # Single dispatch: tag, then deploy. No re-exec — this script is the
+        # only place that drives the chain, so the parent task cannot run it
+        # twice. tag-component may itself prompt (when the tag exists) and
+        # write a different chosen tag to .git/.last-release-tag.
+        rm -f .git/.last-release-tag
+        task git:release:tag-component COMPONENT="$COMPONENT" VERSION="$VERSION" REUSE="{{.REUSE | default "0"}}" FORCE="{{.FORCE | default "0"}}"
+        DEPLOY_TAG="${COMPONENT}-${VERSION}"
+        if [ -f .git/.last-release-tag ]; then
+          DEPLOY_TAG=$(cat .git/.last-release-tag)
+          rm -f .git/.last-release-tag
+          echo "→ Deploying chosen tag: $DEPLOY_TAG"
+        fi
+        # YES=1: caller (release:prod --fast) already confirmed the plan.
+        if [ "{{.YES | default ""}}" = "1" ]; then
+          task --yes deploy:prod:local:"$COMPONENT" REF="$DEPLOY_TAG"
+        else
+          task deploy:prod:local:"$COMPONENT" REF="$DEPLOY_TAG"
+        fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Per-component release tasks
+  # ──────────────────────────────────────────────────────────────────────────
+
+  prod:db:
+    desc:
+      "Tag db-vX.Y.Z + run prod DB migrations. Without VERSION, suggests next
+      patch."
     vars:
       VERSION: "{{if .VERSION}}{{.VERSION}}{{else}}{{.CLI_ARGS}}{{end}}"
+      BUMP: '{{.BUMP | default "patch"}}'
     cmds:
-      - task: ":git:release:tag"
-        vars: { VERSION: "{{.VERSION}}" }
-      - task: ":deploy:prod:local"
-        vars: { CLI_ARGS: "{{.VERSION}}" }
+      - task: _do-component
+        vars: { COMPONENT: "db", VERSION: "{{.VERSION}}", BUMP: "{{.BUMP}}" }
+
+  prod:backend:
+    desc:
+      "Tag backend-vX.Y.Z + deploy backend to prod. Without VERSION, suggests
+      next patch."
+    vars:
+      VERSION: "{{if .VERSION}}{{.VERSION}}{{else}}{{.CLI_ARGS}}{{end}}"
+      BUMP: '{{.BUMP | default "patch"}}'
+    cmds:
+      - task: _do-component
+        vars:
+          { COMPONENT: "backend", VERSION: "{{.VERSION}}", BUMP: "{{.BUMP}}" }
+
+  prod:frontend:
+    desc:
+      "Tag frontend-vX.Y.Z + deploy frontend to prod. Without VERSION, suggests
+      next patch."
+    vars:
+      VERSION: "{{if .VERSION}}{{.VERSION}}{{else}}{{.CLI_ARGS}}{{end}}"
+      BUMP: '{{.BUMP | default "patch"}}'
+    cmds:
+      - task: _do-component
+        vars:
+          { COMPONENT: "frontend", VERSION: "{{.VERSION}}", BUMP: "{{.BUMP}}" }
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Aggregator: release one or more components in sequence
+  #
+  # Default (interactive): walks db → backend → frontend, prompting y/N for
+  # each (or only the components listed after `--`), then the per-component
+  # version + deploy prompts.
+  #
+  # --fast: preselects components with commits on origin/main (in their path)
+  # since refs/deploys/prod/<component>, suggests the next tag for each, asks
+  # once [Y/e/n], then tags + deploys with no further prompts.
+  # --dry-run: prints the --fast plan and the commands it would run.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  prod:
+    desc: "Release components to prod. Args after --: --fast, --dry-run, --skip-ci-check, [db backend frontend]."
+    silent: true
+    vars:
+      BUMP: '{{.BUMP | default "patch"}}'
+    cmds:
+      - |
+        TASK_SKIP="{{.SKIP_CI_CHECK | default ""}}"
+        [ -n "$TASK_SKIP" ] && export SKIP_CI_CHECK="$TASK_SKIP"
+
+        usage() {
+          echo "Usage: task release:prod -- [--fast] [--dry-run] [--skip-ci-check] [db] [backend] [frontend]"
+          echo "  (no flag)        interactive: prompts per component, version, deploy"
+          echo "  --fast           auto-detect changes + suggested tags, one confirmation"
+          echo "  --dry-run        show the --fast plan and exit"
+          echo "  --skip-ci-check  skip CI green-check before deploy"
+          echo "  db backend ...   restrict to these components"
+          echo "  BUMP=minor|major override the suggested bump (default: patch)"
+        }
+
+        FAST=""; DRY=""; LIST=""
+        set -- {{.CLI_ARGS}}
+        for ARG in "$@"; do
+          case "$ARG" in
+            --fast) FAST=1 ;;
+            --dry-run) DRY=1 ;;
+            --skip-ci-check) export SKIP_CI_CHECK=1 ;;
+            -h|--help) usage; exit 0 ;;
+            db|backend|frontend) LIST="$LIST $ARG" ;;
+            *) echo "❌ Unknown argument '$ARG'."; usage; exit 1 ;;
+          esac
+        done
+
+        # Echo-based: a non-zero function return trips errexit in Task's shell.
+        listed() {
+          case " $LIST " in *" $1 "*) echo 1 ;; esac
+        }
+        snapshot() {
+          for C in db backend frontend; do
+            printf "%s=%s " "$C" "$(git rev-parse --verify --quiet "refs/deploys/prod/$C" 2>/dev/null || echo -)"
+          done
+        }
+
+        # ── Interactive (default) ────────────────────────────────────────────
+        if [ -z "$FAST" ] && [ -z "$DRY" ]; then
+          BEFORE=$(snapshot)
+          FAILED=""
+          for C in db backend frontend; do
+            if [ -n "$LIST" ]; then
+              [ -n "$(listed "$C")" ] || continue
+            else
+              printf "\nRelease %s? [y/N] " "$C"
+              read -r ANS
+              case "$ANS" in
+                y|Y|yes) ;;
+                *) echo "→ skipped $C"; continue ;;
+              esac
+            fi
+            if ! task release:prod:$C; then
+              echo "❌ $C release aborted; stopping."; FAILED="$C"; break
+            fi
+          done
+          task deploy:_recap ENV=prod BEFORE="$BEFORE" FAILED="$FAILED"
+          [ -z "$FAILED" ] || exit 1
+          exit 0
+        fi
+
+        # ── Fast / dry-run: build the plan ───────────────────────────────────
+        get() { eval "echo \"\${$1_$2}\""; }
+        comp_path() {
+          case "$1" in
+            db) echo "backend/db/alembic" ;;
+            backend) echo "backend" ;;
+            frontend) echo "frontend" ;;
+          esac
+        }
+        suggest() {
+          BASE=$(git tag -l "$1-v*" --sort=-version:refname | head -1)
+          [ -z "$BASE" ] && BASE=$(git tag -l "v*" --sort=-version:refname | head -1)
+          [ -z "$BASE" ] && BASE="$1-v0.0.0"
+          CORE=$(echo "$BASE" | sed -E "s/^$1-//; s/^v//; s/-.*$//")
+          MAJ=$(echo "$CORE" | cut -d. -f1); MAJ=${MAJ:-0}
+          MIN=$(echo "$CORE" | cut -d. -f2); MIN=${MIN:-0}
+          PAT=$(echo "$CORE" | cut -d. -f3); PAT=${PAT:-0}
+          case "{{.BUMP}}" in
+            major) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+            minor) MIN=$((MIN+1)); PAT=0 ;;
+            *) PAT=$((PAT+1)) ;;
+          esac
+          echo "v$MAJ.$MIN.$PAT"
+        }
+
+        echo "→ Fetching origin/main and tags..."
+        git fetch origin main --tags --quiet 2>/dev/null || true
+
+        for C in db backend frontend; do
+          CUR=$(git rev-parse --verify --quiet "refs/deploys/prod/$C" 2>/dev/null || true)
+          if [ -n "$CUR" ]; then
+            CUR_NAME=$(git describe --tags --exact-match --match "$C-v*" "$CUR" 2>/dev/null \
+              || git describe --tags --always "$CUR" 2>/dev/null || echo "$CUR")
+            N=$(git rev-list --count "$CUR..origin/main" -- "$(comp_path "$C")" 2>/dev/null || echo "?")
+          else
+            CUR_NAME="(none)"
+            N="new"
+          fi
+          SEL=""
+          if [ -n "$LIST" ]; then
+            SEL=$(listed "$C")
+          elif [ "$N" != "0" ]; then
+            SEL=1
+          fi
+          V=$(suggest "$C")
+          eval "SEL_$C=\$SEL; VER_$C=\$V; CUR_$C=\$CUR_NAME; N_$C=\$N"
+        done
+
+        show_plan() {
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════════════"
+          echo "  RELEASE TO PRODUCTION — plan"
+          echo ""
+          printf "  %-3s  %-9s %-28s %-22s %s\n" "" "COMPONENT" "DEPLOYED" "NEXT TAG" "CHANGES"
+          for C in db backend frontend; do
+            MARK="[ ]"; [ -n "$(get SEL $C)" ] && MARK="[x]"
+            CH="$(get N $C) commits"; [ "$(get N $C)" = "new" ] && CH="never deployed"
+            printf "  %-3s  %-9s %-28s %-22s %s\n" "$MARK" "$C" "$(get CUR $C)" "$C-$(get VER $C)" "$CH"
+          done
+          if ! git diff --quiet HEAD -- 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+            echo ""
+            echo "  ⚠️  Uncommitted local changes will NOT be deployed (tags on main only)."
+          fi
+          [ -n "$SKIP_CI_CHECK" ] && echo "  ⏭️  CI green-check will be skipped."
+          echo "═══════════════════════════════════════════════════════════════════════"
+        }
+
+        if [ -n "$DRY" ]; then
+          show_plan
+          echo ""
+          echo "Dry run — would run:"
+          ANY=""
+          for C in db backend frontend; do
+            if [ -n "$(get SEL $C)" ]; then
+              ANY=1
+              echo "  task release:prod:$C VERSION=$(get VER $C) YES=1"
+            fi
+          done
+          [ -z "$ANY" ] && echo "  (nothing — no component selected)"
+          exit 0
+        fi
+
+        while true; do
+          show_plan
+          printf "Proceed? [Y]es / [e]dit / [n]o: "
+          read -r ANS
+          case "$ANS" in
+            ""|y|Y|yes) break ;;
+            e|E|edit)
+              for C in db backend frontend; do
+                if [ -n "$(get SEL $C)" ]; then DEF=y; HINT="Y/n"; else DEF=n; HINT="y/N"; fi
+                printf "  Release %s? [%s] " "$C" "$HINT"
+                read -r A
+                case "${A:-$DEF}" in
+                  y|Y|yes)
+                    eval "SEL_$C=1"
+                    printf "    Version [%s]: " "$(get VER $C)"
+                    read -r V
+                    if [ -n "$V" ]; then
+                      if echo "$V" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+                        eval "VER_$C=\$V"
+                      else
+                        echo "    ❌ '$V' is not vX.Y.Z — keeping $(get VER $C)"
+                      fi
+                    fi
+                    ;;
+                  *) eval "SEL_$C=" ;;
+                esac
+              done
+              ;;
+            *) echo "Aborted."; exit 0 ;;
+          esac
+        done
+
+        ANY=""
+        for C in db backend frontend; do
+          if [ -n "$(get SEL $C)" ]; then ANY=1; fi
+        done
+        if [ -z "$ANY" ]; then
+          echo "Nothing to release."
+          exit 0
+        fi
+
+        BEFORE=$(snapshot)
+        FAILED=""
+        for C in db backend frontend; do
+          [ -n "$(get SEL $C)" ] || continue
+          echo ""
+          echo "━━━━ Releasing $C-$(get VER $C) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if ! task release:prod:$C VERSION="$(get VER $C)" YES=1; then
+            echo "❌ $C release aborted; stopping."; FAILED="$C"; break
+          fi
+        done
+        task deploy:_recap ENV=prod BEFORE="$BEFORE" FAILED="$FAILED"
+        [ -z "$FAILED" ] || exit 1
+
+  # Backward-compat: `task release:default` is what `task release` resolves to.
+  default:
+    desc: "Alias of release:prod (kept for backward compat)."
+    cmds:
+      - task: prod

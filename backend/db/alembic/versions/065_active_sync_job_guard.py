@@ -16,6 +16,12 @@ depends_on = None
 
 
 def upgrade():
+    # Older DBs can hold many stale pending/running jobs; keep only the newest active one.
+    op.execute("""
+        UPDATE sync_jobs SET status = 'aborted'
+        WHERE status IN ('pending', 'running')
+          AND id <> (SELECT max(id) FROM sync_jobs WHERE status IN ('pending', 'running'))
+    """)
     op.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uq_sync_jobs_one_active
         ON sync_jobs ((true))

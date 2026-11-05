@@ -117,8 +117,8 @@ const Filters: React.FC<FiltersProps> = ({
                         key={s}
                         type="button"
                         className={`cursor-pointer px-3 py-1 text-xs transition-all duration-150 ${statusFilter === s
-                                ? 'bg-blue-500 font-bold text-white hover:bg-blue-600'
-                                : 'bg-white font-normal text-gray-600 hover:bg-gray-50'
+                            ? 'bg-blue-500 font-bold text-white hover:bg-blue-600'
+                            : 'bg-white font-normal text-gray-600 hover:bg-gray-50'
                             }`}
                         onClick={() => onStatusChange(s)}
                     >
@@ -291,7 +291,7 @@ const PositionDetailPanel: React.FC<{
     const pnlColor = pos.net_pnl >= 0 ? 'text-green-600' : 'text-red-600';
 
     return (
-        <div className="fixed bottom-0 right-0 top-0 z-[1000] w-[400px] overflow-y-auto border-l border-gray-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-x-0 bottom-0 top-auto z-[1000] max-h-[90vh] w-full max-w-full overflow-y-auto border-t border-gray-200 bg-white p-4 shadow-xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[400px] sm:border-l sm:border-t-0">
             <div className="mb-4 flex justify-between">
                 <div className="flex items-center gap-2">
                     <Badge colorScheme="purple">{pos.coin}</Badge>
