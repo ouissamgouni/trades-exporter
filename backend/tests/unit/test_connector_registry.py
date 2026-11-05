@@ -243,7 +243,7 @@ class TestConnectorRegistry:
 
         assert api_dict["type"] == "blockscout"
         assert api_dict["category"] == "onchain"
-        assert api_dict["display_name"] == "Blockscout"
+        assert api_dict["display_name"] == "EVM · Blockscout"
         assert api_dict["supported_chains"] is not None
         assert "base" in api_dict["supported_chains"]
         assert "chain" in api_dict["required_config"]

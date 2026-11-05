@@ -229,6 +229,10 @@ def detect_duplicate_groups(
     - Same direction
     - date_time within ±time_window_seconds
     - quantity within ±amount_tolerance_percent
+
+    Also matches on-chain rows from different sources with the same account, network,
+    tx hash, token contract (or native) and direction — e.g. the same history imported
+    by two providers, even when symbols (MATIC/POL) or row shapes (cost/transfer) differ.
     
     Excludes review_status="invalid" and same-run-different-ID pairs.
     Uses union-find to merge transitive matches into groups.
@@ -297,21 +301,38 @@ def detect_duplicate_groups(
         )
     )
     
-    # Apply filters
-    if account_id is not None:
-        pair_query = pair_query.where(T1.account_id == account_id)
-    
-    if transaction_ids:
-        pair_query = pair_query.where(
-            or_(T1.id.in_(transaction_ids), T2.id.in_(transaction_ids))
+    onchain_pair_query = (
+        select(T1.id, T2.id)
+        .where(T1.id < T2.id)
+        .where(T1.review_status != "invalid")
+        .where(T2.review_status != "invalid")
+        .where(T1.account_id.isnot(None))
+        .where(T1.account_id == T2.account_id)
+        .where(T1.source != T2.source)
+        .where(T1.network_transaction_id.isnot(None))
+        .where(T1.network_transaction_id != "")
+        .where(func.lower(T1.network_transaction_id) == func.lower(T2.network_transaction_id))
+        .where(func.coalesce(T1.network, "") == func.coalesce(T2.network, ""))
+        .where(T1.direction == T2.direction)
+        .where(
+            func.lower(func.coalesce(T1.token_contract_address, ""))
+            == func.lower(func.coalesce(T2.token_contract_address, ""))
         )
-    
-    if time_filter_cutoff is not None:
-        pair_query = pair_query.where(T1.created_at >= time_filter_cutoff)
-        pair_query = pair_query.where(T2.created_at >= time_filter_cutoff)
-    
+    )
+
+    def _apply_filters(query):
+        if account_id is not None:
+            query = query.where(T1.account_id == account_id)
+        if transaction_ids:
+            query = query.where(or_(T1.id.in_(transaction_ids), T2.id.in_(transaction_ids)))
+        if time_filter_cutoff is not None:
+            query = query.where(T1.created_at >= time_filter_cutoff)
+            query = query.where(T2.created_at >= time_filter_cutoff)
+        return query
+
     # Execute to get all matching pairs
-    pairs = session.exec(pair_query).all()
+    pairs = set(session.exec(_apply_filters(pair_query)).all())
+    pairs |= set(session.exec(_apply_filters(onchain_pair_query)).all())
     
     if not pairs:
         log.debug("No fuzzy duplicate pairs found")

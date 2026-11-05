@@ -1,19 +1,20 @@
 """
-Polymarket Polygon connector: Captures external USDC.E deposits/withdrawals
+Polymarket Polygon connector: Captures external USDC deposits/withdrawals
 to/from the Polymarket proxy wallet on Polygon.
 
-Uses Blockscout Polygon token transfers, filtering at yield_raws() level to
+Uses Ankr's Advanced API token transfers, filtering at yield_raws() level to
 exclude Polymarket-internal transfers (trades, redemptions, CTF token burns).
-Only external USDC.E movements pass through.
+Only external USDC movements pass through.
 """
 
-from typing import Dict, Any, Generator
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any, Dict, Generator
 
-from backend.connectors.onchain.blockscout.connector_blockscout_token_transfers import (
-    ConnectorBlockscoutTokenTransfers,
-)
 from backend.config.loader import configure_logging
-from backend.db.models import NormalizedTransaction
+from backend.connectors.onchain.connector_ankr import ConnectorAnkr
+from backend.core.network_normalizer import normalize_network
+from backend.db.models import NormalizedTransaction, ensure_utc
 
 log = configure_logging("polymarket_polygon")
 
@@ -30,10 +31,16 @@ POLYMARKET_CONTRACTS = {
     "0x0000000000000000000000000000000000000000",  # Zero / burn address
 }
 
+# Contract → symbol, matching the symbols stored by the former Blockscout source.
+USDC_CONTRACTS = {
+    "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": "USDC.E",  # Bridged USDC (Polymarket collateral)
+    "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "USDC",  # Native USDC
+}
 
-class ConnectorPolymarketPolygon(ConnectorBlockscoutTokenTransfers):
+
+class ConnectorPolymarketPolygon(ConnectorAnkr):
     """
-    Blockscout Polygon token transfers filtered to external USDC.E deposits/withdrawals.
+    Ankr Polygon token transfers filtered to external USDC deposits/withdrawals.
 
     Filtering happens in yield_raws() — NOT raw_to_normalized() — because
     returning None from raw_to_normalized() crashes the hub pipeline
@@ -52,6 +59,7 @@ class ConnectorPolymarketPolygon(ConnectorBlockscoutTokenTransfers):
         config: Dict[str, Any] = None,
         **kwargs,
     ):
+        self.source_account = wallet_address
         super().__init__(
             wallet_address=wallet_address,
             chain_name="polygon",
@@ -61,38 +69,111 @@ class ConnectorPolymarketPolygon(ConnectorBlockscoutTokenTransfers):
         )
 
     def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
-        """
-        Yield only external USDC.E transfers, filtering out Polymarket-internal ones.
+        if self.test_mode:
+            return
 
-        Skips:
-        - Transfers where from or to is a known Polymarket contract
-        - Non-USDC.E tokens (conditional tokens, spam, etc.)
-        """
-        for raw in super().yield_raws():
-            # Extract addresses
-            tx_from = (raw.get("from", {}).get("hash", "") or "").lower()
-            tx_to = (raw.get("to", {}).get("hash", "") or "").lower()
+        params: Dict[str, Any] = {
+            "blockchain": self.ankr_chain,
+            "address": self.wallet_address,
+            "descOrder": False,
+        }
+        if self.since_datetime:
+            params["fromTimestamp"] = int(ensure_utc(self.since_datetime).timestamp())
 
-            # Skip Polymarket-internal transfers
-            if tx_from in POLYMARKET_CONTRACTS or tx_to in POLYMARKET_CONTRACTS:
-                continue
+        kept = 0
+        for transfer in self._paginate("ankr_getTokenTransfers", params, "transfers"):
+            if self._is_external_usdc(transfer):
+                kept += 1
+                yield dict(transfer, _kind="token_transfer")
+        log.info(f"   ✅ Polymarket Polygon: {kept} external USDC transfers")
 
-            # Skip non-USDC tokens
-            token_info = raw.get("token", {})
-            token_symbol = (token_info.get("symbol") or "").upper()
-            if token_symbol not in ("USDC", "USDC.E"):
-                continue
+    @staticmethod
+    def _is_external_usdc(transfer: Dict[str, Any]) -> bool:
+        tx_from = (transfer.get("fromAddress") or "").lower()
+        tx_to = (transfer.get("toAddress") or "").lower()
+        if tx_from in POLYMARKET_CONTRACTS or tx_to in POLYMARKET_CONTRACTS:
+            return False
+        return (transfer.get("contractAddress") or "").lower() in USDC_CONTRACTS
 
-            yield raw
+    def raw_to_normalized(self, raw: Dict) -> NormalizedTransaction:
+        if raw.get("_kind") == "token_transfer":
+            return self._map_usdc_transfer(raw)
+        if "token" in raw and "total" in raw:
+            # Legacy Blockscout raws stored before the move to Ankr (renormalize).
+            return self._legacy_blockscout_mapper().raw_to_normalized(raw)
+        raise ValueError(f"Unknown Polymarket Polygon raw: {list(raw)[:5]}")
 
-    def raw_to_normalized(self, tx: Dict) -> NormalizedTransaction:
-        """Normalize as standard Blockscout transfer, override source and type."""
-        normalized = super().raw_to_normalized(tx)
+    def _map_usdc_transfer(self, tr: Dict[str, Any]) -> NormalizedTransaction:
+        tx_hash = tr.get("transactionHash") or ""
+        tx_from = tr.get("fromAddress") or ""
+        tx_to = tr.get("toAddress") or ""
+        contract = tr.get("contractAddress") or ""
+        symbol = USDC_CONTRACTS.get(contract.lower(), (tr.get("tokenSymbol") or "USDC").upper())
+        decimals = int(tr.get("tokenDecimals") or 6)
+        quantity = Decimal(str(tr.get("valueRawInteger") or 0)) / Decimal(10**decimals)
+        direction = "outflow" if tx_from.lower() == self.wallet_address else "inflow"
 
-        if normalized:
-            normalized.source = "polymarket_polygon"
-            normalized.source_transaction_type = (
-                "deposit" if normalized.direction == "inflow" else "withdrawal"
+        # Same id/field layout as the former Blockscout source so existing rows are upserted, not duplicated.
+        return NormalizedTransaction(
+            source="polymarket_polygon",
+            account_id=self.account_id,
+            source_account=self.source_account,
+            source_transaction_id=f"{tx_hash}_{tr.get('logIndex', '')}",
+            network_transaction_id=tx_hash,
+            date_time=datetime.fromtimestamp(int(tr.get("timestamp") or 0), tz=timezone.utc),
+            direction=direction,
+            transaction_type="transfer",
+            source_transaction_type="deposit" if direction == "inflow" else "withdrawal",
+            source_asset_symbol=symbol,
+            quantity=float(quantity),
+            fee=0.0,
+            source_fee_quote_asset_symbol="POL",
+            include_fee=direction == "outflow",
+            source_from_account=tx_from,
+            source_to_account=tx_to,
+            network=normalize_network("polygon"),
+            token_contract_address=contract,
+            tags={
+                "contract_address": contract,
+                "token_symbol": symbol,
+                "token_name": tr.get("tokenName") or "",
+            },
+        )
+
+    def _legacy_blockscout_mapper(self):
+        if not hasattr(self, "_blockscout_mapper"):
+            from backend.connectors.onchain.blockscout.connector_blockscout_token_transfers import (
+                ConnectorBlockscoutTokenTransfers,
             )
 
-        return normalized
+            mapper = ConnectorBlockscoutTokenTransfers(
+                wallet_address=self.source_account,
+                chain_name="polygon",
+                account_id=self.account_id,
+                connector_id=self.connector_id,
+                config={"renormalize_mode": True, "disable_file_output": True},
+            )
+            original = mapper.raw_to_normalized
+
+            def mapped(raw):
+                normalized = original(raw)
+                normalized.source = "polymarket_polygon"
+                normalized.source_transaction_type = (
+                    "deposit" if normalized.direction == "inflow" else "withdrawal"
+                )
+                return normalized
+
+            mapper.raw_to_normalized = mapped
+            self._blockscout_mapper = mapper
+        return self._blockscout_mapper
+
+    def get_balance(self):
+        entries = [
+            entry
+            for entry in super().get_balance()
+            if (entry.raw.get("contractAddress") or "").lower() in USDC_CONTRACTS
+        ]
+        for entry in entries:
+            entry.asset_symbol = "USDC"
+            entry.raw = {"source": "wallet_cash", **entry.raw}
+        return entries

@@ -1,27 +1,22 @@
 """
 Integration tests for SUI connector (live API).
 Moved from tests/unit/connectors/test_sui_integration.py.
-Requires SUI_RPC_URL or ANKR_API_KEY environment variable.
+Uses the public Sui GraphQL endpoint (override with SUI_GRAPHQL_URL); no API key needed.
 """
 
-import os
 import pytest
 from decimal import Decimal
 from backend.connectors.onchain.connector_sui import ConnectorSui
 
-HAS_SUI_RPC = bool(os.getenv("SUI_RPC_URL") or os.getenv("ANKR_API_KEY"))
-
 
 @pytest.mark.integration
 @pytest.mark.timeout(60)
-@pytest.mark.skipif(
-    not HAS_SUI_RPC,
-    reason="SUI_RPC_URL or ANKR_API_KEY environment variable not set",
-)
 class TestSuiIntegration:
-    """Integration tests using real SUI RPC API."""
+    """Integration tests using the real Sui GraphQL API."""
 
-    WALLET_ADDRESS = "0xe1c3e2e854f4cc06e15e168acd38e3a2b61a050c2f622894ed00350de6b8c039"
+    WALLET_ADDRESS = (
+        "0xe1c3e2e854f4cc06e15e168acd38e3a2b61a050c2f622894ed00350de6b8c039"
+    )
 
     @pytest.fixture
     def connector(self):
@@ -83,15 +78,13 @@ class TestSuiIntegration:
             pytest.skip("No transactions where wallet is sender found")
 
         normalized = list(connector.raw_to_normalized(fee_tx_raw))
-        fee_transactions = [
-            t for t in normalized if t.transaction_type == "cost" and t.include_fee
-        ]
+        fee_transactions = [t for t in normalized if t.transaction_type == "cost"]
 
         assert len(fee_transactions) == 1
         fee_tx = fee_transactions[0]
         assert fee_tx.direction == "outflow"
-        assert fee_tx.quantity == Decimal(0)
-        assert fee_tx.fee > 0
+        assert fee_tx.quantity > 0
+        assert fee_tx.price == Decimal(1)
         assert fee_tx.source_asset_symbol == "SUI"
 
     def test_real_api_coin_metadata(self, connector):

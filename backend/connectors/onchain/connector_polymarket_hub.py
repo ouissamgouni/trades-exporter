@@ -1,16 +1,14 @@
 """
 Polymarket Hub connector: Aggregates Polymarket Data API activity (trades + redemptions)
-with Polygon Blockscout on-chain data (deposits + withdrawals) for a single proxy wallet.
+with Polygon on-chain USDC deposits/withdrawals (via Ankr) for a single proxy wallet.
 
-The Polymarket Data API only returns TRADE and REDEEM events.
 USDC deposits/withdrawals to the proxy wallet are standard ERC-20 transfers on Polygon,
-captured by the Blockscout child connector.
+captured by the Polygon child connector.
 """
 
 from typing import Optional, Dict, Any
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
-from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging
 
 log = configure_logging("polymarket_hub")
@@ -49,16 +47,6 @@ class ConnectorPolymarketHub(BaseHubConnector):
         if not self.wallet_address:
             raise ValueError("Missing wallet address")
 
-        test_mode = (config or {}).get("test_mode", False)
-        renormalize_mode = (config or {}).get("renormalize_mode", False)
-
-        # Validate Blockscout Polygon config for live mode
-        if not test_mode and not renormalize_mode:
-            registry = get_connector_registry()
-            chain_config = registry.get_chain_config("blockscout", "polygon")
-            if not chain_config or not chain_config.base_url:
-                log.warning("Blockscout Polygon API not configured — deposits/withdrawals won't be captured")
-
         # Initialize parent first to get output_path
         super().__init__(
             child_connectors=[],
@@ -71,8 +59,7 @@ class ConnectorPolymarketHub(BaseHubConnector):
         # Build child config (shared keys)
         child_config = {"parent_output_path": self.output_path}
         if config:
-            for key in ("test_mode", "renormalize_mode", "since_datetime",
-                        "clob_api_key", "clob_api_secret", "clob_passphrase", "signer_address"):
+            for key in ("test_mode", "renormalize_mode", "since_datetime"):
                 if key in config:
                     child_config[key] = config[key]
 
@@ -115,59 +102,15 @@ class ConnectorPolymarketHub(BaseHubConnector):
         """
         Combined Polymarket balance: positions value + on-chain USDC cash.
 
-        The Polymarket Data API /positions endpoint only reports the value
-        of open prediction-market positions.  USDC cash sitting in the proxy
-        wallet (from deposits, redeemed winnings, etc.) is NOT included
-        there — it lives on-chain as a standard ERC-20 balance on Polygon.
-
-        This method queries both sources and returns separate BalanceEntry
-        items so the caller can see the breakdown.
+        USDC cash sitting in the proxy wallet (deposits, redeemed winnings, etc.)
+        lives on-chain as an ERC-20 balance on Polygon, read via the Polygon child.
         """
-        import requests
-        from decimal import Decimal
-        from backend.connectors.base.base_connector import BalanceEntry
-
         entries = []
-
-        # 1) Positions value from Polymarket Data API child
         for _, connector in self.child_connectors:
-            if hasattr(connector, "get_balance") and hasattr(connector, "supports_balance"):
-                if connector.supports_balance:
-                    entries.extend(connector.get_balance())
-                    break
-
-        # 2) On-chain USDC cash balance via Blockscout Polygon
-        try:
-            registry = get_connector_registry()
-            chain_config = registry.get_chain_config("blockscout", "polygon")
-            if chain_config and chain_config.base_url:
-                base_url = chain_config.base_url
-                resp = requests.get(
-                    f"{base_url}/addresses/{self.wallet_address}/token-balances",
-                    timeout=15,
-                )
-                resp.raise_for_status()
-                tokens = resp.json()
-
-                for tok in tokens:
-                    value = tok.get("value")
-                    token_info = tok.get("token", {})
-                    symbol = (token_info.get("symbol") or "").upper()
-                    if symbol not in ("USDC", "USDC.E"):
-                        continue
-                    decimals = int(token_info.get("decimals", 6))
-                    if value and int(value) > 0:
-                        total = Decimal(value) / Decimal(10 ** decimals)
-                        entries.append(BalanceEntry(
-                            asset_symbol="USDC",
-                            total=total,
-                            available=total,
-                            chain="polygon",
-                            raw={"source": "wallet_cash", **tok},
-                        ))
-            else:
-                log.warning("Blockscout Polygon not configured — cannot fetch wallet USDC balance")
-        except Exception as e:
-            log.warning(f"Failed to fetch on-chain USDC balance: {e}")
-
+            if not getattr(connector, "supports_balance", False):
+                continue
+            try:
+                entries.extend(connector.get_balance())
+            except Exception as e:
+                log.warning(f"Failed to fetch {connector.connector_name} balance: {e}")
         return entries

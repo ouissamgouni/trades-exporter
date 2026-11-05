@@ -1,6 +1,8 @@
 """Unit tests for the Ankr Advanced API connector (fixture-based, no network)."""
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -160,4 +162,36 @@ def test_since_datetime_sent_as_from_timestamp():
     ]
     for _, params in calls:
         assert params["blockchain"] == "arbitrum"
-        assert params["fromTimestamp"] == int(since.timestamp())
+        assert params["fromTimestamp"] == int(since.timestamp()) + 1
+
+
+def test_naive_since_datetime_treated_as_utc():
+    naive = datetime(2025, 10, 1)
+    with patch.dict("os.environ", {"ANKR_API_KEY": "k"}):
+        conn = ConnectorAnkr(
+            wallet_address=WALLET,
+            chain_name="bsc",
+            config={"test_mode": False, "disable_file_output": True, "since_datetime": naive},
+        )
+    calls = []
+    with patch.object(conn, "_rpc", side_effect=lambda m, p: calls.append(p) or {}):
+        list(conn.yield_raws())
+    expected = int(naive.replace(tzinfo=timezone.utc).timestamp()) + 1
+    assert all(p["fromTimestamp"] == expected for p in calls)
+
+
+def test_legacy_moralis_raw_renormalizes_with_moralis_source():
+    fixture = (
+        Path(__file__).parents[2] / "fixtures" / "moralis" / "wallet_history_bsc.json"
+    )
+    legacy_raw = json.loads(fixture.read_text())["result"][0]
+    conn = ConnectorAnkr(
+        wallet_address="0x1111111111111111111111111111111111111111",
+        chain_name="bsc",
+        account_id=1,
+        config={"renormalize_mode": True, "disable_file_output": True},
+    )
+    conn._raw_origin_source = "moralis_wallet_history_bsc"
+    rows = list(conn._mapper_for_raw_origin().raw_to_normalized(legacy_raw))
+    assert rows
+    assert all(r.source == "moralis_wallet_history_bsc" for r in rows)

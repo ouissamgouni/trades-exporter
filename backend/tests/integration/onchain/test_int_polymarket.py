@@ -1,8 +1,8 @@
 """
-Integration tests for Polymarket connector (live CLOB + Gamma APIs).
+Integration tests for Polymarket connector (live public Data API v2 + CLOB markets).
 
-Requires CLOB credentials in environment:
-    POLYMARKET_CLOB_API_KEY, POLYMARKET_CLOB_SECRET, POLYMARKET_CLOB_PASSPHRASE
+Requires a proxy wallet with activity (no credentials needed):
+    POLYMARKET_TEST_WALLET=0x...   (Polygon child also needs ANKR_API_KEY)
 
 Run:
     .venv/bin/python -m pytest tests/integration/onchain/test_int_polymarket.py -v
@@ -18,33 +18,33 @@ from backend.db.models import NormalizedTransaction
 
 log = logging.getLogger(__name__)
 
-WALLET = "0x2222222222222222222222222222222222222222"
+WALLET = os.environ.get("POLYMARKET_TEST_WALLET", "")
 MAX_RESULTS = 10
 
-# Skip entire module if CLOB credentials are not set
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.timeout(120),
     pytest.mark.skipif(
-        not os.environ.get("POLYMARKET_CLOB_API_KEY"),
-        reason="POLYMARKET_CLOB_API_KEY not set — skipping live Polymarket tests",
+        not WALLET,
+        reason="POLYMARKET_TEST_WALLET not set — skipping live Polymarket tests",
     ),
 ]
 
 
-class TestPolymarketClobAPI:
-    """Integration tests hitting the real CLOB + market APIs."""
+class TestPolymarketDataAPI:
+    """Integration tests hitting the real Data API + market APIs."""
 
-    def test_fetch_clob_trades(self):
-        """Test fetching real trades from CLOB /data/trades."""
+    def test_fetch_activity(self):
+        """Test fetching real trades and redemptions from Data API v2 /activity."""
         connector = ConnectorPolymarket(
             wallet_address=WALLET,
             account_id=1,
             connector_id=1,
         )
-        trades = connector._fetch_clob_trades()
+        activity = connector._fetch_activity()
+        trades = [a for a in activity if a["type"] == "TRADE"]
         assert len(trades) > 0, "Should have at least one trade"
-        log.info(f"Fetched {len(trades)} CLOB trades")
+        log.info(f"Fetched {len(activity)} activities ({len(trades)} trades)")
 
         # Verify raw trade structure
         trade = trades[0]
@@ -54,7 +54,8 @@ class TestPolymarketClobAPI:
         assert trade["price"] > 0
         assert trade["conditionId"], "Should have a conditionId"
         assert trade["transactionHash"], "Should have a transaction hash"
-        assert isinstance(trade["timestamp"], int), "match_time should be parsed to int"
+        assert isinstance(trade["timestamp"], int)
+        assert trade["slug"] and trade["outcome"], "Data API rows carry slug/outcome"
 
     def test_market_metadata_fetch(self):
         """Test fetching market metadata from CLOB /markets/{cid} for real conditionIds."""
@@ -63,8 +64,8 @@ class TestPolymarketClobAPI:
             account_id=1,
             connector_id=1,
         )
-        # First get real conditionIds from CLOB
-        trades = connector._fetch_clob_trades()
+        # First get real conditionIds from the Data API
+        trades = connector._fetch_activity()
         condition_ids = {t["conditionId"] for t in trades if t.get("conditionId")}
         assert len(condition_ids) > 0
 
@@ -132,7 +133,7 @@ class TestPolymarketClobAPI:
 
 
 class TestPolymarketHubLive:
-    """Integration tests for the Polymarket Hub (CLOB + Polygon transfers)."""
+    """Integration tests for the Polymarket Hub (Data API + Polygon transfers)."""
 
     def test_hub_yield_raws(self):
         """Test hub aggregates child connectors with real data."""
@@ -151,3 +152,27 @@ class TestPolymarketHubLive:
         assert len(items) > 0, "Hub should yield items from at least one child"
         sources = {i.get("connector_name") or i.get("_master_source") for i in items}
         log.info(f"Hub yielded {len(items)} items from sources: {sources}")
+
+
+class TestPolymarketPolygonLive:
+    """External USDC deposits/withdrawals via Ankr (Polymarket-internal transfers excluded)."""
+
+    pytestmark = pytest.mark.skipif(not os.environ.get("ANKR_API_KEY"), reason="ANKR_API_KEY not set")
+
+    def test_polygon_child_yields_only_external_usdc(self):
+        from backend.connectors.onchain.connector_polymarket_polygon import (
+            POLYMARKET_CONTRACTS,
+            ConnectorPolymarketPolygon,
+        )
+
+        connector = ConnectorPolymarketPolygon(
+            wallet_address=WALLET, account_id=1, connector_id=1,
+            config={"test_mode": False, "disable_file_output": True},
+        )
+        raws = list(connector.yield_raws())
+        for raw in raws:
+            assert raw["fromAddress"].lower() not in POLYMARKET_CONTRACTS
+            assert raw["toAddress"].lower() not in POLYMARKET_CONTRACTS
+            nt = connector.raw_to_normalized(raw)
+            assert nt.source == "polymarket_polygon"
+            assert nt.source_transaction_type in ("deposit", "withdrawal")

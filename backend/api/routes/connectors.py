@@ -17,6 +17,10 @@ from backend.db.database import get_session_dependency
 from backend.db.repositories import FileImportRepository
 from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging
+from backend.api.routes.account_connectors import (
+    ConnectorTypeInfo,
+    get_available_connectors,
+)
 from backend.api.schemas import CleanupRequest, CleanupPreviewResponse, CleanupResultResponse
 from backend.services.data_cleanup_service import DataCleanupService
 
@@ -50,18 +54,6 @@ class ConnectorWithAccountResponse(BaseModel):
     updated_at: str
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class ConnectorTypeInfo(BaseModel):
-    """Information about available connector types."""
-
-    type: str
-    category: str  # 'cex', 'onchain', 'broker'
-    display_name: str
-    supported_chains: Optional[List[str]] = None
-    required_config: List[str]
-    optional_config: List[str]
-    is_file_connector: bool = False
 
 
 class ConnectorUpdate(BaseModel):
@@ -220,23 +212,7 @@ def list_connector_types():
     """
     List all available connector types and their configuration requirements.
     """
-    registry = get_connector_registry()
-    available = []
-    for connector_type in registry.list_types():
-        info = registry.get(connector_type)
-        if info:
-            available.append(
-                ConnectorTypeInfo(
-                    type=connector_type,
-                    category=info.category,
-                    display_name=info.display_name,
-                    supported_chains=info.supported_chains,
-                    required_config=info.required_config,
-                    optional_config=info.optional_config,
-                    is_file_connector=info.is_file_connector,
-                )
-            )
-    return available
+    return list(get_available_connectors().values())
 
 
 @router.get("/{connector_id}", response_model=ConnectorWithAccountResponse)

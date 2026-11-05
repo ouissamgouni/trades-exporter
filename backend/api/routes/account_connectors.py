@@ -3,6 +3,7 @@ API routes for Account Connector CRUD operations.
 """
 
 import os
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlmodel import Session
@@ -11,6 +12,10 @@ from pydantic import BaseModel, ConfigDict
 from backend.db.models import Account, AccountConnector
 from backend.db.database import get_session_dependency
 from backend.db.repositories import AccountConnectorRepository
+from backend.db.repositories.normalized_transaction_repository import (
+    NormalizedTransactionRepository,
+)
+from backend.db.models import ensure_utc
 from backend.connectors.connector_registry import get_connector_registry
 from backend.services.data_cleanup_service import DataCleanupService
 
@@ -85,6 +90,12 @@ class AccountConnectorResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ConnectorChainOption(BaseModel):
+    value: str  # stored in config["chain"]
+    canonical: str
+    label: str
+
+
 class ConnectorTypeInfo(BaseModel):
     """Information about available connector types."""
 
@@ -95,6 +106,21 @@ class ConnectorTypeInfo(BaseModel):
     required_config: List[str]
     optional_config: List[str]
     is_file_connector: bool = False
+    supports_balance: bool = False
+    group: str = ""
+    chains: List[ConnectorChainOption] = []
+    status: str = "active"
+    status_note: Optional[str] = None
+    degraded_chains: List[str] = []
+    recommended_for: List[str] = []
+    required_env: List[str] = []
+    missing_env: List[str] = []
+
+
+class ConnectorSwitchRequest(BaseModel):
+    """Request model for switching a connector to another provider type."""
+
+    new_connector_type: str
 
 
 # ============================================================================
@@ -109,15 +135,7 @@ def get_available_connectors() -> Dict[str, ConnectorTypeInfo]:
     for connector_type in registry.list_types():
         info = registry.get(connector_type)
         if info:
-            available[connector_type] = ConnectorTypeInfo(
-                type=connector_type,
-                category=info.category,
-                display_name=info.display_name,
-                supported_chains=info.supported_chains,
-                required_config=info.required_config,
-                optional_config=info.optional_config,
-                is_file_connector=info.is_file_connector,
-            )
+            available[connector_type] = ConnectorTypeInfo(**info.to_api_dict())
     return available
 
 
@@ -351,6 +369,82 @@ def update_account_connector(
     if connector_data.color is not None:
         connector.color = connector_data.color
 
+    updated = repo.update(connector)
+    session.commit()
+
+    return connector_to_response(updated)
+
+
+@router.post("/{connector_type}/switch", response_model=AccountConnectorResponse)
+def switch_connector_type(
+    account_id: int,
+    connector_type: str,
+    request: ConnectorSwitchRequest,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Switch an on-chain connector to another provider, keeping the same row
+    (id, history, settings). The chain is mapped to the new provider's naming.
+    """
+    get_account_or_404(session, account_id)
+    repo = get_repo(session)
+    registry = get_connector_registry()
+
+    connector = repo.get_by_account_and_type(account_id, connector_type)
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Connector '{connector_type}' not found for account {account_id}",
+        )
+
+    new_type = request.new_connector_type
+    current_info = registry.get(connector_type)
+    new_info = registry.get(new_type)
+    if not new_info:
+        raise HTTPException(status_code=400, detail=f"Unknown connector type '{new_type}'")
+    if new_type == connector_type:
+        raise HTTPException(status_code=400, detail="Connector already uses this provider")
+    if (
+        not current_info
+        or current_info.category != "onchain"
+        or new_info.category != "onchain"
+        or "app" in (current_info.group, new_info.group)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Only generic on-chain connectors can switch provider",
+        )
+    if repo.get_by_account_and_type(account_id, new_type):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Connector '{new_type}' already exists for this account",
+        )
+
+    config = dict(connector.config or {})
+    current_chain = config.get("chain")
+    if not current_chain and len(current_info.supported_chains or []) == 1:
+        current_chain = current_info.supported_chains[0]
+
+    if new_info.supported_chains:
+        new_chain = new_info.chain_value_for(current_chain)
+        if not new_chain:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{new_info.display_name} does not support chain '{current_chain}'",
+            )
+        config["chain"] = new_chain
+
+    # Never re-fetch history the previous provider already stored (different source ids)
+    last_tx = NormalizedTransactionRepository(session).get_max_datetime_by_connector(connector.id)
+    if last_tx:
+        previous_cutoff = config.get("history_cutoff")
+        cutoff = ensure_utc(last_tx)
+        if previous_cutoff:
+            cutoff = max(cutoff, ensure_utc(datetime.fromisoformat(previous_cutoff)))
+        config["history_cutoff"] = cutoff.isoformat()
+
+    connector.connector_type = new_type
+    connector.config = config
     updated = repo.update(connector)
     session.commit()
 

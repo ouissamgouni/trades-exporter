@@ -16,7 +16,7 @@ from typing import Generator, Dict, List, Any, Optional
 from backend.config.loader import configure_logging, get_connectors_output_path
 from backend.core.utils import is_test_mode
 
-from backend.db.models import NormalizedTransaction
+from backend.db.models import NormalizedTransaction, ensure_utc
 
 log = configure_logging("base_connector")
 
@@ -344,7 +344,9 @@ class BaseConnector(ABC):
                                 total_count,
                                 fetched_count=item_count,
                             )
+                        self._raw_origin_source = raw_tx.source
                         yield raw_tx.raw_data
+            self._raw_origin_source = None
 
             self.update_progress(
                 "Renormalize complete",
@@ -486,22 +488,29 @@ class BaseConnector(ABC):
 
         log.info(f"🔄 [{self.connector_name}] Starting data stream...")
 
+        history_cutoff = None if self._renormalize_mode else self._history_cutoff()
+        skipped_before_cutoff = 0
+
         item_count = 0
         # Use _yield_raws() generator which handles test mode automatically
         for raw_item in self._yield_raws():
             item_count += 1
             try:
                 # Map to normalized format immediately
-                result = self.raw_to_normalized(raw_item)
+                result = self._mapper_for_raw_origin().raw_to_normalized(raw_item)
 
                 # Check if result is a generator (multi-yield support)
-                if isinstance(result, types.GeneratorType):
-                    # Yield from generator - allows connectors to yield multiple normalized items per raw item
-                    for normalized in result:
-                        yield (raw_item, normalized, None)
-                else:
-                    # Single normalized item (backward compatible)
-                    yield (raw_item, result, None)
+                results = result if isinstance(result, types.GeneratorType) else [result]
+                for normalized in results:
+                    if (
+                        history_cutoff
+                        and normalized is not None
+                        and normalized.date_time
+                        and ensure_utc(normalized.date_time) <= history_cutoff
+                    ):
+                        skipped_before_cutoff += 1
+                        continue
+                    yield (raw_item, normalized, None)
             except Exception as e:
                 # Yield error tuple to maintain streaming behavior
                 error_msg = str(e)
@@ -512,6 +521,48 @@ class BaseConnector(ABC):
 
         if item_count == 0:
             log.warning(f"⚠️ [{self.connector_name}] No data fetched")
+        if skipped_before_cutoff:
+            log.info(
+                f"⏭️ [{self.connector_name}] Skipped {skipped_before_cutoff} items at or before "
+                f"history_cutoff {history_cutoff.isoformat()} (owned by the previous provider)"
+            )
+
+    def _history_cutoff(self) -> Optional[datetime]:
+        """Set when a connector switches provider: older history belongs to the previous provider."""
+        raw = (self.config or {}).get("history_cutoff")
+        if not raw:
+            return None
+        try:
+            return ensure_utc(datetime.fromisoformat(str(raw)))
+        except (TypeError, ValueError):
+            log.warning(f"[{self.connector_name}] Ignoring invalid history_cutoff {raw!r}")
+            return None
+
+    def _mapper_for_raw_origin(self) -> "BaseConnector":
+        """Connector able to read the current raw: the provider that stored it (renormalize)."""
+        source = getattr(self, "_raw_origin_source", None)
+        if not source:
+            return self
+        cache = self.__dict__.setdefault("_origin_mappers", {})
+        if source not in cache:
+            from backend.connectors.connector_registry import get_connector_registry
+
+            mapper = self
+            origin = get_connector_registry().resolve_raw_origin(source)
+            if origin and not isinstance(self, origin[0]):
+                cls, chain = origin
+                try:
+                    mapper = cls(
+                        wallet_address=getattr(self, "wallet_address", ""),
+                        chain_name=chain,
+                        account_id=self.account_id,
+                        connector_id=self.connector_id,
+                        config={"renormalize_mode": True, "disable_file_output": True},
+                    )
+                except Exception as e:
+                    log.warning(f"[{self.connector_name}] No mapper for raw source {source!r}: {e}")
+            cache[source] = mapper
+        return cache[source]
 
     def dump_trades_to_json(self, trades: List[Dict]) -> str:
         """Save raw trades data to JSON file in connector's output directory."""

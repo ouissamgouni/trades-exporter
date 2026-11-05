@@ -49,17 +49,22 @@ This matrix describes connector types registered in the application. It does not
 | Coinbase | Transactions, deposits, withdrawals | API sync | Registered connector types support incremental sync. |
 | DeGiro | Transactions file, account file | File | Useful for broker-style activity and account statements. |
 | Hyperliquid | Perps, funding, transfers | API sync | Perps connector can feed derivative position tracking. |
-| Blockscout | Base, Ethereum, Polygon, Arbitrum, Optimism, HyperEVM | On-chain | Requires chain and address. Can include internal transactions and token transfers. |
+| Blockscout | Base, Ethereum, Polygon, Arbitrum, Optimism, HyperEVM | On-chain | Requires chain and address. Can include internal transactions and token transfers. Base, Polygon and Arbitrum are currently blocked by Cloudflare; use Ankr there. |
 | Etherscan | Ethereum | On-chain | Requires address. Can include internal transactions and token transfers. |
-| Moralis | Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism, Sei | On-chain | Requires chain and address. |
+| Moralis | Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism, Sei | On-chain | Requires chain and address. Legacy; prefer Ankr. |
+| Ankr | BSC, Arbitrum, Ethereum, Polygon, Base, Optimism, Avalanche | On-chain | Requires chain and address; uses `ANKR_API_KEY`. Native + ERC-20 transfers (no internal transactions). |
 | Solana | Solana via Helius | On-chain | Requires address; API key is optional in the registered config. |
 | XRP Ledger | XRP | On-chain | Requires address. |
 | Cardano | Cardanoscan | On-chain | Requires address; API key is optional. See [Cardano Connector](../backend/docs/CARDANO_CONNECTOR.md). |
-| SUI | SUI | On-chain | Requires address. |
+| SUI | SUI | On-chain | Requires address. Uses the public Sui GraphQL API. |
 | Bitcoin | Blockstream Esplora | On-chain | Requires address. |
 | NEAR | NearBlocks | On-chain | Requires address; API key is optional. |
 | Bittensor | TAO | On-chain | Requires address; API key is optional. |
-| Polymarket | Polygon-based Polymarket activity | On-chain/API | Requires address; CLOB credentials are optional where configured. |
+| Polymarket | Polygon-based Polymarket activity | On-chain/API | Requires the proxy wallet address only (public Data API). USDC deposits/withdrawals via Ankr (`ANKR_API_KEY`). Losing positions are closed at $0 on the market's resolution time; winning positions stay open until redeemed and are closed on the redeem date. |
+
+### Switching provider
+
+In the connector's edit dialog, **Switch provider** moves an on-chain connector to another provider for the same chain (for example Blockscout → Ankr) while keeping its ID, history and settings. History already imported stays with the previous provider: syncs never fetch transactions at or before the last imported one, and reprocessing reads each stored row with the provider that produced it.
 
 ## Preparing an Import
 

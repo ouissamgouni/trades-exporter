@@ -1,7 +1,7 @@
 """
 Integration test for OnChainAddressLookupService.
-Makes real calls to Moralis EVM API to verify address resolution.
-Requires MORALIS_API_KEY environment variable.
+Makes real calls to Ankr JSON-RPC to verify address resolution.
+Requires ANKR_API_KEY environment variable.
 """
 
 import os
@@ -24,15 +24,15 @@ ARB_EXPECTED_FROM = "0xb38e8c17e38363af6ebdcb3dae12e0243582891d"
 ARB_EXPECTED_TO = "0xee7ae85f2fe2239e27d9c1e23fffe168d63b4055"
 
 needs_api_key = pytest.mark.skipif(
-    not os.getenv("MORALIS_API_KEY"),
-    reason="MORALIS_API_KEY not set",
+    not os.getenv("ANKR_API_KEY"),
+    reason="ANKR_API_KEY not set",
 )
 
 
 @pytest.mark.integration
 @needs_api_key
 class TestOnChainAddressLookupLive:
-    """Live integration tests against Moralis EVM API."""
+    """Live integration tests against Ankr JSON-RPC."""
 
     @pytest.fixture(autouse=True)
     def _service(self):
@@ -87,7 +87,7 @@ class TestOnChainAddressLookupLive:
 @pytest.mark.integration
 @needs_api_key
 class TestArbitrumLookupLive:
-    """Live integration tests against Moralis EVM API for Arbitrum."""
+    """Live integration tests against Ankr JSON-RPC for Arbitrum."""
 
     @pytest.fixture(autouse=True)
     def _service(self):

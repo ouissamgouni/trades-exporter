@@ -3,7 +3,7 @@ Integration tests for SUI connector.
 
 Includes:
 - Unit tests using fixture data (always run)
-- Live API integration tests (require SUI_RPC_URL or ANKR_API_KEY env var)
+- Live API integration tests (public Sui GraphQL endpoint)
 """
 
 import os

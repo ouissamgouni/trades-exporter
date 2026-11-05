@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from backend.db.models import NormalizedTransaction
 from backend.services.onchain_address_lookup import (
     OnChainAddressLookupService,
-    NETWORK_TO_MORALIS_CHAIN,
+    NETWORK_TO_ANKR_CHAIN,
 )
 from backend.services.pipeline.stages.onchain_enrichment import (
     OnChainAddressEnrichmentStage,
@@ -39,15 +39,17 @@ def mock_context():
 
 
 @pytest.fixture
-def moralis_success_response():
-    """Moralis Transaction API successful response."""
+def ankr_success_response():
+    """Ankr eth_getTransactionByHash successful response."""
     return {
-        "hash": "0xabc123",
-        "from_address": "0x1234567890abcdef1234567890abcdef12345678",
-        "to_address": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-        "block_number": "1",
-        "from_address_entity": "Binance",
-        "from_address_label": "Binance: Withdrawal Hot Wallet",
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "hash": "0xabc123",
+            "from": "0x1234567890ABCDEF1234567890abcdef12345678",
+            "to": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            "blockNumber": "0x1",
+        },
     }
 
 
@@ -102,20 +104,20 @@ class TestOnChainAddressLookupService:
 
     def test_network_aliases_all_resolve_to_bsc(self):
         for alias in ["bsc", "bep20", "bnb", "BNB", "BEP20", "BSC"]:
-            assert NETWORK_TO_MORALIS_CHAIN.get(alias.lower().strip()) == "bsc"
+            assert NETWORK_TO_ANKR_CHAIN.get(alias.lower().strip()) == "bsc"
 
     def test_network_aliases_all_resolve_to_arbitrum(self):
         for alias in ["arbitrum", "ARBITRUM", "arb", "ARB", "arb1", "ARB1", "arbitrum one"]:
-            assert NETWORK_TO_MORALIS_CHAIN.get(alias.lower().strip()) == "arbitrum"
+            assert NETWORK_TO_ANKR_CHAIN.get(alias.lower().strip()) == "arbitrum"
 
-    @patch("backend.services.onchain_address_lookup.requests.get")
+    @patch("backend.services.onchain_address_lookup.requests.post")
     def test_bsc_lookup_returns_from_and_to(
-        self, mock_get, lookup_service, moralis_success_response
+        self, mock_get, lookup_service, ankr_success_response
     ):
-        """Single Moralis call should resolve both from (inflow) and to (outflow)."""
+        """Single Ankr call should resolve both from (inflow) and to (outflow)."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = moralis_success_response
+        mock_response.json.return_value = ankr_success_response
         mock_get.return_value = mock_response
 
         from_addr = lookup_service.lookup_address("bsc", "0xabc123", "inflow")
@@ -126,16 +128,16 @@ class TestOnChainAddressLookupService:
         # Cache should prevent second HTTP call
         assert mock_get.call_count == 1
 
-    @patch("backend.services.onchain_address_lookup.requests.get")
+    @patch("backend.services.onchain_address_lookup.requests.post")
     def test_api_error_returns_none(self, mock_get, lookup_service):
         mock_get.side_effect = Exception("Network error")
         assert lookup_service.lookup_address("bsc", "0xabc123", "inflow") is None
 
-    @patch("backend.services.onchain_address_lookup.requests.get")
+    @patch("backend.services.onchain_address_lookup.requests.post")
     def test_empty_response_returns_none(self, mock_get, lookup_service):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {}
+        mock_response.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": None}
         mock_get.return_value = mock_response
 
         assert lookup_service.lookup_address("bsc", "0xnotfound", "inflow") is None
