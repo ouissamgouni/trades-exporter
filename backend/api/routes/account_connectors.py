@@ -290,21 +290,21 @@ def create_account_connector(
 
     # Validate required config
     connector_info = available_connectors[connector_data.connector_type]
-    
+
     # Get the account to check for address inheritance
     account = session.get(Account, account_id)
-    
+
     missing_config = [
         field
         for field in connector_info.required_config
         if field not in connector_data.config or connector_data.config[field] is None
     ]
-    
+
     # Allow missing 'address' for onchain connectors if account has address_or_identifier
     if "address" in missing_config and connector_info.category == "onchain":
         if account and account.address_or_identifier:
             missing_config.remove("address")
-    
+
     if missing_config:
         raise HTTPException(
             status_code=400,
@@ -401,9 +401,13 @@ def switch_connector_type(
     current_info = registry.get(connector_type)
     new_info = registry.get(new_type)
     if not new_info:
-        raise HTTPException(status_code=400, detail=f"Unknown connector type '{new_type}'")
+        raise HTTPException(
+            status_code=400, detail=f"Unknown connector type '{new_type}'"
+        )
     if new_type == connector_type:
-        raise HTTPException(status_code=400, detail="Connector already uses this provider")
+        raise HTTPException(
+            status_code=400, detail="Connector already uses this provider"
+        )
     if (
         not current_info
         or current_info.category != "onchain"
@@ -435,7 +439,9 @@ def switch_connector_type(
         config["chain"] = new_chain
 
     # Never re-fetch history the previous provider already stored (different source ids)
-    last_tx = NormalizedTransactionRepository(session).get_max_datetime_by_connector(connector.id)
+    last_tx = NormalizedTransactionRepository(session).get_max_datetime_by_connector(
+        connector.id
+    )
     if last_tx:
         previous_cutoff = config.get("history_cutoff")
         cutoff = ensure_utc(last_tx)

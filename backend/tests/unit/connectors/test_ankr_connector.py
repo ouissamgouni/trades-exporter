@@ -171,7 +171,11 @@ def test_naive_since_datetime_treated_as_utc():
         conn = ConnectorAnkr(
             wallet_address=WALLET,
             chain_name="bsc",
-            config={"test_mode": False, "disable_file_output": True, "since_datetime": naive},
+            config={
+                "test_mode": False,
+                "disable_file_output": True,
+                "since_datetime": naive,
+            },
         )
     calls = []
     with patch.object(conn, "_rpc", side_effect=lambda m, p: calls.append(p) or {}):

@@ -31,7 +31,9 @@ BLOCKSCOUT_RAW = {
 
 
 def _moralis_raw():
-    path = Path(__file__).parents[2] / "fixtures" / "moralis" / "wallet_history_bsc.json"
+    path = (
+        Path(__file__).parents[2] / "fixtures" / "moralis" / "wallet_history_bsc.json"
+    )
     return json.loads(path.read_text())["result"][0]
 
 
@@ -50,8 +52,14 @@ def _stream(connector, items):
 class TestResolveRawOrigin:
     def test_known_sources(self):
         registry = get_connector_registry()
-        assert registry.resolve_raw_origin("blockscout_base_normal_tx") == (ConnectorBlockscoutNormalTx, "base")
-        assert registry.resolve_raw_origin("moralis_wallet_history_eth") == (ConnectorMoralisWalletHistory, "eth")
+        assert registry.resolve_raw_origin("blockscout_base_normal_tx") == (
+            ConnectorBlockscoutNormalTx,
+            "base",
+        )
+        assert registry.resolve_raw_origin("moralis_wallet_history_eth") == (
+            ConnectorMoralisWalletHistory,
+            "eth",
+        )
         assert registry.resolve_raw_origin("ankr_bsc") == (ConnectorAnkr, "bsc")
 
     def test_unknown_source(self):
@@ -114,7 +122,8 @@ class TestHistoryCutoff:
 
     def test_items_at_or_before_cutoff_are_dropped(self):
         connector = _FakeConnector(
-            self.ITEMS, {"test_mode": False, "history_cutoff": "2026-02-05T07:23:51+00:00"}
+            self.ITEMS,
+            {"test_mode": False, "history_cutoff": "2026-02-05T07:23:51+00:00"},
         )
         ids = [n.source_transaction_id for _, n, _ in connector.yield_normalized()]
         assert ids == ["new"]

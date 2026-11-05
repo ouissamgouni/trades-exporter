@@ -25,7 +25,11 @@ class TestConnectorTypeMetadata:
         available = get_available_connectors()
         assert available["moralis"].status == "legacy"
         assert available["blockscout"].status == "degraded"
-        assert set(available["blockscout"].degraded_chains) == {"base", "polygon", "arbitrum"}
+        assert set(available["blockscout"].degraded_chains) == {
+            "base",
+            "polygon",
+            "arbitrum",
+        }
         assert "bsc" in available["ankr"].recommended_for
         assert available["ankr"].required_env == ["ANKR_API_KEY"]
 
@@ -52,7 +56,11 @@ class _FakeRepo:
 
     def get_by_account_and_type(self, account_id, connector_type):
         return next(
-            (c for c in self.connectors if c.account_id == account_id and c.connector_type == connector_type),
+            (
+                c
+                for c in self.connectors
+                if c.account_id == account_id and c.connector_type == connector_type
+            ),
             None,
         )
 
@@ -76,12 +84,15 @@ def _connector(connector_type, config, connector_id=1):
 def _switch(connectors, current, new, last_tx=None):
     session = MagicMock()
     session.get.return_value = Account(id=1, name="W", account_type="wallet")
-    with patch(
-        "backend.api.routes.account_connectors.get_repo",
-        return_value=_FakeRepo(connectors),
-    ), patch(
-        "backend.api.routes.account_connectors.NormalizedTransactionRepository"
-    ) as tx_repo:
+    with (
+        patch(
+            "backend.api.routes.account_connectors.get_repo",
+            return_value=_FakeRepo(connectors),
+        ),
+        patch(
+            "backend.api.routes.account_connectors.NormalizedTransactionRepository"
+        ) as tx_repo,
+    ):
         tx_repo.return_value.get_max_datetime_by_connector.return_value = last_tx
         return switch_connector_type(
             account_id=1,
@@ -93,7 +104,9 @@ def _switch(connectors, current, new, last_tx=None):
 
 class TestSwitchConnectorType:
     def test_moralis_to_ankr_maps_chain_and_keeps_row(self):
-        conn = _connector("moralis", {"chain": "eth", "address": "0xabc"}, connector_id=687)
+        conn = _connector(
+            "moralis", {"chain": "eth", "address": "0xabc"}, connector_id=687
+        )
         result = _switch([conn], "moralis", "ankr")
         assert result.id == 687
         assert result.connector_type == "ankr"
@@ -101,12 +114,16 @@ class TestSwitchConnectorType:
 
     def test_history_cutoff_set_to_last_transaction(self):
         conn = _connector("blockscout", {"chain": "base", "address": "0xabc"})
-        result = _switch([conn], "blockscout", "ankr", last_tx=datetime(2026, 2, 5, 7, 23, 51))
+        result = _switch(
+            [conn], "blockscout", "ankr", last_tx=datetime(2026, 2, 5, 7, 23, 51)
+        )
         assert result.config["history_cutoff"] == "2026-02-05T07:23:51+00:00"
         assert result.config["chain"] == "base"
 
     def test_history_cutoff_never_moves_back(self):
-        conn = _connector("ankr", {"chain": "base", "history_cutoff": "2026-02-05T07:23:51+00:00"})
+        conn = _connector(
+            "ankr", {"chain": "base", "history_cutoff": "2026-02-05T07:23:51+00:00"}
+        )
         result = _switch([conn], "ankr", "blockscout", last_tx=datetime(2026, 1, 1))
         assert result.config["history_cutoff"] == "2026-02-05T07:23:51+00:00"
 
