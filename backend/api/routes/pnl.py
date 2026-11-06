@@ -7549,8 +7549,15 @@ def get_enriched_transactions(
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
 
     tx_ids_sq = _enriched_tx_ids_subquery(
-        session, version_id, tx_filters, unit_pattern, has_realized_pnl,
-        has_fees, has_warnings, warning_type, search,
+        session,
+        version_id,
+        tx_filters,
+        unit_pattern,
+        has_realized_pnl,
+        has_fees,
+        has_warnings,
+        warning_type,
+        search,
     )
 
     # Step 3: Build the NormalizedTransaction query (standard shape for TransactionsTable)
@@ -7842,8 +7849,15 @@ def get_enriched_transaction_groups(
         raise HTTPException(status_code=400, detail=str(e))
 
     tx_ids_sq = _enriched_tx_ids_subquery(
-        session, version_id, tx_filters, unit_pattern, has_realized_pnl,
-        has_fees, has_warnings, warning_type, search,
+        session,
+        version_id,
+        tx_filters,
+        unit_pattern,
+        has_realized_pnl,
+        has_fees,
+        has_warnings,
+        warning_type,
+        search,
     )
     ids_statement = select(NormalizedTransaction.id).where(
         NormalizedTransaction.id.in_(select(tx_ids_sq))
@@ -7874,7 +7888,10 @@ def get_enriched_transaction_groups(
         realized = session.exec(
             select(func.coalesce(func.sum(RealizedPnl.pnl_in_base), 0))
             .join(CalculationUnit, CalculationUnit.id == RealizedPnl.origin_unit_id)
-            .join(NormalizedTransaction, NormalizedTransaction.id == RealizedPnl.transaction_id)
+            .join(
+                NormalizedTransaction,
+                NormalizedTransaction.id == RealizedPnl.transaction_id,
+            )
             .where(CalculationUnit.version_id == version_id)
             .where(RealizedPnl.transaction_id.in_(ids_statement))
             .where(NormalizedTransaction.date_time >= lower)

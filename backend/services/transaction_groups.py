@@ -87,9 +87,7 @@ def compute_transaction_groups(
     nt = NormalizedTransaction
     local_dt = func.timezone(tz.key, func.timezone("UTC", nt.date_time))
     owned_ids = select(Account.id).where(Account.owned == True)  # noqa: E712
-    is_internal = (
-        nt.from_account_id.in_(owned_ids) & nt.to_account_id.in_(owned_ids)
-    )
+    is_internal = nt.from_account_id.in_(owned_ids) & nt.to_account_id.in_(owned_ids)
     has_issue = nt.id.in_(_issue_tx_ids(session))
 
     base = (
@@ -112,9 +110,7 @@ def compute_transaction_groups(
     )
     not_invalid = base.c.review_status != ReviewStatus.INVALID.value
 
-    total_groups = session.exec(
-        select(func.count(func.distinct(base.c.period)))
-    ).one()
+    total_groups = session.exec(select(func.count(func.distinct(base.c.period)))).one()
 
     order = base.c.period.asc() if sort_dir == "asc" else base.c.period.desc()
     period_rows = session.exec(
@@ -184,17 +180,29 @@ def compute_transaction_groups(
     account_ids = {r[1] for r in account_rows if r[1] is not None}
     asset_ids = {r[2] for r in asset_rows if r[2] is not None}
     account_names: Dict[int, str] = (
-        dict(session.exec(select(Account.id, Account.name).where(Account.id.in_(account_ids))).all())
+        dict(
+            session.exec(
+                select(Account.id, Account.name).where(Account.id.in_(account_ids))
+            ).all()
+        )
         if account_ids
         else {}
     )
     asset_symbols: Dict[int, str] = (
-        dict(session.exec(select(Asset.asset_id, Asset.symbol).where(Asset.asset_id.in_(asset_ids))).all())
+        dict(
+            session.exec(
+                select(Asset.asset_id, Asset.symbol).where(
+                    Asset.asset_id.in_(asset_ids)
+                )
+            ).all()
+        )
         if asset_ids
         else {}
     )
 
-    accounts_by_period: Dict[datetime, Dict[Optional[int], GroupAccountRecap]] = defaultdict(dict)
+    accounts_by_period: Dict[datetime, Dict[Optional[int], GroupAccountRecap]] = (
+        defaultdict(dict)
+    )
     for period, acc_id, inflow, outflow, neutral, internal in account_rows:
         accounts_by_period[period][acc_id] = GroupAccountRecap(
             account_id=acc_id,
@@ -205,13 +213,19 @@ def compute_transaction_groups(
             internal_transfer_count=int(internal),
         )
 
-    assets_by_account: Dict[Tuple[datetime, Optional[int]], List[GroupAssetNet]] = defaultdict(list)
-    asset_facets: Dict[datetime, Dict[Optional[int], int]] = defaultdict(lambda: defaultdict(int))
+    assets_by_account: Dict[Tuple[datetime, Optional[int]], List[GroupAssetNet]] = (
+        defaultdict(list)
+    )
+    asset_facets: Dict[datetime, Dict[Optional[int], int]] = defaultdict(
+        lambda: defaultdict(int)
+    )
     for period, acc_id, asset_id, net, count in asset_rows:
         assets_by_account[(period, acc_id)].append(
             GroupAssetNet(
                 asset_id=asset_id,
-                symbol=asset_symbols.get(asset_id, "?") if asset_id is not None else "?",
+                symbol=asset_symbols.get(asset_id, "?")
+                if asset_id is not None
+                else "?",
                 net_quantity=float(net or Decimal(0)),
                 tx_count=count,
             )
@@ -231,7 +245,9 @@ def compute_transaction_groups(
         for period, value, count in rows:
             if value in (None, ""):
                 continue
-            out[period].append(GroupFacetValue(value=str(value), label=str(value), count=count))
+            out[period].append(
+                GroupFacetValue(value=str(value), label=str(value), count=count)
+            )
         for values in out.values():
             values.sort(key=lambda v: -v.count)
         return out

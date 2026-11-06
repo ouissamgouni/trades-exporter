@@ -19,7 +19,9 @@ def _bare_connector():
 
 
 def _response(status, text="", payload=None):
-    r = MagicMock(status_code=status, text=text, url="https://explorer.example/api/v2/x")
+    r = MagicMock(
+        status_code=status, text=text, url="https://explorer.example/api/v2/x"
+    )
     r.json.return_value = payload or {}
     return r
 
@@ -28,7 +30,9 @@ def _response(status, text="", payload=None):
 @patch("backend.connectors.onchain.blockscout.base_blockscout_connector.requests.get")
 def test_client_error_fails_fast_with_url(mock_get, _sleep):
     mock_get.return_value = _response(404, "<html>Redirecting to hl.eco</html>")
-    with pytest.raises(BlockscoutClientError, match="HTTP 404 from https://explorer.example"):
+    with pytest.raises(
+        BlockscoutClientError, match="HTTP 404 from https://explorer.example"
+    ):
         _bare_connector().safe_request("/x")
     assert mock_get.call_count == 1
 

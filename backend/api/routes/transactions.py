@@ -2143,11 +2143,15 @@ def list_transaction_ids(
     ids_statement, _, _ = apply_tx_list_filters(
         session, select(NormalizedTransaction.id), q
     )
-    total = session.exec(select(func.count()).select_from(ids_statement.subquery())).one()
+    total = session.exec(
+        select(func.count()).select_from(ids_statement.subquery())
+    ).one()
     ids = session.exec(
         ids_statement.order_by(NormalizedTransaction.date_time.desc()).limit(max_ids)
     ).all()
-    return TransactionIdsResponse(ids=list(ids), total=total, truncated=total > len(ids))
+    return TransactionIdsResponse(
+        ids=list(ids), total=total, truncated=total > len(ids)
+    )
 
 
 @router.get("/inbox", response_model=Dict)

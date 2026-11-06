@@ -55,7 +55,9 @@ class BlockscoutConnectorBase(BaseConnector):
         # Get chain configuration from registry
         registry = get_connector_registry()
         self.native_token = registry.get_native_token("blockscout", self.chain_name)
-        self.native_token_decimals = registry.get_native_token_decimals("blockscout", self.chain_name)
+        self.native_token_decimals = registry.get_native_token_decimals(
+            "blockscout", self.chain_name
+        )
         self.chain_id = registry.get_chain_id("blockscout", self.chain_name)
         if not self.native_token or self.native_token_decimals is None:
             raise ValueError(f"Chain configuration not found for {chain_name}")

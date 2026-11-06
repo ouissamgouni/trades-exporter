@@ -1626,41 +1626,41 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     const renderRow = (tx: Transaction) => (
         <TransactionTableRow
-                                            key={tx.id}
-                                            tx={tx}
-                                            suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
-                                            duplicateEntry={duplicateMap.get(tx.id)}
-                                            rowBgColor={getRowBgColor(tx)}
-                                            rowBorderColor={getRowBorderColor(tx)}
-                                            isInvalidCollapsed={isInvalidCollapsed(tx)}
-                                            accounts={accounts}
-                                            accountsById={accountsById}
-                                            assets={assets}
-                                            batchSuggestionsMap={batchSuggestionsMap}
-                                            showColumn={showColumn}
-                                            visibleColumnCount={visibleColumnCount}
-                                            embeddedMode={embeddedMode}
-                                            showSuggestions={showSuggestions}
-                                            showSelectionInEmbedded={showSelectionInEmbedded}
-                                            additionalColumns={additionalColumns as ColumnPlugin[]}
-                                            additionalRowActions={additionalRowActions as RowAction[]}
-                                            editingCell={editingCell}
-                                            editValues={editValues}
-                                            selectedIds={selectedIds}
-                                            expandedInvalidIds={expandedInvalidIds}
-                                            openSuggestionTxId={openSuggestionTxId}
-                                            hoveredSuggestionGroup={hoveredSuggestionGroup}
-                                            openDuplicateTxId={openDuplicateTxId}
-                                            hoveredDuplicateGroup={hoveredDuplicateGroup}
-                                            hoveredBundleId={hoveredBundleId}
-                                            openBundleTxId={openBundleTxId}
-                                            bundleColorMap={bundleColorMap}
-                                            editInputRef={editInputRef}
-                                            escapePressedRef={escapePressedRef}
-                                            editValuesRef={editValuesRef}
-                                            callbacks={rowCallbacksRef.current}
+            key={tx.id}
+            tx={tx}
+            suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
+            duplicateEntry={duplicateMap.get(tx.id)}
+            rowBgColor={getRowBgColor(tx)}
+            rowBorderColor={getRowBorderColor(tx)}
+            isInvalidCollapsed={isInvalidCollapsed(tx)}
+            accounts={accounts}
+            accountsById={accountsById}
+            assets={assets}
+            batchSuggestionsMap={batchSuggestionsMap}
+            showColumn={showColumn}
+            visibleColumnCount={visibleColumnCount}
+            embeddedMode={embeddedMode}
+            showSuggestions={showSuggestions}
+            showSelectionInEmbedded={showSelectionInEmbedded}
+            additionalColumns={additionalColumns as ColumnPlugin[]}
+            additionalRowActions={additionalRowActions as RowAction[]}
+            editingCell={editingCell}
+            editValues={editValues}
+            selectedIds={selectedIds}
+            expandedInvalidIds={expandedInvalidIds}
+            openSuggestionTxId={openSuggestionTxId}
+            hoveredSuggestionGroup={hoveredSuggestionGroup}
+            openDuplicateTxId={openDuplicateTxId}
+            hoveredDuplicateGroup={hoveredDuplicateGroup}
+            hoveredBundleId={hoveredBundleId}
+            openBundleTxId={openBundleTxId}
+            bundleColorMap={bundleColorMap}
+            editInputRef={editInputRef}
+            escapePressedRef={escapePressedRef}
+            editValuesRef={editValuesRef}
+            callbacks={rowCallbacksRef.current}
             dateMode={serverGrouping ? 'time' : 'full'}
-                                        />
+        />
     );
 
     const applyFacetsGlobally = (selection: GroupFacetSelection) => {

@@ -63,10 +63,24 @@ class TestTransactionGroups:
         eth = _asset(pg_session, "GRPETH")
         _tx(pg_session, acct, btc, datetime(2024, 3, 2, 10), "inflow", 2)
         _tx(pg_session, acct, btc, datetime(2024, 3, 5, 10), "outflow", 0.5)
-        _tx(pg_session, acct, eth, datetime(2024, 3, 6, 10), "inflow", 3,
-            review_status=ReviewStatus.PENDING)
-        _tx(pg_session, acct, eth, datetime(2024, 3, 7, 10), "inflow", 100,
-            review_status=ReviewStatus.INVALID)
+        _tx(
+            pg_session,
+            acct,
+            eth,
+            datetime(2024, 3, 6, 10),
+            "inflow",
+            3,
+            review_status=ReviewStatus.PENDING,
+        )
+        _tx(
+            pg_session,
+            acct,
+            eth,
+            datetime(2024, 3, 7, 10),
+            "inflow",
+            100,
+            review_status=ReviewStatus.INVALID,
+        )
         _tx(pg_session, acct, btc, datetime(2024, 2, 10, 10), "inflow", 1)
 
         groups, total = compute_transaction_groups(
@@ -77,7 +91,11 @@ class TestTransactionGroups:
         march = groups[0]
         assert march.period_start == "2024-03-01"
         assert march.total_count == 3
-        assert (march.valid_count, march.pending_count, march.invalid_count) == (2, 1, 1)
+        assert (march.valid_count, march.pending_count, march.invalid_count) == (
+            2,
+            1,
+            1,
+        )
         recap = march.accounts[0]
         assert (recap.inflow_count, recap.outflow_count) == (2, 1)
         nets = {a.symbol: a.net_quantity for a in recap.assets}
@@ -104,8 +122,17 @@ class TestTransactionGroups:
         a = _account(pg_session, "GrpFrom")
         b = _account(pg_session, "GrpTo")
         btc = _asset(pg_session, "GRPINT")
-        _tx(pg_session, a, btc, datetime(2024, 5, 1, 12), "outflow", 1,
-            transaction_type="transfer", from_account_id=a.id, to_account_id=b.id)
+        _tx(
+            pg_session,
+            a,
+            btc,
+            datetime(2024, 5, 1, 12),
+            "outflow",
+            1,
+            transaction_type="transfer",
+            from_account_id=a.id,
+            to_account_id=b.id,
+        )
 
         groups, _ = compute_transaction_groups(
             pg_session, _ids(a), granularity="month", tz=ZoneInfo("UTC")

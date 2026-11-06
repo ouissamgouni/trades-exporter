@@ -19,7 +19,9 @@ def last_tx(monkeypatch):
 
 
 def _connector(connector_type, **config):
-    return AccountConnector(id=1, account_id=1, connector_type=connector_type, config=config)
+    return AccountConnector(
+        id=1, account_id=1, connector_type=connector_type, config=config
+    )
 
 
 class TestResolveSyncWindow:
@@ -40,7 +42,10 @@ class TestResolveSyncWindow:
     def test_history_cutoff_floors_since(self, last_tx):
         last_tx["value"] = datetime(2025, 1, 1)
         w = sw.resolve_sync_window(
-            None, _connector("ankr", chain="base", history_cutoff="2026-02-05T07:23:51+00:00")
+            None,
+            _connector(
+                "ankr", chain="base", history_cutoff="2026-02-05T07:23:51+00:00"
+            ),
         )
         assert w["source"] == "history_cutoff"
         assert w["since"] == datetime(2026, 2, 5, 7, 23, 51, tzinfo=timezone.utc)
@@ -48,7 +53,9 @@ class TestResolveSyncWindow:
     def test_override_full_sync_still_respects_cutoff(self, last_tx):
         w = sw.resolve_sync_window(
             None,
-            _connector("ankr", chain="base", history_cutoff="2026-02-05T07:23:51+00:00"),
+            _connector(
+                "ankr", chain="base", history_cutoff="2026-02-05T07:23:51+00:00"
+            ),
             override_since=None,
         )
         assert w["source"] == "history_cutoff"

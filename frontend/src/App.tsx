@@ -395,22 +395,22 @@ const App = () => {
     return (
         <QueryClientProvider client={queryClient}>
             <AssetDetailPanelProvider>
-            <AccountDetailPanelProvider>
-                <DataHealthProvider>
-                    <QaTestPlanProvider>
-                        <Routes>
-                            <Route path="/" element={<Navigate to={DEFAULT_ROUTE} replace />} />
-                            <Route path="/timeline/*" element={<TimelineRedirect />} />
-                            <Route path="/:tab" element={<AppContent />} />
-                            <Route path="/:tab/:subtab" element={<AppContent />} />
-                            <Route path="*" element={<Navigate to={DEFAULT_ROUTE} replace />} />
-                        </Routes>
-                        <AssetDetailSlidePanel />
-                        <AccountDetailSlidePanel />
-                        <Toaster />
-                    </QaTestPlanProvider>
-                </DataHealthProvider>
-            </AccountDetailPanelProvider>
+                <AccountDetailPanelProvider>
+                    <DataHealthProvider>
+                        <QaTestPlanProvider>
+                            <Routes>
+                                <Route path="/" element={<Navigate to={DEFAULT_ROUTE} replace />} />
+                                <Route path="/timeline/*" element={<TimelineRedirect />} />
+                                <Route path="/:tab" element={<AppContent />} />
+                                <Route path="/:tab/:subtab" element={<AppContent />} />
+                                <Route path="*" element={<Navigate to={DEFAULT_ROUTE} replace />} />
+                            </Routes>
+                            <AssetDetailSlidePanel />
+                            <AccountDetailSlidePanel />
+                            <Toaster />
+                        </QaTestPlanProvider>
+                    </DataHealthProvider>
+                </AccountDetailPanelProvider>
             </AssetDetailPanelProvider>
         </QueryClientProvider>
     );
