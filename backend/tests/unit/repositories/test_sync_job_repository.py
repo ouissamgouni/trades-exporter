@@ -464,6 +464,7 @@ class TestHeartbeatAndCleanup:
         assert result["jobs_aborted"] == 1
         assert result["connector_runs_failed"] == 0
         assert stale_job.status == SyncJobStatus.ABORTED
+        assert result["job_ids"] == [2]
 
     def test_cleanup_orphaned_jobs_queued_runs_also_marked(self, repo, mock_session):
         """Test that queued connector runs are also marked as failed."""

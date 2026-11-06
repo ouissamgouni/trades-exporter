@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { FiXOctagon } from 'react-icons/fi';
 import { LuChevronLeft, LuChevronRight, LuEye, LuRefreshCw } from 'react-icons/lu';
 import {
     API_URL,
@@ -7,9 +8,12 @@ import {
     SyncJobStatus,
 } from '../types';
 import { Badge, type BadgeColorScheme, Button, Heading, ResponsiveTable, Spinner } from './ui/primitives';
+import { toaster } from './ui/toaster';
+import { abortSyncJob } from '../utils/syncJobApi';
 
 interface JobHistoryTableProps {
     onViewJob?: (jobId: number) => void;
+    onJobAborted?: () => void;
     refreshTrigger?: number;
 }
 
@@ -51,6 +55,7 @@ const formatDate = (dateStr?: string): string => {
 
 export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
     onViewJob,
+    onJobAborted,
     refreshTrigger,
 }) => {
     const [jobs, setJobs] = useState<SyncJobSummary[]>([]);
@@ -83,6 +88,21 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
     useEffect(() => {
         fetchHistory();
     }, [fetchHistory, refreshTrigger]);
+
+    const [abortingId, setAbortingId] = useState<number | null>(null);
+    const handleAbort = async (jobId: number) => {
+        setAbortingId(jobId);
+        try {
+            const result = await abortSyncJob(jobId);
+            toaster.success({ title: `Job #${jobId} aborted`, description: result.message });
+            await fetchHistory();
+            onJobAborted?.();
+        } catch (err) {
+            toaster.error({ title: 'Abort failed', description: err instanceof Error ? err.message : 'Failed to abort job' });
+        } finally {
+            setAbortingId(null);
+        }
+    };
 
     const totalPages = Math.ceil(total / limit);
 
@@ -150,7 +170,7 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                     </thead>
                     <tbody>
                         {jobs.map((job) => (
-                            <tr key={job.id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <tr key={job.id} className={`border-b border-slate-100 ${job.is_orphaned ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-slate-50'}`}>
                                 <td className="px-2 py-1 font-mono text-xs">
                                     #{job.id}
                                 </td>
@@ -165,15 +185,24 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                                     </div>
                                 </td>
                                 <td className="px-2 py-1">
-                                    <Badge colorScheme={statusColorMap[job.status]}>
-                                        {job.status}
-                                    </Badge>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                        <Badge colorScheme={statusColorMap[job.status]}>
+                                            {job.status}
+                                        </Badge>
+                                        {job.is_orphaned && (
+                                            <Badge colorScheme="red" title="No worker is running this job; it blocks new syncs until aborted">
+                                                stuck
+                                            </Badge>
+                                        )}
+                                    </div>
                                 </td>
                                 <td className="px-2 py-1 text-xs">
                                     {formatDate(job.started_at)}
                                 </td>
                                 <td className="px-2 py-1 text-xs">
-                                    {formatDuration(job.started_at, job.finished_at)}
+                                    {job.finished_at || job.status === 'running' || job.status === 'pending'
+                                        ? formatDuration(job.started_at, job.finished_at)
+                                        : '-'}
                                 </td>
                                 <td className="px-2 py-1 text-right">
                                     {job.connector_runs && job.connector_runs.length > 0 ? (
@@ -219,14 +248,29 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                                     {job.total_errors > 0 ? job.total_errors : '-'}
                                 </td>
                                 <td className="px-2 py-1">
-                                    <Button
-                                        aria-label="View details"
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => onViewJob?.(job.id)}
-                                    >
-                                        <LuEye />
-                                    </Button>
+                                    <div className="flex items-center justify-end gap-1">
+                                        {job.is_orphaned && (
+                                            <Button
+                                                aria-label={`Abort stuck job #${job.id}`}
+                                                title="Abort stuck job"
+                                                size="sm"
+                                                variant="ghost"
+                                                colorScheme="red"
+                                                loading={abortingId === job.id}
+                                                onClick={() => handleAbort(job.id)}
+                                            >
+                                                <FiXOctagon />
+                                            </Button>
+                                        )}
+                                        <Button
+                                            aria-label="View details"
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={() => onViewJob?.(job.id)}
+                                        >
+                                            <LuEye />
+                                        </Button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}

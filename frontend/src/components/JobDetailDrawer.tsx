@@ -23,11 +23,13 @@ import { DuplicateResolutionPanel } from './DuplicateResolutionPanel';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState } from './TransactionFilters';
 import TransactionDetailDrawer from './TransactionDetailDrawer';
+import { StuckJobAlert } from './StuckJobAlert';
 
 interface JobDetailDrawerProps {
     jobId: number | null;
     open: boolean;
     onClose: () => void;
+    onJobAborted?: () => void;
     connectorIdFilter?: number;  // Optional: filter to specific connector
 }
 
@@ -490,6 +492,7 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
     jobId,
     open,
     onClose,
+    onJobAborted,
 }) => {
     const [job, setJob] = useState<SyncJobDetail | null>(null);
     const [loading, setLoading] = useState(true);
@@ -741,6 +744,15 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                                 />
                             ) : (
                                 <>
+                                    {mergedJob.is_orphaned && (
+                                        <StuckJobAlert
+                                            job={mergedJob}
+                                            onAborted={() => {
+                                                fetchJob();
+                                                onJobAborted?.();
+                                            }}
+                                        />
+                                    )}
                                     {/* Job Header */}
                                     <div className="mb-4 flex items-start justify-between">
                                         <div className="flex flex-col items-start gap-1">
@@ -770,7 +782,7 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                                                     <span>
                                                         Duration: {formatDuration(mergedJob.started_at, mergedJob.finished_at)}
                                                     </span>
-                                                ) : mergedJob.status === 'running' ? (
+                                                ) : mergedJob.status === 'running' && !mergedJob.is_orphaned ? (
                                                     <span>
                                                         Running: {formatDuration(mergedJob.started_at)}
                                                     </span>

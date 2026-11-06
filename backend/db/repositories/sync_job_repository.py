@@ -525,7 +525,7 @@ class SyncJobRepository:
         self.session.flush()
         return job
 
-    def cleanup_orphaned_jobs(self, stale_minutes: int = 5) -> Dict[str, int]:
+    def cleanup_orphaned_jobs(self, stale_minutes: int = 5) -> Dict[str, Any]:
         """
         Clean up jobs that are stuck in 'running' status after a server crash.
 
@@ -535,9 +535,9 @@ class SyncJobRepository:
 
         Also marks their connector runs with 'running' or 'queued' status as 'failed'.
 
-        Returns a dict with counts of affected jobs and connector runs.
+        Returns a dict with counts of affected jobs and connector runs, plus job_ids.
         """
-        from sqlmodel import func, or_
+        from sqlmodel import or_
         from datetime import timedelta
 
         now = datetime.now(timezone.utc)
@@ -556,18 +556,28 @@ class SyncJobRepository:
         stale_jobs = list(self.session.exec(stale_jobs_statement).all())
 
         if not stale_jobs:
-            return {"jobs_aborted": 0, "connector_runs_failed": 0}
+            return {"jobs_aborted": 0, "connector_runs_failed": 0, "job_ids": []}
 
-        job_ids = [job.id for job in stale_jobs]
+        connector_runs_updated = self.abort_jobs(
+            stale_jobs,
+            "Job aborted: Server restarted unexpectedly or job became stale",
+        )
+        return {
+            "jobs_aborted": len(stale_jobs),
+            "connector_runs_failed": connector_runs_updated,
+            "job_ids": [job.id for job in stale_jobs],
+        }
+
+    def abort_jobs(self, jobs: List[SyncJob], reason: str) -> int:
+        """Mark jobs aborted and their running/queued connector runs failed. Returns runs failed."""
+        now = datetime.now(timezone.utc)
+        job_ids = [job.id for job in jobs]
         connector_runs_updated = 0
 
-        # Mark stale jobs as aborted
-        for job in stale_jobs:
+        for job in jobs:
             job.status = SyncJobStatus.ABORTED
             job.finished_at = now
-            job.error_message = (
-                "Job aborted: Server restarted unexpectedly or job became stale"
-            )
+            job.error_message = reason
             self.session.add(job)
 
         # Mark their running/queued connector runs as failed
@@ -585,13 +595,9 @@ class SyncJobRepository:
         for run in connector_runs:
             run.status = SyncJobConnectorStatus.FAILED
             run.finished_at = now
-            run.error_message = "Connector run failed: Job was aborted due to server restart or stale state"
+            run.error_message = f"Connector run failed: parent job was aborted ({reason})"
             self.session.add(run)
             connector_runs_updated += 1
 
         self.session.flush()
-
-        return {
-            "jobs_aborted": len(stale_jobs),
-            "connector_runs_failed": connector_runs_updated,
-        }
+        return connector_runs_updated

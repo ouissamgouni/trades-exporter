@@ -10,7 +10,11 @@ from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session
 
 from backend.db.database import get_session_dependency
-from backend.services.sync_job_service import get_sync_job_service, ConnectorOverride
+from backend.services.sync_job_service import (
+    get_sync_job_service,
+    ConnectorOverride,
+    SyncJobBlockedError,
+)
 from backend.api.schemas import SyncJobStartRequest, ConnectorOverrideRequest
 
 router = APIRouter(prefix="/sync-job", tags=["Sync Job"])
@@ -43,6 +47,15 @@ class ConnectorProgressResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class BlockingJobInfo(BaseModel):
+    """A pending/running DB job that prevents new syncs from starting."""
+
+    id: Optional[int] = None
+    status: str
+    started_at: Optional[str] = None
+    orphaned: bool = False
+
+
 class JobStatusResponse(BaseModel):
     """Response model for job status."""
 
@@ -64,6 +77,7 @@ class JobStatusResponse(BaseModel):
     use_database_connectors: bool = False
     renormalize: bool = False
     connector_statuses: Optional[Dict[int, ConnectorProgressResponse]] = None
+    blocking_job: Optional[BlockingJobInfo] = None
 
     model_config = ConfigDict(extra="allow")
 
@@ -88,7 +102,7 @@ class ConnectorDefaultInfo(BaseModel):
 
 
 @router.get("/status", response_model=JobStatusResponse)
-def get_job_status():
+def get_job_status(session: Session = Depends(get_session_dependency)):
     """
     Get the current sync job status and progress.
 
@@ -97,9 +111,16 @@ def get_job_status():
     - Progress statistics (processed, added, skipped, errors)
     - Currently processing connector
     - Timing information
+    - blocking_job: a DB job stuck in pending/running that no worker owns
     """
+    from backend.db.repositories.sync_job_repository import SyncJobRepository
+
     service = get_sync_job_service()
-    return service.get_status()
+    status = service.get_status()
+    if not service.is_running():
+        active = SyncJobRepository(session).get_active_job()
+        status["blocking_job"] = service.describe_job(active) if active else None
+    return status
 
 
 @router.post("/start")
@@ -169,6 +190,15 @@ def start_sync_job(http_request: Request, request: SyncJobStartRequest):
             renormalize=bool(request.renormalize),
         )
         return result
+    except SyncJobBlockedError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "sync_job_active",
+                "message": str(e),
+                "blocking_job": e.blocking_job,
+            },
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
@@ -246,9 +276,20 @@ def abort_sync_job():
 
     The job will stop after completing its current operation.
     This is a graceful abort - the job status will change to 'aborted'.
+    If no worker is running but a DB job is stuck pending/running, it is marked aborted.
     """
     service = get_sync_job_service()
     return service.abort_job()
+
+
+@router.post("/jobs/{job_id}/abort")
+def abort_specific_job(job_id: int):
+    """Abort a specific job (graceful if running in-process, immediate if orphaned)."""
+    service = get_sync_job_service()
+    result = service.abort_job(job_id=job_id)
+    if result["status"] == "not_running":
+        raise HTTPException(status_code=409, detail=result["message"])
+    return result
 
 
 @router.post("/retry/{connector_id}")
@@ -542,6 +583,7 @@ class SyncJobSummaryResponse(BaseModel):
     total_errors: int = 0
     error_message: Optional[str] = None
     renormalize: bool = False
+    is_orphaned: bool = False
     connector_runs: Optional[List[ConnectorRunResponse]] = None
 
 
@@ -594,8 +636,15 @@ class SyncJobDetailResponse(BaseModel):
     total_errors: int = 0
     error_message: Optional[str] = None
     renormalize: bool = False
+    is_orphaned: bool = False
     config_snapshot: Optional[Dict[str, Any]] = None
     connector_runs: List[ConnectorRunResponse] = []
+
+
+def _is_orphaned(job) -> bool:
+    return job.status in ("pending", "running") and not get_sync_job_service().owns_job(
+        job.id
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=SyncJobDetailResponse)
@@ -653,6 +702,7 @@ def get_job_detail(
             total_errors=job.total_errors,
             error_message=job.error_message,
             renormalize=(job.config_snapshot or {}).get("renormalize", False),
+            is_orphaned=_is_orphaned(job),
             config_snapshot=job.config_snapshot,
             connector_runs=connector_runs,
         )
@@ -728,6 +778,7 @@ def get_job_history(
                     total_errors=job.total_errors,
                     error_message=job.error_message,
                     renormalize=(job.config_snapshot or {}).get("renormalize", False),
+                    is_orphaned=_is_orphaned(job),
                     connector_runs=connector_run_responses,
                 )
             )
