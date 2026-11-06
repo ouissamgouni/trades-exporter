@@ -939,6 +939,8 @@ export interface AppInfo {
     backend_version: string;
     frontend_version?: string | null;
     db_schema_version?: string | null;
+    db_name?: string | null;
+    db_provenance?: string | null;
     qa_scenarios?: string[];
 }
 

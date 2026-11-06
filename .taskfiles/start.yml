@@ -162,7 +162,7 @@ tasks:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
       - task: dev:db:check
-    dir: "{{.BACKEND_DIR}}"
+    dir: backend
     env:
       PYTHONPATH: "{{.ROOT_DIR}}"
       LOG_LEVEL: "{{.LOG_LEVEL}}"
@@ -183,7 +183,7 @@ tasks:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
       - task: dev:db:check
-    dir: "{{.BACKEND_DIR}}"
+    dir: backend
     env:
       PYTHONPATH: "{{.ROOT_DIR}}"
       LOG_LEVEL: "{{.LOG_LEVEL}}"
@@ -202,7 +202,7 @@ tasks:
         "{{.ROOT_DIR}}/config/secrets.env",
         "{{.ROOT_DIR}}/config/secrets.dev.env",
       ]
-    dir: "{{.FRONTEND_DIR}}"
+    dir: frontend
     vars:
       BROWSER: '{{.BROWSER | default "none"}}'
       COUNT: '{{.COUNT | default "1"}}'

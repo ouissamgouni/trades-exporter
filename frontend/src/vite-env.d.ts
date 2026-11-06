@@ -12,6 +12,7 @@ interface ImportMetaEnv {
      * - Prod: http://localhost:8080
      */
     readonly VITE_API_URL: string;
+    readonly VITE_APP_VERSION?: string;
 }
 
 interface ImportMeta {

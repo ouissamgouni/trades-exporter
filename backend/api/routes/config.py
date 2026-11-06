@@ -4,8 +4,13 @@ Provides endpoints for retrieving application configuration and status.
 """
 
 import os
+import subprocess
+from functools import lru_cache
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlmodel import Session, select, func
 
 from backend.db.database import get_db
@@ -29,6 +34,8 @@ class AppInfoResponse(BaseModel):
     backend_version: str
     frontend_version: str | None = None
     db_schema_version: str | None = None
+    db_name: str | None = None
+    db_provenance: str | None = None
     qa_scenarios: list[str] = []
 
 
@@ -90,13 +97,46 @@ def get_or_create_app_settings(session: Session) -> AppSettings:
     return settings
 
 
+@lru_cache(maxsize=1)
+def backend_version() -> str:
+    """APP_VERSION is baked in at deploy time; local runs fall back to git describe."""
+    if version := os.getenv("APP_VERSION"):
+        return version
+    try:
+        return subprocess.run(
+            ["git", "describe", "--tags", "--always", "--dirty"],
+            cwd=Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        ).stdout.strip() or "dev"
+    except (OSError, subprocess.SubprocessError):
+        return "dev"
+
+
+def db_info(session: Session) -> tuple[str | None, str | None, str | None]:
+    """(database name, alembic revision, provenance comment set by db:restore / db:copy)."""
+    name, has_alembic, provenance = session.execute(
+        text(
+            "SELECT current_database(), to_regclass('public.alembic_version') IS NOT NULL, "
+            "shobj_description(d.oid, 'pg_database') "
+            "FROM pg_database d WHERE d.datname = current_database()"
+        )
+    ).one()
+    revision = None
+    if has_alembic:
+        revision = session.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).scalar()
+    return name, revision, provenance
+
+
 @router.get("/info", response_model=AppInfoResponse)
 def get_app_info(session: Session = Depends(get_db)):
     """
     Get application information including environment and versions.
     """
     environment = os.getenv("ENV_NAME", "unknown")
-    backend_version = "1.0.0"
+    db_name, db_revision, db_provenance = db_info(session)
 
     settings = get_or_create_app_settings(session)
     qa_scenarios = [
@@ -107,9 +147,11 @@ def get_app_info(session: Session = Depends(get_db)):
 
     return AppInfoResponse(
         environment=environment,
-        backend_version=backend_version,
+        backend_version=backend_version(),
         frontend_version=None,
-        db_schema_version=None,
+        db_schema_version=db_revision,
+        db_name=db_name,
+        db_provenance=db_provenance,
         qa_scenarios=qa_scenarios,
     )
 

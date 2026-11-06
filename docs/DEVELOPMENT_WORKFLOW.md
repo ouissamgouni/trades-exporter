@@ -266,6 +266,7 @@ task test:all              # full suite: backend + frontend + full-stack e2e
 
 ```bash
 task test:backend:e2e    # backend e2e tests; self-contained (provisions its own scenario DB)
+task test:db:backup      # backup/restore/rollback/commit/copy/prune on throwaway scenario DBs (KEEP_SCENARIOS=1 skips teardown)
 ```
 
 `task test:backend:int` runs the full `tests/integration/` suite in one go, including live-API tests marked `pytest.mark.network` (Yahoo, CoinGecko, Forex, Marketstack, Alpha Vantage, Coinbase, MEXC, Etherscan, etc.) — these self-skip via `pytest.skip(...)` when they hit a rate limit, missing API key, or transient network/auth error, rather than being excluded upfront. Pass `-m "integration and network"` (or similar) directly to pytest if you only want to exercise the live-API tests.
@@ -341,7 +342,7 @@ Common parameters:
 
 | Param | Used by | Default | Notes |
 |-------|---------|---------|-------|
-| `DRY_RUN=1` | deploy, DB reset/copy, stop volume cleanup, build clean-all, tag cleanup | `0` | Prints planned actions without mutating state where implemented. |
+| `DRY_RUN=1` | deploy, DB reset/copy/restore, backup prune, stop volume cleanup, build clean-all, tag cleanup | `0` | Prints planned actions without mutating state where implemented. |
 | `RESET=1` | start dev DB, local staging/prod, scenarios | `0` | Recreates an existing stack/database before start. |
 | `FORCE=1` | `start:prod:local RESET=1` | `0` | Required to reset prod-local during start. |
 | `BROWSER=none|shared|isolated` | browser-aware start/open tasks | `none` for `start:*`, explicit mode for `open:*` | Controls browser launch mode. |
@@ -358,6 +359,12 @@ Common parameters:
 | `LOG_LEVEL=<level>` | backend start tasks | `INFO` | Overrides backend log level. |
 | `DONT_RELOAD=true` | full dev start tasks | `false` | Disables uvicorn reload. |
 | `AUTO_START_DB=false` | backend-only dev tasks | `true` | Avoids starting dev DB dependency automatically. |
+| `LABEL=<why>` | `db:backup:*` | `manual` | Recorded in the backup filename and `.meta` file. |
+| `FILE=<path\|latest>` | `db:restore:*` | interactive pick | Backup to restore; `latest` picks the newest. |
+| `FROM_ENV=<env>` | `db:restore:*` | target env | Restore from another env's backups (e.g. `FROM_ENV=prod`). |
+| `MIGRATE=0` | `db:restore:*` | `1` | Skip Alembic upgrade after restore. |
+| `KEEP=N` | `db:backup:prune:*` | `10` | Number of newest backups to keep. |
+| `ENV=<env>` / `VERIFY=1` | `db:backup:list` | all / `0` | Filter by env (`scenario:<name>` for scenarios); verify checksums. |
 
 CLI argument rules:
 
@@ -366,7 +373,7 @@ CLI argument rules:
 | `-- <ref>` | `task build:ref -- feature/x` | Stored in `CLI_ARGS`; common for git refs and revisions. |
 | Named var | `task build:ref REF=feature/x` | Same behavior when the task exposes `REF`. |
 | Revision args | `task db:downgrade:dev -- -1` | Required when the value begins with `-`. |
-| Generic DB copy args | `task db:copy -- staging dev --migrate` | Parser accepts `--migrate`, `--dry-run`, and `DRY_RUN=1`. |
+| Generic DB copy args | `task db:copy -- staging dev --no-migrate` | Copy migrates by default; parser accepts `--no-migrate`, `--no-backup`, `--dry-run`, and `DRY_RUN=1`. |
 
 ---
 
@@ -398,6 +405,9 @@ Additional safety gates:
 - `task start:prod:local RESET=1` refuses to run unless `FORCE=1` is also provided.
 - `task db:cleanup-tags:dev` prompts interactively when running a non-dry-run cleanup without `KEY=<tag-key>`, and prompts again when `ALL=1` would remove system tags.
 - `task db:reset:prod` is destructive and prompts, but does not currently implement `DRY_RUN=1`.
+- `db:reset:staging:local` and `db:reset:prod:local` take a `pre-reset` backup first; `db:copy` into staging/prod takes a `pre-copy` backup (skip with `--no-backup`).
+- `db:restore:*` and `db:copy*` restore into a temporary DB, check it, migrate, then swap it in. The previous DB is kept: undo with `db:restore:rollback:<env>`, or drop it with `db:restore:commit:<env>`. `db:restore:status:<env>` shows both.
+- Backups live in `backend/data/backups/<env>/` (scenarios: `backups/scenarios/<name>/`), git-ignored, with a `.meta` provenance file and checksum per dump.
 - `task stop:scenario` and `task stop:scenario:all` prompt and remove scenario DB volumes; use `KEEP_BROWSER=1` only to skip isolated browser cleanup, not to keep the DB.
 
 ### Browser Safety Flags
@@ -592,11 +602,18 @@ task stop:staging:local
 | `task start:scenario:db SCENARIO=<name>` | Create and seed a scenario DB (used by integration/e2e tests too) |
 | `task stop:scenario SCENARIO=<name>` | Tear down a scenario instance (DB + volume) |
 | `task db:copy:dev-to-staging` | Copy dev -> staging (`DRY_RUN=1` to preview) |
-| `task db:copy:staging-to-dev` | Copy staging -> dev and run migrations |
+| `task db:copy:staging-to-dev` | Copy staging -> dev |
+| `task db:copy:prod-to-staging` | Copy prod-local -> staging |
 | `task db:copy:staging-to-prod` | Copy staging -> prod-local |
-| `task db:copy -- <src> <dst> [--dry-run]` | Generic copy between local envs (`dev`, `staging`, `prod`, `scenario`) |
-| `task db:copy -- staging dev --migrate` | Generic copy plus Alembic upgrade on target |
+| `task db:copy -- <src> <dst> [--dry-run] [--no-migrate] [--no-backup]` | Generic copy between local envs (`dev`, `staging`, `prod`, `scenario`); migrates target by default |
 | `task db:copy -- dev staging DRY_RUN=1` | Generic copy dry run; accepted after `--` |
+| `task db:backup:dev` / `db:backup:staging` / `db:backup:prod` / `db:backup:scenario SCENARIO=<name>` | Back up a DB (`LABEL=<why>`) |
+| `task db:backup:list [ENV=<env>] [VERIFY=1]` | List backups and provenance |
+| `task db:backup:prune:<env> [KEEP=10] [DRY_RUN=1]` | Delete old backups |
+| `task db:restore:<env> [FILE=<path\|latest>] [FROM_ENV=<env>] [MIGRATE=0] [DRY_RUN=1]` | Restore a backup (interactive pick by default) |
+| `task db:restore:status:<env>` | Show live + kept-for-rollback DBs |
+| `task db:restore:rollback:<env>` | Undo the last restore/copy |
+| `task db:restore:commit:<env>` | Keep the last restore/copy; drop the previous DB |
 | `task db:status:dev` | Alembic current/head status |
 | `task db:status:staging:local` | Alembic status inside local staging backend container |
 | `task db:status:prod:local` | Alembic status inside local prod backend container |

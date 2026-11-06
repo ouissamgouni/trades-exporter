@@ -46,6 +46,17 @@ def _flatten_tags(tags) -> dict:
     return {}
 
 
+def _is_zero_price_resolution(disposal: CalculationUnitLeg) -> bool:
+    """Synthetic close of a worthless outcome (e.g. losing Polymarket share) recorded at price 0."""
+    tx = getattr(disposal, "origin_transaction", None) or getattr(disposal, "transaction", None)
+    price = getattr(tx, "price", None)
+    if not isinstance(price, (int, float, Decimal)) or price != 0:
+        return False
+    if getattr(tx, "source_transaction_type", None) == "synthetic-close":
+        return True
+    return _flatten_tags(getattr(tx, "tags", None)).get("synthetic") is True
+
+
 def handle_unit(
     unit: CalculationUnit,
     lot_manager: LotManager,
@@ -518,7 +529,11 @@ def _consume_lots(
     # Compute FMV for negative lot fallback cost (instead of using 0)
     fmv_unit_cost = None
     fmv_metadata = None
-    if fmv_service and disposal.asset_id != config.base_currency_id:
+    if (
+        fmv_service
+        and disposal.asset_id != config.base_currency_id
+        and not _is_zero_price_resolution(disposal)
+    ):
         fmv_result = fmv_service.get_fmv_in_base(disposal, skip_on_error=True)
         if fmv_result.success and fmv_result.price and fmv_result.price > 0:
             fmv_unit_cost = Decimal(str(fmv_result.price))
@@ -1153,6 +1168,15 @@ def _compute_proceeds(
             "timestamp": disposal.date_time,
         }
         return proceeds, None, metadata
+
+    if _is_zero_price_resolution(disposal):
+        metadata = {
+            "source": "resolution",
+            "price": Decimal("0"),
+            "price_source": "resolution",
+            "timestamp": disposal.date_time,
+        }
+        return Decimal("0"), None, metadata
 
     # Swap or payment: proceeds = FMV of disposed asset
     fmv_result = fmv_service.get_fmv_in_base(disposal, skip_on_error=True)

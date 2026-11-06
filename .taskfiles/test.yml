@@ -20,7 +20,7 @@ tasks:
   backend:unit:
     aliases: [unit:backend]
     desc: Run backend unit + API tests in parallel
-    dir: "{{.BACKEND_DIR}}"
+    dir: backend
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
@@ -38,7 +38,7 @@ tasks:
   frontend:unit:
     aliases: [unit:frontend]
     desc: Run frontend build, type check, and Vitest unit tests
-    dir: "{{.FRONTEND_DIR}}"
+    dir: frontend
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
@@ -58,7 +58,7 @@ tasks:
   backend:int:
     aliases: [int]
     desc: "Run all integration tests against a dedicated scenario database. Self-contained — provisions its own scenario DB via start:scenario:db (default SCENARIO=backend-integration-tests; pass a different SCENARIO=<name> to run against another scenario fixture). Includes live-API/network tests — these self-skip on rate-limit/auth/quota errors instead of hard-failing (see pytest.mark.network tests)."
-    dir: "{{.BACKEND_DIR}}"
+    dir: backend
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
@@ -86,7 +86,7 @@ tasks:
 
   backend:e2e:
     desc: "Run backend end-to-end tests. Self-contained — provisions its own scenario DB via start:scenario:db (default SCENARIO=backend-e2e-tests)."
-    dir: "{{.BACKEND_DIR}}"
+    dir: backend
     dotenv:
       [
         "{{.ROOT_DIR}}/config/base.env",
@@ -108,16 +108,21 @@ tasks:
         DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$SC_DB_PORT/$POSTGRES_DB" \
           {{.ROOT_DIR}}/.venv/bin/python -m pytest tests/e2e/ -v -m e2e --timeout=30
 
+  db:backup:
+    desc: "End-to-end check of db backup/restore/rollback/commit/copy/prune on two throwaway scenario DBs (bk-src, bk-dst). KEEP_SCENARIOS=1 skips teardown."
+    cmds:
+      - KEEP_SCENARIOS="{{.KEEP_SCENARIOS | default "0"}}" bash .taskfiles/test_db_backup.sh
+
   frontend:e2e:
     desc: "Frontend Playwright smoke tests (critical + major, no backend required)"
-    dir: "{{.FRONTEND_DIR}}"
+    dir: frontend
     cmds:
       - npx playwright install --with-deps chromium
       - npm run test:e2e:frontend
 
   e2e:
     desc: "Full-stack e2e: frontend Playwright tests against a real backend + db. Self-contained — Playwright's globalSetup/globalTeardown (frontend/e2e-backend/global-setup.ts) spin up/tear down the dedicated frontend_e2e scenario (task start:scenario:backend / stop:scenario) around the run, so no separate DB/backend setup step is needed here."
-    dir: "{{.FRONTEND_DIR}}"
+    dir: frontend
     cmds:
       - npx playwright install --with-deps chromium
       - npm run test:e2e:backend

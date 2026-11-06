@@ -204,7 +204,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                 )}
                 <div className="relative">
                     <Input
-                        placeholder="Search by name, symbol, #id or source…"
+                        placeholder="Search by name, symbol or source…"
                         aria-label="Search assets"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
@@ -229,7 +229,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                 <th className="w-[28px] py-2 pl-3"></th>
                                 <th className="py-2">Asset</th>
                                 <th className="py-2">Price</th>
-                                <th className="py-2">Status · source · as of</th>
+                                <th className="py-2">Status</th>
                                 <th className="py-2">
                                     <button type="button" onClick={cycleGapSort} className="inline-flex items-center gap-1 hover:text-blue-600" aria-label="Sort by missing price days">
                                         Gaps
@@ -282,7 +282,9 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                                         )}
                                                         {item.error && !isLoading && (
                                                             <Tooltip content={item.error} openDelay={150}>
-                                                                <span className="max-w-[160px] truncate text-red-600">{item.error}</span>
+                                                                <span className={state === 'failed' || state === 'missing' ? 'text-red-500' : 'text-orange-500'} aria-label="Price fetch error">
+                                                                    <FiAlertTriangle size={12} />
+                                                                </span>
                                                             </Tooltip>
                                                         )}
                                                     </div>
@@ -294,9 +296,9 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                                         type="button"
                                                         onClick={() => onGapsClick?.(id)}
                                                         className="whitespace-nowrap text-orange-700 underline decoration-dotted hover:text-orange-800"
-                                                        title="Open in Gaps tab"
+                                                        title={`${gaps.gap_count} gap range${gaps.gap_count !== 1 ? 's' : ''} since first transaction — open in Gaps tab`}
                                                     >
-                                                        {gaps.gap_count} range{gaps.gap_count !== 1 ? 's' : ''} · {gaps.total_missing_days} d
+                                                        {gaps.total_missing_days} d
                                                     </button>
                                                 ) : (
                                                     <span className="text-gray-300">—</span>

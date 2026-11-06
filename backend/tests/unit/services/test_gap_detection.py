@@ -277,3 +277,33 @@ class TestDetectGaps:
         # Default is crypto → should expect all 7 days (including weekend)
         assert result.total_expected == 7
         assert result.total_covered == 7
+
+
+class TestClosedPositionEndDate:
+    def _session(self, net, total_in, last_dt):
+        session = MagicMock()
+        session.exec.return_value.one.return_value = (net, total_in, last_dt)
+        return session
+
+    def test_closed_position_ends_at_last_transaction(self):
+        from backend.services.price_service import _closed_position_end_date
+
+        session = self._session(Decimal("0"), Decimal("522.5"), datetime(2025, 11, 7, 23, 32))
+        assert _closed_position_end_date(session, 1) == date(2025, 11, 7)
+
+    def test_rounding_dust_counts_as_closed(self):
+        from backend.services.price_service import _closed_position_end_date
+
+        session = self._session(Decimal("0.0000001"), Decimal("695.4"), datetime(2025, 11, 30))
+        assert _closed_position_end_date(session, 1) == date(2025, 11, 30)
+
+    def test_open_position_has_no_end_date(self):
+        from backend.services.price_service import _closed_position_end_date
+
+        session = self._session(Decimal("1.5"), Decimal("2"), datetime(2025, 11, 30))
+        assert _closed_position_end_date(session, 1) is None
+
+    def test_no_transactions(self):
+        from backend.services.price_service import _closed_position_end_date
+
+        assert _closed_position_end_date(self._session(None, None, None), 1) is None

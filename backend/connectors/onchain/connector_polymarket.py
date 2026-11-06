@@ -687,8 +687,11 @@ class ConnectorPolymarket(BaseConnector):
                 continue  # paying outcome: stays open until its REDEEM
 
             timestamp = _parse_closed_time(market.get("closedTime"))
+            latest_ts = self._condition_latest_timestamp.get(condition_id)
+            if timestamp is not None and latest_ts and timestamp <= latest_ts:
+                # A close dated before the last trade would dispose shares not yet bought
+                timestamp = latest_ts + 1
             if timestamp is None:
-                latest_ts = self._condition_latest_timestamp.get(condition_id)
                 timestamp = (
                     latest_ts + 1
                     if latest_ts

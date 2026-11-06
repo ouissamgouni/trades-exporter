@@ -211,7 +211,11 @@ export const PriceGapsTab: React.FC<PriceGapsTabProps> = ({ pnlAssetIds, quoteAs
                                 const canSkip = isActive && r.job && (r.job.status === 'pending' || r.job.status === 'running');
                                 return (
                                     <React.Fragment key={r.asset_id}>
-                                        <tr ref={isFocus ? focusRef : undefined} className={`border-b border-gray-50 ${isFocus ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                                        <tr
+                                            ref={isFocus ? focusRef : undefined}
+                                            onClick={() => setExpandedId(isExpanded ? null : r.asset_id)}
+                                            className={`cursor-pointer border-b border-gray-50 ${isFocus ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                                        >
                                             <td className="max-w-[280px] py-1.5 pl-3">
                                                 <AssetNameCell id={r.asset_id} symbol={r.symbol} label={r.label} pnlVersionId={pnlVersionId} />
                                             </td>
@@ -242,11 +246,11 @@ export const PriceGapsTab: React.FC<PriceGapsTabProps> = ({ pnlAssetIds, quoteAs
                                             <td className="py-1.5 pr-3">
                                                 <div className="flex items-center justify-end gap-0.5">
                                                     {canSkip && (
-                                                        <button type="button" aria-label={`Skip ${r.label || r.symbol}`} title="Skip this asset" onClick={() => skip.mutate(r.asset_id)} className="p-1 text-gray-500 hover:bg-orange-50 hover:text-orange-600">
+                                                        <button type="button" aria-label={`Skip ${r.label || r.symbol}`} title="Skip this asset" onClick={(e) => { e.stopPropagation(); skip.mutate(r.asset_id); }} className="p-1 text-gray-500 hover:bg-orange-50 hover:text-orange-600">
                                                             <FiSkipForward size={12} />
                                                         </button>
                                                     )}
-                                                    <button type="button" aria-label={isExpanded ? 'Collapse gap details' : 'Expand gap details'} onClick={() => setExpandedId(isExpanded ? null : r.asset_id)} className="p-1 text-gray-500 hover:bg-gray-100">
+                                                    <button type="button" aria-label={isExpanded ? 'Collapse gap details' : 'Expand gap details'} onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : r.asset_id); }} className="p-1 text-gray-500 hover:bg-gray-100">
                                                         <span className={`inline-block transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`}><FiChevronDown size={12} /></span>
                                                     </button>
                                                 </div>
