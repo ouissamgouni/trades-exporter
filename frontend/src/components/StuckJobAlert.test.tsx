@@ -10,7 +10,7 @@ describe('StuckJobAlert (critical: only way to unblock syncs)', () => {
     const job = { id: 802, status: 'pending', started_at: '2026-03-17T19:52:33' }
 
     it('explains which job blocks syncs', () => {
-        render(<StuckJobAlert job={job} onAborted={() => {}} />)
+        render(<StuckJobAlert job={job} onAborted={() => { }} />)
 
         expect(screen.getByRole('alert')).toHaveTextContent('Sync job #802 is stuck and blocks new syncs')
         expect(screen.getByRole('alert')).toHaveTextContent('pending')
