@@ -53,6 +53,21 @@ async def lifespan(app: FastAPI):
     # Initialize database (creates tables + seeds default data)
     init_db()
 
+    # Sync jobs run in-process, so any pending/running job at boot is orphaned
+    # and would otherwise block new syncs via the active-job guard (409).
+    from sqlmodel import Session
+    from backend.db.database import get_engine
+    from backend.db.repositories.sync_job_repository import SyncJobRepository
+
+    with Session(get_engine()) as session:
+        orphaned = SyncJobRepository(session).cleanup_orphaned_jobs(stale_minutes=0)
+        session.commit()
+    if orphaned["jobs_aborted"]:
+        print(
+            f"   Sync jobs: aborted {orphaned['jobs_aborted']} orphaned job(s), "
+            f"{orphaned['connector_runs_failed']} connector run(s) marked failed"
+        )
+
     # Register P&L invalidation listener (detects data changes → marks stale)
     register_pnl_invalidation_listener()
 
