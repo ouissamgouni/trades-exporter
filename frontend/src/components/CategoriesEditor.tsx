@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { LuTriangleAlert, LuCheck, LuPencil, LuPlus, LuTrash2, LuX, LuChevronDown, LuChevronRight, LuGripVertical, LuShuffle } from 'react-icons/lu';
 import { API_URL, Category, CategoryAssetsResponse, Dimension, DimensionWithCategories, LinkedAsset, UnclassifiedAssetsResponse } from '../types';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
-import { Toaster, toaster } from './ui/toaster';
+import { toaster } from './ui/toaster';
 import { ColorSelector } from './ColorSelector';
 import { getNextAvailableColor, getContrastTextColor, DEFAULT_CATEGORY_COLOR, CATEGORY_COLOR_PALETTE } from '../constants/colors';
 
@@ -424,7 +424,6 @@ export const CategoriesEditor: React.FC = () => {
 
     return (
         <div>
-            <Toaster />
             <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-base font-semibold">Asset Categories</h2>
                 <span className="text-sm text-slate-500">

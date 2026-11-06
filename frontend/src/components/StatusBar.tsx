@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FiActivity, FiCheckCircle, FiClipboard } from 'react-icons/fi';
+import { FiActivity, FiCheckCircle, FiClipboard, FiDatabase, FiMonitor, FiServer } from 'react-icons/fi';
 import { useDataHealth } from '../contexts/DataHealthContext';
 import { useQaContext } from './QaTestPlanPanel';
 import { DataHealthCheckDrawer } from './DataHealthCheckDrawer';
@@ -35,6 +35,29 @@ const Segment: React.FC<{ onClick?: () => void; children: React.ReactNode }> = (
     >
         {children}
     </div>
+);
+
+type InfoKind = 'fe' | 'be' | 'db';
+
+// Square corners by design system; full literal classes so Tailwind picks them up.
+const PILL_COLORS: Record<InfoKind, string> = {
+    fe: 'border-sky-200 bg-sky-50 text-sky-700',
+    be: 'border-violet-200 bg-violet-50 text-violet-700',
+    db: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+};
+
+const InfoPill: React.FC<{ kind: InfoKind; icon: React.ReactNode; label: string; title: string; children: React.ReactNode }> = ({
+    kind, icon, label, title, children,
+}) => (
+    <span
+        className={`inline-flex h-4 shrink-0 items-center gap-1 whitespace-nowrap border px-1.5 text-[10px] leading-none ${PILL_COLORS[kind]}`}
+        title={title}
+        aria-label={title}
+    >
+        {icon}
+        <span className="font-semibold">{label}</span>
+        <span className="font-mono">{children}</span>
+    </span>
 );
 
 export const StatusBar: React.FC = () => {
@@ -131,29 +154,53 @@ export const StatusBar: React.FC = () => {
 
                 {/* Env info segment (rightmost) */}
                 <Segment>
-                    <span className="flex items-center gap-1" title={versionTooltip} aria-label={versionTooltip}>
                     {!isProd && (
-                        <>
+                        <span className="flex items-center gap-1" title={versionTooltip} aria-label={versionTooltip}>
                             <span
                                 className="inline-block h-[7px] w-[7px] shrink-0 rounded-full"
                                 style={{ backgroundColor: dotColor }}
                             />
                             <span className="font-bold">{env.toUpperCase()}</span>
-                        </>
+                        </span>
                     )}
                     {frontendVersion && (
-                        <span style={{ opacity: 0.6 }}>FE {frontendVersion}</span>
+                        <InfoPill kind="fe" icon={<FiMonitor size={10} />} label="FE" title={`Frontend: ${frontendVersion}`}>
+                            {frontendVersion}
+                        </InfoPill>
                     )}
                     {appInfo?.backend_version && (
-                        <span style={{ opacity: 0.6 }}>BE {appInfo.backend_version}</span>
+                        <InfoPill kind="be" icon={<FiServer size={10} />} label="BE" title={`Backend: ${appInfo.backend_version}`}>
+                            {appInfo.backend_version}
+                        </InfoPill>
                     )}
-                    {appInfo?.db_schema_version && (
-                        <span style={{ opacity: 0.5 }}>DB {appInfo.db_schema_version.split('_')[0]}</span>
+                    {(appInfo?.db_name || appInfo?.db_schema_version) && (
+                        <InfoPill
+                            kind="db"
+                            icon={<FiDatabase size={10} />}
+                            label="DB"
+                            title={[
+                                `Database: ${appInfo.db_name ?? 'unknown'}`,
+                                `Migration: ${appInfo.db_schema_version ?? 'none'}`,
+                                appInfo.db_provenance ? `Data: ${appInfo.db_provenance}` : null,
+                            ].filter(Boolean).join('\n')}
+                        >
+                            {/* Full details on wide screens, short forms when space is tight */}
+                            {appInfo.db_name && <span className="hidden lg:inline">{appInfo.db_name}</span>}
+                            {appInfo.db_name && appInfo.db_schema_version && <span className="hidden lg:inline"> @ </span>}
+                            {appInfo.db_schema_version && (
+                                <>
+                                    <span className="hidden xl:inline">{appInfo.db_schema_version}</span>
+                                    <span className="xl:hidden">{appInfo.db_schema_version.split('_')[0]}</span>
+                                </>
+                            )}
+                            {appInfo.db_provenance && (
+                                <>
+                                    <span className="hidden 2xl:inline"> · {appInfo.db_provenance}</span>
+                                    <span className="2xl:hidden"> · {appInfo.db_provenance.startsWith('copied_from') ? 'copied' : 'restored'}</span>
+                                </>
+                            )}
+                        </InfoPill>
                     )}
-                    {appInfo?.db_provenance && (
-                        <span style={{ opacity: 0.5 }}>· {appInfo.db_provenance.startsWith('copied_from') ? 'copied' : 'restored'}</span>
-                    )}
-                    </span>
                 </Segment>
 
                 {/* Right edge padding */}

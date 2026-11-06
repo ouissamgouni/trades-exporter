@@ -667,6 +667,14 @@ export interface ConnectorProgress {
     connector_name?: string;
 }
 
+// A DB job stuck in pending/running; orphaned = no worker in the backend runs it
+export interface BlockingJobInfo {
+    id: number | null;
+    status: string;
+    started_at?: string | null;
+    orphaned: boolean;
+}
+
 export interface SyncJobProgress {
     status: SyncJobStatus;
     started_at?: string;
@@ -685,6 +693,7 @@ export interface SyncJobProgress {
     connector_statuses?: Record<string, ConnectorProgress>;
     job_id?: number; // Persisted job ID
     renormalize?: boolean;
+    blocking_job?: BlockingJobInfo | null;
 }
 
 // ============================================================================
@@ -704,6 +713,7 @@ export interface SyncJobSummary {
     total_errors: number;
     error_message?: string;
     renormalize?: boolean;
+    is_orphaned?: boolean;
     connector_runs?: ConnectorRunSummary[];
 }
 
@@ -736,6 +746,7 @@ export interface SyncJobDetail {
     total_errors: number;
     error_message?: string;
     renormalize?: boolean;
+    is_orphaned?: boolean;
     config_snapshot?: Record<string, any>;
     connector_runs: ConnectorRunSummary[];
 }

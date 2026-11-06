@@ -22,7 +22,9 @@ import { JobDetailDrawer } from './JobDetailDrawer';
 import { JobHistoryTable } from './JobHistoryTable';
 import { SyncConfigPanel } from './SyncConfigPanel';
 import { SyncRecapDialog } from './SyncRecapDialog';
+import { StuckJobAlert } from './StuckJobAlert';
 import { toaster } from './ui/toaster';
+import { abortSyncJob, getBlockingJob, readApiError } from '../utils/syncJobApi';
 
 // Status badge color helper
 const getJobStatusColor = (status: string): string => {
@@ -206,16 +208,19 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestBody)
             });
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Failed to start job');
-            }
+            if (!response.ok) throw await readApiError(response, 'Failed to start job');
             const data: SyncJobStartResponse = await response.json();
             console.log('Job started:', data);
             // Immediately fetch status
             await fetchJobStatus();
         } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to start job' });
+            const blocking = getBlockingJob(err);
+            toaster.error({
+                title: blocking ? `Sync blocked by job #${blocking.id}` : 'Failed to start sync',
+                description: err instanceof Error ? err.message : 'Failed to start job',
+            });
+            // Surfaces the stuck-job banner with its abort action
+            if (blocking) await fetchJobStatus();
         } finally {
             setActionLoading(false);
         }
@@ -225,10 +230,10 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
     const abortJob = async () => {
         setActionLoading(true);
         try {
-            const response = await fetch(`${API_URL}/sync-job/abort`, {
-                method: 'POST'
-            });
-            if (!response.ok) throw new Error('Failed to abort job');
+            const result = await abortSyncJob();
+            if (result.status === 'not_running') {
+                toaster.info({ title: 'Nothing to abort', description: result.message });
+            }
             await fetchJobStatus();
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to abort job' });
@@ -348,7 +353,8 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
         (c) => c.status === 'running' || c.status === 'queued'
     ).length;
     const isFullJobRunning = isRunning && activeConnectorCount > 1;
-    const canStart = !isRunning && !actionLoading;
+    const blockingJob = !isRunning ? jobStatus?.blocking_job ?? null : null;
+    const canStart = !isRunning && !actionLoading && !blockingJob;
     const hasFailedConnectors = getSortedConnectorStatuses().some(
         (c) => c.status === 'failed' || c.status === 'warning'
     );
@@ -370,6 +376,16 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                 <div className="mb-4 bg-red-100 p-3 text-red-800">
                     Error: {error}
                 </div>
+            )}
+
+            {blockingJob && (
+                <StuckJobAlert
+                    job={blockingJob}
+                    onAborted={() => {
+                        fetchJobStatus();
+                        setHistoryRefreshTrigger(prev => prev + 1);
+                    }}
+                />
             )}
 
             <Tabs value={activeTab} onValueChange={(v) => onActiveTabChange(v as 'control' | 'history')}>
@@ -410,6 +426,11 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                                         )}
                                     </>
                                 )}
+                                {blockingJob && (
+                                    <span className="text-sm text-red-600">
+                                        Blocked by stuck job #{blockingJob.id}
+                                    </span>
+                                )}
                                 {syncOverrides.length > 0 && canStart && (
                                     <span className="text-sm text-blue-400">
                                         {syncOverrides.length} override{syncOverrides.length !== 1 ? 's' : ''} configured
@@ -417,7 +438,7 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                                 )}
                             </div>
                             <div className="flex gap-2">
-                                {canStart && (
+                                {!isRunning && (
                                     <>
                                         <Button
                                             colorScheme="blue"
@@ -765,6 +786,7 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                                     setSelectedJobId(jobId);
                                     setJobDrawerOpen(true);
                                 }}
+                                onJobAborted={fetchJobStatus}
                                 refreshTrigger={historyRefreshTrigger}
                             />
                         </div>
@@ -779,6 +801,10 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                 onClose={() => {
                     setJobDrawerOpen(false);
                     setSelectedJobId(null);
+                }}
+                onJobAborted={() => {
+                    fetchJobStatus();
+                    setHistoryRefreshTrigger(prev => prev + 1);
                 }}
             />
 

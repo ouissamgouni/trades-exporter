@@ -36,6 +36,14 @@ from backend.services.parallel_pipeline_processor import (
 _UNSET = object()
 
 
+class SyncJobBlockedError(RuntimeError):
+    """Raised when a new sync cannot start because another job is active."""
+
+    def __init__(self, message: str, blocking_job: Dict[str, Any]):
+        super().__init__(message)
+        self.blocking_job = blocking_job
+
+
 class JobStatus(str, Enum):
     """Possible states for a sync job."""
 
@@ -396,8 +404,23 @@ class SyncJobService:
         """
         with self._start_lock:
             if self.is_running():
-                raise RuntimeError(
-                    "A sync job is already running. Please wait for it to complete or abort it."
+                blocking = {
+                    "id": self.progress.job_id,
+                    "status": "running",
+                    "started_at": self.progress.started_at.isoformat()
+                    if self.progress.started_at
+                    else None,
+                    "orphaned": False,
+                }
+                self.logger.warning(
+                    "sync_start_rejected",
+                    reason="job_running_in_process",
+                    blocking_job_id=blocking["id"],
+                )
+                raise SyncJobBlockedError(
+                    f"A sync job is already running (job #{blocking['id']}). "
+                    "Please wait for it to complete or abort it.",
+                    blocking,
                 )
 
             overrides_count = len(connector_overrides) if connector_overrides else 0
@@ -419,10 +442,27 @@ class SyncJobService:
                 sync_job_repo = SyncJobRepository(session)
                 active_job = sync_job_repo.get_active_job()
                 if active_job:
-                    raise RuntimeError(
-                        f"A sync job is already active (job #{active_job.id}, status={active_job.status}). "
-                        "Please wait for it to complete or abort it."
+                    blocking = self.describe_job(active_job)
+                    self.logger.warning(
+                        "sync_start_rejected",
+                        reason="active_job_in_db",
+                        blocking_job_id=blocking["id"],
+                        blocking_status=blocking["status"],
+                        blocking_started_at=blocking["started_at"],
+                        orphaned=blocking["orphaned"],
                     )
+                    if blocking["orphaned"]:
+                        message = (
+                            f"Sync job #{blocking['id']} is stuck in '{blocking['status']}' "
+                            f"since {blocking['started_at']} with no worker running it. "
+                            "Abort it to start a new sync."
+                        )
+                    else:
+                        message = (
+                            f"A sync job is already active (job #{blocking['id']}, "
+                            f"status={blocking['status']}). Please wait for it to complete or abort it."
+                        )
+                    raise SyncJobBlockedError(message, blocking)
                 try:
                     db_job = sync_job_repo.create_job(
                         config_snapshot=config_snapshot,
@@ -465,16 +505,92 @@ class SyncJobService:
             "test_mode": is_test_mode(),
         }
 
-    def abort_job(self) -> Dict[str, Any]:
+    def owns_job(self, job_id: Optional[int]) -> bool:
+        """True if this process is currently running the given job."""
+        return self.is_running() and self.progress.job_id == job_id
+
+    def describe_job(self, job) -> Dict[str, Any]:
+        """Summary of a pending/running DB job; orphaned = no worker in this process owns it."""
+        from backend.db.models import SyncJobStatus
+
+        return {
+            "id": job.id,
+            "status": SyncJobStatus(job.status).value,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "orphaned": not self.owns_job(job.id),
+        }
+
+    def abort_orphaned_jobs_on_startup(self) -> None:
+        """Jobs run in-process, so any pending/running job at boot was left by a dead process."""
+        from backend.db.repositories.sync_job_repository import SyncJobRepository
+
+        with Session(get_engine()) as session:
+            result = SyncJobRepository(session).cleanup_orphaned_jobs(stale_minutes=0)
+            session.commit()
+        if result["jobs_aborted"]:
+            self.logger.warning(
+                "sync_orphaned_jobs_aborted",
+                trigger="startup",
+                job_ids=result["job_ids"],
+                connector_runs_failed=result["connector_runs_failed"],
+            )
+
+    def _abort_orphaned_job(self, job_id: Optional[int]) -> Dict[str, Any]:
+        from backend.db.models import SyncJobStatus
+        from backend.db.repositories.sync_job_repository import SyncJobRepository
+
+        with self._start_lock, Session(get_engine()) as session:
+            repo = SyncJobRepository(session)
+            job = repo.get_active_job() if job_id is None else repo.get_job(job_id)
+            if job is None or SyncJobStatus(job.status) not in (
+                SyncJobStatus.PENDING,
+                SyncJobStatus.RUNNING,
+            ):
+                message = (
+                    "No job is currently running"
+                    if job_id is None
+                    else f"Job #{job_id} is not active"
+                )
+                return {"status": "not_running", "message": message}
+            if self.owns_job(job.id):
+                return {"status": "not_running", "message": "Job is owned by a running worker"}
+
+            previous_status = SyncJobStatus(job.status).value
+            aborted_id = job.id
+            runs_failed = repo.abort_jobs(
+                [job], "Aborted by user: job was orphaned (no worker was running it)"
+            )
+            session.commit()
+
+        self.logger.warning(
+            "sync_orphaned_job_aborted",
+            trigger="user",
+            job_id=aborted_id,
+            previous_status=previous_status,
+            connector_runs_failed=runs_failed,
+        )
+        return {
+            "status": "aborted",
+            "message": f"Stuck job #{aborted_id} ({previous_status}) was marked as aborted.",
+            "job_id": aborted_id,
+        }
+
+    def abort_job(self, job_id: Optional[int] = None) -> Dict[str, Any]:
         """
-        Request abort of the current running job.
+        Request abort of the running job, or mark an orphaned DB job as aborted.
+
+        Args:
+            job_id: Specific job to abort; defaults to the current/active job.
 
         Returns:
             Dict with status and message
         """
-        if not self.is_running():
-            return {"status": "not_running", "message": "No job is currently running"}
+        if not self.is_running() or (
+            job_id is not None and job_id != self.progress.job_id
+        ):
+            return self._abort_orphaned_job(job_id)
 
+        self.logger.info("sync_abort_requested", job_id=self.progress.job_id)
         self.progress.abort_requested = True
         self._abort_event.set()
 

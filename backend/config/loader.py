@@ -340,6 +340,7 @@ def configure_logging(logger_name: str = "backend") -> structlog.stdlib.BoundLog
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.filter_by_level,  # Filter based on stdlib log level
             structlog.processors.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.TimeStamper(
                 fmt="iso" if log_format == "json" else "%H:%M:%S"
             ),

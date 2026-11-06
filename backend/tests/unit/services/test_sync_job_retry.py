@@ -497,6 +497,51 @@ class TestRetryAPIRoute:
         assert "already in progress" in resp.json()["detail"]
 
 
+class TestStartAbortAPIRoute:
+    """Blocked starts and orphaned-job aborts must be explicit to the UI."""
+
+    @patch("backend.api.routes.sync_job.get_sync_job_service")
+    def test_blocked_start_returns_structured_409(self, mock_get_svc):
+        from fastapi.testclient import TestClient
+        from backend.api.routes.sync_job import router
+        from backend.services.sync_job_service import SyncJobBlockedError
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        blocking = {"id": 802, "status": "pending", "started_at": "2026-03-17T19:52:00", "orphaned": True}
+        mock_svc = MagicMock()
+        mock_svc.start_job.side_effect = SyncJobBlockedError("Sync job #802 is stuck", blocking)
+        mock_get_svc.return_value = mock_svc
+
+        resp = client.post("/sync-job/start", json={"trigger_source": "manual"})
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == "sync_job_active"
+        assert detail["blocking_job"] == blocking
+        assert "#802" in detail["message"]
+
+    @patch("backend.api.routes.sync_job.get_sync_job_service")
+    def test_abort_specific_inactive_job_returns_409(self, mock_get_svc):
+        from fastapi.testclient import TestClient
+        from backend.api.routes.sync_job import router
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+
+        mock_svc = MagicMock()
+        mock_svc.abort_job.return_value = {"status": "not_running", "message": "Job #5 is not active"}
+        mock_get_svc.return_value = mock_svc
+
+        resp = client.post("/sync-job/jobs/5/abort")
+        assert resp.status_code == 409
+        mock_svc.abort_job.assert_called_once_with(job_id=5)
+
+
 # ─── Retry Override Bug Fix Tests ─────────────────────────────────────────
 
 

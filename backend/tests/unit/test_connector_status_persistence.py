@@ -106,6 +106,76 @@ class TestConnectorStatusPersistence:
             service.start_job()
         mock_thread.start.assert_called_once()
 
+    @patch("backend.services.sync_job_service.Session")
+    @patch("backend.services.sync_job_service.get_engine")
+    @patch("backend.db.repositories.sync_job_repository.SyncJobRepository")
+    def test_start_job_rejects_orphaned_db_job_explicitly(
+        self, mock_repo_cls, mock_get_engine, mock_session_cls
+    ):
+        """A stuck pending DB job blocks start with a descriptive, logged error."""
+        from backend.services.sync_job_service import SyncJobBlockedError
+
+        mock_repo = MagicMock()
+        mock_repo.get_active_job.return_value = SimpleNamespace(
+            id=802, status="pending", started_at=datetime(2026, 3, 17, 19, 52)
+        )
+        mock_repo_cls.return_value = mock_repo
+
+        service = SyncJobService()
+        service.logger = MagicMock()
+
+        with pytest.raises(SyncJobBlockedError, match="#802 is stuck in 'pending'") as exc:
+            service.start_job()
+
+        assert exc.value.blocking_job == {
+            "id": 802,
+            "status": "pending",
+            "started_at": "2026-03-17T19:52:00",
+            "orphaned": True,
+        }
+        service.logger.warning.assert_called_once()
+        assert service.logger.warning.call_args.args[0] == "sync_start_rejected"
+        mock_repo.create_job.assert_not_called()
+
+    @patch("backend.services.sync_job_service.Session")
+    @patch("backend.services.sync_job_service.get_engine")
+    @patch("backend.db.repositories.sync_job_repository.SyncJobRepository")
+    def test_abort_marks_orphaned_db_job_aborted(
+        self, mock_repo_cls, mock_get_engine, mock_session_cls
+    ):
+        """Abort with no in-process worker aborts the stuck DB job instead of no-op."""
+        job = SimpleNamespace(id=802, status="pending", started_at=None)
+        mock_repo = MagicMock()
+        mock_repo.get_active_job.return_value = job
+        mock_repo.abort_jobs.return_value = 0
+        mock_repo_cls.return_value = mock_repo
+        mock_session = MagicMock()
+        mock_session_cls.return_value.__enter__.return_value = mock_session
+
+        service = SyncJobService()
+        result = service.abort_job()
+
+        assert result["status"] == "aborted"
+        assert result["job_id"] == 802
+        mock_repo.abort_jobs.assert_called_once()
+        assert mock_repo.abort_jobs.call_args.args[0] == [job]
+        mock_session.commit.assert_called_once()
+
+    @patch("backend.services.sync_job_service.Session")
+    @patch("backend.services.sync_job_service.get_engine")
+    @patch("backend.db.repositories.sync_job_repository.SyncJobRepository")
+    def test_abort_specific_inactive_job_is_noop(
+        self, mock_repo_cls, mock_get_engine, mock_session_cls
+    ):
+        mock_repo = MagicMock()
+        mock_repo.get_job.return_value = SimpleNamespace(id=5, status="completed")
+        mock_repo_cls.return_value = mock_repo
+
+        result = SyncJobService().abort_job(job_id=5)
+
+        assert result["status"] == "not_running"
+        mock_repo.abort_jobs.assert_not_called()
+
     @patch("backend.db.database.get_session")
     def test_persist_pending_status(self, mock_get_session):
         """Test persisting PENDING (QUEUED) status."""

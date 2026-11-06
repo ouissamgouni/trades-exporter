@@ -10,6 +10,7 @@ import { AssetDetailPanelProvider } from './contexts/AssetDetailPanelContext';
 import { AssetDetailSlidePanel } from './components/AssetDetailSlidePanel';
 import { QaTestPlanProvider, useQaPinnedWidth } from './components/QaTestPlanPanel';
 import { StatusBar, STATUS_BAR_HEIGHT_PX } from './components/StatusBar';
+import { Toaster } from './components/ui/toaster';
 import type { PnLCalcStatus } from './components/pnl/types';
 
 // Setup status interface
@@ -259,6 +260,11 @@ const AppContent = () => {
                         <TabsTrigger value="sync">
                             <span className="inline-flex items-center gap-1">
                                 🔄 Sync
+                                {syncStatus?.blocking_job && (
+                                    <Badge colorScheme="red" className="ml-1" title={`Job #${syncStatus.blocking_job.id} is stuck and blocks new syncs`}>
+                                        stuck
+                                    </Badge>
+                                )}
                                 {hasSyncFailures && (
                                     <Badge colorScheme="red" className="ml-1">
                                         {failedConnectorsCount > 0 ? `${failedConnectorsCount} failed` : '⚠'}
@@ -397,6 +403,7 @@ const App = () => {
                             <Route path="*" element={<Navigate to={DEFAULT_ROUTE} replace />} />
                         </Routes>
                         <AssetDetailSlidePanel />
+                        <Toaster />
                     </QaTestPlanProvider>
                 </DataHealthProvider>
             </AssetDetailPanelProvider>
