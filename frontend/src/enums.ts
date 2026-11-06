@@ -28,6 +28,7 @@ export enum TransactionType {
   MARGIN = 'margin',
   COST = 'cost',
   DIVIDEND = 'dividend',
+  MEMO = 'memo',
 }
 
 /**
@@ -147,6 +148,7 @@ export function getTransactionTypeLabel(type: TransactionType | string): string 
     [TransactionType.MARGIN]: 'Margin',
     [TransactionType.COST]: 'Cost',
     [TransactionType.DIVIDEND]: 'Dividend',
+    [TransactionType.MEMO]: 'Memo',
   };
   return labels[type] || type;
 }

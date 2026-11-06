@@ -16,6 +16,10 @@ from backend.config.loader import configure_logging, load_settings
 log = configure_logging("blockscout_base")
 
 
+class BlockscoutClientError(RuntimeError):
+    """4xx response (other than 429): retrying will not help."""
+
+
 class BlockscoutConnectorBase(BaseConnector):
     """
     Base class for Blockscout API connectors.
@@ -51,7 +55,9 @@ class BlockscoutConnectorBase(BaseConnector):
         # Get chain configuration from registry
         registry = get_connector_registry()
         self.native_token = registry.get_native_token("blockscout", self.chain_name)
-        self.native_token_decimals = registry.get_native_token_decimals("blockscout", self.chain_name)
+        self.native_token_decimals = registry.get_native_token_decimals(
+            "blockscout", self.chain_name
+        )
         self.chain_id = registry.get_chain_id("blockscout", self.chain_name)
         if not self.native_token or self.native_token_decimals is None:
             raise ValueError(f"Chain configuration not found for {chain_name}")
@@ -114,14 +120,20 @@ class BlockscoutConnectorBase(BaseConnector):
                     log.warning(f"⚠️ Rate limited (attempt {attempt}): HTTP 429")
                     delay *= 2
                     continue
-                elif response.status_code >= 400:
+                elif response.status_code >= 500:
                     raise RuntimeError(
                         f"HTTP {response.status_code}: {response.text[:100]}"
+                    )
+                elif response.status_code >= 400:
+                    raise BlockscoutClientError(
+                        f"HTTP {response.status_code} from {response.url}: {response.text[:100]}"
                     )
 
                 data = response.json()
                 return data
 
+            except BlockscoutClientError:
+                raise
             except requests.exceptions.RequestException as e:
                 log.error(f"⚠️ Network error: {e}")
                 delay *= 2

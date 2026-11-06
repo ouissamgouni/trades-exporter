@@ -103,6 +103,105 @@ export function formatTimeShort(value: string | number | Date | null | undefined
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * Transaction row date: "14:32" (time mode, used under a day header),
+ * "5 Nov 14:32" (current year) or "5 Nov 2024 14:32".
+ */
+export function formatTxDateTime(
+    value: string | number | Date | null | undefined,
+    mode: 'full' | 'time' = 'full',
+    now: Date = new Date(),
+): string {
+    const date = parseApiDate(value);
+    if (!date) return '-';
+    const time = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    if (mode === 'time') return time;
+    const year = date.getFullYear() === now.getFullYear() ? '' : ` ${date.getFullYear()}`;
+    return `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]}${year} ${time}`;
+}
+
+/** Parse a local "YYYY-MM-DD" period key into a local Date at midnight. */
+function parsePeriodStart(periodStart: string): Date {
+    const [y, m, d] = periodStart.split('-').map(Number);
+    return new Date(y, m - 1, d);
+}
+
+/** Month group label: "November" (current year) or "Nov 2024". */
+export function formatMonthLabel(periodStart: string, now: Date = new Date()): string {
+    const date = parsePeriodStart(periodStart);
+    if (date.getFullYear() === now.getFullYear()) return MONTHS_LONG[date.getMonth()];
+    return `${MONTHS_SHORT[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+/** Day group label: "Today", "Yesterday", or "Wed 5". */
+export function formatDayLabel(periodStart: string, now: Date = new Date()): string {
+    const date = parsePeriodStart(periodStart);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.round((today.getTime() - date.getTime()) / 86_400_000);
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    return `${WEEKDAYS_SHORT[date.getDay()]} ${date.getDate()}`;
+}
+
+/** Browser IANA timezone (falls back to UTC). */
+export function browserTimeZone(): string {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch {
+        return 'UTC';
+    }
+}
+
+/**
+ * Convert a local filter value ("YYYY-MM-DD" or "YYYY-MM-DDTHH:mm") to the naive-UTC
+ * ISO string the backend compares against. Values already carrying a zone are passed through.
+ */
+export function localFilterToUtcNaive(value: string, edge: 'start' | 'end'): string {
+    if (!value) return '';
+    if (value.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(value)) return value;
+    const hasTime = value.includes('T');
+    const local = hasTime
+        ? new Date(edge === 'end' && value.length === 16 ? `${value}:59.999` : value)
+        : new Date(`${value}T${edge === 'start' ? '00:00:00' : '23:59:59.999'}`);
+    if (isNaN(local.getTime())) return value;
+    return local.toISOString().replace('Z', '');
+}
+
+/** Local "YYYY-MM-DD" for a Date. */
+export function toLocalDateKey(date: Date): string {
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+export type NamedDateRange = 'this_month' | 'last_30d' | 'ytd' | 'last_tax_year';
+
+export const NAMED_DATE_RANGES: { id: NamedDateRange; label: string }[] = [
+    { id: 'this_month', label: 'This month' },
+    { id: 'last_30d', label: 'Last 30d' },
+    { id: 'ytd', label: 'YTD' },
+    { id: 'last_tax_year', label: 'Last tax year' },
+];
+
+/** Date-only local range for a preset; tax year = calendar year (FR). */
+export function getNamedDateRange(id: NamedDateRange, now: Date = new Date()): { from: string; to: string } {
+    const today = toLocalDateKey(now);
+    switch (id) {
+        case 'this_month':
+            return { from: toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+        case 'last_30d':
+            return { from: toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)), to: today };
+        case 'ytd':
+            return { from: `${now.getFullYear()}-01-01`, to: today };
+        case 'last_tax_year':
+            return { from: `${now.getFullYear() - 1}-01-01`, to: `${now.getFullYear() - 1}-12-31` };
+    }
+}
+
 /**
  * Format a date using the browser's locale settings (full date)
  */

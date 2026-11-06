@@ -4,6 +4,7 @@ Transaction endpoints for the TradeTrail API.
 
 import uuid
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from typing import List, Optional, Dict, Any
@@ -20,6 +21,8 @@ from backend.api.schemas import (
     TransactionUpdate,
     AssetRef,
     TransactionListResponse,
+    TransactionGroupsResponse,
+    TransactionIdsResponse,
     FilterMetadata,
     AppliedFilters,
     ValidationWarning,
@@ -1570,8 +1573,42 @@ def bulk_dismiss_transfer_issues(
     }
 
 
-@router.get("", response_model=TransactionListResponse)
-def list_transactions(
+@dataclass
+class TxListQuery:
+    review_status: Any = None
+    taxability: Any = None
+    source: Any = None
+    account_id: Any = None
+    from_account_id: Any = None
+    to_account_id: Any = None
+    related_account_id: Any = None
+    unit_id: Any = None
+    ids: Any = None
+    date_from: Any = None
+    date_to: Any = None
+    asset_id: Any = None
+    related_asset_id: Any = None
+    category_id: Any = None
+    transaction_type: Any = None
+    direction: Any = None
+    connector_run_id: Any = None
+    connector_run_outcome: Any = None
+    source_transaction_id: Any = None
+    tag_key: Any = None
+    network: Any = None
+    pnl_cal_version: Any = None
+    pnl_cal_inclusions_status: Any = None
+    non_owned: Any = None
+    has_fee: Any = None
+    price_quote_asset_id: Any = None
+    fee_quote_asset_id: Any = None
+    attributed_asset_id: Any = None
+    include_fee: Any = None
+    has_bundle: Any = None
+    bundle_pattern: Any = None
+
+
+def get_tx_list_query(
     review_status: Optional[str] = Query(
         None, description="Filter by review status (valid/pending/invalid)"
     ),
@@ -1679,6 +1716,247 @@ def list_transactions(
         None,
         description="Filter by bundle pattern (comma-separated: internal_transfer, swap, flow, split, custom, unknown)",
     ),
+) -> TxListQuery:
+    return TxListQuery(
+        review_status=review_status,
+        taxability=taxability,
+        source=source,
+        account_id=account_id,
+        from_account_id=from_account_id,
+        to_account_id=to_account_id,
+        related_account_id=related_account_id,
+        unit_id=unit_id,
+        ids=ids,
+        date_from=date_from,
+        date_to=date_to,
+        asset_id=asset_id,
+        related_asset_id=related_asset_id,
+        category_id=category_id,
+        transaction_type=transaction_type,
+        direction=direction,
+        connector_run_id=connector_run_id,
+        connector_run_outcome=connector_run_outcome,
+        source_transaction_id=source_transaction_id,
+        tag_key=tag_key,
+        network=network,
+        pnl_cal_version=pnl_cal_version,
+        pnl_cal_inclusions_status=pnl_cal_inclusions_status,
+        non_owned=non_owned,
+        has_fee=has_fee,
+        price_quote_asset_id=price_quote_asset_id,
+        fee_quote_asset_id=fee_quote_asset_id,
+        attributed_asset_id=attributed_asset_id,
+        include_fee=include_fee,
+        has_bundle=has_bundle,
+        bundle_pattern=bundle_pattern,
+    )
+
+
+def apply_tx_list_filters(session: Session, statement, q: TxListQuery):
+    """Apply the transaction-list filters to `statement`; returns (statement, applied_filters, warnings)."""
+    review_status = q.review_status
+    taxability = q.taxability
+    source = q.source
+    account_id = q.account_id
+    from_account_id = q.from_account_id
+    to_account_id = q.to_account_id
+    related_account_id = q.related_account_id
+    unit_id = q.unit_id
+    ids = q.ids
+    date_from = q.date_from
+    date_to = q.date_to
+    asset_id = q.asset_id
+    related_asset_id = q.related_asset_id
+    category_id = q.category_id
+    transaction_type = q.transaction_type
+    direction = q.direction
+    connector_run_id = q.connector_run_id
+    connector_run_outcome = q.connector_run_outcome
+    source_transaction_id = q.source_transaction_id
+    tag_key = q.tag_key
+    network = q.network
+    pnl_cal_version = q.pnl_cal_version
+    pnl_cal_inclusions_status = q.pnl_cal_inclusions_status
+    non_owned = q.non_owned
+    has_fee = q.has_fee
+    price_quote_asset_id = q.price_quote_asset_id
+    fee_quote_asset_id = q.fee_quote_asset_id
+    attributed_asset_id = q.attributed_asset_id
+    include_fee = q.include_fee
+    has_bundle = q.has_bundle
+    bundle_pattern = q.bundle_pattern
+    from backend.api.routes.filter_validator import validate_transaction_filters
+
+    # When connector_run_outcome is specified, don't pass connector_run_id
+    # to the shared filter builder — sync_connector_run_id tracks the LAST
+    # run that touched a transaction, which may differ from the run we're
+    # inspecting.  The outcome filter handles the correct filtering via
+    # source_transaction_id resolved from the run's JSON columns.
+    effective_connector_run_id = None if connector_run_outcome else connector_run_id
+
+    # Validate filters
+    applied_filters, warnings = validate_transaction_filters(
+        session=session,
+        review_status=review_status,
+        taxability=taxability,
+        source=source,
+        account_id=account_id,
+        from_account_id=from_account_id,
+        to_account_id=to_account_id,
+        related_account_id=related_account_id,
+        asset_id=asset_id,
+        related_asset_id=related_asset_id,
+        category_id=category_id,
+        transaction_type=transaction_type,
+        direction=direction,
+        connector_run_id=effective_connector_run_id,
+        tag_key=tag_key,
+        network=network,
+        date_from=date_from,
+        date_to=date_to,
+        price_quote_asset_id=price_quote_asset_id,
+        fee_quote_asset_id=fee_quote_asset_id,
+        attributed_asset_id=attributed_asset_id,
+        include_fee=include_fee,
+        has_bundle=has_bundle,
+        bundle_pattern=bundle_pattern,
+    )
+
+    # Add P&L audit filters to applied_filters
+    if pnl_cal_version is not None:
+        applied_filters.pnl_cal_version = pnl_cal_version
+    if pnl_cal_inclusions_status:
+        applied_filters.pnl_cal_inclusions_status = pnl_cal_inclusions_status
+
+    # Apply shared transaction filter predicates (handles all standard filters:
+    # review_statuses, taxability, sources, accounts, assets, categories,
+    # transaction_types, directions, connector_runs, dates, tags, networks)
+    from backend.services.filters.transaction_filter import (
+        build_transaction_filter_predicates,
+    )
+
+    for predicate in build_transaction_filter_predicates(
+        applied_filters, non_owned=non_owned
+    ):
+        statement = statement.where(predicate)
+
+    if unit_id is not None:
+        statement = statement.where(
+            NormalizedTransaction.user_calculation_unit_id == unit_id
+        )
+
+    # Filter by specific transaction IDs
+    if ids:
+        id_list = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+        if id_list:
+            if len(id_list) == 1:
+                statement = statement.where(NormalizedTransaction.id == id_list[0])
+            else:
+                statement = statement.where(NormalizedTransaction.id.in_(id_list))
+
+    # Has fee filter
+    if has_fee is True:
+        statement = statement.where(
+            NormalizedTransaction.fee.isnot(None),
+            NormalizedTransaction.fee > 0,
+        )
+    elif has_fee is False:
+        statement = statement.where(
+            or_(NormalizedTransaction.fee.is_(None), NormalizedTransaction.fee == 0)
+        )
+
+    # P&L version inclusion/exclusion filter
+    if pnl_cal_version is not None and pnl_cal_inclusions_status:
+        from sqlalchemy import exists
+
+        # Subquery to get transaction IDs in this version
+        version_tx_subquery = (
+            select(CalculationUnitLeg.transaction_id)
+            .join(CalculationUnit, CalculationUnit.id == CalculationUnitLeg.unit_id)
+            .where(CalculationUnit.version_id == pnl_cal_version)
+            .distinct()
+        )
+
+        if pnl_cal_inclusions_status == "included":
+            # Only transactions IN this version
+            statement = statement.where(
+                NormalizedTransaction.id.in_(version_tx_subquery)
+            )
+        elif pnl_cal_inclusions_status == "excluded":
+            # Transactions NOT IN this version
+            statement = statement.where(
+                ~NormalizedTransaction.id.in_(version_tx_subquery)
+            )
+
+    # Date range, asset, category, transaction_type, direction, connector_run,
+    # tag, and network filters are already applied by build_transaction_filter_predicates above.
+
+    # Source transaction ID filter (not part of shared builder — transaction-table-specific)
+    if source_transaction_id:
+        source_ids = [
+            sid.strip() for sid in source_transaction_id.split(",") if sid.strip()
+        ]
+        if source_ids:
+            if len(source_ids) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.source_transaction_id == source_ids[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.source_transaction_id.in_(source_ids)
+                )
+
+    # Connector run outcome filter — resolves IDs server-side from the
+    # SyncJobConnectorRun JSON columns (synced_ids / updated_ids / skipped_ids)
+    # so the frontend doesn't need to send potentially hundreds of IDs in the URL.
+    if connector_run_outcome and connector_run_id:
+        outcome = connector_run_outcome.strip().lower()
+        if outcome in ("synced", "updated", "skipped"):
+            run_id_list = [
+                int(r.strip())
+                for r in connector_run_id.split(",")
+                if r.strip().isdigit()
+            ]
+            if run_id_list:
+                run = session.get(SyncJobConnectorRun, run_id_list[0])
+                if run:
+                    outcome_ids: List[str] = []
+                    if outcome == "synced":
+                        outcome_ids = run.synced_ids or []
+                    elif outcome == "updated":
+                        outcome_ids = run.updated_ids or []
+                    elif outcome == "skipped":
+                        outcome_ids = run.skipped_ids or []
+
+                    if outcome_ids:
+                        if len(outcome_ids) == 1:
+                            statement = statement.where(
+                                NormalizedTransaction.source_transaction_id
+                                == outcome_ids[0]
+                            )
+                        else:
+                            statement = statement.where(
+                                NormalizedTransaction.source_transaction_id.in_(
+                                    outcome_ids
+                                )
+                            )
+                    else:
+                        # Empty outcome list → no results
+                        statement = statement.where(
+                            literal_column("1") == literal_column("0")
+                        )
+                else:
+                    # Connector run not found → no results
+                    statement = statement.where(
+                        literal_column("1") == literal_column("0")
+                    )
+
+    return statement, applied_filters, warnings
+
+
+@router.get("", response_model=TransactionListResponse)
+def list_transactions(
+    q: TxListQuery = Depends(get_tx_list_query),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     sort_by: Optional[str] = Query(
@@ -1713,54 +1991,11 @@ def list_transactions(
     - **offset**: Number of results to skip for pagination
     """
     try:
-        from backend.api.routes.filter_validator import validate_transaction_filters
-
-        # When connector_run_outcome is specified, don't pass connector_run_id
-        # to the shared filter builder — sync_connector_run_id tracks the LAST
-        # run that touched a transaction, which may differ from the run we're
-        # inspecting.  The outcome filter handles the correct filtering via
-        # source_transaction_id resolved from the run's JSON columns.
-        effective_connector_run_id = None if connector_run_outcome else connector_run_id
-
-        # Validate filters
-        applied_filters, warnings = validate_transaction_filters(
-            session=session,
-            review_status=review_status,
-            taxability=taxability,
-            source=source,
-            account_id=account_id,
-            from_account_id=from_account_id,
-            to_account_id=to_account_id,
-            related_account_id=related_account_id,
-            asset_id=asset_id,
-            related_asset_id=related_asset_id,
-            category_id=category_id,
-            transaction_type=transaction_type,
-            direction=direction,
-            connector_run_id=effective_connector_run_id,
-            tag_key=tag_key,
-            network=network,
-            date_from=date_from,
-            date_to=date_to,
-            price_quote_asset_id=price_quote_asset_id,
-            fee_quote_asset_id=fee_quote_asset_id,
-            attributed_asset_id=attributed_asset_id,
-            include_fee=include_fee,
-            has_bundle=has_bundle,
-            bundle_pattern=bundle_pattern,
-        )
-
-        # Add P&L audit filters to applied_filters
-        if pnl_cal_version is not None:
-            applied_filters.pnl_cal_version = pnl_cal_version
-        if pnl_cal_inclusions_status:
-            applied_filters.pnl_cal_inclusions_status = pnl_cal_inclusions_status
-
         # Get total count (without filters, except unit_id if provided)
         count_statement = select(func.count(NormalizedTransaction.id))
-        if unit_id is not None:
+        if q.unit_id is not None:
             count_statement = count_statement.where(
-                NormalizedTransaction.user_calculation_unit_id == unit_id
+                NormalizedTransaction.user_calculation_unit_id == q.unit_id
             )
         total_count = session.exec(count_statement).one()
 
@@ -1776,128 +2011,9 @@ def list_transactions(
             joinedload(NormalizedTransaction.sync_connector_run),
         )
 
-        # Apply shared transaction filter predicates (handles all standard filters:
-        # review_statuses, taxability, sources, accounts, assets, categories,
-        # transaction_types, directions, connector_runs, dates, tags, networks)
-        from backend.services.filters.transaction_filter import (
-            build_transaction_filter_predicates,
+        statement, applied_filters, warnings = apply_tx_list_filters(
+            session, statement, q
         )
-
-        for predicate in build_transaction_filter_predicates(
-            applied_filters, non_owned=non_owned
-        ):
-            statement = statement.where(predicate)
-
-        if unit_id is not None:
-            statement = statement.where(
-                NormalizedTransaction.user_calculation_unit_id == unit_id
-            )
-
-        # Filter by specific transaction IDs
-        if ids:
-            id_list = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
-            if id_list:
-                if len(id_list) == 1:
-                    statement = statement.where(NormalizedTransaction.id == id_list[0])
-                else:
-                    statement = statement.where(NormalizedTransaction.id.in_(id_list))
-
-        # Has fee filter
-        if has_fee is True:
-            statement = statement.where(
-                NormalizedTransaction.fee.isnot(None),
-                NormalizedTransaction.fee > 0,
-            )
-        elif has_fee is False:
-            statement = statement.where(
-                or_(NormalizedTransaction.fee.is_(None), NormalizedTransaction.fee == 0)
-            )
-
-        # P&L version inclusion/exclusion filter
-        if pnl_cal_version is not None and pnl_cal_inclusions_status:
-            from sqlalchemy import exists
-
-            # Subquery to get transaction IDs in this version
-            version_tx_subquery = (
-                select(CalculationUnitLeg.transaction_id)
-                .join(CalculationUnit, CalculationUnit.id == CalculationUnitLeg.unit_id)
-                .where(CalculationUnit.version_id == pnl_cal_version)
-                .distinct()
-            )
-
-            if pnl_cal_inclusions_status == "included":
-                # Only transactions IN this version
-                statement = statement.where(
-                    NormalizedTransaction.id.in_(version_tx_subquery)
-                )
-            elif pnl_cal_inclusions_status == "excluded":
-                # Transactions NOT IN this version
-                statement = statement.where(
-                    ~NormalizedTransaction.id.in_(version_tx_subquery)
-                )
-
-        # Date range, asset, category, transaction_type, direction, connector_run,
-        # tag, and network filters are already applied by build_transaction_filter_predicates above.
-
-        # Source transaction ID filter (not part of shared builder — transaction-table-specific)
-        if source_transaction_id:
-            source_ids = [
-                sid.strip() for sid in source_transaction_id.split(",") if sid.strip()
-            ]
-            if source_ids:
-                if len(source_ids) == 1:
-                    statement = statement.where(
-                        NormalizedTransaction.source_transaction_id == source_ids[0]
-                    )
-                else:
-                    statement = statement.where(
-                        NormalizedTransaction.source_transaction_id.in_(source_ids)
-                    )
-
-        # Connector run outcome filter — resolves IDs server-side from the
-        # SyncJobConnectorRun JSON columns (synced_ids / updated_ids / skipped_ids)
-        # so the frontend doesn't need to send potentially hundreds of IDs in the URL.
-        if connector_run_outcome and connector_run_id:
-            outcome = connector_run_outcome.strip().lower()
-            if outcome in ("synced", "updated", "skipped"):
-                run_id_list = [
-                    int(r.strip())
-                    for r in connector_run_id.split(",")
-                    if r.strip().isdigit()
-                ]
-                if run_id_list:
-                    run = session.get(SyncJobConnectorRun, run_id_list[0])
-                    if run:
-                        outcome_ids: List[str] = []
-                        if outcome == "synced":
-                            outcome_ids = run.synced_ids or []
-                        elif outcome == "updated":
-                            outcome_ids = run.updated_ids or []
-                        elif outcome == "skipped":
-                            outcome_ids = run.skipped_ids or []
-
-                        if outcome_ids:
-                            if len(outcome_ids) == 1:
-                                statement = statement.where(
-                                    NormalizedTransaction.source_transaction_id
-                                    == outcome_ids[0]
-                                )
-                            else:
-                                statement = statement.where(
-                                    NormalizedTransaction.source_transaction_id.in_(
-                                        outcome_ids
-                                    )
-                                )
-                        else:
-                            # Empty outcome list → no results
-                            statement = statement.where(
-                                literal_column("1") == literal_column("0")
-                            )
-                    else:
-                        # Connector run not found → no results
-                        statement = statement.where(
-                            literal_column("1") == literal_column("0")
-                        )
 
         # Get filtered count (before pagination)
         filtered_count_statement = select(func.count()).select_from(
@@ -1972,6 +2088,70 @@ def list_transactions(
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.get("/groups", response_model=TransactionGroupsResponse)
+def list_transaction_groups(
+    q: TxListQuery = Depends(get_tx_list_query),
+    granularity: str = Query("month", pattern="^(month|day)$"),
+    tz: str = Query("UTC", description="IANA timezone used for period boundaries"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(24, ge=1, le=400),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_db),
+):
+    """Per-period (month/day) recaps of the filtered transactions."""
+    from backend.services.transaction_groups import (
+        compute_transaction_groups,
+        resolve_timezone,
+    )
+
+    try:
+        zone = resolve_timezone(tz)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    ids_statement, _, _ = apply_tx_list_filters(
+        session, select(NormalizedTransaction.id), q
+    )
+    groups, total_groups = compute_transaction_groups(
+        session,
+        ids_statement,
+        granularity=granularity,
+        tz=zone,
+        sort_dir=sort_dir,
+        limit=limit,
+        offset=offset,
+    )
+    return TransactionGroupsResponse(
+        granularity=granularity,
+        timezone=zone.key,
+        groups=groups,
+        total_groups=total_groups,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/ids", response_model=TransactionIdsResponse)
+def list_transaction_ids(
+    q: TxListQuery = Depends(get_tx_list_query),
+    max_ids: int = Query(5000, ge=1, le=20000),
+    session: Session = Depends(get_db),
+):
+    """IDs of all transactions matching the filters (used for select-whole-group)."""
+    ids_statement, _, _ = apply_tx_list_filters(
+        session, select(NormalizedTransaction.id), q
+    )
+    total = session.exec(
+        select(func.count()).select_from(ids_statement.subquery())
+    ).one()
+    ids = session.exec(
+        ids_statement.order_by(NormalizedTransaction.date_time.desc()).limit(max_ids)
+    ).all()
+    return TransactionIdsResponse(
+        ids=list(ids), total=total, truncated=total > len(ids)
+    )
 
 
 @router.get("/inbox", response_model=Dict)

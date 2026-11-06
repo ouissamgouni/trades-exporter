@@ -118,6 +118,8 @@ export const TRANSACTION_TYPE_OPTIONS = [
     'transfer',  // Deposits, withdrawals, internal transfers
     'margin',    // Derivative cash flows: funding, perp open/close
     'cost',      // Fee-only: approvals, gas fees, management fees
+    'dividend',  // Income inflow
+    'memo',      // Audit-only record, no P&L impact (e.g. Polymarket redeem)
 ];
 
 export const ASSET_TYPE_OPTIONS = [

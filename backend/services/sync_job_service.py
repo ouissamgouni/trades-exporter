@@ -29,6 +29,12 @@ from backend.services.parallel_pipeline_processor import (
     ParallelPipelineProcessor,
     PipelineStage,
 )
+from backend.services.sync_window import (
+    NO_OVERRIDE,
+    describe_sync_window,
+    resolve_sync_window,
+    sync_window_to_dict,
+)
 
 
 # Sentinel value to distinguish "not provided" from "explicitly set to None".
@@ -162,6 +168,9 @@ class ConnectorProgress:
     # Stage statistics (initialized in __post_init__)
     stage_stats: Dict[str, StageStats] = field(default_factory=dict)
 
+    # Effective run parameters (fetch window, chain, overrides) shown on the card
+    params: Dict[str, Any] = field(default_factory=dict)
+
     # Logs (capped list of log entries)
     logs: List[LogEntry] = field(default_factory=list)
 
@@ -195,6 +204,7 @@ class ConnectorProgress:
             "status": self.status.value,
             "test_mode": self.test_mode,
             "connector_run_id": self.connector_run_id,
+            "params": self.params,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "processed": self.processed,
@@ -1262,6 +1272,31 @@ class SyncJobService:
             )
             return is_last
 
+    def _apply_run_params(
+        self,
+        cstatus: "ConnectorProgress",
+        account_connector,
+        window: Optional[Dict[str, Any]],
+        symbols: Optional[List[str]] = None,
+        currencies: Optional[List[str]] = None,
+    ) -> None:
+        """Expose the effective run parameters on the card and as the first run log line."""
+        config = account_connector.config or {}
+        params: Dict[str, Any] = sync_window_to_dict(window) if window else {}
+        parts: List[str] = [describe_sync_window(window)] if window else []
+        if config.get("chain"):
+            params["chain"] = config["chain"]
+            parts.append(f"chain {config['chain']}")
+        if symbols:
+            params["symbols"] = symbols
+            parts.append(f"symbols {', '.join(symbols)}")
+        if currencies:
+            params["currencies"] = currencies
+            parts.append(f"currencies {', '.join(currencies)}")
+        cstatus.params = params
+        if parts:
+            cstatus.add_log("INFO", "⚙️ Params: " + " · ".join(parts))
+
     def retry_connector(self, connector_id: int) -> Dict[str, Any]:
         """
         Retry a failed or warning connector within its original job.
@@ -1473,13 +1508,13 @@ class SyncJobService:
             # Compute since_datetime for incremental sync
             connector_info = registry.get(account_connector.connector_type)
             connector_since_map: Dict[int, Optional[datetime]] = {}
+            window = resolve_sync_window(session, account_connector)
             if connector_info and connector_info.supports_incremental_sync:
-                max_dt = tx_repo.get_max_datetime_by_connector(connector_id)
-                connector_since_map[connector_id] = max_dt
-                if max_dt:
-                    self.logger.info(
-                        f"📅 Retry connector {connector_id} since: {max_dt}"
-                    )
+                connector_since_map[connector_id] = window["since"]
+            self.logger.info(
+                f"📅 Retry connector {connector_id}: {describe_sync_window(window)}"
+            )
+            self._apply_run_params(cstatus, account_connector, window)
 
             # Generate output path
             sync_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1761,12 +1796,18 @@ class SyncJobService:
         override_test_mode: Dict[int, bool] = {}
         override_test_file: Dict[int, str] = {}
         override_since: Dict[int, Optional[datetime]] = {}
+        override_symbols: Dict[int, List[str]] = {}
+        override_currencies: Dict[int, List[str]] = {}
         has_since_override: set = (
             set()
         )  # Track which connectors have explicit since override
 
         if connector_overrides:
             for o in connector_overrides:
+                if o.symbols is not None:
+                    override_symbols[o.connector_id] = o.symbols
+                if o.currencies is not None:
+                    override_currencies[o.connector_id] = o.currencies
                 if o.enabled is not None:
                     override_enabled[o.connector_id] = o.enabled
                 if o.test_mode is not None:
@@ -1839,6 +1880,7 @@ class SyncJobService:
 
                 # Collect enabled connectors, filtering by overrides
                 enabled_connectors = []
+                sync_windows: Dict[int, Dict[str, Any]] = {}
                 for account_connector, account in repo.get_all():
                     connector_id = account_connector.id
 
@@ -1857,62 +1899,21 @@ class SyncJobService:
                     enabled_connectors.append((account_connector, account))
                     connector_info = registry.get(account_connector.connector_type)
 
-                    # Only compute since for connectors that support incremental sync
+                    sync_windows[connector_id] = resolve_sync_window(
+                        session,
+                        account_connector,
+                        override_since.get(connector_id)
+                        if connector_id in has_since_override
+                        else NO_OVERRIDE,
+                    )
                     if connector_info and connector_info.supports_incremental_sync:
-                        if connector_id in has_since_override:
-                            # Use explicit override (can be None for full sync)
-                            connector_since_map[connector_id] = override_since.get(
-                                connector_id
-                            )
-                            if override_since.get(connector_id):
-                                self.logger.info(
-                                    f"📅 Connector {connector_id} using override since: {override_since[connector_id]}"
-                                )
-                            else:
-                                self.logger.info(
-                                    f"📅 Connector {connector_id} performing full sync (override)"
-                                )
-                        else:
-                            # Compute default from max transaction datetime,
-                            # then fall back to start_datetime from connector config
-                            max_dt = tx_repo.get_max_datetime_by_connector(connector_id)
-                            if max_dt:
-                                connector_since_map[connector_id] = max_dt
-                                self.logger.info(
-                                    f"📅 Connector {connector_id} computed since: {max_dt}"
-                                )
-                            else:
-                                # No transactions yet — use start_datetime from config if set
-                                ac = next(
-                                    (
-                                        ac
-                                        for ac, _ in enabled_connectors
-                                        if ac.id == connector_id
-                                    ),
-                                    None,
-                                )
-                                cfg_start_raw = (
-                                    (ac.config or {}).get("start_datetime")
-                                    if ac
-                                    else None
-                                )
-                                cfg_start = None
-                                if cfg_start_raw:
-                                    try:
-                                        cfg_start = datetime.fromisoformat(
-                                            str(cfg_start_raw)
-                                        )
-                                    except (ValueError, TypeError):
-                                        cfg_start = None
-                                connector_since_map[connector_id] = cfg_start
-                                if cfg_start:
-                                    self.logger.info(
-                                        f"📅 Connector {connector_id} using config start_datetime: {cfg_start}"
-                                    )
-                                else:
-                                    self.logger.info(
-                                        f"📅 Connector {connector_id} performing full sync (no history, no config start)"
-                                    )
+                        connector_since_map[connector_id] = sync_windows[connector_id][
+                            "since"
+                        ]
+                    self.logger.info(
+                        f"📅 Connector {connector_id}: "
+                        f"{describe_sync_window(sync_windows[connector_id])}"
+                    )
 
                 # Initialize per-connector statuses BEFORE creating hub
                 # This ensures the progress callback can find connector IDs
@@ -1933,6 +1934,13 @@ class SyncJobService:
                         account_group=account.group,
                         status=ConnectorSyncStatus.QUEUED,
                         test_mode=effective_test_mode,
+                    )
+                    self._apply_run_params(
+                        self.progress.connector_statuses[connector_id],
+                        account_connector,
+                        sync_windows.get(connector_id),
+                        symbols=override_symbols.get(connector_id),
+                        currencies=override_currencies.get(connector_id),
                     )
 
                     # Create database connector run record for history tracking

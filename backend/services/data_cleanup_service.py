@@ -487,7 +487,7 @@ class DataCleanupService:
         # First detach consumed_lot_slices that reference these realized_pnl rows
         pnl_sub = "(SELECT pnl_id FROM realized_pnl WHERE asset_id = :aid)"
         self._exec(
-            f"DELETE FROM consumed_lot_slices WHERE realized_pnl_id IN {pnl_sub}", p
+            f"DELETE FROM consumed_lot_slices WHERE pnl_id IN {pnl_sub}", p
         )
         result["realized_pnl_deleted"] = self._exec(
             "DELETE FROM realized_pnl WHERE asset_id = :aid", p

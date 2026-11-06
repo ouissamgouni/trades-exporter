@@ -348,6 +348,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         filters={{
                             ...defaultFilterState,
                             connectorRunIds: [String(detail.id)],
+                            connectorRunOutcome: 'synced',
                         }}
                         onDataChange={fetchDetail}
                     />
@@ -366,6 +367,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         filters={{
                             ...defaultFilterState,
                             connectorRunIds: [String(detail.id)],
+                            connectorRunOutcome: 'updated',
                         }}
                         onDataChange={fetchDetail}
                     />
@@ -384,6 +386,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         filters={{
                             ...defaultFilterState,
                             connectorRunIds: [String(detail.id)],
+                            connectorRunOutcome: 'skipped',
                         }}
                         onDataChange={fetchDetail}
                     />

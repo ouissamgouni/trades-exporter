@@ -7421,39 +7421,17 @@ class EnrichedTransactionsFilterOptionsResponse(BaseModel):
     warning_types: List[FilterOptionWithCount] = []
 
 
-@router.get("/versions/{version_id}/enriched-transactions")
-def get_enriched_transactions(
+def _enriched_tx_ids_subquery(
+    session: Session,
     version_id: int,
-    # PnL-specific filters
+    tx_filters: PnLTransactionFilters,
     unit_pattern: Optional[str] = None,
     has_realized_pnl: Optional[bool] = None,
     has_fees: Optional[bool] = None,
     has_warnings: Optional[bool] = None,
     warning_type: Optional[str] = None,
     search: Optional[str] = None,
-    # Standard pagination & sorting
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    sort_by: Optional[str] = "date_time",
-    sort_dir: Optional[str] = "desc",
-    # Context filters (account, asset, etc.)
-    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
-    session: Session = Depends(get_session_dependency),
 ):
-    """
-    Get transactions enriched with P&L data for the transaction-level audit view.
-
-    Returns standard TransactionListResponse shape with extra P&L fields per transaction.
-    Supports both PnL-specific filters (unit_pattern, has_realized_pnl, has_fees, etc.)
-    and standard transaction filters (account, asset, direction, date range, etc.).
-    """
-    from backend.api.routes.transactions import _build_transaction_response
-    from backend.api.schemas import FilterMetadata, AppliedFilters
-
-    version = session.get(CalculationVersion, version_id)
-    if not version:
-        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
-
     # Step 1: Resolve which unit IDs match PnL-specific + context filters
     # Start with all units in this version, filtered by context (tx_filters)
     unit_q = select(CalculationUnit.id).where(CalculationUnit.version_id == version_id)
@@ -7533,6 +7511,54 @@ def get_enriched_transactions(
         .distinct()
     )
     tx_ids_sq = tx_ids_q.subquery()
+
+    return tx_ids_sq
+
+
+@router.get("/versions/{version_id}/enriched-transactions")
+def get_enriched_transactions(
+    version_id: int,
+    # PnL-specific filters
+    unit_pattern: Optional[str] = None,
+    has_realized_pnl: Optional[bool] = None,
+    has_fees: Optional[bool] = None,
+    has_warnings: Optional[bool] = None,
+    warning_type: Optional[str] = None,
+    search: Optional[str] = None,
+    # Standard pagination & sorting
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    sort_by: Optional[str] = "date_time",
+    sort_dir: Optional[str] = "desc",
+    # Context filters (account, asset, etc.)
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get transactions enriched with P&L data for the transaction-level audit view.
+
+    Returns standard TransactionListResponse shape with extra P&L fields per transaction.
+    Supports both PnL-specific filters (unit_pattern, has_realized_pnl, has_fees, etc.)
+    and standard transaction filters (account, asset, direction, date range, etc.).
+    """
+    from backend.api.routes.transactions import _build_transaction_response
+    from backend.api.schemas import FilterMetadata, AppliedFilters
+
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    tx_ids_sq = _enriched_tx_ids_subquery(
+        session,
+        version_id,
+        tx_filters,
+        unit_pattern,
+        has_realized_pnl,
+        has_fees,
+        has_warnings,
+        warning_type,
+        search,
+    )
 
     # Step 3: Build the NormalizedTransaction query (standard shape for TransactionsTable)
     base_statement = (
@@ -7789,6 +7815,98 @@ def get_enriched_transactions(
             "offset": offset,
         },
     }
+
+
+@router.get("/versions/{version_id}/enriched-transactions/groups")
+def get_enriched_transaction_groups(
+    version_id: int,
+    unit_pattern: Optional[str] = None,
+    has_realized_pnl: Optional[bool] = None,
+    has_fees: Optional[bool] = None,
+    has_warnings: Optional[bool] = None,
+    warning_type: Optional[str] = None,
+    search: Optional[str] = None,
+    granularity: str = Query("month", pattern="^(month|day)$"),
+    tz: str = Query("UTC"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(24, ge=1, le=400),
+    offset: int = Query(0, ge=0),
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """Month/day recaps of the P&L audit transactions, including realized P&L per period."""
+    from backend.api.schemas import TransactionGroupsResponse
+    from backend.services.transaction_groups import (
+        compute_transaction_groups,
+        resolve_timezone,
+    )
+
+    if not session.get(CalculationVersion, version_id):
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+    try:
+        zone = resolve_timezone(tz)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    tx_ids_sq = _enriched_tx_ids_subquery(
+        session,
+        version_id,
+        tx_filters,
+        unit_pattern,
+        has_realized_pnl,
+        has_fees,
+        has_warnings,
+        warning_type,
+        search,
+    )
+    ids_statement = select(NormalizedTransaction.id).where(
+        NormalizedTransaction.id.in_(select(tx_ids_sq))
+    )
+    if tx_filters.has_active_filters:
+        from backend.services.filters.transaction_filter import (
+            build_transaction_filter_predicates,
+        )
+
+        for predicate in build_transaction_filter_predicates(
+            tx_filters.applied_filters, non_owned=tx_filters.non_owned
+        ):
+            ids_statement = ids_statement.where(predicate)
+
+    groups, total_groups = compute_transaction_groups(
+        session,
+        ids_statement,
+        granularity=granularity,
+        tz=zone,
+        sort_dir=sort_dir,
+        limit=limit,
+        offset=offset,
+    )
+
+    for group in groups:
+        lower = datetime.fromisoformat(group.date_from)
+        upper = datetime.fromisoformat(group.date_to)
+        realized = session.exec(
+            select(func.coalesce(func.sum(RealizedPnl.pnl_in_base), 0))
+            .join(CalculationUnit, CalculationUnit.id == RealizedPnl.origin_unit_id)
+            .join(
+                NormalizedTransaction,
+                NormalizedTransaction.id == RealizedPnl.transaction_id,
+            )
+            .where(CalculationUnit.version_id == version_id)
+            .where(RealizedPnl.transaction_id.in_(ids_statement))
+            .where(NormalizedTransaction.date_time >= lower)
+            .where(NormalizedTransaction.date_time <= upper)
+        ).one()
+        group.realized_pnl_in_base = float(realized)
+
+    return TransactionGroupsResponse(
+        granularity=granularity,
+        timezone=zone.key,
+        groups=groups,
+        total_groups=total_groups,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/versions/{version_id}/enriched-transactions/filter-options")

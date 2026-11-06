@@ -633,6 +633,23 @@ export interface StageStats {
     failed: number;
 }
 
+/** Where the next fetch of a connector starts (backend/services/sync_window.py). */
+export interface SyncWindow {
+    incremental: boolean;
+    since?: string | null;
+    source: 'override' | 'last_transaction' | 'config_start' | 'history_cutoff' | 'connector_default' | 'full_history';
+    last_transaction_at?: string | null;
+    history_cutoff?: string | null;
+    default_start?: string | null;
+}
+
+/** Effective parameters of a connector run. */
+export interface ConnectorRunParams extends Partial<SyncWindow> {
+    chain?: string;
+    symbols?: string[];
+    currencies?: string[];
+}
+
 export interface ConnectorProgress {
     connector_id: number;
     connector_run_id?: number;
@@ -658,6 +675,7 @@ export interface ConnectorProgress {
     pipeline_stage?: PipelineStage;
     stage_stats?: Record<PipelineStage, StageStats>;
     logs?: LogEntry[];
+    params?: ConnectorRunParams;
     // Legacy field names for backward compatibility
     new_entries?: number;
     updated?: number;
@@ -883,6 +901,7 @@ export interface EnabledConnector {
     last_sync_status?: string;
     supports_incremental_sync?: boolean;
     default_since_datetime?: string | null;
+    sync_window?: SyncWindow;
     optional_config?: string[];  // List of optional config params (symbols, currencies, etc.)
     config?: Record<string, any>;  // Full connector config (includes sync_mode, import_history, etc.)
     // File connector metadata (from registry)

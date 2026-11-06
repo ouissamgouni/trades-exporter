@@ -337,6 +337,7 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 showBundles={false}
                 hideLegend
                 customApiUrl={customApiUrl}
+                baseCurrency={baseCurrency}
                 tableId="pnl-enriched-transactions"
                 config={{
                     columnPreset: 'compact',

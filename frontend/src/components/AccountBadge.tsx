@@ -14,6 +14,7 @@ import { Badge } from './ui/primitives';
 import { Tooltip } from './ui/tooltip';
 import { Account } from '../types';
 import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
+import { EntityInfoButton } from './EntityInfoButton';
 
 export interface AccountBadgeProps {
     /** Linked account object */
@@ -40,6 +41,8 @@ export interface AccountBadgeProps {
     showWarning?: boolean;
     /** Custom fallback text when no account and no sourceAccount */
     fallback?: string;
+    /** Hide the info icon that opens the account detail panel */
+    hideInfoIcon?: boolean;
 }
 
 /**
@@ -58,6 +61,7 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
     onClick,
     showWarning = true,
     fallback = '-',
+    hideInfoIcon = false,
 }) => {
     const { getAccountColor } = useEntityColors();
 
@@ -185,6 +189,9 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
             >
                 {ownershipKnown && <OwnershipIcon size={size === 'xs' ? 9 : size === 'sm' ? 11 : 13} />}
                 {displayName}
+                {!hideInfoIcon && (
+                    <EntityInfoButton kind="account" id={resolvedId} label={resolvedName} size={size === 'xs' ? 9 : 11} className="ml-0.5" />
+                )}
             </span>
         </Tooltip>
     );
