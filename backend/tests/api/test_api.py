@@ -77,6 +77,30 @@ def test_get_transaction_not_found(client):
     assert response.status_code == 404
 
 
+def test_transaction_groups_empty(client):
+    response = client.get("/transactions/groups?granularity=day&tz=Europe/Paris")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["groups"] == []
+    assert data["timezone"] == "Europe/Paris"
+
+
+def test_transaction_groups_rejects_unknown_timezone(client):
+    response = client.get("/transactions/groups?tz=Mars/Olympus")
+    assert response.status_code == 400
+
+
+def test_transaction_ids_endpoint(client):
+    response = client.get("/transactions/ids?review_status=pending")
+    assert response.status_code == 200
+    assert response.json() == {"ids": [], "total": 0, "truncated": False}
+
+
+def test_pnl_transaction_groups_unknown_version(client):
+    response = client.get("/pnl/versions/999/enriched-transactions/groups")
+    assert response.status_code == 404
+
+
 def test_update_transaction_validation(client):
     """Test transaction update validates fields."""
     # Invalid review_status should fail validation - use a value not in the enum

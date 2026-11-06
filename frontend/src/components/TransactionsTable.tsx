@@ -40,6 +40,18 @@ import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
 import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
 import { BundleCreateDialog, BundleCreateDefaults } from './bundles/BundleCreateDialog';
 import { TransactionTableRow, TransactionRowCallbacks, EditableField } from './TransactionTableRow';
+import { buildTransactionFilterParams } from '../utils/transactionFilterParams';
+import {
+    GroupedTransactionsBody,
+    PageDayGroupedRows,
+    ActivityHeader,
+    groupsUrlFor,
+    idsUrlFor,
+    FACET_FILTER_KEY,
+    type GroupingMode,
+    type GroupFacetSelection,
+    type ReviewedOverlayEntry,
+} from './tables/grouped';
 
 // Types for CSV import
 interface TradesImportPreviewTransaction {
@@ -156,6 +168,10 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     customApiUrl?: string;
     /** Hide the direction/review legend bar */
     hideLegend?: boolean;
+    /** Initial date grouping when the user has no saved preference (default: month-day) */
+    defaultGrouping?: GroupingMode;
+    /** Base currency symbol shown next to realized P&L in group recaps */
+    baseCurrency?: string;
 
     // ============== Plugin Architecture Props ==============
 
@@ -219,6 +235,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     onDataChange,
     customApiUrl,
     hideLegend = false,
+    defaultGrouping = 'month-day',
+    baseCurrency,
     // Plugin architecture props
     tableId = 'default',
     initialColumnVisibility: initialVisibilityProp,
@@ -532,100 +550,28 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const sortBy = sorting[0] ? (SORT_COLUMN_MAP[sorting[0].id] || 'date') : 'date';
     const sortDir = sorting[0] ? (sorting[0].desc ? 'desc' : 'asc') : 'desc';
 
+    const groupingStorageKey = `txTable:${tableId}:grouping`;
+    const [groupingMode, setGroupingMode] = useState<GroupingMode>(() => {
+        const stored = localStorage.getItem(groupingStorageKey);
+        return stored === 'off' || stored === 'month-day' ? stored : defaultGrouping;
+    });
+    useEffect(() => {
+        try {
+            localStorage.setItem(groupingStorageKey, groupingMode);
+        } catch { }
+    }, [groupingMode, groupingStorageKey]);
+    const groupsUrl = useMemo(() => groupsUrlFor(customApiUrl), [customApiUrl]);
+    const groupingActive = groupingMode !== 'off' && sortBy === 'date';
+    const serverGrouping = groupingActive && !embeddedMode && !!groupsUrl;
+    const pageGrouping = groupingActive && !serverGrouping;
+    const filterParams = useMemo(() => buildTransactionFilterParams(filters), [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // TanStack Query for transactions - use stable string key to avoid reference issues
     const { data: transactionResponse, isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
         queryKey: ['transactions', 'with-metadata', filterKey, pagination.page, pagination.pageSize, sortBy, sortDir, customApiUrl],
+        enabled: !serverGrouping,
         queryFn: async () => {
-            const params = new URLSearchParams();
-            // Apply review status filter (support multiple via comma-separated)
-            if (filters.reviewStatus.length > 0) {
-                params.append('review_status', filters.reviewStatus.join(','));
-            }
-            if (filters.taxability.length > 0) {
-                params.append('taxability', filters.taxability.join(','));
-            }
-            if (filters.sources.length > 0) {
-                params.append('source', filters.sources.join(','));
-            }
-            if (filters.accountIds.length > 0) {
-                params.append('account_id', filters.accountIds.join(','));
-            }
-            if (filters.fromAccountIds && filters.fromAccountIds.length > 0) {
-                params.append('from_account_id', filters.fromAccountIds.join(','));
-            }
-            if (filters.toAccountIds && filters.toAccountIds.length > 0) {
-                params.append('to_account_id', filters.toAccountIds.join(','));
-            }
-            if (filters.relatedAccountIds && filters.relatedAccountIds.length > 0) {
-                params.append('related_account_id', filters.relatedAccountIds.join(','));
-            }
-            if (filters.assetIds.length > 0) {
-                params.append('asset_id', filters.assetIds.join(','));
-            }
-            if (filters.relatedAssetIds && filters.relatedAssetIds.length > 0) {
-                params.append('related_asset_id', filters.relatedAssetIds.join(','));
-            }
-            if (filters.attributedAssetIds && filters.attributedAssetIds.length > 0) {
-                params.append('attributed_asset_id', filters.attributedAssetIds.join(','));
-            }
-            if (filters.categoryIds.length > 0) {
-                params.append('category_id', filters.categoryIds.join(','));
-            }
-            if (filters.connectorRunIds.length > 0) {
-                params.append('connector_run_id', filters.connectorRunIds.join(','));
-            }
-            if (filters.connectorRunOutcome) {
-                params.append('connector_run_outcome', filters.connectorRunOutcome);
-            }
-            if (filters.tagKeys.length > 0) {
-                params.append('tag_key', filters.tagKeys.join(','));
-            }
-            if (filters.networks && filters.networks.length > 0) {
-                params.append('network', filters.networks.join(','));
-            }
-            if (filters.transactionTypes.length > 0) {
-                params.append('transaction_type', filters.transactionTypes.join(','));
-            }
-            if (filters.directions.length > 0) {
-                params.append('direction', filters.directions.join(','));
-            }
-            if (filters.dateFrom) {
-                params.append('date_from', filters.dateFrom);
-            }
-            if (filters.dateTo) {
-                params.append('date_to', filters.dateTo);
-            }
-            // P&L audit filters
-            if (filters.versionId) {
-                params.append('pnl_cal_version', filters.versionId);
-            }
-            if (filters.inclusionStatus) {
-                params.append('pnl_cal_inclusions_status', filters.inclusionStatus);
-            }
-            // Transaction IDs filter (for issue-specific views)
-            if (filters.transactionIds && filters.transactionIds.length > 0) {
-                params.append('ids', filters.transactionIds.join(','));
-            }
-            // Has fees filter
-            if (filters.hasFees !== undefined) {
-                params.append('has_fee', String(filters.hasFees));
-            }
-            // New filters: quote assets, include_fee, bundles
-            if (filters.includeFee !== undefined) {
-                params.append('include_fee', String(filters.includeFee));
-            }
-            if (filters.hasBundle !== undefined) {
-                params.append('has_bundle', String(filters.hasBundle));
-            }
-            if (filters.priceQuoteAssetIds.length > 0) {
-                params.append('price_quote_asset_id', filters.priceQuoteAssetIds.join(','));
-            }
-            if (filters.feeQuoteAssetIds.length > 0) {
-                params.append('fee_quote_asset_id', filters.feeQuoteAssetIds.join(','));
-            }
-            if (filters.bundlePatterns.length > 0) {
-                params.append('bundle_pattern', filters.bundlePatterns.join(','));
-            }
+            const params = buildTransactionFilterParams(filters);
 
             // Server-side pagination
             params.append('limit', String(pagination.pageSize));
@@ -656,7 +602,37 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         },
     });
 
-    const transactions = transactionResponse?.results || [];
+    const [groupRows, setGroupRows] = useState<Map<string, Transaction[]>>(() => new Map());
+    const handleGroupRowsLoaded = useCallback((key: string, rows: Transaction[] | null) => {
+        setGroupRows(prev => {
+            if (rows === null) {
+                if (!prev.has(key)) return prev;
+                const next = new Map(prev);
+                next.delete(key);
+                return next;
+            }
+            if (prev.get(key) === rows) return prev;
+            const next = new Map(prev);
+            next.set(key, rows);
+            return next;
+        });
+    }, []);
+    const loadedGroupRows = useMemo(() => [...groupRows.values()].flat(), [groupRows]);
+    const transactions = serverGrouping ? loadedGroupRows : (transactionResponse?.results || []);
+
+    // Inbox triage: rows just marked reviewed stay visible (grayed, with Undo) until refresh.
+    const isInbox = defaultWorkflowFilter === 'pending';
+    const [reviewedOverlay, setReviewedOverlay] = useState<Map<number, ReviewedOverlayEntry>>(() => new Map());
+    const addReviewedOverlay = useCallback((txs: Transaction[], newStatus: string) => {
+        setReviewedOverlay(prev => {
+            const next = new Map(prev);
+            txs.forEach(tx => next.set(tx.id, { tx, previousStatus: tx.review_status || 'pending', newStatus }));
+            return next;
+        });
+    }, []);
+    useEffect(() => {
+        setReviewedOverlay(new Map());
+    }, [filterKey]);
     const error = queryError ? (queryError instanceof Error ? queryError.message : 'Unknown error') : null;
 
     const expandAllInvalid = useCallback(() => {
@@ -909,7 +885,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const DIRECTION_OPTIONS = [
         { value: 'inflow', label: '↓' },
         { value: 'outflow', label: '↑' },
-        { value: 'internal', label: '↔' }
+        { value: 'neutral', label: '↔' }
     ];
 
     const saveTransaction = async (id: number) => {
@@ -1093,6 +1069,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             });
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
+            if (isInbox && serverGrouping && status !== 'pending') {
+                addReviewedOverlay(transactions.filter(tx => selectedIds.has(tx.id)), status);
+            }
             toaster.success({ title: 'Success', description: result.message });
             invalidateTransactionData();
             refreshHealthData();
@@ -1469,7 +1448,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     };
 
     const handleRefresh = () => {
+        setReviewedOverlay(new Map());
         refetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
         queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
         // Always refresh validation summary for Data Health Check
         refreshHealthData();
@@ -1642,6 +1623,96 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             );
         });
     }, [selectedIds, paginatedTransactions]);
+
+    const renderRow = (tx: Transaction) => (
+        <TransactionTableRow
+                                            key={tx.id}
+                                            tx={tx}
+                                            suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
+                                            duplicateEntry={duplicateMap.get(tx.id)}
+                                            rowBgColor={getRowBgColor(tx)}
+                                            rowBorderColor={getRowBorderColor(tx)}
+                                            isInvalidCollapsed={isInvalidCollapsed(tx)}
+                                            accounts={accounts}
+                                            accountsById={accountsById}
+                                            assets={assets}
+                                            batchSuggestionsMap={batchSuggestionsMap}
+                                            showColumn={showColumn}
+                                            visibleColumnCount={visibleColumnCount}
+                                            embeddedMode={embeddedMode}
+                                            showSuggestions={showSuggestions}
+                                            showSelectionInEmbedded={showSelectionInEmbedded}
+                                            additionalColumns={additionalColumns as ColumnPlugin[]}
+                                            additionalRowActions={additionalRowActions as RowAction[]}
+                                            editingCell={editingCell}
+                                            editValues={editValues}
+                                            selectedIds={selectedIds}
+                                            expandedInvalidIds={expandedInvalidIds}
+                                            openSuggestionTxId={openSuggestionTxId}
+                                            hoveredSuggestionGroup={hoveredSuggestionGroup}
+                                            openDuplicateTxId={openDuplicateTxId}
+                                            hoveredDuplicateGroup={hoveredDuplicateGroup}
+                                            hoveredBundleId={hoveredBundleId}
+                                            openBundleTxId={openBundleTxId}
+                                            bundleColorMap={bundleColorMap}
+                                            editInputRef={editInputRef}
+                                            escapePressedRef={escapePressedRef}
+                                            editValuesRef={editValuesRef}
+                                            callbacks={rowCallbacksRef.current}
+            dateMode={serverGrouping ? 'time' : 'full'}
+                                        />
+    );
+
+    const applyFacetsGlobally = (selection: GroupFacetSelection) => {
+        const next = { ...filters };
+        (Object.keys(selection) as (keyof typeof FACET_FILTER_KEY)[]).forEach(key => {
+            const values = selection[key];
+            if (values && values.length > 0) next[FACET_FILTER_KEY[key]] = values;
+        });
+        setFilters(next);
+    };
+
+    const markGroupReviewed = async (ids: number[]) => {
+        if (ids.length === 0) return;
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transaction_ids: ids, review_status: 'valid' }),
+            });
+            if (!response.ok) throw new Error('Failed to update transactions');
+            const idSet = new Set(ids);
+            addReviewedOverlay(transactions.filter(tx => idSet.has(tx.id) && tx.review_status === 'pending'), 'valid');
+            toaster.success({ title: 'Marked as reviewed', description: `${ids.length} transaction(s) marked valid` });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
+        }
+    };
+
+    const undoReviewed = async (id: number) => {
+        const entry = reviewedOverlay.get(id);
+        if (!entry) return;
+        try {
+            const response = await fetch(`${API_URL}/transactions/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ review_status: entry.previousStatus }),
+            });
+            if (!response.ok) throw new Error('Failed to undo');
+            setReviewedOverlay(prev => {
+                const next = new Map(prev);
+                next.delete(id);
+                return next;
+            });
+            invalidateTransactionData();
+            refreshHealthData();
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to undo' });
+        }
+    };
 
     return (
         <div className="pb-0" style={selectedIds.size > 0 && !embeddedMode ? { paddingBottom: '48px' } : undefined}>
@@ -1879,6 +1950,35 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
                         {/* Actions (right side) */}
                         <div className="flex flex-wrap items-center gap-2">
+                            {groupingMode !== 'off' && sortBy !== 'date' && (
+                                <button
+                                    type="button"
+                                    className="text-[10px] text-slate-500 hover:text-blue-600"
+                                    title="Date grouping needs date sorting"
+                                    onClick={() => setSorting([{ id: 'date', desc: true }])}
+                                >
+                                    Grouping paused (sorted by {sortBy}) · sort by date
+                                </button>
+                            )}
+                            <div className="inline-flex items-center text-[10px]" role="group" aria-label="Group transactions">
+                                <span className="mr-1 text-slate-500">Group:</span>
+                                {(['month-day', 'off'] as const).map(mode => (
+                                    <button
+                                        key={mode}
+                                        type="button"
+                                        aria-pressed={groupingMode === mode}
+                                        onClick={() => setGroupingMode(mode)}
+                                        className={cn(
+                                            'border px-1.5 py-0.5',
+                                            groupingMode === mode
+                                                ? 'border-blue-500 bg-blue-500 text-white'
+                                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                                        )}
+                                    >
+                                        {mode === 'month-day' ? 'Month·Day' : 'Off'}
+                                    </button>
+                                ))}
+                            </div>
                             <ColumnVisibilityPopover
                                 table={tanstackTable}
                                 onReset={() => {
@@ -1924,8 +2024,18 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     </div>
                 )}
 
+                {serverGrouping && groupsUrl && showFilters && !hideLegend && (
+                    <ActivityHeader
+                        groupsUrl={groupsUrl}
+                        params={filterParams}
+                        dateFrom={filters.dateFrom}
+                        dateTo={filters.dateTo}
+                        onSelectRange={(from, to) => setFilters({ ...filters, dateFrom: from, dateTo: to })}
+                    />
+                )}
+
                 {/* Top Pagination - show when more than 15 transactions */}
-                {!loading && !error && !embeddedMode && (filterMetadata?.filtered_count ?? 0) > 15 && (
+                {!loading && !error && !embeddedMode && !serverGrouping && (filterMetadata?.filtered_count ?? 0) > 15 && (
                     <div className="mb-2">
                         <TablePagination
                             pagination={pagination}
@@ -1957,7 +2067,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
                 {/* Transaction table - only show when not loading or erroring */}
                 {!loading && !error && (
-                    <div className="relative overflow-x-auto border border-slate-200 bg-white text-[9px] shadow-sm">
+                    <div className={cn('relative overflow-x-auto border border-slate-200 bg-white text-[9px] shadow-sm', serverGrouping && 'max-h-[75vh] overflow-y-auto')}>
                         <table className="w-full">
                             <thead className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                                 <tr>
@@ -1997,7 +2107,27 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                 </tr>
                             </thead>
                             <tbody>
-                                {paginatedTransactions.length === 0 ? (
+                                {serverGrouping && groupsUrl ? (
+                                    <GroupedTransactionsBody
+                                        groupsUrl={groupsUrl}
+                                        listUrl={(customApiUrl || `${API_URL}/transactions`)}
+                                        idsUrl={idsUrlFor(customApiUrl)}
+                                        params={filterParams}
+                                        sortDir={sortDir}
+                                        colSpan={visibleColumnCount}
+                                        selectable={!embeddedMode || showSelectionInEmbedded}
+                                        renderRow={renderRow}
+                                        onRowsLoaded={handleGroupRowsLoaded}
+                                        selectedIds={selectedIds}
+                                        setSelectedIds={setSelectedIds}
+                                        onApplyFacetsGlobally={applyFacetsGlobally}
+                                        onMarkGroupReviewed={isInbox ? markGroupReviewed : undefined}
+                                        reviewedOverlay={reviewedOverlay}
+                                        onUndoReviewed={undoReviewed}
+                                        emptyMessage={emptyMessage}
+                                        baseCurrency={baseCurrency}
+                                    />
+                                ) : paginatedTransactions.length === 0 ? (
                                     <tr>
                                         <td colSpan={visibleColumnCount}>
                                             <span className="block py-8 text-center text-slate-500">
@@ -2006,43 +2136,11 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         </td>
                                     </tr>
                                 ) : (
-                                    paginatedTransactions.map(tx => (
-                                        <TransactionTableRow
-                                            key={tx.id}
-                                            tx={tx}
-                                            suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
-                                            duplicateEntry={duplicateMap.get(tx.id)}
-                                            rowBgColor={getRowBgColor(tx)}
-                                            rowBorderColor={getRowBorderColor(tx)}
-                                            isInvalidCollapsed={isInvalidCollapsed(tx)}
-                                            accounts={accounts}
-                                            accountsById={accountsById}
-                                            assets={assets}
-                                            batchSuggestionsMap={batchSuggestionsMap}
-                                            showColumn={showColumn}
-                                            visibleColumnCount={visibleColumnCount}
-                                            embeddedMode={embeddedMode}
-                                            showSuggestions={showSuggestions}
-                                            showSelectionInEmbedded={showSelectionInEmbedded}
-                                            additionalColumns={additionalColumns as ColumnPlugin[]}
-                                            additionalRowActions={additionalRowActions as RowAction[]}
-                                            editingCell={editingCell}
-                                            editValues={editValues}
-                                            selectedIds={selectedIds}
-                                            expandedInvalidIds={expandedInvalidIds}
-                                            openSuggestionTxId={openSuggestionTxId}
-                                            hoveredSuggestionGroup={hoveredSuggestionGroup}
-                                            openDuplicateTxId={openDuplicateTxId}
-                                            hoveredDuplicateGroup={hoveredDuplicateGroup}
-                                            hoveredBundleId={hoveredBundleId}
-                                            openBundleTxId={openBundleTxId}
-                                            bundleColorMap={bundleColorMap}
-                                            editInputRef={editInputRef}
-                                            escapePressedRef={escapePressedRef}
-                                            editValuesRef={editValuesRef}
-                                            callbacks={rowCallbacksRef.current}
-                                        />
-                                    ))
+                                    pageGrouping ? (
+                                        <PageDayGroupedRows transactions={paginatedTransactions} colSpan={visibleColumnCount} renderRow={renderRow} />
+                                    ) : (
+                                        paginatedTransactions.map(tx => renderRow(tx))
+                                    )
                                 )}
                             </tbody>
                         </table>
@@ -2050,7 +2148,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 )}
 
                 {/* Pagination Controls - show even when loading/error */}
-                {!loading && !error && !embeddedMode && (
+                {!loading && !error && !embeddedMode && !serverGrouping && (
                     <TablePagination
                         pagination={pagination}
                         total={filterMetadata?.filtered_count ?? 0}

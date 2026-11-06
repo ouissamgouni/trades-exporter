@@ -1,8 +1,9 @@
 import { Badge, type BadgeColorScheme, Button, Progress, type ProgressColorScheme } from './ui/primitives';
 import React, { useState } from 'react';
-import { ConnectorProgress, ConnectorSyncStatus } from '../types';
+import { ConnectorProgress, ConnectorSyncStatus, SyncWindow } from '../types';
 import { ConnectorLogViewer } from './ConnectorLogViewer';
 import { ConnectorRunDetailDrawer } from './ConnectorRunDetailDrawer';
+import { describeSyncWindow } from '../utils/syncWindow';
 
 interface ConnectorProgressCardProps {
     progress: ConnectorProgress;
@@ -103,6 +104,15 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
     const skippedCount = progress.skipped_count ?? progress.duplicates ?? 0;
     const errorCount = progress.errors ?? 0;
     const connectorName = progress.connector_type ?? progress.connector_name ?? 'Unknown';
+    const params = progress.params;
+    const paramParts = params
+        ? [
+            params.source ? describeSyncWindow(params as SyncWindow) : null,
+            params.chain ? `chain ${params.chain}` : null,
+            params.symbols?.length ? `symbols ${params.symbols.join(', ')}` : null,
+            params.currencies?.length ? `currencies ${params.currencies.join(', ')}` : null,
+        ].filter(Boolean)
+        : [];
 
     return (
         <div
@@ -166,6 +176,11 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                 {!showAccountName && (
                     <span className="block text-xs text-slate-500">
                         {progress.account_name}
+                    </span>
+                )}
+                {paramParts.length > 0 && (
+                    <span className="block truncate text-xs text-slate-500" title={paramParts.join(' · ')}>
+                        ⚙️ {paramParts.join(' · ')}
                     </span>
                 )}
                 <span className="mb-2 block text-xs text-slate-400">

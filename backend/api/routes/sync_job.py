@@ -43,6 +43,7 @@ class ConnectorProgressResponse(BaseModel):
     stage_stats: Optional[Dict[str, Any]] = None
     logs: Optional[List[Dict[str, Any]]] = None
     connector_run_id: Optional[int] = None
+    params: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(extra="allow")
 
@@ -332,6 +333,7 @@ def get_all_connectors(session: Session = Depends(get_session_dependency)):
         NormalizedTransactionRepository,
     )
     from backend.db.repositories.sync_job_repository import SyncJobRepository
+    from backend.services.sync_window import resolve_sync_window, sync_window_to_dict
 
     try:
         registry = get_connector_registry()
@@ -450,6 +452,9 @@ def get_all_connectors(session: Session = Depends(get_session_dependency)):
                     "last_sync_status": account_connector.last_sync_status,
                     "supports_incremental_sync": supports_incremental,
                     "default_since_datetime": default_since,
+                    "sync_window": sync_window_to_dict(
+                        resolve_sync_window(session, account_connector)
+                    ),
                     "optional_config": connector_info.optional_config
                     if connector_info
                     else [],

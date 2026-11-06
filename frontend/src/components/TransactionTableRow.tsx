@@ -30,7 +30,7 @@ import { ValueDisplay } from './ValueDisplay';
 import { BundleSuggestionIcon, SuggestionPopover, BundleMembershipPopover } from './bundles';
 import { DuplicateIcon, DuplicatePopover } from './duplicates';
 import { getAssetSuggestions, getConfidenceColor, formatConfidence } from '../utils/similarity';
-import { formatDateTimeCompact, toDateTimeLocalString, dateTimeLocalToISO } from '../utils/dateUtils';
+import { formatDateTimeCompact, formatTxDateTime, toDateTimeLocalString, dateTimeLocalToISO } from '../utils/dateUtils';
 import { linkRawAccount } from '../utils/rawAccountApi';
 import { hasPotentialDuplicateTag, getDuplicateResolutionTag, getDuplicateGroupHash } from '../utils/duplicateTagUtils';
 import type { AccountSuggestion } from '../hooks/useAccountSuggestions';
@@ -42,7 +42,7 @@ import type { TransactionColumnKey, ColumnPlugin, RowAction } from './tables';
 const DIRECTION_OPTIONS = [
     { value: 'inflow', label: '↓' },
     { value: 'outflow', label: '↑' },
-    { value: 'internal', label: '↔' }
+    { value: 'neutral', label: '↔' }
 ];
 
 // Direction color mapping is now handled via DIRECTION_ROW_HEX in TransactionsTable.tsx
@@ -150,6 +150,8 @@ export interface TransactionRowProps {
     editValuesRef: React.MutableRefObject<Partial<Transaction>>;
     // Stable callbacks
     callbacks: TransactionRowCallbacks;
+    /** 'time' when rendered under a day header */
+    dateMode?: 'full' | 'time';
 }
 
 // ========== Memoized component ==========
@@ -178,6 +180,7 @@ function arePropsEqual(prev: TransactionRowProps, next: TransactionRowProps): bo
     if (prev.bundleColorMap !== next.bundleColorMap) return false;
     if (prev.batchSuggestionsMap !== next.batchSuggestionsMap) return false;
     if (prev.showColumn !== next.showColumn) return false;
+    if (prev.dateMode !== next.dateMode) return false;
 
     return true;
 }
@@ -196,7 +199,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
         openDuplicateTxId, hoveredDuplicateGroup,
         hoveredBundleId, openBundleTxId, bundleColorMap,
         editInputRef, escapePressedRef, editValuesRef,
-        callbacks,
+        callbacks, dateMode = 'full',
     } = props;
 
     const {
@@ -406,7 +409,9 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 className="w-[130px] px-1 text-[8px]"
                             />
                         ) : (
-                            <span className="text-[8px]">{formatDateTimeCompact(tx.date_time)}</span>
+                            <span className="whitespace-nowrap text-[11px] tabular-nums text-slate-700" title={formatDateTimeCompact(tx.date_time)}>
+                                {formatTxDateTime(tx.date_time, dateMode)}
+                            </span>
                         )}
                     </td>
                 )}
@@ -951,6 +956,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     <RiExchangeFundsLine color="#D69E2E" size={12} title="Margin (derivative)" />
                                 ) : tx.transaction_type === 'cost' ? (
                                     <FaQuestion color="#A0AEC0" size={10} title="Cost (fee-only)" />
+                                ) : tx.transaction_type === 'memo' ? (
+                                    <LuCircleHelp color="#A0AEC0" size={10} title="Memo (audit-only, no P&L impact)" />
                                 ) : (
                                     <FaQuestion color="#718096" size={10} title="Other" />
                                 )}

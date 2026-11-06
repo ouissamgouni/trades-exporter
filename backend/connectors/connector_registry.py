@@ -92,6 +92,8 @@ class ConnectorInfo:
     status_note: Optional[str] = None
     degraded_chains: List[str] = field(default_factory=list)  # canonical names
     recommended_for: List[str] = field(default_factory=list)  # canonical names
+    # Start used by the connector itself when no since/start_datetime is given
+    default_start: Optional[str] = None
     required_env: List[str] = field(default_factory=list)
     # UI grouping: "exchange" | "evm" | "chain" | "app" | "file"; derived when empty
     group: str = ""
@@ -146,6 +148,7 @@ class ConnectorInfo:
             "status_note": self.status_note,
             "degraded_chains": self.degraded_chains,
             "recommended_for": self.recommended_for,
+            "default_start": self.default_start,
             "required_env": self.required_env,
             # Only names are exposed, never values
             "missing_env": [v for v in self.required_env if not os.getenv(v)],
@@ -450,6 +453,7 @@ class ConnectorRegistry:
                 optional_config=["wallet_address", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="hyperliquid",
+                default_start="2025-10-01T00:00:00+00:00",
                 supports_balance=True,
                 derivative_exchange="hyperliquid",
             )
@@ -464,6 +468,7 @@ class ConnectorRegistry:
                 optional_config=["wallet_address", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="hyperliquid",
+                default_start="2025-10-01T00:00:00+00:00",
             )
         )
 
@@ -476,6 +481,7 @@ class ConnectorRegistry:
                 optional_config=["wallet_address", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="hyperliquid",
+                default_start="2025-10-01T00:00:00+00:00",
             )
         )
 
@@ -489,9 +495,11 @@ class ConnectorRegistry:
                 hub_key="on-chain",
                 group="evm",
                 status="degraded",
-                status_note="Cloudflare blocks API requests on Base, Polygon and Arbitrum",
-                degraded_chains=["base", "polygon", "arbitrum"],
-                recommended_for=["hyperevm"],
+                status_note=(
+                    "Cloudflare blocks API requests on Base, Polygon and Arbitrum; "
+                    "HyperEVM explorer (hyperscan.com) was retired"
+                ),
+                degraded_chains=["base", "polygon", "arbitrum", "hyperevm"],
                 supported_chains=[
                     "base",
                     "ethereum",
@@ -517,9 +525,9 @@ class ConnectorRegistry:
                 display_name="EVM · Etherscan",
                 hub_key="on-chain",
                 group="evm",
-                recommended_for=["ethereum"],
+                recommended_for=["ethereum", "hyperevm"],
                 required_env=["ETHERSCAN_API_KEY"],
-                supported_chains=["ethereum"],
+                supported_chains=["ethereum", "hyperevm"],
                 required_config=["address"],
                 optional_config=[
                     "start_datetime",
@@ -753,6 +761,13 @@ class ConnectorRegistry:
                 base_url="https://api.etherscan.io/api",
                 chain_id=1,
                 native_currency="ETH",
+                native_token_decimals=18,
+            ),
+            "hyperevm": ChainConfig(
+                explorer_type="etherscan",
+                base_url="https://api.etherscan.io/v2/api",
+                chain_id=999,
+                native_currency="HYPE",
                 native_token_decimals=18,
             ),
         }

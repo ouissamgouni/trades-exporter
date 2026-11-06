@@ -4,7 +4,8 @@ import { LuCalendar, LuCheck, LuChevronDown, LuFilter, LuRotateCcw, LuSearch, Lu
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { API_URL } from '../types';
 import type { AppliedFilters as BackendAppliedFilters, FilterMetadata, ValidationWarning } from '../types';
-import { toDateInputString, getDateRangePreset } from '../utils/dateUtils';
+import { toDateInputString, getDateRangePreset, getNamedDateRange, NAMED_DATE_RANGES } from '../utils/dateUtils';
+import { buildTransactionFilterParams } from '../utils/transactionFilterParams';
 import { CounterpartyFilterCard } from './CounterpartyFilterCard';
 
 // Filter option from backend
@@ -152,6 +153,8 @@ interface TransactionFiltersProps {
     hiddenFilters?: (keyof TransactionFilterState)[];
     /** Extra filter cards to render in the grid (e.g., Counterparty) */
     extraFilterCards?: React.ReactNode;
+    /** Show date range, accounts and status as an always-visible bar; the panel holds the rest (default true) */
+    quickBar?: boolean;
     /** Callback receiving loaded filterOptions for parent to access (e.g. non_owned_count) */
     onFilterOptionsLoaded?: (options: FilterOptions) => void;
 }
@@ -506,6 +509,193 @@ const DateCard: React.FC<DateCardProps> = ({
     );
 };
 
+// Always-visible primary filters: date range, accounts, review status (apply immediately)
+interface QuickFilterBarProps {
+    filters: TransactionFilterState;
+    onChange: (filters: TransactionFilterState) => void;
+    accountOptions: FilterOption[];
+    statusOptions: FilterOption[];
+    hiddenSet: Set<keyof TransactionFilterState>;
+}
+
+const QUICK_STATUSES = [
+    { value: 'pending', label: 'Pending' },
+    { value: 'valid', label: 'Valid' },
+    { value: 'invalid', label: 'Invalid' },
+];
+
+const QUICK_PILL = 'border px-1.5 py-0.5 text-[10px] transition-colors';
+const QUICK_PILL_ON = 'border-blue-500 bg-blue-500 text-white';
+const QUICK_PILL_OFF = 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50';
+
+const QuickFilterBar: React.FC<QuickFilterBarProps> = ({ filters, onChange, accountOptions, statusOptions, hiddenSet }) => {
+    const [accountsOpen, setAccountsOpen] = useState(false);
+    const [accountSearch, setAccountSearch] = useState('');
+    const accountsRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!accountsOpen) return;
+        const onDown = (e: MouseEvent) => {
+            if (accountsRef.current && !accountsRef.current.contains(e.target as Node)) setAccountsOpen(false);
+        };
+        document.addEventListener('mousedown', onDown);
+        return () => document.removeEventListener('mousedown', onDown);
+    }, [accountsOpen]);
+
+    const fromDate = filters.dateFrom ? filters.dateFrom.split('T')[0] : '';
+    const toDate = filters.dateTo ? filters.dateTo.split('T')[0] : '';
+    const activePreset = NAMED_DATE_RANGES.find(r => {
+        const range = getNamedDateRange(r.id);
+        return range.from === fromDate && range.to === toDate;
+    })?.id;
+
+    const statusCounts = new Map(statusOptions.map(o => [o.value, o.count]));
+    const toggleStatus = (value: string) => {
+        const current = filters.reviewStatus;
+        const next = current.includes(value) ? current.filter(v => v !== value) : [...current, value];
+        onChange({ ...filters, reviewStatus: next });
+    };
+
+    const selectedAccounts = filters.accountIds;
+    const accountLabel = selectedAccounts.length === 0
+        ? 'All'
+        : selectedAccounts.length === 1
+            ? accountOptions.find(o => o.value === selectedAccounts[0])?.label ?? '1 selected'
+            : `${selectedAccounts.length} selected`;
+    const filteredAccounts = accountOptions.filter(o => o.label.toLowerCase().includes(accountSearch.toLowerCase()));
+    const toggleAccount = (value: string) => {
+        const next = selectedAccounts.includes(value)
+            ? selectedAccounts.filter(v => v !== value)
+            : [...selectedAccounts, value];
+        onChange({ ...filters, accountIds: next });
+    };
+
+    return (
+        <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Date range">
+                <LuCalendar size={12} className="text-slate-500" />
+                {NAMED_DATE_RANGES.map(r => (
+                    <button
+                        key={r.id}
+                        type="button"
+                        aria-pressed={activePreset === r.id}
+                        className={`${QUICK_PILL} ${activePreset === r.id ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
+                        onClick={() => {
+                            const range = getNamedDateRange(r.id);
+                            onChange({ ...filters, dateFrom: range.from, dateTo: range.to });
+                        }}
+                    >
+                        {r.label}
+                    </button>
+                ))}
+                <input
+                    type="date"
+                    aria-label="From date"
+                    value={fromDate}
+                    onChange={e => onChange({ ...filters, dateFrom: e.target.value })}
+                    className="h-[22px] border border-slate-200 bg-white px-1 text-[10px]"
+                />
+                <span className="text-[10px] text-slate-400">→</span>
+                <input
+                    type="date"
+                    aria-label="To date"
+                    value={toDate}
+                    onChange={e => onChange({ ...filters, dateTo: e.target.value })}
+                    className="h-[22px] border border-slate-200 bg-white px-1 text-[10px]"
+                />
+                {(fromDate || toDate) && (
+                    <button
+                        type="button"
+                        aria-label="Clear date range"
+                        className="p-0.5 text-slate-400 hover:text-slate-700"
+                        onClick={() => onChange({ ...filters, dateFrom: '', dateTo: '' })}
+                    >
+                        <LuX size={10} />
+                    </button>
+                )}
+            </div>
+
+            {!hiddenSet.has('accountIds') && (
+                <div ref={accountsRef} className="relative">
+                    <button
+                        type="button"
+                        aria-expanded={accountsOpen}
+                        className={`${QUICK_PILL} inline-flex items-center gap-1 ${selectedAccounts.length > 0 ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
+                        onClick={() => setAccountsOpen(o => !o)}
+                    >
+                        👤 Accounts: <span className="max-w-[140px] truncate">{accountLabel}</span>
+                        <LuChevronDown size={10} />
+                    </button>
+                    {accountsOpen && (
+                        <div className="absolute left-0 top-full z-[1000] mt-1 w-[240px] border border-slate-200 bg-white shadow-lg">
+                            <div className="flex items-center gap-1 border-b border-slate-100 px-1.5">
+                                <LuSearch size={10} className="text-slate-400" />
+                                <input
+                                    type="text"
+                                    aria-label="Search accounts"
+                                    placeholder="Search..."
+                                    value={accountSearch}
+                                    onChange={e => setAccountSearch(e.target.value)}
+                                    className="flex-1 bg-transparent py-1.5 text-[10px] outline-none"
+                                />
+                                {selectedAccounts.length > 0 && (
+                                    <button
+                                        type="button"
+                                        className="text-[10px] text-slate-500 hover:text-slate-800"
+                                        onClick={() => onChange({ ...filters, accountIds: [] })}
+                                    >
+                                        Clear
+                                    </button>
+                                )}
+                            </div>
+                            <div className="max-h-[220px] overflow-y-auto p-1">
+                                {filteredAccounts.map(o => {
+                                    const isOn = selectedAccounts.includes(o.value);
+                                    return (
+                                        <label key={o.value} className="flex cursor-pointer items-center gap-1.5 px-1.5 py-1 text-[10px] hover:bg-slate-50">
+                                            <input
+                                                type="checkbox"
+                                                className="h-3 w-3 accent-blue-500"
+                                                checked={isOn}
+                                                onChange={() => toggleAccount(o.value)}
+                                            />
+                                            <span className="flex-1 truncate">{o.label}</span>
+                                            {o.count !== undefined && <span className="text-slate-400">{o.count}</span>}
+                                        </label>
+                                    );
+                                })}
+                                {filteredAccounts.length === 0 && (
+                                    <p className="p-1.5 text-center text-[10px] text-slate-400">No results</p>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {!hiddenSet.has('reviewStatus') && (
+                <div className="inline-flex items-center gap-1" role="group" aria-label="Review status">
+                    {QUICK_STATUSES.map(s => {
+                        const isOn = filters.reviewStatus.includes(s.value);
+                        const count = statusCounts.get(s.value);
+                        return (
+                            <button
+                                key={s.value}
+                                type="button"
+                                aria-pressed={isOn}
+                                className={`${QUICK_PILL} ${isOn ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
+                                onClick={() => toggleStatus(s.value)}
+                            >
+                                {s.label}{count !== undefined ? ` ${count}` : ''}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
 // Dropdown Filter Card - for Asset (with search)
 interface DropdownCardProps {
     label: string;
@@ -849,40 +1039,13 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     hiddenFilters,
     extraFilterCards,
     onFilterOptionsLoaded,
+    quickBar = true,
 }) => {
     const effectiveBaseUrl = filterOptionsUrl || `${API_URL}/transactions/filter-options`;
     const hiddenSet = React.useMemo(() => new Set(hiddenFilters || []), [hiddenFilters]);
 
     // Build URL search params from applied filters for context-aware counts
-    const filterParams = React.useMemo(() => {
-        const params = new URLSearchParams();
-        if (filters.reviewStatus.length > 0) params.append('review_status', filters.reviewStatus.join(','));
-        if (filters.taxability.length > 0) params.append('taxability', filters.taxability.join(','));
-        if (filters.sources.length > 0) params.append('source', filters.sources.join(','));
-        if (filters.accountIds.length > 0) params.append('account_id', filters.accountIds.join(','));
-        if (filters.fromAccountIds?.length) params.append('from_account_id', filters.fromAccountIds.join(','));
-        if (filters.toAccountIds?.length) params.append('to_account_id', filters.toAccountIds.join(','));
-        if (filters.relatedAccountIds?.length) params.append('related_account_id', filters.relatedAccountIds.join(','));
-        if (filters.assetIds.length > 0) params.append('asset_id', filters.assetIds.join(','));
-        if (filters.relatedAssetIds.length > 0) params.append('related_asset_id', filters.relatedAssetIds.join(','));
-        if (filters.attributedAssetIds?.length > 0) params.append('attributed_asset_id', filters.attributedAssetIds.join(','));
-        if (filters.categoryIds.length > 0) params.append('category_id', filters.categoryIds.join(','));
-        if (filters.transactionTypes.length > 0) params.append('transaction_type', filters.transactionTypes.join(','));
-        if (filters.directions.length > 0) params.append('direction', filters.directions.join(','));
-        if (filters.connectorRunIds.length > 0) params.append('connector_run_id', filters.connectorRunIds.join(','));
-        if (filters.tagKeys.length > 0) params.append('tag_key', filters.tagKeys.join(','));
-        if (filters.networks?.length) params.append('network', filters.networks.join(','));
-        if (filters.dateFrom) params.append('date_from', filters.dateFrom);
-        if (filters.dateTo) params.append('date_to', filters.dateTo);
-        if (filters.transactionIds?.length) params.append('ids', filters.transactionIds.join(','));
-        if (filters.hasFees !== undefined) params.append('has_fee', String(filters.hasFees));
-        if (filters.includeFee !== undefined) params.append('include_fee', String(filters.includeFee));
-        if (filters.hasBundle !== undefined) params.append('has_bundle', String(filters.hasBundle));
-        if (filters.priceQuoteAssetIds.length > 0) params.append('price_quote_asset_id', filters.priceQuoteAssetIds.join(','));
-        if (filters.feeQuoteAssetIds.length > 0) params.append('fee_quote_asset_id', filters.feeQuoteAssetIds.join(','));
-        if (filters.bundlePatterns.length > 0) params.append('bundle_pattern', filters.bundlePatterns.join(','));
-        return params;
-    }, [filters]);
+    const filterParams = React.useMemo(() => buildTransactionFilterParams(filters), [filters]);
 
     const effectiveUrl = React.useMemo(() => {
         const qs = filterParams.toString();
@@ -1274,15 +1437,30 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     }
 
     const activeFilterCount = getActiveFilterCount();
-    const openFilters = FILTER_DEFS.filter(d => !d.isDropdown && !hiddenSet.has(d.key));
+    const openFilters = FILTER_DEFS.filter(d => !d.isDropdown && !hiddenSet.has(d.key)
+        && !(quickBar && (d.key === 'accountIds' || d.key === 'reviewStatus')));
     const dropdownFilters = FILTER_DEFS.filter(d => d.isDropdown && !hiddenSet.has(d.key));
     const filterChips = getFilterChips();
     const hasActiveFilters = filterChips.length > 0;
     const visibleChips = filterChips.slice(0, visibleChipCount);
     const hiddenChipCount = Math.max(0, filterChips.length - visibleChipCount);
 
+    const applyQuick = (next: TransactionFilterState) => {
+        setLocalFilters(next);
+        onChange(next);
+    };
+
     return (
         <div className="mb-3">
+            {quickBar && (
+                <QuickFilterBar
+                    filters={localFilters}
+                    onChange={applyQuick}
+                    accountOptions={filterOptions?.accounts || []}
+                    statusOptions={filterOptions?.review_statuses || []}
+                    hiddenSet={hiddenSet}
+                />
+            )}
             <div className={`overflow-visible border bg-slate-50 ${hasChanges ? 'border-blue-300' : 'border-slate-200'}`}>
                 {/* Clickable Header */}
                 <div
@@ -1294,7 +1472,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                             <LuChevronDown size={14} />
                         </div>
                         <LuFilter size={12} />
-                        <span className="text-xs font-semibold">Filters</span>
+                        <span className="text-xs font-semibold">{quickBar ? '+ Filter' : 'Filters'}</span>
                         {activeFilterCount > 0 && (
                             <Badge colorScheme="blue">{activeFilterCount} active</Badge>
                         )}
@@ -1380,13 +1558,13 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                         {/* Card Grid - Maximum columns */}
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                             {/* Date Range Card - First */}
-                            <DateCard
+                            {!quickBar && <DateCard
                                 dateFrom={localFilters.dateFrom}
                                 dateTo={localFilters.dateTo}
                                 onChangeFrom={(v) => updateLocalFilter('dateFrom', v)}
                                 onChangeTo={(v) => updateLocalFilter('dateTo', v)}
                                 onClear={clearDateFilter}
-                            />
+                            />}
 
                             {/* Open Filter Cards: Account, Source, Type, Direction, Taxability, Status */}
                             {openFilters.map(def => {

@@ -31,7 +31,7 @@ REQUEST_DELAY = 0.3     # polite delay between every request
 # Default start date when no since_datetime is configured.
 # Prevents walking from Unix epoch (1970) to now in 30-day windows (~681 empty API calls).
 # Oct 1, 2025 00:00 UTC — aligns with accounts.yaml default start_datetime.
-DEFAULT_START_MS = 1_727_740_800_000  # 2025-10-01T00:00:00Z
+DEFAULT_START_MS = 1_759_276_800_000  # 2025-10-01T00:00:00Z
 
 
 class HyperliquidTransfersConnector(BaseConnector):

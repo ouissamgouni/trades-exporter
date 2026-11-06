@@ -179,6 +179,66 @@ class TransactionListResponse(BaseModel):
     metadata: FilterMetadata = Field(..., description="Filter and pagination metadata")
 
 
+class GroupAssetNet(BaseModel):
+    asset_id: Optional[int] = None
+    symbol: str
+    net_quantity: float
+    tx_count: int
+
+
+class GroupAccountRecap(BaseModel):
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+    inflow_count: int = 0
+    outflow_count: int = 0
+    neutral_count: int = 0
+    internal_transfer_count: int = 0
+    assets: List[GroupAssetNet] = Field(default_factory=list)
+    more_assets_count: int = 0
+
+
+class GroupFacetValue(BaseModel):
+    value: str
+    label: str
+    count: int
+
+
+class TransactionGroupFacets(BaseModel):
+    accounts: List[GroupFacetValue] = Field(default_factory=list)
+    assets: List[GroupFacetValue] = Field(default_factory=list)
+    networks: List[GroupFacetValue] = Field(default_factory=list)
+    sources: List[GroupFacetValue] = Field(default_factory=list)
+
+
+class TransactionGroup(BaseModel):
+    period_start: str = Field(..., description="Local period start date (YYYY-MM-DD)")
+    date_from: str = Field(..., description="Inclusive UTC lower bound (naive ISO)")
+    date_to: str = Field(..., description="Inclusive UTC upper bound (naive ISO)")
+    total_count: int = Field(..., description="Count excluding invalid transactions")
+    pending_count: int = 0
+    valid_count: int = 0
+    invalid_count: int = 0
+    health_issue_count: int = 0
+    accounts: List[GroupAccountRecap] = Field(default_factory=list)
+    facets: TransactionGroupFacets = Field(default_factory=TransactionGroupFacets)
+    realized_pnl_in_base: Optional[float] = None
+
+
+class TransactionGroupsResponse(BaseModel):
+    granularity: str
+    timezone: str
+    groups: List[TransactionGroup] = Field(default_factory=list)
+    total_groups: int = 0
+    limit: int
+    offset: int
+
+
+class TransactionIdsResponse(BaseModel):
+    ids: List[int] = Field(default_factory=list)
+    total: int
+    truncated: bool
+
+
 # =============================================================================
 # Transaction API Models
 # =============================================================================

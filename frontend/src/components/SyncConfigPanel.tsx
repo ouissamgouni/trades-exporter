@@ -18,6 +18,7 @@ import { BalanceDrawer } from './BalanceDrawer';
 import { ConnectorPickerModal } from './ConnectorPickerModal';
 import { useSyncConfigStore } from '../hooks/useSyncConfigStore';
 import { formatAddress, formatChainName } from '../utils/addressUtils';
+import { describeSyncWindow } from '../utils/syncWindow';
 
 interface SyncConfigPanelProps {
     onOverridesChange: (overrides: ConnectorOverride[]) => void;
@@ -505,6 +506,13 @@ const AccountCard: React.FC<{
                                             {!hasSinceOverride && !isFullSync && (
                                                 <Badge colorScheme="gray">auto</Badge>
                                             )}
+                                        </div>
+                                    )}
+
+                                    {/* Effective fetch window (hidden while a since override is set) */}
+                                    {isEnabled && !isTestMode && !hasSinceOverride && connector.sync_window && (
+                                        <div className="mt-1 pl-6 text-[10px] text-slate-500">
+                                            Fetch: {describeSyncWindow(connector.sync_window)}
                                         </div>
                                     )}
 

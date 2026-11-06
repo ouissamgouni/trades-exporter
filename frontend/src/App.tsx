@@ -8,6 +8,8 @@ import { DataHealthProvider, useDataHealth } from './contexts/DataHealthContext'
 import logoSrc from './assets/logo.png';
 import { AssetDetailPanelProvider } from './contexts/AssetDetailPanelContext';
 import { AssetDetailSlidePanel } from './components/AssetDetailSlidePanel';
+import { AccountDetailPanelProvider } from './contexts/AccountDetailPanelContext';
+import { AccountDetailSlidePanel } from './components/AccountDetailSlidePanel';
 import { QaTestPlanProvider, useQaPinnedWidth } from './components/QaTestPlanPanel';
 import { StatusBar, STATUS_BAR_HEIGHT_PX } from './components/StatusBar';
 import { Toaster } from './components/ui/toaster';
@@ -46,7 +48,6 @@ const AddImportPanel = React.lazy(() => import('./components/AddImportPanel').th
 const InboxView = React.lazy(() => import('./components/InboxView').then(m => ({ default: m.InboxView })));
 const AllTransactionsView = React.lazy(() => import('./components/AllTransactionsView').then(m => ({ default: m.AllTransactionsView })));
 const TransactionsTable = React.lazy(() => import('./components/TransactionsTable').then(m => ({ default: m.TransactionsTable })));
-const TimelineSection = React.lazy(() => import('./components/TimelineSection'));
 const PositionsView = React.lazy(() => import('./components/PositionsView'));
 const PnLPanel = React.lazy(() => import('./components/PnLPanel').then(m => ({ default: m.PnLPanel })));
 const PricesViewer = React.lazy(() => import('./components/PricesViewer').then(m => ({ default: m.PricesViewer })));
@@ -63,7 +64,7 @@ const TabLoadingFallback = () => (
 // set of valid sub-tab values + the default sub-tab to redirect to.
 const KNOWN_TABS = [
     'setup', 'sync', 'add-transaction', 'inbox', 'all-transactions',
-    'timeline', 'positions', 'pnl', 'prices',
+    'positions', 'pnl', 'prices',
 ] as const;
 type TabId = typeof KNOWN_TABS[number];
 
@@ -293,7 +294,6 @@ const AppContent = () => {
                         <TabsTrigger value="all-transactions">
                             📋 All
                         </TabsTrigger>
-                        <TabsTrigger value="timeline">📅 Timeline</TabsTrigger>
                         <TabsTrigger value="positions">🎯 Positions</TabsTrigger>
 
                         {/* Step 4: Analysis */}
@@ -354,11 +354,6 @@ const AppContent = () => {
                             <AllTransactionsView />
                         </Suspense>
                     </TabsContent>
-                    <TabsContent value="timeline">
-                        <Suspense fallback={<TabLoadingFallback />}>
-                            <TimelineSection />
-                        </Suspense>
-                    </TabsContent>
                     <TabsContent value="positions">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <PositionsView />
@@ -390,22 +385,32 @@ const AppContent = () => {
 };
 
 
+/** The Timeline page was merged into the transactions Activity header. */
+const TimelineRedirect = () => {
+    try { localStorage.setItem('txActivity:expanded', '1'); } catch { }
+    return <Navigate to="/all-transactions" replace />;
+};
+
 const App = () => {
     return (
         <QueryClientProvider client={queryClient}>
             <AssetDetailPanelProvider>
+            <AccountDetailPanelProvider>
                 <DataHealthProvider>
                     <QaTestPlanProvider>
                         <Routes>
                             <Route path="/" element={<Navigate to={DEFAULT_ROUTE} replace />} />
+                            <Route path="/timeline/*" element={<TimelineRedirect />} />
                             <Route path="/:tab" element={<AppContent />} />
                             <Route path="/:tab/:subtab" element={<AppContent />} />
                             <Route path="*" element={<Navigate to={DEFAULT_ROUTE} replace />} />
                         </Routes>
                         <AssetDetailSlidePanel />
+                        <AccountDetailSlidePanel />
                         <Toaster />
                     </QaTestPlanProvider>
                 </DataHealthProvider>
+            </AccountDetailPanelProvider>
             </AssetDetailPanelProvider>
         </QueryClientProvider>
     );

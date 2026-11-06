@@ -80,7 +80,7 @@ export interface TransactionSidePanelProps {
 // Helpers ported from ManualTransactionForm
 // ============================================================================
 
-type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER | typeof TransactionType.MARGIN | typeof TransactionType.COST;
+type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER | typeof TransactionType.MARGIN | typeof TransactionType.COST | typeof TransactionType.DIVIDEND | typeof TransactionType.MEMO;
 
 const deriveTransactionType = (simplifiedType: SimplifiedType, _direction: string): string => {
     return simplifiedType;
@@ -90,6 +90,8 @@ const deriveSimplifiedType = (transactionType: string): SimplifiedType => {
     if (transactionType === TransactionType.TRANSFER) return TransactionType.TRANSFER;
     if (transactionType === TransactionType.MARGIN) return TransactionType.MARGIN;
     if (transactionType === TransactionType.COST) return TransactionType.COST;
+    if (transactionType === TransactionType.DIVIDEND) return TransactionType.DIVIDEND;
+    if (transactionType === TransactionType.MEMO) return TransactionType.MEMO;
     return TransactionType.TRADE;
 };
 
@@ -735,6 +737,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                             { label: 'Transfer', value: TransactionType.TRANSFER },
                             { label: 'Margin', value: TransactionType.MARGIN },
                             { label: 'Cost', value: TransactionType.COST },
+                            { label: 'Dividend', value: TransactionType.DIVIDEND },
+                            { label: 'Memo', value: TransactionType.MEMO },
                         ]}
                         onSave={async (v) => { await saveTypeOrDirection('transaction_type', v); }}
                     />
@@ -761,6 +765,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         options={[
                             { label: '↓ Inflow', value: Direction.INFLOW },
                             { label: '↑ Outflow', value: Direction.OUTFLOW },
+                            { label: '↔ Neutral', value: Direction.NEUTRAL },
                         ]}
                         onSave={async (v) => { await saveTypeOrDirection('direction', v); }}
                     />

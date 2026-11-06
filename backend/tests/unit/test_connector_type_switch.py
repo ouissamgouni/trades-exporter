@@ -29,7 +29,9 @@ class TestConnectorTypeMetadata:
             "base",
             "polygon",
             "arbitrum",
+            "hyperevm",
         }
+        assert "hyperevm" in available["etherscan"].recommended_for
         assert "bsc" in available["ankr"].recommended_for
         assert available["ankr"].required_env == ["ANKR_API_KEY"]
 
