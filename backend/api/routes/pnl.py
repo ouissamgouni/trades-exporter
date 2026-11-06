@@ -3958,6 +3958,7 @@ def get_version_balances(
     version_id: int,
     group_by_asset: bool = False,
     include_unsettled_negative: bool = False,
+    account_ids: Optional[str] = None,
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     session: Session = Depends(get_session_dependency),
 ):
@@ -3973,8 +3974,25 @@ def get_version_balances(
                         Also includes realized_pnl_in_base, realized_event_count, warning_count.
         include_unsettled_negative: If False (default), excludes lots where is_negative=True AND is_settled=False.
                                     The response includes unsettled_negative_count showing how many were excluded.
+        account_ids: Comma-separated holding accounts. Scopes lots, realized P&L, fees, income and
+                     warnings to those accounts (unlike tx_filters' account_id, which selects whole units).
     """
     from collections import defaultdict
+    from backend.services.pnl.metrics_service import _scope_fees_to_accounts
+
+    try:
+        scoped_account_ids = (
+            [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+        )
+    except ValueError:
+        raise HTTPException(status_code=422, detail="account_ids must be comma-separated integers")
+
+    def _scope_to_accounts(q, transaction_id_col):
+        if not scoped_account_ids:
+            return q
+        return q.join(
+            NormalizedTransaction, transaction_id_col == NormalizedTransaction.id
+        ).where(NormalizedTransaction.account_id.in_(scoped_account_ids))
 
     # Verify version exists
     version = session.get(CalculationVersion, version_id)
@@ -4005,6 +4023,8 @@ def get_version_balances(
     )
     if filtered_unit_ids is not None:
         query = query.where(CostLot.unit_id.in_(filtered_unit_ids))
+    if scoped_account_ids:
+        query = query.where(CostLot.account_id.in_(scoped_account_ids))
     lots = session.exec(query).all()
 
     # Separate lots into included and excluded based on unsettled negative filter
@@ -4069,6 +4089,7 @@ def get_version_balances(
             realized_query = realized_query.where(
                 RealizedPnl.origin_unit_id.in_(filtered_unit_ids)
             )
+        realized_query = _scope_to_accounts(realized_query, RealizedPnl.transaction_id)
         realized_results = session.exec(realized_query).all()
         realized_map = {
             r.effective_asset_id: {
@@ -4096,6 +4117,7 @@ def get_version_balances(
             taxable_rpnl_query = taxable_rpnl_query.where(
                 RealizedPnl.origin_unit_id.in_(filtered_unit_ids)
             )
+        taxable_rpnl_query = _scope_to_accounts(taxable_rpnl_query, RealizedPnl.transaction_id)
         taxable_rpnl_results = session.exec(taxable_rpnl_query).all()
         taxable_rpnl_map = {
             r.effective_asset_id: float(r.total_pnl or 0) for r in taxable_rpnl_results
@@ -4115,6 +4137,7 @@ def get_version_balances(
             warning_query = warning_query.where(
                 PnlWarning.unit_id.in_(filtered_unit_ids)
             )
+        warning_query = _scope_to_accounts(warning_query, PnlWarning.transaction_id)
         warning_results = session.exec(warning_query).all()
         warning_map = {w.asset_id: w.warning_count for w in warning_results}
 
@@ -4133,6 +4156,7 @@ def get_version_balances(
         )
         if filtered_unit_ids is not None:
             fee_query = fee_query.where(FeeEntry.unit_id.in_(filtered_unit_ids))
+        fee_query = _scope_fees_to_accounts(fee_query, scoped_account_ids)
         fee_results = session.exec(fee_query).all()
         fee_map = {
             r.related_asset_id: float(r.total_fees_fmv or 0) for r in fee_results
@@ -4149,6 +4173,7 @@ def get_version_balances(
             .where(IncomeEvent.attributed_asset_id.isnot(None))
             .group_by(IncomeEvent.attributed_asset_id)
         )
+        income_query = _scope_to_accounts(income_query, IncomeEvent.transaction_id)
         income_results = session.exec(income_query).all()
         income_map = {
             r.attributed_asset_id: {
