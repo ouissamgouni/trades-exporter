@@ -24,8 +24,10 @@ export function effectivePrice(p: PriceResponse): number | null {
     return p.price ?? p.last_known_price ?? null;
 }
 
+/** Provider name only: the "fallback:" prefix duplicates the state badge. */
 export function effectiveSource(p: PriceResponse): string | null {
-    return p.price != null ? p.source ?? null : p.last_known_source ?? p.source ?? null;
+    const raw = p.price != null ? p.source ?? null : p.last_known_source ?? p.source ?? null;
+    return raw?.replace(/^fallback:/, '') ?? null;
 }
 
 export function effectiveDate(p: PriceResponse): string | null {

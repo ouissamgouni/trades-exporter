@@ -62,6 +62,14 @@ export const StatusBar: React.FC = () => {
         if (isHealthCheckOpen) fetchAccounts();
     }, [isHealthCheckOpen, fetchAccounts]);
 
+    const frontendVersion = import.meta.env.VITE_APP_VERSION;
+    const versionTooltip = [
+        `Frontend: ${frontendVersion ?? 'unknown'}`,
+        `Backend: ${appInfo?.backend_version ?? 'unknown'}`,
+        `Database: ${appInfo?.db_name ?? 'unknown'} @ ${appInfo?.db_schema_version ?? 'no migration rev'}`,
+        appInfo?.db_provenance ? `Data: ${appInfo.db_provenance.replace(/; /g, '\n      ')}` : null,
+    ].filter(Boolean).join('\n');
+
     const env = appInfo?.environment ?? 'prod';
     const isProd = env === 'prod';
     const barBg = envColors[env] ?? envColors.prod;
@@ -123,6 +131,7 @@ export const StatusBar: React.FC = () => {
 
                 {/* Env info segment (rightmost) */}
                 <Segment>
+                    <span className="flex items-center gap-1" title={versionTooltip} aria-label={versionTooltip}>
                     {!isProd && (
                         <>
                             <span
@@ -132,12 +141,19 @@ export const StatusBar: React.FC = () => {
                             <span className="font-bold">{env.toUpperCase()}</span>
                         </>
                     )}
+                    {frontendVersion && (
+                        <span style={{ opacity: 0.6 }}>FE {frontendVersion}</span>
+                    )}
                     {appInfo?.backend_version && (
-                        <span style={{ opacity: 0.6 }}>{appInfo.backend_version}</span>
+                        <span style={{ opacity: 0.6 }}>BE {appInfo.backend_version}</span>
                     )}
                     {appInfo?.db_schema_version && (
-                        <span style={{ opacity: 0.5 }}>DB {appInfo.db_schema_version}</span>
+                        <span style={{ opacity: 0.5 }}>DB {appInfo.db_schema_version.split('_')[0]}</span>
                     )}
+                    {appInfo?.db_provenance && (
+                        <span style={{ opacity: 0.5 }}>· {appInfo.db_provenance.startsWith('copied_from') ? 'copied' : 'restored'}</span>
+                    )}
+                    </span>
                 </Segment>
 
                 {/* Right edge padding */}

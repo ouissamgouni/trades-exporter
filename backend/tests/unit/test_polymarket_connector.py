@@ -1261,3 +1261,22 @@ class TestGammaTokenMapping:
         c._enrich_with_gamma(item)
         assert item["slug"] == "original"
         assert item["outcome"] == "No"
+
+
+class TestSyntheticCloseNeverPrecedesTrades:
+    @patch.object(ConnectorPolymarket, "_fetch_gamma_markets")
+    @patch.object(ConnectorPolymarket, "_fetch_activity")
+    def test_closed_time_before_last_trade_is_clamped(self, mock_fetch, mock_gamma):
+        """A Gamma closedTime earlier than the last buy would create a negative lot."""
+        mock_fetch.return_value = [_trade_buy(condition_id="0xabc")]  # timestamp=1762301363
+
+        def gamma_side_effect(condition_ids):
+            TestSyntheticCloses()._setup_gamma(
+                c, "0xabc", is_winner=False, closed_time="2025-11-01T00:00:00Z"
+            )
+
+        mock_gamma.side_effect = gamma_side_effect
+
+        c = _make_connector()
+        synthetic = [r for r in c.yield_raws() if r.get("_synthetic")][0]
+        assert synthetic["timestamp"] == 1762301363 + 1

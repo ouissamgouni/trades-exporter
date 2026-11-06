@@ -43,6 +43,9 @@ COPY --chown=appuser:appuser backend ./backend
 # Switch to non-root user
 USER appuser
 
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 # Expose port
 EXPOSE 8000
 

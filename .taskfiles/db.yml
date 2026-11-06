@@ -95,11 +95,9 @@ tasks:
           echo "   Actions: drop all tables → run migrations → seed"
           exit 0
         fi
-      - |
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" echo "y" | {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.reset
-      - |
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
-      - echo "✅ Dev database reset and seeded"
+        echo "✅ Dev database reset and seeded"
 
   reset:staging:local:
     aliases: [reset:staging]
@@ -119,11 +117,12 @@ tasks:
         if [ "{{.DRY_RUN}}" = "1" ]; then
           echo "🔍 DRY RUN — would reset staging database:"
           echo "   Project: trades-exporter-staging"
-          echo "   Actions: drop all tables → seed"
+          echo "   Actions: safety backup → drop all tables → seed"
           exit 0
         fi
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
-      - echo "✅ Staging database reset and seeded"
+        bash .taskfiles/db_backup.sh backup staging pre-reset
+        docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
+        echo "✅ Staging database reset and seeded"
 
   # Integration/e2e test databases are no longer special-cased here — they're
   # just named scenarios (see `start:scenario:db SCENARIO=backend-integration-tests`
@@ -143,6 +142,7 @@ tasks:
         config/secrets.prod.local.env,
       ]
     cmds:
+      - bash .taskfiles/db_backup.sh backup prod pre-reset
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
       - echo "⚠️ Prod database reset"
 
@@ -389,126 +389,252 @@ tasks:
           {{.ROOT_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini downgrade {{.CLI_ARGS}}
         echo "✅ Rolled back to {{.CLI_ARGS}}"
 
-  # === Tag Cleanup ===
+  # === Backup / Restore ===
+  #
+  # Backups: backend/data/backups/{dev,staging,prod}/ and backend/data/backups/scenarios/<name>/
+  #   file = <env>_<UTC timestamp>_<label>.dump (+ .meta: checksum, migration rev, row counts)
+  #
+  #   task db:backup:prod LABEL=before-tax-export     take a backup
+  #   task db:backup:list [ENV=prod] [VERIFY=1]       list backups (VERIFY=1 checks checksums)
+  #   task db:restore:staging [FROM_ENV=prod]         pick a backup → restore (temp DB + swap)
+  #   task db:restore:commit:staging                  keep the restore (drop the previous DB)
+  #   task db:restore:rollback:staging                undo the restore
+  #   task db:backup:prune:prod KEEP=10               retention
+  #
+  # pg_dump / pg_restore run inside the env's DB container (versions always match).
+  # Staging/prod get an automatic safety backup before restore, copy, reset and db deploys.
+
+  _backup_cli:
+    internal: true
+    interactive: true
+    silent: true
+    cmds:
+      - >-
+        LABEL="{{.LABEL}}" FILE="{{.FILE}}" FROM_ENV="{{.FROM_ENV}}"
+        MIGRATE="{{.MIGRATE | default "1"}}" DRY_RUN="{{.DRY_RUN | default "0"}}"
+        NO_BACKUP="{{.NO_BACKUP | default "0"}}" KEEP="{{.KEEP | default "10"}}"
+        VERIFY="{{.VERIFY | default "0"}}" ASSUME_YES="{{.ASSUME_YES | default "0"}}"
+        CONFIRM="{{.CONFIRM}}" ROOT_DIR="{{.ROOT_DIR}}"
+        bash .taskfiles/db_backup.sh {{.CMD}} "{{.TARGET}}"
+
+  backup:list:
+    desc: "📦 List backups of all envs (ENV=<dev|staging|prod|scenario:<name>> to filter, VERIFY=1 to check checksums)"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: list, TARGET: '{{.ENV | default ""}}' }
+
+  backup:dev:
+    desc: "💾 Back up the dev database. LABEL=<why> (default 'manual')"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: backup, TARGET: 'dev' }
+
+  backup:staging:local:
+    aliases: [backup:staging]
+    desc: "💾 Back up the staging database. LABEL=<why> (default 'manual')"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: backup, TARGET: 'staging' }
+
+  backup:prod:local:
+    aliases: [backup:prod]
+    desc: "💾 Back up the prod database. LABEL=<why> (default 'manual')"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: backup, TARGET: 'prod' }
+
+  backup:scenario:
+    desc: "💾 Back up the scenario (SCENARIO=<name>) database. LABEL=<why> (default 'manual')"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: backup, TARGET: '{{printf "scenario:%s" (.SCENARIO | default "default")}}' }
+
+  backup:prune:dev:
+    desc: "🧹 Delete old dev backups, keeping the newest KEEP (default 10). DRY_RUN=1 to preview"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: prune, TARGET: 'dev' }
+
+  backup:prune:staging:local:
+    aliases: [backup:prune:staging]
+    desc: "🧹 Delete old staging backups, keeping the newest KEEP (default 10). DRY_RUN=1 to preview"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: prune, TARGET: 'staging' }
+
+  backup:prune:prod:local:
+    aliases: [backup:prune:prod]
+    desc: "🧹 Delete old prod backups, keeping the newest KEEP (default 10). DRY_RUN=1 to preview"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: prune, TARGET: 'prod' }
+
+  backup:prune:scenario:
+    desc: "🧹 Delete old scenario (SCENARIO=<name>) backups, keeping the newest KEEP (default 10). DRY_RUN=1 to preview"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: prune, TARGET: '{{printf "scenario:%s" (.SCENARIO | default "default")}}' }
+
+  restore:dev:
+    desc: "♻️  Restore the dev database from a backup (pick from a list, or FILE=<path|latest>). FROM_ENV=<env>, MIGRATE=0, DRY_RUN=1"
+    interactive: true
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: restore, TARGET: 'dev' }
+
+  restore:staging:local:
+    aliases: [restore:staging]
+    desc: "♻️  Restore the staging database from a backup (pick from a list, or FILE=<path|latest>). FROM_ENV=<env>, MIGRATE=0, DRY_RUN=1"
+    interactive: true
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: restore, TARGET: 'staging' }
+
+  restore:prod:local:
+    aliases: [restore:prod]
+    desc: "♻️  Restore the prod database from a backup (pick from a list, or FILE=<path|latest>). FROM_ENV=<env>, MIGRATE=0, DRY_RUN=1"
+    interactive: true
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: restore, TARGET: 'prod' }
+
+  restore:scenario:
+    desc: "♻️  Restore the scenario (SCENARIO=<name>) database from a backup (pick from a list, or FILE=<path|latest>). FROM_ENV=<env>, MIGRATE=0, DRY_RUN=1"
+    interactive: true
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: restore, TARGET: '{{printf "scenario:%s" (.SCENARIO | default "default")}}' }
+
+  restore:commit:dev:
+    desc: "✅ Keep the last dev restore: drop the previous database kept for rollback"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: commit, TARGET: 'dev' }
+
+  restore:commit:staging:local:
+    aliases: [restore:commit:staging]
+    desc: "✅ Keep the last staging restore: drop the previous database kept for rollback"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: commit, TARGET: 'staging' }
+
+  restore:commit:prod:local:
+    aliases: [restore:commit:prod]
+    desc: "✅ Keep the last prod restore: drop the previous database kept for rollback"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: commit, TARGET: 'prod' }
+
+  restore:commit:scenario:
+    desc: "✅ Keep the last scenario (SCENARIO=<name>) restore: drop the previous database kept for rollback"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: commit, TARGET: '{{printf "scenario:%s" (.SCENARIO | default "default")}}' }
+
+  restore:rollback:dev:
+    desc: "↩️  Undo the last dev restore: swap the previous database back in"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: rollback, TARGET: 'dev' }
+
+  restore:rollback:staging:local:
+    aliases: [restore:rollback:staging]
+    desc: "↩️  Undo the last staging restore: swap the previous database back in"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: rollback, TARGET: 'staging' }
+
+  restore:rollback:prod:local:
+    aliases: [restore:rollback:prod]
+    desc: "↩️  Undo the last prod restore: swap the previous database back in"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: rollback, TARGET: 'prod' }
+
+  restore:rollback:scenario:
+    desc: "↩️  Undo the last scenario (SCENARIO=<name>) restore: swap the previous database back in"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: rollback, TARGET: '{{printf "scenario:%s" (.SCENARIO | default "default")}}' }
+
+  restore:status:dev:
+    desc: "🗄️  Show dev databases (live + kept by restores) and their provenance"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: status, TARGET: 'dev' }
+
+  restore:status:staging:local:
+    aliases: [restore:status:staging]
+    desc: "🗄️  Show staging databases (live + kept by restores) and their provenance"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: status, TARGET: 'staging' }
+
+  restore:status:prod:local:
+    aliases: [restore:status:prod]
+    desc: "🗄️  Show prod databases (live + kept by restores) and their provenance"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: status, TARGET: 'prod' }
+
+  restore:status:scenario:
+    desc: "🗄️  Show scenario (SCENARIO=<name>) databases (live + kept by restores) and their provenance"
+    cmds:
+      - task: _backup_cli
+        vars: { CMD: status, TARGET: '{{printf "scenario:%s" (.SCENARIO | default "default")}}' }
 
   # === Database Copy / Promotion ===
   #
-  # Named shortcuts (recommended):
-  #   task db:copy:dev-to-staging      Copy dev → staging
-  #   task db:copy:staging-to-prod     Copy staging → prod (with extra warning)
-  #   task db:copy:prod-to-staging     Copy prod → staging
-  #
-  # Generic (any direction):
-  #   task db:copy -- dev staging      Same as copy:dev-to-staging
-  #   task db:copy -- dev prod         Any custom combination (dev | staging | prod | scenario)
-  #
-  # Dry-run (preview only):
-  #   task db:copy:dry-run -- dev test
-  #
+  # Same safe path as db:restore (temp DB → row check → migrate → swap; previous DB kept).
+  #   task db:copy:dev-to-staging | staging-to-dev | staging-to-prod | prod-to-staging
+  #   task db:copy -- <src> <dst> [--no-migrate] [--no-backup]   (env: dev | staging | prod | scenario:<name>)
+  #   DRY_RUN=1 previews; then db:restore:commit:<dst> / db:restore:rollback:<dst>.
+
+  _copy:
+    internal: true
+    interactive: true
+    silent: true
+    cmds:
+      - >-
+        DRY_RUN="{{.DRY_RUN | default "0"}}" MIGRATE="{{.MIGRATE | default "1"}}"
+        NO_BACKUP="{{.NO_BACKUP | default "0"}}" ASSUME_YES="{{.ASSUME_YES | default "0"}}"
+        CONFIRM="{{.CONFIRM}}" ROOT_DIR="{{.ROOT_DIR}}"
+        bash .taskfiles/db_copy.sh {{.ARGS}}
 
   copy:dev-to-staging:
-    desc: "🔄 Copy dev database → staging. DRY_RUN=1 to preview."
-    prompt: "This will REPLACE the staging database with dev data. Continue?"
-    vars:
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    desc: "🔄 Copy dev database → staging (migrates, keeps previous staging DB for rollback). DRY_RUN=1 to preview."
+    interactive: true
     cmds:
-      - |
-        FLAGS=""
-        if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="--dry-run"; fi
-        ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh dev staging $FLAGS
+      - task: _copy
+        vars: { ARGS: "dev staging" }
 
   copy:staging-to-dev:
-    desc: "🔄 Copy staging database → dev (with schema migration). DRY_RUN=1 to preview."
-    prompt: "This will REPLACE the dev database with staging data and run migrations. Continue?"
-    vars:
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    desc: "🔄 Copy staging database → dev (migrates, keeps previous dev DB for rollback). DRY_RUN=1 to preview."
+    interactive: true
     cmds:
-      - |
-        FLAGS="--migrate"
-        if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="$FLAGS --dry-run"; fi
-        BACKEND_DIR={{.BACKEND_DIR}} ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh staging dev $FLAGS
+      - task: _copy
+        vars: { ARGS: "staging dev" }
 
   copy:staging-to-prod:
-    desc: "⚠️ Copy staging database → prod (promotes to production). DRY_RUN=1 to preview."
-    prompt: "⚠️ This will REPLACE the PRODUCTION database with staging data. Continue?"
-    vars:
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    desc: "⚠️ Copy staging database → prod (migrates, keeps previous prod DB for rollback). DRY_RUN=1 to preview."
+    interactive: true
     cmds:
-      - |
-        FLAGS=""
-        if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="--dry-run"; fi
-        ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh staging prod $FLAGS
+      - task: _copy
+        vars: { ARGS: "staging prod" }
 
   copy:prod-to-staging:
-    desc: "🔄 Copy prod database → staging. DRY_RUN=1 to preview."
-    prompt: "This will REPLACE the staging database with PRODUCTION data. Continue?"
-    vars:
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    desc: "🔄 Copy prod database → staging (migrates, keeps previous staging DB for rollback). DRY_RUN=1 to preview."
+    interactive: true
     cmds:
-      - |
-        FLAGS=""
-        if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="--dry-run"; fi
-        ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh prod staging $FLAGS
+      - task: _copy
+        vars: { ARGS: "prod staging" }
 
   copy:
-    desc: "🔄 Copy a database between any two envs. DRY_RUN=1 to preview. (usage: task db:copy -- <src> <dst> [--migrate])"
-    prompt: "This will REPLACE the target database with source data. Continue?"
-    vars:
-      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    desc: "🔄 Copy a database between any two envs. DRY_RUN=1 to preview. (usage: task db:copy -- <src> <dst> [--no-migrate] [--no-backup])"
+    interactive: true
     cmds:
-      - |
-        ARGS="{{.CLI_ARGS}}"
-        SRC=""
-        DST=""
-        EXTRA_FLAGS=""
-
-        for arg in $ARGS; do
-          arg="${arg#\'}"
-          arg="${arg%\'}"
-          arg="${arg#\"}"
-          arg="${arg%\"}"
-          case "$arg" in
-            --migrate) EXTRA_FLAGS="$EXTRA_FLAGS --migrate" ;;
-            --dry-run) EXTRA_FLAGS="$EXTRA_FLAGS --dry-run" ;;
-            DRY_RUN=1) EXTRA_FLAGS="$EXTRA_FLAGS --dry-run" ;;
-            DRY_RUN=0) ;;
-            *)
-              if [ -z "$SRC" ]; then
-                SRC="$arg"
-              elif [ -z "$DST" ]; then
-                DST="$arg"
-              fi
-              ;;
-          esac
-        done       task db:copy:prod-to-staging"
-          echo "
-
-        if [ -z "$SRC" ] || [ -z "$DST" ]; then
-          echo "Usage: task db:copy -- <source> <target> [--migrate]"
-          echo "       task db:copy -- dev staging"
-          echo "       task db:copy -- staging dev --migrate"
-          echo ""
-          echo "Or use the named shortcuts:"
-          echo "       task db:copy:dev-to-staging"
-          echo "       task db:copy:staging-to-dev    (includes --migrate)"
-          echo "       task db:copy:staging-to-prod"
-          echo ""
-          echo "Available environments: dev, staging, prod, scenario"
-          exit 1
-        fi
-
-        if [ "$SRC" = "$DST" ]; then
-          echo "❌ Source and target must be different environments"
-          exit 1
-        fi
-
-
-        if [ "{{.DRY_RUN}}" = "1" ]; then
-          EXTRA_FLAGS="$EXTRA_FLAGS --dry-run"
-        fi
-
-        exec env BACKEND_DIR="{{.BACKEND_DIR}}" ROOT_DIR="{{.ROOT_DIR}}" \
-          "{{.ROOT_DIR}}/.taskfiles/db_copy.sh" "$SRC" "$DST" $EXTRA_FLAGS
+      - task: _copy
+        vars: { ARGS: "{{.CLI_ARGS}}" }
 
   # === Tag Cleanup ===
 
@@ -666,12 +792,11 @@ tasks:
           STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
           [ -f "$STATE_FILE" ] && source "$STATE_FILE"
           echo "🔍 DRY RUN — would reset scenario database:"
-          echo "   Instance: {{.SCENARIO | default \"default\"}}"
+          echo "   Instance: $SCENARIO_LABEL"
           echo "   DB port:  $SC_DB_PORT"
           echo "   Actions: drop all tables → seed"
           exit 0
         fi
-      - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
         SCENARIO_LABEL="{{.SCENARIO}}"; [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
         STATE_FILE="{{.ROOT_DIR}}/.taskfiles/.scenario-state/$SCENARIO_LABEL.env"
@@ -703,4 +828,4 @@ tasks:
               {{.ROOT_DIR}}/.venv/bin/python -m backend.scripts.seed
           fi
         fi
-      - echo "✅ Scenario database reset and seeded"
+        echo "✅ Scenario database reset and seeded"

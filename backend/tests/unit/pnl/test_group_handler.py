@@ -2210,3 +2210,41 @@ class TestMixedAssetProceeds:
         # FMV: 3 * 100 = 300
         assert entry.proceeds_in_base == Decimal("300")
         assert entry.proceeds_source != "base_currency"
+
+
+class TestZeroPriceResolution:
+    """Synthetic $0 closes (losing prediction-market shares) must not trigger FMV lookups."""
+
+    @staticmethod
+    def _leg(price, source_type="synthetic-close", tags=None):
+        from types import SimpleNamespace
+
+        tx = SimpleNamespace(price=price, source_transaction_type=source_type, tags=tags)
+        return SimpleNamespace(
+            is_fee=False, asset_id=42, quantity=Decimal("10"), date_time=None,
+            origin_transaction=tx, transaction=tx,
+        )
+
+    def test_synthetic_close_at_zero_has_zero_proceeds_without_fmv(self, fifo_config):
+        from unittest.mock import MagicMock
+        from backend.services.pnl.group_handler import _compute_proceeds
+
+        fmv = MagicMock()
+        proceeds, error, meta = _compute_proceeds(self._leg(Decimal("0")), [], [], fmv, fifo_config)
+
+        assert proceeds == Decimal("0")
+        assert error is None
+        assert meta["source"] == "resolution"
+        fmv.get_fmv_in_base.assert_not_called()
+
+    def test_legacy_synthetic_tag_is_recognised(self):
+        from backend.services.pnl.group_handler import _is_zero_price_resolution
+
+        assert _is_zero_price_resolution(self._leg(Decimal("0"), "sell", [{"synthetic": True}]))
+
+    def test_regular_zero_price_sell_still_uses_fmv(self):
+        from backend.services.pnl.group_handler import _is_zero_price_resolution
+
+        assert not _is_zero_price_resolution(self._leg(Decimal("0"), "sell", [{"side": "SELL"}]))
+        assert not _is_zero_price_resolution(self._leg(Decimal("0.5")))
+        assert not _is_zero_price_resolution(self._leg(None))

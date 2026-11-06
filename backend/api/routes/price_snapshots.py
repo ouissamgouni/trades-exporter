@@ -378,6 +378,25 @@ def _transaction_asset_ids(session: Session) -> List[int]:
     return sorted(aid for aid in ids if aid is not None)
 
 
+def _price_fetchable_asset_ids(session: Session, ids: List[int]) -> List[int]:
+    """Drop assets whose prices can't be fetched (e.g. Polymarket without a getter): their gaps are unfixable."""
+    from backend.api.routes.pnl import (
+        _classify_asset_price_policy,
+        _get_enabled_price_getters_by_asset,
+    )
+
+    if not ids:
+        return []
+    assets = session.exec(select(Asset).where(Asset.asset_id.in_(ids))).all()
+    getters = _get_enabled_price_getters_by_asset(session, ids)
+    fetchable = {
+        a.asset_id
+        for a in assets
+        if _classify_asset_price_policy(a, getters.get(a.asset_id))["price_fetch_eligible"]
+    }
+    return [aid for aid in ids if aid in fetchable]
+
+
 @router.get("/gaps/summary", response_model=GapSummaryResponse)
 def get_price_gaps_summary(
     asset_ids: Optional[str] = Query(
@@ -396,6 +415,7 @@ def get_price_gaps_summary(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid asset_ids format.")
 
+    ids = _price_fetchable_asset_ids(session, ids)
     if not ids:
         return GapSummaryResponse(items=[])
 
@@ -584,8 +604,12 @@ def start_gap_fix_job(
         ).first()
         if base_asset:
             quote_id = base_asset.asset_id
+    asset_ids = _price_fetchable_asset_ids(
+        session,
+        req.asset_ids if req.asset_ids is not None else _transaction_asset_ids(session),
+    )
     try:
-        return gap_fix_jobs.start(req.asset_ids, quote_id)
+        return gap_fix_jobs.start(asset_ids, quote_id)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

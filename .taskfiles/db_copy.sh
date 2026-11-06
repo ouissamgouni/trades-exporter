@@ -1,295 +1,75 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────
-# db_copy.sh — Copy a PostgreSQL database between environments
-# ─────────────────────────────────────────────────────────────
+# Copy a database between local envs, using the same safe restore path as db:restore
+# (restore into a temp DB → check rows → migrate → rename swap; previous DB kept for rollback).
 #
-# Usage:
-#   ./db_copy.sh <src_env> <dst_env> [--dry-run] [--migrate]
-#   env = dev | staging | prod | scenario
+#   db_copy.sh <src> <dst> [--dry-run] [--no-migrate] [--no-backup]
+#   env = dev | staging | prod | scenario[:<name>]
 #
-# Config layers per env (same convention as the Taskfile):
-#   dev:      config/base.env → scenarios/dev/config.env → config/secrets.env → config/secrets.dev.env
-#   staging:  config/base.env → config/staging.local.env → config/secrets.env → config/secrets.staging.local.env
-#   prod:     config/base.env → config/prod.local.env    → config/secrets.env → config/secrets.prod.local.env
-#   scenario: config/base.env → config/scenario.env      → config/secrets.env → config/secrets.scenario.env
-# The final resolved configuration must define:
-#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT
-#
-# Flags:
-#   --dry-run     Preview what would happen without making changes
-#   --migrate     After restore, run Alembic migrations on the target
-#                 to bring the schema up to HEAD. Requires BACKEND_DIR
-#                 and ROOT_DIR env vars (set by Taskfile).
-#
-# Examples:
-#   ./db_copy.sh dev staging
-#   ./db_copy.sh staging dev --migrate
-#   ./db_copy.sh dev prod --dry-run
-# ─────────────────────────────────────────────────────────────
+# Staging/prod targets get a durable pre-copy backup first (unless --no-backup).
+# Migrations run by default, to the revision the target's deployed code expects.
 set -euo pipefail
 
-# ── Helpers ──────────────────────────────────────────────────
+# shellcheck source=.taskfiles/db_lib.sh
+source "$(dirname "$0")/db_lib.sh"
 
-die()  { echo "❌ $*" >&2; exit 1; }
-info() { echo "   $*"; }
-
-REPO_ROOT="${ROOT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-
-env_layers() {
-  # env_layers <env> — prints the config layer files for an env, one per line.
-  local c="$REPO_ROOT/config"
-  case "$1" in
-    dev)      printf '%s\n' "$c/base.env" "$REPO_ROOT/scenarios/dev/config.env" "$c/secrets.env" "$c/secrets.dev.env" ;;
-    staging)  printf '%s\n' "$c/base.env" "$c/staging.local.env" "$c/secrets.env" "$c/secrets.staging.local.env" ;;
-    prod)     printf '%s\n' "$c/base.env" "$c/prod.local.env" "$c/secrets.env" "$c/secrets.prod.local.env" ;;
-    scenario) printf '%s\n' "$c/base.env" "$c/scenario.env" "$c/secrets.env" "$c/secrets.scenario.env" ;;
-    *) die "Unknown env '$1' (expected dev | staging | prod | scenario)" ;;
-  esac
-}
-
-env_value_from_layers() {
-  # env_value_from_layers <key> <env> — prints the last value found across layers.
-  local key="$1" env_name="$2"
-  local layers value layer line
-
-  layers=()
-  while IFS= read -r layer; do layers+=("$layer"); done < <(env_layers "$env_name")
-
-  value=""
-  for layer in "${layers[@]}"; do
-    [[ -f "$layer" ]] || continue
-    line=$(grep -E "^[[:space:]]*${key}=" "$layer" | tail -1 || true)
-    [[ -n "$line" ]] || continue
-    value="${line#*=}"
-    value="${value%$'\r'}"
-  done
-
-  printf '%s' "$value"
-}
-
-parse_env() {
-  # parse_env <env> <prefix> — sets PREFIX_USER, PREFIX_PASS, etc.
-  local file="$1" prefix="$2"
-  env_layers "$file" >/dev/null
-
-  local user pass db host port
-  user=$(env_value_from_layers POSTGRES_USER "$file")
-  pass=$(env_value_from_layers POSTGRES_PASSWORD "$file")
-  db=$(env_value_from_layers POSTGRES_DB "$file")
-  host=$(env_value_from_layers POSTGRES_HOST "$file")
-  port=$(env_value_from_layers POSTGRES_PORT "$file")
-
-  [[ -n "$user" ]] || die "POSTGRES_USER missing after loading config layers for $file"
-  [[ -n "$pass" ]] || die "POSTGRES_PASSWORD missing after loading config layers for $file"
-  [[ -n "$db"   ]] || die "POSTGRES_DB missing after loading config layers for $file"
-  [[ -n "$host" ]] || die "POSTGRES_HOST missing after loading config layers for $file"
-  [[ -n "$port" ]] || die "POSTGRES_PORT missing after loading config layers for $file"
-
-  eval "${prefix}_USER='$user'"
-  eval "${prefix}_PASS='$pass'"
-  eval "${prefix}_DB='$db'"
-  eval "${prefix}_HOST='$host'"
-  eval "${prefix}_PORT='$port'"
-}
-
-table_count() {
-  # table_count <host> <port> <user> <pass> <db> — prints number of public tables
-  PGPASSWORD="$4" psql -h "$1" -p "$2" -U "$3" --no-password -d "$5" \
-    -tAq -c "SELECT count(*) FROM pg_tables WHERE schemaname='public';" 2>/dev/null || echo "?"
-}
-
-test_connection() {
-  # test_connection <host> <port> <user> <pass> <db> — returns 0 if OK
-  PGPASSWORD="$4" psql -h "$1" -p "$2" -U "$3" --no-password -d "$5" \
-    -tAq -c "SELECT 1;" >/dev/null 2>&1
-}
-
-# ── Parse arguments ──────────────────────────────────────────
-
-DRY_RUN=false
-MIGRATE=false
-SRC_ENV=""
-DST_ENV=""
+SRC_SPEC=""
+DST_SPEC=""
+DRY_RUN="${DRY_RUN:-0}"
+MIGRATE="${MIGRATE:-1}"
+NO_BACKUP="${NO_BACKUP:-0}"
 
 for arg in "$@"; do
   case "$arg" in
-    --dry-run) DRY_RUN=true ;;
-    --migrate) MIGRATE=true ;;
+    --dry-run)    DRY_RUN=1 ;;
+    --no-migrate) MIGRATE=0 ;;
+    --migrate)    MIGRATE=1 ;;
+    --no-backup)  NO_BACKUP=1 ;;
+    -*) die "Unknown flag: $arg" ;;
     *)
-      if [[ -z "$SRC_ENV" ]]; then
-        SRC_ENV="$arg"
-      elif [[ -z "$DST_ENV" ]]; then
-        DST_ENV="$arg"
-      else
-        die "Unexpected argument: $arg"
-      fi
-      ;;
+      if   [ -z "$SRC_SPEC" ]; then SRC_SPEC="$arg"
+      elif [ -z "$DST_SPEC" ]; then DST_SPEC="$arg"
+      else die "Unexpected argument: $arg"
+      fi ;;
   esac
 done
+[ -n "$SRC_SPEC" ] && [ -n "$DST_SPEC" ] || die "Usage: $0 <src> <dst> [--dry-run] [--no-migrate] [--no-backup]"
+export DRY_RUN MIGRATE
 
-[[ -n "$SRC_ENV" ]] || die "Missing source env file.\nUsage: $0 <src_env> <dst_env> [--dry-run] [--migrate]"
-[[ -n "$DST_ENV" ]] || die "Missing target env file.\nUsage: $0 <src_env> <dst_env> [--dry-run] [--migrate]"
+resolve_env "$SRC_SPEC" S
+resolve_env "$DST_SPEC" D
+[ "$S_CONTAINER/$S_DB" != "$D_CONTAINER/$D_DB" ] || die "Source and target are the same database ($S_CONTAINER/$S_DB)"
+require_db_container S
+require_db_container D
+db_exists S "$S_DB" || die "Source database $S_DB does not exist in $S_CONTAINER"
 
-# ── Parse env files ──────────────────────────────────────────
+echo "" >&2
+echo "🔄 Copy $S_SPEC ($S_CONTAINER/$S_DB) → $D_SPEC ($D_CONTAINER/$D_DB)" >&2
 
-parse_env "$SRC_ENV" "SRC"
-parse_env "$DST_ENV" "DST"
+TMP_DIR="$BACKUP_ROOT/.tmp"
+mkdir -p "$TMP_DIR" && chmod 700 "$TMP_DIR"
+BASE="$TMP_DIR/copy_${S_LABEL}_to_${D_LABEL}_$(utc_now)"
+EXIT_HOOK='rm -f "$BASE.dump" "$BASE.meta"'
+EXPECTED_META="$BASE.meta"
+trap run_exit_hook EXIT
 
-[[ "$SRC_DB" != "$DST_DB" || "$SRC_PORT" != "$DST_PORT" || "$SRC_HOST" != "$DST_HOST" ]] \
-  || die "Source and target resolve to the same database ($SRC_HOST:$SRC_PORT/$SRC_DB)"
+step "Dumping $S_SPEC"
+ROWS_BEFORE=$(row_fingerprint S "$S_DB")
+(umask 077; dump_db S "$S_DB" "$BASE.dump") || die "pg_dump failed"
+write_meta S "$S_DB" "$BASE.dump" "copy" "$BASE.meta" "$ROWS_BEFORE"
+info "✅ $(human_size "$(file_size "$BASE.dump")"), rev $(meta_get "$BASE.meta" alembic_rev)"
 
-# ── Display plan ─────────────────────────────────────────────
+export NO_BACKUP
+restore_dump D "$BASE.dump" "copied_from=$S_SPEC/$S_DB" "pre-copy-from-$S_LABEL"
 
-echo ""
-echo "🔄 Database Copy"
-echo "═══════════════════════════════════════════════════"
-echo "   Source:  $SRC_HOST:$SRC_PORT/$SRC_DB"
-echo "   Target:  $DST_HOST:$DST_PORT/$DST_DB"
-if $MIGRATE; then
-  echo "   Migrate: yes (alembic upgrade head after restore)"
-fi
-echo "═══════════════════════════════════════════════════"
-echo ""
-
-# ── Check connectivity ───────────────────────────────────────
-
-echo "🔗 Checking connections..."
-test_connection "$SRC_HOST" "$SRC_PORT" "$SRC_USER" "$SRC_PASS" "$SRC_DB" \
-  || die "Cannot connect to source: $SRC_HOST:$SRC_PORT/$SRC_DB"
-info "✅ Source OK"
-
-# For target, try connecting to 'postgres' db first (target db may not exist yet)
-test_connection "$DST_HOST" "$DST_PORT" "$DST_USER" "$DST_PASS" "postgres" \
-  || die "Cannot connect to target host: $DST_HOST:$DST_PORT"
-info "✅ Target host OK"
-echo ""
-
-# ── Table counts (before) ───────────────────────────────────
-
-SRC_TABLES=$(table_count "$SRC_HOST" "$SRC_PORT" "$SRC_USER" "$SRC_PASS" "$SRC_DB")
-echo "📊 Source tables: $SRC_TABLES"
-
-if test_connection "$DST_HOST" "$DST_PORT" "$DST_USER" "$DST_PASS" "$DST_DB" 2>/dev/null; then
-  DST_TABLES_BEFORE=$(table_count "$DST_HOST" "$DST_PORT" "$DST_USER" "$DST_PASS" "$DST_DB")
-  echo "📊 Target tables (before): $DST_TABLES_BEFORE"
-else
-  echo "📊 Target database does not exist yet (will be created)"
-fi
-echo ""
-
-# ── Dry-run stop ─────────────────────────────────────────────
-
-if $DRY_RUN; then
-  echo "🔍 Dry run — no changes made."
+if [ "$DRY_RUN" = "1" ]; then
+  next_steps "task db:copy -- $SRC_SPEC $DST_SPEC   # run it for real"
   exit 0
 fi
 
-# ── Step 1: Dump source ─────────────────────────────────────
-
-DUMP_FILE=$(mktemp /tmp/trades_db_copy_XXXXXX.dump)
-trap 'rm -f "$DUMP_FILE"' EXIT
-
-echo "📤 Dumping source database..."
-PGPASSWORD="$SRC_PASS" pg_dump \
-  -h "$SRC_HOST" -p "$SRC_PORT" -U "$SRC_USER" \
-  --no-password -Fc "$SRC_DB" -f "$DUMP_FILE"
-info "Dump size: $(du -sh "$DUMP_FILE" | cut -f1)"
-echo ""
-
-# ── Step 2: Drop & recreate target ──────────────────────────
-
-echo "🗑️  Dropping target database ($DST_DB)..."
-PGPASSWORD="$DST_PASS" psql \
-  -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
-  --no-password -d postgres \
-  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DST_DB' AND pid <> pg_backend_pid();" \
-  -c "DROP DATABASE IF EXISTS \"$DST_DB\";" \
-  -c "CREATE DATABASE \"$DST_DB\" OWNER \"$DST_USER\";" \
-  >/dev/null 2>&1
-info "Recreated $DST_DB"
-echo ""
-
-# ── Step 3: Restore ─────────────────────────────────────────
-
-echo "📥 Restoring into target database..."
-# pg_restore returns exit code 1 for warnings (e.g. transaction_timeout on
-# version mismatch). Capture the exit code and only fail on real errors.
-set +e
-RESTORE_OUTPUT=$(PGPASSWORD="$DST_PASS" pg_restore \
-  -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
-  --no-password --no-owner --role="$DST_USER" \
-  -d "$DST_DB" "$DUMP_FILE" 2>&1)
-RESTORE_RC=$?
-set -e
-
-if [[ $RESTORE_RC -ne 0 ]]; then
-  # Check if the output only contains warnings (not fatal errors)
-  FATAL_ERRORS=$(echo "$RESTORE_OUTPUT" | grep -c "FATAL\|could not connect\|no matching tables" || true)
-  if [[ $FATAL_ERRORS -gt 0 ]]; then
-    echo "$RESTORE_OUTPUT"
-    die "Restore failed with fatal errors (exit code $RESTORE_RC)"
-  fi
-  info "⚠️  pg_restore exited with warnings (non-fatal, usually version mismatch)"
-fi
-echo ""
-
-# ── Step 4: Verify ──────────────────────────────────────────
-
-echo "🔍 Verifying..."
-DST_TABLES_AFTER=$(table_count "$DST_HOST" "$DST_PORT" "$DST_USER" "$DST_PASS" "$DST_DB")
-echo "   Source tables: $SRC_TABLES"
-echo "   Target tables: $DST_TABLES_AFTER"
-
-if [[ "$SRC_TABLES" == "$DST_TABLES_AFTER" ]]; then
-  info "✅ Table counts match"
-else
-  info "⚠️  Table count mismatch — check for errors above"
-fi
-echo ""
-
-# ── Step 5 (optional): Migrate target to HEAD ───────────────
-
-if $MIGRATE; then
-  # Resolve paths: BACKEND_DIR and ROOT_DIR are passed by Taskfile.
-  # Fall back to reasonable defaults relative to this script.
-  _BACKEND_DIR="${BACKEND_DIR:-$REPO_ROOT/backend}"
-  _ROOT_DIR="$REPO_ROOT"
-  ALEMBIC_INI="$_BACKEND_DIR/alembic.ini"
-  ALEMBIC_BIN="$_ROOT_DIR/.venv/bin/alembic"
-
-  if [[ ! -f "$ALEMBIC_INI" ]]; then
-    echo "⚠️  Cannot migrate: alembic.ini not found at $ALEMBIC_INI"
-  elif [[ ! -x "$ALEMBIC_BIN" ]]; then
-    echo "⚠️  Cannot migrate: alembic not found at $ALEMBIC_BIN"
-  else
-    # Read current version from restored DB
-    RESTORED_VER=$(PGPASSWORD="$DST_PASS" psql -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
-      --no-password -d "$DST_DB" -tAq \
-      -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null || echo "unknown")
-
-    echo "🔀 Running Alembic migrations on target..."
-    info "Current version: $RESTORED_VER"
-
-    PYTHONPATH="$_ROOT_DIR" \
-    DATABASE_URL="postgresql://$DST_USER:$DST_PASS@$DST_HOST:$DST_PORT/$DST_DB" \
-      "$ALEMBIC_BIN" -c "$ALEMBIC_INI" upgrade head 2>&1 | while IFS= read -r line; do
-        echo "   $line"
-      done
-
-    MIGRATED_VER=$(PGPASSWORD="$DST_PASS" psql -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
-      --no-password -d "$DST_DB" -tAq \
-      -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null || echo "unknown")
-
-    if [[ "$RESTORED_VER" == "$MIGRATED_VER" ]]; then
-      info "✅ Already at HEAD ($MIGRATED_VER)"
-    else
-      info "✅ Migrated: $RESTORED_VER → $MIGRATED_VER"
-    fi
-
-    DST_TABLES_FINAL=$(table_count "$DST_HOST" "$DST_PORT" "$DST_USER" "$DST_PASS" "$DST_DB")
-    info "Target tables (after migration): $DST_TABLES_FINAL"
-    echo ""
-  fi
-fi
-
-echo "✅ Done — $SRC_HOST:$SRC_PORT/$SRC_DB  →  $DST_HOST:$DST_PORT/$DST_DB"
+echo "" >&2
+echo "✅ Copied $S_SPEC → $D_SPEC" >&2
+[ -n "$PRE_BACKUP" ] && info "Safety backup of the previous $D_SPEC data: ${PRE_BACKUP#"$REPO_ROOT"/}"
+next_steps \
+  "Check the $D_SPEC app" \
+  "task db:restore:commit:$D_TASK_SUFFIX     # happy: drop the kept previous database" \
+  "task db:restore:rollback:$D_TASK_SUFFIX   # not happy: swap the previous database back"

@@ -1213,6 +1213,35 @@ def _expected_trading_days(
     return days
 
 
+def _closed_position_end_date(session: Session, asset_id: int) -> Optional[date]:
+    """Last transaction date when the asset's net quantity is ~0, else None (still held)."""
+    signed_qty = case(
+        (NormalizedTransaction.direction == "inflow", NormalizedTransaction.quantity),
+        (NormalizedTransaction.direction == "outflow", -NormalizedTransaction.quantity),
+        else_=0,
+    )
+    inflow_qty = case(
+        (NormalizedTransaction.direction == "inflow", NormalizedTransaction.quantity),
+        else_=0,
+    )
+    net, total_in, last_dt = session.exec(
+        select(
+            func.sum(signed_qty),
+            func.sum(inflow_qty),
+            func.max(NormalizedTransaction.date_time),
+        ).where(
+            NormalizedTransaction.asset_id == asset_id,
+            NormalizedTransaction.review_status != "invalid",
+        )
+    ).one()
+    if net is None or last_dt is None:
+        return None
+    tolerance = max(Decimal("1e-9"), Decimal(str(total_in or 0)) * Decimal("1e-6"))
+    if abs(Decimal(str(net))) > tolerance:
+        return None
+    return last_dt.date() if hasattr(last_dt, "date") else last_dt
+
+
 def detect_gaps(
     session: Session,
     asset_id: int,
@@ -1230,7 +1259,8 @@ def detect_gaps(
         session: DB session
         asset_id: Asset to analyse
         date_from: Override start date (default: first snapshot date)
-        date_to: Override end date (default: today)
+        date_to: Override end date (default: today, or the last transaction
+            date when the position is fully closed)
         quote_asset_id: Filter snapshots by quote currency (default: all)
 
     Returns:
@@ -1263,7 +1293,7 @@ def detect_gaps(
         date_from = first_tx_dt.date() if hasattr(first_tx_dt, "date") else first_tx_dt
 
     if date_to is None:
-        date_to = date.today()
+        date_to = _closed_position_end_date(session, asset_id) or date.today()
 
     # Collect existing price dates
     snap_stmt = (
