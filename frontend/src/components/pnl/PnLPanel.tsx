@@ -18,7 +18,8 @@ import { PnLStatusBadge } from './PnLStatusBadge';
 // P&L Components
 import { CalculationContext } from './CalculationContext';
 import { PnLImpactPanel } from './PnLImpactPanel';
-import { PriceStatusList } from './PriceStatusList';
+import { PricesDrawer } from './PricesDrawer';
+import { resolvePriceState } from './priceState';
 import { SlidePanel } from './SlidePanel';
 import { BalanceSlidePanel } from './BalanceSlidePanel';
 import { UnitDetailSlidePanel } from './UnitDetailSlidePanel';
@@ -71,6 +72,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
         availableAccountIds,
         availableCategoryIds,
         versionsQuery,
+        queryClient,
         heroTimeline,
         versionMetrics,
         bookMetrics,
@@ -107,7 +109,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
     const isLoadingVersions = versionsQuery.isLoading;
 
     // ── Price operations ──
-    const { fetchPrices, handlePriceAdded, handleRefreshPrices, retryFailedPrices } = usePnLPrices();
+    const { fetchPrices, handlePriceAdded, handleRefreshPrices, retryFailedPrices, refreshSinglePrice } = usePnLPrices();
 
     // ── Data operations ──
     const {
@@ -388,9 +390,9 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                             <RefreshPricesCard
                                 onRefreshPrices={handleRefreshPrices}
                                 isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
-                                priceSuccessCount={prices.filter(p => !p.error && p.price != null && !p.is_stale).length}
-                                priceStaleCount={prices.filter(p => !p.error && p.price != null && p.is_stale).length}
-                                priceErrorCount={prices.filter(p => !!p.error || p.price == null).length}
+                                priceSuccessCount={prices.filter(p => ['live', 'cached'].includes(resolvePriceState(p))).length}
+                                priceStaleCount={prices.filter(p => ['fallback', 'stale', 'failed_with_last_known'].includes(resolvePriceState(p))).length}
+                                priceErrorCount={prices.filter(p => ['failed', 'missing'].includes(resolvePriceState(p))).length}
                                 onPriceBadgeClick={() => dispatch({ type: 'SET_SHOW_PRICE_DRAWER', value: true })}
                                 refreshDisabled={!currentVersionId}
                                 naCount={displayAssets.filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id)).length}
@@ -459,23 +461,26 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
             <SlidePanel
                 isOpen={showPriceDrawer}
                 onClose={() => dispatch({ type: 'SET_SHOW_PRICE_DRAWER', value: false })}
-                title="Price Fetch Results"
-                width="600px"
+                title="Prices"
+                width="960px"
             >
-                <PriceStatusList
+                <PricesDrawer
                     prices={prices}
                     baseCurrency={config.base_currency_symbol}
                     quoteAssetId={config.base_currency_id ?? undefined}
+                    pnlAssets={pnlAssets}
+                    naAssets={displayAssets.filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id))}
+                    totalAssetCount={displayAssets.length}
+                    loadingAssetIds={loadingPriceAssetIds}
+                    pnlVersionId={currentVersionId ?? undefined}
                     onPriceAdded={(assetId) => handlePriceAdded(assetId)}
                     onRetryFailed={retryFailedPrices}
-                    onBulkGapFixComplete={handleRefreshPrices}
-                    loadingAssetIds={loadingPriceAssetIds}
-                    assetNameMap={new Map(pnlAssets.map(a => [a.asset.id!, a.asset.symbol ?? `#${a.asset.id}`]))}
-                    totalAssetCount={displayAssets.length}
-                    naAssets={displayAssets
-                        .filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id))
-                        .map(da => ({ id: da.asset.id!, symbol: da.asset.symbol ?? `#${da.asset.id}` }))
-                    }
+                    onRefreshAll={handleRefreshPrices}
+                    onRefreshAsset={(assetId) => refreshSinglePrice(assetId, { force: true })}
+                    onGapFixFinished={() => {
+                        versionMetrics.refetch();
+                        queryClient.invalidateQueries({ queryKey: ['portfolio-timeline'] });
+                    }}
                 />
             </SlidePanel>
 

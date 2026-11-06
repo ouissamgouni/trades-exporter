@@ -15,7 +15,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlmodel import Session, select
 from sqlalchemy import and_, func, not_, or_, case, cast, String as SAString
 from sqlalchemy.orm import selectinload
@@ -905,6 +905,26 @@ class PriceResponse(BaseModel):
     last_known_price: Optional[float] = None
     last_known_price_date: Optional[datetime] = None
     last_known_source: Optional[str] = None
+    # live | cached | fallback | stale | failed_with_last_known | failed | missing | skipped
+    price_state: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _derive_price_state(self) -> "PriceResponse":
+        if self.price_state is None:
+            if self.skipped:
+                self.price_state = "skipped"
+            elif self.price is not None:
+                if self.is_stale:
+                    self.price_state = "stale"
+                elif self.is_fallback:
+                    self.price_state = "fallback"
+                else:
+                    self.price_state = "live"
+            elif self.last_known_price is not None:
+                self.price_state = "failed_with_last_known"
+            else:
+                self.price_state = "failed"
+        return self
 
 
 # =============================================================================
@@ -1613,6 +1633,9 @@ def get_asset_price(
     max_timeout_seconds: int = Query(
         10, description="Max seconds before giving up live fetch and returning fallback"
     ),
+    force_live: bool = Query(
+        False, description="Skip the recent-snapshot cache and fetch live"
+    ),
     session: Session = Depends(get_session_dependency),
 ):
     """
@@ -1662,6 +1685,7 @@ def get_asset_price(
             use_fallback=use_fallback,
             staleness_window_days=staleness_window_days,
             max_timeout_seconds=max_timeout_seconds,
+            force_live=force_live,
         )
 
         warning_msg = None
@@ -1724,6 +1748,83 @@ def get_asset_price(
             valuation_status=price_policy["valuation_status"],
             valuation_note=price_policy["valuation_note"],
         )
+
+
+class CachedPricesRequest(BaseModel):
+    asset_ids: List[int]
+    base_currency: str = "EUR"
+    staleness_window_days: int = 7
+
+
+@router.post("/prices/cached", response_model=List[PriceResponse])
+def get_cached_prices(
+    request: CachedPricesRequest,
+    session: Session = Depends(get_session_dependency),
+):
+    """Latest stored price per asset, without any live fetch."""
+    from datetime import timezone
+
+    price_service = PriceService(session=session)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    assets = session.exec(
+        select(Asset).where(Asset.asset_id.in_(request.asset_ids))
+    ).all()
+    getters_by_asset = _get_enabled_price_getters_by_asset(session, request.asset_ids)
+    snapshots = price_service.cache.get_latest_many(
+        session,
+        request.asset_ids,
+        price_service._get_quote_asset_id(session, request.base_currency),
+        exclude_sources=price_service._get_cache_exclude_sources(session),
+    )
+
+    items: List[PriceResponse] = []
+    for asset in assets:
+        policy = _classify_asset_price_policy(
+            asset, getters_by_asset.get(asset.asset_id, set())
+        )
+        ref = AssetRef(
+            id=asset.asset_id,
+            symbol=asset.symbol or f"#{asset.asset_id}",
+            label=asset.label,
+        )
+        common = dict(
+            asset=ref,
+            price_quote=request.base_currency,
+            price_fetch_eligible=policy["price_fetch_eligible"],
+            valuation_status=policy["valuation_status"],
+            valuation_note=policy["valuation_note"],
+        )
+        if asset.symbol and asset.symbol.upper() == request.base_currency.upper():
+            items.append(
+                PriceResponse(
+                    **common,
+                    price=1.0,
+                    source="same_currency",
+                    fetched_at=now,
+                    price_state="cached",
+                )
+            )
+            continue
+        snap = snapshots.get(asset.asset_id)
+        if snap is None:
+            items.append(PriceResponse(**common, price_state="missing"))
+            continue
+        snap_time = snap.snapshot_time.replace(tzinfo=None)
+        staleness_days = (now - snap_time).days
+        is_stale = staleness_days > request.staleness_window_days
+        items.append(
+            PriceResponse(
+                **common,
+                price=float(snap.price),
+                source=snap.source,
+                fetched_at=snap.snapshot_time,
+                actual_price_date=snap.snapshot_time,
+                staleness_days=staleness_days,
+                is_stale=is_stale,
+                price_state="stale" if is_stale else "cached",
+            )
+        )
+    return items
 
 
 class PriceRequest(BaseModel):
@@ -3982,10 +4083,14 @@ def get_version_balances(
 
     try:
         scoped_account_ids = (
-            [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+            [int(x) for x in account_ids.split(",") if x.strip()]
+            if account_ids
+            else None
         )
     except ValueError:
-        raise HTTPException(status_code=422, detail="account_ids must be comma-separated integers")
+        raise HTTPException(
+            status_code=422, detail="account_ids must be comma-separated integers"
+        )
 
     def _scope_to_accounts(q, transaction_id_col):
         if not scoped_account_ids:
@@ -4117,7 +4222,9 @@ def get_version_balances(
             taxable_rpnl_query = taxable_rpnl_query.where(
                 RealizedPnl.origin_unit_id.in_(filtered_unit_ids)
             )
-        taxable_rpnl_query = _scope_to_accounts(taxable_rpnl_query, RealizedPnl.transaction_id)
+        taxable_rpnl_query = _scope_to_accounts(
+            taxable_rpnl_query, RealizedPnl.transaction_id
+        )
         taxable_rpnl_results = session.exec(taxable_rpnl_query).all()
         taxable_rpnl_map = {
             r.effective_asset_id: float(r.total_pnl or 0) for r in taxable_rpnl_results
@@ -6510,7 +6617,9 @@ def get_portfolio_timeline(
     session: Session = Depends(get_session_dependency),
 ):
     """Get portfolio value timeline for charts."""
-    from backend.services.pnl.portfolio_timeline import compute_portfolio_timeline_cached
+    from backend.services.pnl.portfolio_timeline import (
+        compute_portfolio_timeline_cached,
+    )
     from datetime import datetime as dt_cls
 
     parsed_date_from = dt_cls.fromisoformat(date_from) if date_from else None

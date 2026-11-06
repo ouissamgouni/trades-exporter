@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { priceScopedRows, sumLiveBalancesForAccounts } from './pnlCalculations'
+import { applyPriceToAssetRow, priceScopedRows, sumLiveBalancesForAccounts } from './pnlCalculations'
+import { createInitialPnLState, pnlReducer } from './pnlState'
+import type { PriceResponse } from '../../types'
 import type { AssetPnLRow } from './types'
 
 const row = (id: number, overrides: Partial<AssetPnLRow> = {}): AssetPnLRow => ({
@@ -51,5 +53,48 @@ describe('sumLiveBalancesForAccounts', () => {
 
         expect(result.get('BTC')).toBe(1.5)
         expect(result.has('ETH')).toBe(false)
+    })
+})
+
+const price = (overrides: Partial<PriceResponse> = {}): PriceResponse => ({
+    asset: { id: 1, symbol: 'BTC', label: 'Bitcoin' },
+    price: null,
+    price_quote: 'EUR',
+    ...overrides,
+})
+
+describe('applyPriceToAssetRow (critical: unrealized P&L valuation)', () => {
+    it('values a failed fetch at the last known price and flags it', () => {
+        const r = applyPriceToAssetRow(
+            row(1, { quantity: 2, cost_basis: 100 }),
+            price({ error: 'down', last_known_price: 80, last_known_source: 'coingecko', last_known_price_date: '2026-11-01T00:00:00' }),
+        )
+        expect(r.unit_value).toBe(80)
+        expect(r.market_value).toBe(160)
+        expect(r.unrealized_pnl).toBe(60)
+        expect(r.price_state).toBe('failed_with_last_known')
+        expect(r.price_source).toBe('coingecko')
+    })
+
+    it('leaves value at 0 when nothing is known', () => {
+        const r = applyPriceToAssetRow(row(1, { quantity: 2, cost_basis: 100 }), price({ error: 'down' }))
+        expect(r.unit_value).toBeNull()
+        expect(r.market_value).toBe(0)
+        expect(r.price_state).toBe('failed')
+    })
+})
+
+describe('UPSERT_PRICE (critical: never lose a known price on refresh failure)', () => {
+    it('carries the previous price forward as last known', () => {
+        let state = createInitialPnLState('EUR', null, [])
+        state = pnlReducer(state, { type: 'UPSERT_PRICE', assetId: 1, price: price({ price: 50, source: 'cached-src', fetched_at: '2026-11-01T00:00:00', price_state: 'cached' }) })
+        state = pnlReducer(state, { type: 'UPSERT_PRICE', assetId: 1, price: price({ error: 'Request timed out', price_state: 'failed' }) })
+
+        const [p] = state.prices
+        expect(p.price).toBeNull()
+        expect(p.last_known_price).toBe(50)
+        expect(p.last_known_source).toBe('cached-src')
+        expect(p.price_state).toBe('failed_with_last_known')
+        expect(p.error).toBe('Request timed out')
     })
 })

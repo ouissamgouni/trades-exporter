@@ -35,6 +35,7 @@ import { PnLBreakdownBar } from './PnLBreakdownBar';
 import { HeroMetricsBar } from './HeroMetricsBar';
 import { MetricItem, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import { computeDelta, formatPct } from './deltaUtils';
+import { PRICE_STATE_LABELS } from './priceState';
 
 // ------------------------------------------------------------------
 // Constants
@@ -218,13 +219,21 @@ const renderValue = (
     const hasPrice = row.unit_value != null;
     const hasError = !!row.price_error;
     const isLoadingPrice = !!row.price_loading;
+    const stateLabel = row.price_state ? PRICE_STATE_LABELS[row.price_state] : null;
+    const usingFallback = row.price_state === 'failed_with_last_known' || row.price_state === 'fallback' || row.price_state === 'stale';
 
-    if (isLoadingPrice) return <Spinner size="xs" className="text-gray-400" />;
+    if (isLoadingPrice && !hasPrice) return <Spinner size="xs" className="text-gray-400" />;
 
     return (
         <Tooltip
             content={
                 <div className="p-2 text-xs">
+                    {stateLabel && (
+                        <div className="mb-1 flex justify-between gap-4">
+                            <span className="text-gray-400">Status</span>
+                            <span className="font-medium">{isLoadingPrice ? `${stateLabel} · refreshing…` : stateLabel}</span>
+                        </div>
+                    )}
                     <div className="mb-1 flex justify-between gap-4">
                         <span className="text-gray-400">Unit price</span>
                         <span className="font-medium">
@@ -261,9 +270,10 @@ const renderValue = (
                         ? <ValueDisplay value={row.market_value} currency={baseCurrency} />
                         : '—'}
                 </span>
-                {(stale || hasError) && (
+                {(stale || hasError || usingFallback) && (
                     <FiAlertCircle size={10} color={hasError ? '#E53E3E' : '#DD6B20'} />
                 )}
+                {isLoadingPrice && <Spinner size="xs" className="text-gray-400" />}
             </div>
         </Tooltip>
     );

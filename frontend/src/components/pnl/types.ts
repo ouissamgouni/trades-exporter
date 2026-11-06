@@ -7,7 +7,7 @@
  * - Principle 3: Everything must be traceable
  */
 
-import { CostMethod, LotMode, AssetRef, Asset } from '../../types';
+import { CostMethod, LotMode, AssetRef, Asset, PriceState } from '../../types';
 
 
 // ============================================================================
@@ -253,6 +253,7 @@ export interface AssetPnLRow {
     price_fetched_at?: string;       // ISO datetime when price was fetched
     price_error?: string;            // Error message if price fetch failed
     price_loading?: boolean;         // True if price is currently being fetched
+    price_state?: PriceState;        // How the displayed unit_value was obtained
 }
 
 // ============================================================================

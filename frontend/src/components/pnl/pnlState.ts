@@ -19,6 +19,7 @@
 import type { Account, PriceResponse, DimensionWithCategories } from '../../types';
 import type { Range } from './TotalReturnScorecard';
 import type { GroupBy } from '../../hooks/useChartData';
+import { effectiveDate, effectivePrice, effectiveSource } from './priceState';
 import type { CalculationMode } from './CalculationContext';
 import type {
     CalculationConfig,
@@ -621,8 +622,22 @@ export function pnlReducer(state: PnLState, action: PnLAction): PnLState {
         case 'UPSERT_PRICE': {
             const idx = state.prices.findIndex(p => p.asset.id === action.assetId);
             if (idx >= 0) {
+                const prev = state.prices[idx];
+                let incoming = action.price;
+                // Never lose a known price because a refresh failed
+                const prevPrice = effectivePrice(prev);
+                if (incoming.price == null && incoming.last_known_price == null && prevPrice != null && !incoming.skipped) {
+                    incoming = {
+                        ...incoming,
+                        asset: { ...prev.asset, ...incoming.asset, label: incoming.asset.label ?? prev.asset.label },
+                        last_known_price: prevPrice,
+                        last_known_price_date: effectiveDate(prev),
+                        last_known_source: effectiveSource(prev),
+                        price_state: 'failed_with_last_known',
+                    };
+                }
                 const next = [...state.prices];
-                next[idx] = action.price;
+                next[idx] = incoming;
                 return { ...state, prices: next };
             }
             return { ...state, prices: [...state.prices, action.price] };

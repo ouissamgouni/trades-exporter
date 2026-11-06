@@ -7,6 +7,7 @@
 
 import type { PriceResponse } from '../../types';
 import type { AggregatedBalanceItem, AssetPnLRow } from './types';
+import { resolvePriceState } from './priceState';
 
 /**
  * Map aggregated balances (GET /balances?group_by_asset=true) to asset rows (unpriced).
@@ -53,6 +54,7 @@ export function priceScopedRows(scopedRows: AssetPnLRow[], pricedRows: AssetPnLR
             price_fetched_at: priced?.price_fetched_at,
             price_error: priced?.price_error,
             price_loading: priced?.price_loading,
+            price_state: priced?.price_state,
         };
         if (priceMeta.unit_value == null) {
             return { ...row, ...priceMeta, market_value: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0 };
@@ -98,32 +100,36 @@ export function sumLiveBalancesForAccounts(
  * price_source, price_fetched_at, and price_error updated.
  */
 export function applyPriceToAssetRow(row: AssetPnLRow, priceObj: PriceResponse | undefined): AssetPnLRow {
-    if (!priceObj || priceObj.price == null) {
+    const hasLive = priceObj?.price != null;
+    // A failed fetch still values the position at the last known price (flagged via price_state)
+    const unitPrice = hasLive ? priceObj!.price : priceObj?.last_known_price ?? null;
+    const meta = {
+        price_source: hasLive ? priceObj?.source : priceObj?.last_known_source ?? priceObj?.source,
+        price_fetched_at: hasLive ? priceObj?.fetched_at : priceObj?.last_known_price_date ?? priceObj?.fetched_at,
+        price_error: priceObj?.error,
+        price_state: priceObj ? resolvePriceState(priceObj) : undefined,
+        price_loading: false,
+    };
+    if (unitPrice == null) {
         return {
             ...row,
+            ...meta,
             market_value: 0,
             unrealized_pnl: 0,
             unrealized_pnl_pct: 0,
             unit_value: null,
-            price_source: priceObj?.source,
-            price_fetched_at: priceObj?.fetched_at,
-            price_error: priceObj?.error,
-            price_loading: false,
         };
     }
-    const marketValue = row.quantity * priceObj.price;
+    const marketValue = row.quantity * unitPrice;
     const unrealizedPnl = marketValue - row.cost_basis;
     const unrealizedPnlPct = row.cost_basis > 0 ? unrealizedPnl / row.cost_basis : 0;
     return {
         ...row,
+        ...meta,
         market_value: marketValue,
         unrealized_pnl: unrealizedPnl,
         unrealized_pnl_pct: unrealizedPnlPct,
-        unit_value: priceObj.price,
-        price_source: priceObj.source,
-        price_fetched_at: priceObj.fetched_at,
-        price_error: priceObj.error,
-        price_loading: false,
+        unit_value: unitPrice,
     };
 }
 
@@ -141,11 +147,16 @@ export function buildPriceMap(prices: PriceResponse[]): Map<number, PriceRespons
 /**
  * Apply prices to all asset rows, returning a new array.
  */
-export function applyPricesToAssets(assets: AssetPnLRow[], priceMap: Map<number, PriceResponse>): AssetPnLRow[] {
+export function applyPricesToAssets(
+    assets: AssetPnLRow[],
+    priceMap: Map<number, PriceResponse>,
+    loadingIds?: Set<number>,
+): AssetPnLRow[] {
     return assets.map(row => {
         const assetId = row.asset.id;
         const priceObj = assetId != null ? priceMap.get(assetId) : undefined;
-        return applyPriceToAssetRow(row, priceObj);
+        const updated = applyPriceToAssetRow(row, priceObj);
+        return assetId != null && loadingIds?.has(assetId) ? { ...updated, price_loading: true } : updated;
     });
 }
 

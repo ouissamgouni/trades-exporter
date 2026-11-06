@@ -228,288 +228,288 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                 </div>
             </div>
 
-                {/* ── Zone 2: Metrics grid ── */}
-                {!isNoPnl && (
-                    <div className="mb-1 flex gap-3">
-                        {/* Qty */}
-                        <Metric label="Qty" flex="1">
-                            <div className="text-xs"><ValueDisplay value={row.quantity} options={compact} /></div>
-                        </Metric>
+            {/* ── Zone 2: Metrics grid ── */}
+            {!isNoPnl && (
+                <div className="mb-1 flex gap-3">
+                    {/* Qty */}
+                    <Metric label="Qty" flex="1">
+                        <div className="text-xs"><ValueDisplay value={row.quantity} options={compact} /></div>
+                    </Metric>
 
-                        {/* Cost */}
-                        <Metric label="Cost" flex="1">
+                    {/* Cost */}
+                    <Metric label="Cost" flex="1">
+                        <Tooltip
+                            content={
+                                <div className="p-1 text-xs">
+                                    <div className="flex justify-between gap-3">
+                                        <span className="text-gray-400">Unit cost</span>
+                                        <span className="font-medium">
+                                            {row.unit_cost != null
+                                                ? <ValueDisplay value={row.unit_cost} currency={baseCurrency} />
+                                                : '—'}
+                                        </span>
+                                    </div>
+                                </div>
+                            }
+                            openDelay={200}
+                        >
+                            <div className="cursor-help">
+                                <div className="text-xs">
+                                    <ValueDisplay value={row.cost_basis} currency={baseCurrency} options={compact} />
+                                </div>
+                                {row.total_invested != null && Math.abs(row.total_invested - row.cost_basis) > 0.01 && (
+                                    <div className="text-[10px] leading-none text-gray-400">
+                                        invested <ValueDisplay value={row.total_invested} currency={baseCurrency} options={compact} />
+                                    </div>
+                                )}
+                            </div>
+                        </Tooltip>
+                    </Metric>
+
+                    {/* Value */}
+                    <Metric label="Value" flex="1">
+                        {row.price_loading && !hasPrice ? (
+                            <Spinner size="xs" className="text-gray-400" />
+                        ) : (
                             <Tooltip
                                 content={
-                                    <div className="p-1 text-xs">
-                                        <div className="flex justify-between gap-3">
-                                            <span className="text-gray-400">Unit cost</span>
+                                    <div className="p-2 text-xs">
+                                        <div className="mb-1 flex justify-between gap-4">
+                                            <span className="text-gray-400">Unit price</span>
                                             <span className="font-medium">
-                                                {row.unit_cost != null
-                                                    ? <ValueDisplay value={row.unit_cost} currency={baseCurrency} />
-                                                    : '—'}
+                                                {hasPrice ? <ValueDisplay value={row.unit_value!} currency={baseCurrency} /> : '—'}
                                             </span>
                                         </div>
+                                        <div className="mb-1 flex justify-between gap-4">
+                                            <span className="text-gray-400">Source</span>
+                                            <span className="font-medium">{row.price_source || 'N/A'}</span>
+                                        </div>
+                                        <div className="mb-1 flex justify-between gap-4">
+                                            <span className="text-gray-400">Updated</span>
+                                            <span className="font-medium">{formatDateTimeLocale(row.price_fetched_at)}</span>
+                                        </div>
+                                        {hasError && (
+                                            <div className="flex justify-between gap-4">
+                                                <span className="text-red-400">Error</span>
+                                                <span className="max-w-[200px] break-words text-red-300">{row.price_error}</span>
+                                            </div>
+                                        )}
+                                        {stale && <div className="mt-1 text-orange-400">⚠ Price is stale (over 1 hour old)</div>}
                                     </div>
                                 }
                                 openDelay={200}
+                                closeDelay={100}
                             >
-                                <div className="cursor-help">
-                                    <div className="text-xs">
-                                        <ValueDisplay value={row.cost_basis} currency={baseCurrency} options={compact} />
-                                    </div>
-                                    {row.total_invested != null && Math.abs(row.total_invested - row.cost_basis) > 0.01 && (
-                                        <div className="text-[10px] leading-none text-gray-400">
-                                            invested <ValueDisplay value={row.total_invested} currency={baseCurrency} options={compact} />
-                                        </div>
+                                <div className="flex cursor-help items-center gap-1">
+                                    <span
+                                        className={`text-xs font-medium ${stale ? 'text-orange-500' : ''} ${hasPrice ? 'underline decoration-dotted' : ''}`}
+                                    >
+                                        {hasPrice ? <ValueDisplay value={row.market_value} currency={baseCurrency} options={compact} /> : '—'}
+                                    </span>
+                                    {(stale || hasError || (row.price_state && row.price_state !== 'live' && row.price_state !== 'cached')) && (
+                                        <FiAlertCircle size={10} color={hasError ? '#E53E3E' : '#DD6B20'} />
                                     )}
                                 </div>
                             </Tooltip>
-                        </Metric>
+                        )}
+                    </Metric>
+                </div>
+            )}
 
-                        {/* Value */}
-                        <Metric label="Value" flex="1">
-                            {row.price_loading ? (
-                                <Spinner size="xs" className="text-gray-400" />
-                            ) : (
+            {/* ── Cost vs PnL bar ── */}
+            {!isNoPnl && row.cost_basis > 0 && (
+                <div className="mb-1">
+                    <PnLBreakdownBar
+                        costBasis={row.cost_basis}
+                        unrealizedPnl={row.unrealized_pnl}
+                        realizedPnl={row.realized_pnl}
+                        fees={row.total_fees}
+                        height={6}
+                    />
+                </div>
+            )}
+
+            {/* ── Zone 3: P&L row ── */}
+            {!isNoPnl && (
+                <div className="flex items-start gap-3">
+                    <div
+                        className="min-w-0 flex-1 rounded-md px-1 py-0.5"
+                        style={{ backgroundColor: hasPrice && unrealizedPnlRange ? unrealizedHeatmapBg(row.unrealized_pnl, unrealizedPnlRange) : undefined }}
+                    >
+                        <div className="mb-0.5 truncate text-[10px] text-gray-500">Unrealized</div>
+                        {hasPrice ? (
+                            <>
+                                <div className={`text-xs font-medium ${row.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
+                                </div>
+                                <div className="text-[10px] text-gray-500">{`${row.unrealized_pnl_pct >= 0 ? '+' : ''}${Math.round(row.unrealized_pnl_pct * 100)}%`}</div>
+                                {periodDelta && periodLabel && (
+                                    <div className={`text-[10px] ${periodDelta.unrealized_change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {periodLabel}: <ValueDisplay value={periodDelta.unrealized_change} currency={baseCurrency} options={compact} />
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className="flex items-center gap-1">
+                                <span className="text-xs text-gray-400">—</span>
+                                {hasError && <FiAlertCircle size={10} color="#E53E3E" />}
+                            </div>
+                        )}
+                    </div>
+
+                    <Metric label="Realized" flex="1">
+                        <div className={`text-xs font-medium ${row.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            <ValueDisplay value={row.realized_pnl} currency={baseCurrency} options={compact} />
+                        </div>
+                        {row.taxable_realized_pnl !== 0 && (
+                            <div className="text-[10px] text-gray-500">
+                                Tax: <ValueDisplay value={row.taxable_realized_pnl} currency={baseCurrency} options={compact} />
+                            </div>
+                        )}
+                        {periodDelta && periodLabel && (
+                            <div className={`text-[10px] ${periodDelta.realized_in_period >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                {periodLabel}: <ValueDisplay value={periodDelta.realized_in_period} currency={baseCurrency} options={compact} />
+                            </div>
+                        )}
+                    </Metric>
+
+                    <Metric label="Fees" flex="1">
+                        <div className="text-[10px] text-gray-600">
+                            <ValueDisplay value={Math.round(row.total_fees)} currency={baseCurrency} options={compact} />
+                        </div>
+                    </Metric>
+                </div>
+            )}
+
+            {/* Live balance indicator — bottom right */}
+            {!isNoPnl && (
+                <div className="mt-0.5 flex justify-end">
+                    {liveBalanceLoading ? (
+                        <Spinner size="xs" className="text-gray-400" />
+                    ) : (
+                        <div className="flex items-center gap-0.5">
+                            <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={row.quantity} size="xs" />
+                            {hasLiveErrors && (
                                 <Tooltip
                                     content={
-                                        <div className="p-2 text-xs">
-                                            <div className="mb-1 flex justify-between gap-4">
-                                                <span className="text-gray-400">Unit price</span>
-                                                <span className="font-medium">
-                                                    {hasPrice ? <ValueDisplay value={row.unit_value!} currency={baseCurrency} /> : '—'}
-                                                </span>
-                                            </div>
-                                            <div className="mb-1 flex justify-between gap-4">
-                                                <span className="text-gray-400">Source</span>
-                                                <span className="font-medium">{row.price_source || 'N/A'}</span>
-                                            </div>
-                                            <div className="mb-1 flex justify-between gap-4">
-                                                <span className="text-gray-400">Updated</span>
-                                                <span className="font-medium">{formatDateTimeLocale(row.price_fetched_at)}</span>
-                                            </div>
-                                            {hasError && (
-                                                <div className="flex justify-between gap-4">
-                                                    <span className="text-red-400">Error</span>
-                                                    <span className="max-w-[200px] break-words text-red-300">{row.price_error}</span>
-                                                </div>
-                                            )}
-                                            {stale && <div className="mt-1 text-orange-400">⚠ Price is stale (over 1 hour old)</div>}
+                                        <div className="text-xs">
+                                            <div className="mb-1 font-medium">Some accounts had fetch errors</div>
+                                            {assetErrorAccounts.map(accId => {
+                                                const errs = liveAccountErrors?.get(accId) ?? [];
+                                                const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
+                                                return errs.map((err, i) => (
+                                                    <div key={`${accId}-${i}`} className="text-red-300">{accName}: {err}</div>
+                                                ));
+                                            })}
                                         </div>
                                     }
                                     openDelay={200}
-                                    closeDelay={100}
                                 >
-                                    <div className="flex cursor-help items-center gap-1">
-                                        <span
-                                            className={`text-xs font-medium ${stale ? 'text-orange-500' : ''} ${hasPrice ? 'underline decoration-dotted' : ''}`}
-                                        >
-                                            {hasPrice ? <ValueDisplay value={row.market_value} currency={baseCurrency} options={compact} /> : '—'}
-                                        </span>
-                                        {(stale || hasError) && (
-                                            <FiAlertCircle size={10} color={hasError ? '#E53E3E' : '#DD6B20'} />
-                                        )}
-                                    </div>
+                                    <span className="shrink-0 cursor-help text-xs text-orange-500">⚠</span>
                                 </Tooltip>
                             )}
-                        </Metric>
-                    </div>
-                )}
-
-                {/* ── Cost vs PnL bar ── */}
-                {!isNoPnl && row.cost_basis > 0 && (
-                    <div className="mb-1">
-                        <PnLBreakdownBar
-                            costBasis={row.cost_basis}
-                            unrealizedPnl={row.unrealized_pnl}
-                            realizedPnl={row.realized_pnl}
-                            fees={row.total_fees}
-                            height={6}
-                        />
-                    </div>
-                )}
-
-                {/* ── Zone 3: P&L row ── */}
-                {!isNoPnl && (
-                    <div className="flex items-start gap-3">
-                        <div
-                            className="min-w-0 flex-1 rounded-md px-1 py-0.5"
-                            style={{ backgroundColor: hasPrice && unrealizedPnlRange ? unrealizedHeatmapBg(row.unrealized_pnl, unrealizedPnlRange) : undefined }}
-                        >
-                            <div className="mb-0.5 truncate text-[10px] text-gray-500">Unrealized</div>
-                            {hasPrice ? (
-                                <>
-                                    <div className={`text-xs font-medium ${row.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                        <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
-                                    </div>
-                                    <div className="text-[10px] text-gray-500">{`${row.unrealized_pnl_pct >= 0 ? '+' : ''}${Math.round(row.unrealized_pnl_pct * 100)}%`}</div>
-                                    {periodDelta && periodLabel && (
-                                        <div className={`text-[10px] ${periodDelta.unrealized_change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                            {periodLabel}: <ValueDisplay value={periodDelta.unrealized_change} currency={baseCurrency} options={compact} />
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <div className="flex items-center gap-1">
-                                    <span className="text-xs text-gray-400">—</span>
-                                    {hasError && <FiAlertCircle size={10} color="#E53E3E" />}
-                                </div>
-                            )}
                         </div>
+                    )}
+                </div>
+            )}
 
-                        <Metric label="Realized" flex="1">
-                            <div className={`text-xs font-medium ${row.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                <ValueDisplay value={row.realized_pnl} currency={baseCurrency} options={compact} />
-                            </div>
-                            {row.taxable_realized_pnl !== 0 && (
-                                <div className="text-[10px] text-gray-500">
-                                    Tax: <ValueDisplay value={row.taxable_realized_pnl} currency={baseCurrency} options={compact} />
-                                </div>
-                            )}
-                            {periodDelta && periodLabel && (
-                                <div className={`text-[10px] ${periodDelta.realized_in_period >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                    {periodLabel}: <ValueDisplay value={periodDelta.realized_in_period} currency={baseCurrency} options={compact} />
-                                </div>
-                            )}
-                        </Metric>
+            {/* ── Zone 4: Expandable account breakdown ── */}
+            {isExpandable && isExpanded && (
+                <div className="mt-2 border-t border-gray-100 pt-2">
+                    {accountBalances && accountBalances.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                            {accountBalances.map((balance) => {
+                                const accountColor = getAccountColor(balance.account_id);
+                                const unitPrice = row.unit_value;
+                                const marketValue = unitPrice != null ? balance.qty * unitPrice : 0;
+                                const unrealizedPnl = marketValue - balance.cost_basis_in_base;
+                                const unrealizedPnlPct = balance.cost_basis_in_base > 0
+                                    ? unrealizedPnl / balance.cost_basis_in_base
+                                    : 0;
 
-                        <Metric label="Fees" flex="1">
-                            <div className="text-[10px] text-gray-600">
-                                <ValueDisplay value={Math.round(row.total_fees)} currency={baseCurrency} options={compact} />
-                            </div>
-                        </Metric>
-                    </div>
-                )}
+                                const acctLiveQty = liveAccountBalanceMap?.get(balance.account_id);
+                                const acctDelta = computeDelta(balance.qty, acctLiveQty);
+                                const acctErrors = liveAccountErrors?.get(balance.account_id);
+                                const acctHasError = acctErrors && acctErrors.length > 0 && acctLiveQty == null;
 
-                {/* Live balance indicator — bottom right */}
-                {!isNoPnl && (
-                    <div className="mt-0.5 flex justify-end">
-                        {liveBalanceLoading ? (
-                            <Spinner size="xs" className="text-gray-400" />
-                        ) : (
-                            <div className="flex items-center gap-0.5">
-                                <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={row.quantity} size="xs" />
-                                {hasLiveErrors && (
-                                    <Tooltip
-                                        content={
-                                            <div className="text-xs">
-                                                <div className="mb-1 font-medium">Some accounts had fetch errors</div>
-                                                {assetErrorAccounts.map(accId => {
-                                                    const errs = liveAccountErrors?.get(accId) ?? [];
-                                                    const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
-                                                    return errs.map((err, i) => (
-                                                        <div key={`${accId}-${i}`} className="text-red-300">{accName}: {err}</div>
-                                                    ));
-                                                })}
-                                            </div>
-                                        }
-                                        openDelay={200}
+                                return (
+                                    <div
+                                        key={balance.account_id}
+                                        className="rounded-sm bg-gray-50 px-2 py-1.5"
+                                        style={{ borderLeft: `3px solid ${accountColor}` }}
                                     >
-                                        <span className="shrink-0 cursor-help text-xs text-orange-500">⚠</span>
-                                    </Tooltip>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                )}
+                                        {/* Account name */}
+                                        <div className="mb-1 flex items-center gap-1">
+                                            <div className="h-[6px] w-[6px] shrink-0 rounded-full" style={{ backgroundColor: accountColor }} />
+                                            <span
+                                                className={`text-xs font-medium text-gray-700 ${onAccountClick ? 'cursor-pointer hover:text-blue-600 hover:underline' : ''}`}
+                                                onClick={(e) => {
+                                                    if (onAccountClick && assetId != null) {
+                                                        e.stopPropagation();
+                                                        onAccountClick(assetId, balance.account_id);
+                                                    }
+                                                }}
+                                            >
+                                                {balance.account_name}
+                                            </span>
+                                        </div>
 
-                {/* ── Zone 4: Expandable account breakdown ── */}
-                {isExpandable && isExpanded && (
-                    <div className="mt-2 border-t border-gray-100 pt-2">
-                        {accountBalances && accountBalances.length > 0 ? (
-                            <div className="flex flex-col gap-1">
-                                {accountBalances.map((balance) => {
-                                    const accountColor = getAccountColor(balance.account_id);
-                                    const unitPrice = row.unit_value;
-                                    const marketValue = unitPrice != null ? balance.qty * unitPrice : 0;
-                                    const unrealizedPnl = marketValue - balance.cost_basis_in_base;
-                                    const unrealizedPnlPct = balance.cost_basis_in_base > 0
-                                        ? unrealizedPnl / balance.cost_basis_in_base
-                                        : 0;
-
-                                    const acctLiveQty = liveAccountBalanceMap?.get(balance.account_id);
-                                    const acctDelta = computeDelta(balance.qty, acctLiveQty);
-                                    const acctErrors = liveAccountErrors?.get(balance.account_id);
-                                    const acctHasError = acctErrors && acctErrors.length > 0 && acctLiveQty == null;
-
-                                    return (
-                                        <div
-                                            key={balance.account_id}
-                                            className="rounded-sm bg-gray-50 px-2 py-1.5"
-                                            style={{ borderLeft: `3px solid ${accountColor}` }}
-                                        >
-                                            {/* Account name */}
-                                            <div className="mb-1 flex items-center gap-1">
-                                                <div className="h-[6px] w-[6px] shrink-0 rounded-full" style={{ backgroundColor: accountColor }} />
-                                                <span
-                                                    className={`text-xs font-medium text-gray-700 ${onAccountClick ? 'cursor-pointer hover:text-blue-600 hover:underline' : ''}`}
-                                                    onClick={(e) => {
-                                                        if (onAccountClick && assetId != null) {
-                                                            e.stopPropagation();
-                                                            onAccountClick(assetId, balance.account_id);
-                                                        }
-                                                    }}
-                                                >
-                                                    {balance.account_name}
-                                                </span>
-                                            </div>
-
-                                            {/* Account-level metrics */}
-                                            <div className="flex gap-3 text-xs">
-                                                <div className="flex-1">
-                                                    <div className="text-[10px] text-gray-400">Qty</div>
-                                                    <div className="flex items-center gap-1">
-                                                        <span className="text-gray-600"><ValueDisplay value={balance.qty} options={compact} /></span>
-                                                        {acctHasError ? (
-                                                            <Tooltip
-                                                                content={
-                                                                    <div className="text-xs">
-                                                                        <div className="mb-1 font-medium">Fetch error:</div>
-                                                                        {acctErrors!.map((err, i) => <div key={i} className="text-red-300">{err}</div>)}
-                                                                    </div>
-                                                                }
-                                                                openDelay={200}
-                                                            >
-                                                                <span className="cursor-help text-xs text-red-500">⚠</span>
-                                                            </Tooltip>
-                                                        ) : (
-                                                            <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={balance.qty} size="xs" />
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="flex-1">
-                                                    <div className="text-[10px] text-gray-400">Value</div>
-                                                    <div className="text-gray-600">
-                                                        {unitPrice != null
-                                                            ? <ValueDisplay value={marketValue} currency={baseCurrency} options={compact} />
-                                                            : '—'}
-                                                    </div>
-                                                </div>
-                                                <div className="flex-1">
-                                                    <div className="text-[10px] text-gray-400">Unrealized</div>
-                                                    {unitPrice != null ? (
-                                                        <>
-                                                            <div className={unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}>
-                                                                <ValueDisplay value={unrealizedPnl} currency={baseCurrency} options={compact} />
-                                                            </div>
-                                                            <div className="text-[10px] text-gray-500">{formatPct(unrealizedPnlPct)}</div>
-                                                        </>
+                                        {/* Account-level metrics */}
+                                        <div className="flex gap-3 text-xs">
+                                            <div className="flex-1">
+                                                <div className="text-[10px] text-gray-400">Qty</div>
+                                                <div className="flex items-center gap-1">
+                                                    <span className="text-gray-600"><ValueDisplay value={balance.qty} options={compact} /></span>
+                                                    {acctHasError ? (
+                                                        <Tooltip
+                                                            content={
+                                                                <div className="text-xs">
+                                                                    <div className="mb-1 font-medium">Fetch error:</div>
+                                                                    {acctErrors!.map((err, i) => <div key={i} className="text-red-300">{err}</div>)}
+                                                                </div>
+                                                            }
+                                                            openDelay={200}
+                                                        >
+                                                            <span className="cursor-help text-xs text-red-500">⚠</span>
+                                                        </Tooltip>
                                                     ) : (
-                                                        <div className="text-gray-500">—</div>
+                                                        <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={balance.qty} size="xs" />
                                                     )}
                                                 </div>
                                             </div>
+                                            <div className="flex-1">
+                                                <div className="text-[10px] text-gray-400">Value</div>
+                                                <div className="text-gray-600">
+                                                    {unitPrice != null
+                                                        ? <ValueDisplay value={marketValue} currency={baseCurrency} options={compact} />
+                                                        : '—'}
+                                                </div>
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="text-[10px] text-gray-400">Unrealized</div>
+                                                {unitPrice != null ? (
+                                                    <>
+                                                        <div className={unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                                            <ValueDisplay value={unrealizedPnl} currency={baseCurrency} options={compact} />
+                                                        </div>
+                                                        <div className="text-[10px] text-gray-500">{formatPct(unrealizedPnlPct)}</div>
+                                                    </>
+                                                ) : (
+                                                    <div className="text-gray-500">—</div>
+                                                )}
+                                            </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        ) : (
-                            <div className="py-2 text-center text-xs text-gray-400">
-                                Loading account breakdown...
-                            </div>
-                        )}
-                    </div>
-                )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="py-2 text-center text-xs text-gray-400">
+                            Loading account breakdown...
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

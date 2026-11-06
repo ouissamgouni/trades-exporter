@@ -396,6 +396,7 @@ tasks:
   # Named shortcuts (recommended):
   #   task db:copy:dev-to-staging      Copy dev → staging
   #   task db:copy:staging-to-prod     Copy staging → prod (with extra warning)
+  #   task db:copy:prod-to-staging     Copy prod → staging
   #
   # Generic (any direction):
   #   task db:copy -- dev staging      Same as copy:dev-to-staging
@@ -438,6 +439,17 @@ tasks:
         if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="--dry-run"; fi
         ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh staging prod $FLAGS
 
+  copy:prod-to-staging:
+    desc: "🔄 Copy prod database → staging. DRY_RUN=1 to preview."
+    prompt: "This will REPLACE the staging database with PRODUCTION data. Continue?"
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        FLAGS=""
+        if [ "{{.DRY_RUN}}" = "1" ]; then FLAGS="--dry-run"; fi
+        ROOT_DIR={{.ROOT_DIR}} {{.ROOT_DIR}}/.taskfiles/db_copy.sh prod staging $FLAGS
+
   copy:
     desc: "🔄 Copy a database between any two envs. DRY_RUN=1 to preview. (usage: task db:copy -- <src> <dst> [--migrate])"
     prompt: "This will REPLACE the target database with source data. Continue?"
@@ -468,7 +480,8 @@ tasks:
               fi
               ;;
           esac
-        done
+        done       task db:copy:prod-to-staging"
+          echo "
 
         if [ -z "$SRC" ] || [ -z "$DST" ]; then
           echo "Usage: task db:copy -- <source> <target> [--migrate]"

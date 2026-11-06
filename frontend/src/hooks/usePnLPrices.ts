@@ -1,8 +1,9 @@
 /**
  * usePnLPrices
  *
- * Manages price fetching, single-price refresh, and the recompute-unrealized
- * effect that updates asset rows when prices arrive.
+ * Cached-first price loading: stored prices are applied immediately, then live
+ * prices are fetched for assets whose stored price is missing or older than today
+ * (or for all assets when forced).
  *
  * Dispatches to PnLContext reducer — no direct useState.
  */
@@ -11,127 +12,147 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, PriceResponse } from '../types';
 import type { BalanceEntry } from '../types';
-import { toaster } from '../components/ui/toaster';
 import { usePnL } from '../components/pnl/PnLContext';
 import { buildPriceMap, applyPricesToAssets, computeSummaryTotals } from '../components/pnl/pnlCalculations';
+import type { AssetPnLRow } from '../components/pnl/types';
+import { parseApiDate } from '../utils/dateUtils';
 
+/** Higher than the backend max_timeout_seconds (10 s) so the server can fall back to its DB cache first. */
+const PRICE_FETCH_TIMEOUT_MS = 15_000;
+const CONCURRENCY = 5;
+
+export interface FetchPricesOptions {
+    /** Bypass the cached-first step and the recent-snapshot cache; refresh every asset live. */
+    force?: boolean;
+}
+
+function needsLiveRefresh(p: PriceResponse | undefined): boolean {
+    if (!p || p.price == null) return true;
+    const fetched = parseApiDate(p.fetched_at);
+    if (!fetched) return true;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    return fetched.getTime() < startOfToday.getTime();
+}
+
+function rowsToBalanceEntries(rows: AssetPnLRow[]): BalanceEntry[] {
+    return rows.map(a => ({
+        asset: a.asset,
+        qty: a.quantity,
+        cost_basis_in_base: a.cost_basis,
+        avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
+        lot_count: a.lot_count,
+        has_open_position: a.has_open_position,
+        price_fetch_eligible: a.price_fetch_eligible,
+        valuation_status: a.valuation_status,
+        valuation_note: a.valuation_note,
+    }));
+}
 
 export function usePnLPrices() {
     const { state, dispatch, assets, versionMetrics } = usePnL();
     const { config, prices, loadingPriceAssetIds } = state;
     const queryClient = useQueryClient();
 
-    // Ref for loadingPriceAssetIds read inside async closures.
     const loadingIdsRef = useRef(state.loadingPriceAssetIds);
     loadingIdsRef.current = state.loadingPriceAssetIds;
 
-    // Ref for prices read inside async closures (to carry forward last_known on client timeout).
-    const pricesRef = useRef(state.prices);
-    pricesRef.current = state.prices;
+    const priceUrl = useCallback((assetId: number, baseCurrency: string, force: boolean) =>
+        `${API_URL}/pnl/prices/${assetId}?base_currency=${encodeURIComponent(baseCurrency)}&use_fallback=${config.use_price_fallback}&staleness_window_days=${config.price_staleness_window_days}&max_timeout_seconds=10&force_live=${force}`,
+        [config.use_price_fallback, config.price_staleness_window_days]);
 
-    /** Max time (ms) to wait for a single price fetch before aborting.
-     *  Set higher than the backend max_timeout_seconds (10 s) so the server
-     *  has time to fall back to its DB cache before the client aborts. */
-    const PRICE_FETCH_TIMEOUT_MS = 15_000;
-
-    // Fetch prices for all assets in balances (individually with concurrency control)
-    const fetchPrices = useCallback(async (balances: BalanceEntry[], baseCurrency: string) => {
-        if (!balances || balances.length === 0) return;
-
-        const priceableBalances = balances.filter(b => b.price_fetch_eligible !== false);
-        const assetIds = priceableBalances.map(b => b.asset.id).filter((id): id is number => id !== undefined);
-        if (assetIds.length === 0) return;
-
-        dispatch({ type: 'SET_IS_REFRESHING_PRICES', value: true });
-        dispatch({ type: 'SET_LOADING_PRICE_ASSET_IDS', ids: new Set(assetIds) });
-        dispatch({ type: 'SET_LAST_PRICE_REFRESH', date: new Date() });
-
-        const fetchSinglePrice = async (assetId: number) => {
-            try {
-                const response = await fetch(
-                    `${API_URL}/pnl/prices/${assetId}?base_currency=${encodeURIComponent(baseCurrency)}&use_fallback=${config.use_price_fallback}&staleness_window_days=${config.price_staleness_window_days}&max_timeout_seconds=10`,
-                    { signal: AbortSignal.timeout(PRICE_FETCH_TIMEOUT_MS) },
-                );
-                if (!response.ok) throw new Error('Failed to fetch price');
-                const data: PriceResponse = await response.json();
-
-                dispatch({ type: 'UPSERT_PRICE', assetId, price: data });
-            } catch (err) {
-                console.error(`Fetch failed for asset ${assetId}`, err);
-                const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
-
-                // Carry forward last-known price from a prior successful fetch
-                const prev = pricesRef.current.find(p => p.asset.id === assetId);
-                const lastKnownPrice = prev?.price ?? prev?.last_known_price ?? null;
-                const lastKnownDate = prev?.fetched_at ?? prev?.last_known_price_date ?? null;
-                const lastKnownSource = prev?.source ?? prev?.last_known_source ?? null;
-
-                const errorItem: PriceResponse = {
-                    asset: { id: assetId, symbol: 'Unknown' },
+    const fetchLivePrice = useCallback(async (asset: BalanceEntry['asset'], baseCurrency: string, force: boolean) => {
+        const assetId = asset.id!;
+        try {
+            const response = await fetch(priceUrl(assetId, baseCurrency, force), { signal: AbortSignal.timeout(PRICE_FETCH_TIMEOUT_MS) });
+            if (!response.ok) throw new Error(`Price request failed (${response.status})`);
+            const data: PriceResponse = await response.json();
+            dispatch({ type: 'UPSERT_PRICE', assetId, price: data });
+        } catch (err) {
+            console.error(`Fetch failed for asset ${assetId}`, err);
+            const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+            // The reducer carries forward the previously known price for this asset
+            dispatch({
+                type: 'UPSERT_PRICE',
+                assetId,
+                price: {
+                    asset: { id: assetId, symbol: asset.symbol, label: asset.label },
                     price: null,
                     price_quote: baseCurrency,
                     error: isTimeout ? 'Request timed out' : (err instanceof Error ? err.message : 'Unknown error'),
                     fetched_at: new Date().toISOString(),
-                    last_known_price: lastKnownPrice,
-                    last_known_price_date: lastKnownDate,
-                    last_known_source: lastKnownSource,
-                };
-                const balance = priceableBalances.find(b => b.asset.id === assetId);
-                if (balance) errorItem.asset.symbol = balance.asset.symbol;
-
-                dispatch({ type: 'UPSERT_PRICE', assetId, price: errorItem });
-            } finally {
-                dispatch({ type: 'REMOVE_LOADING_PRICE_ASSET_ID', id: assetId });
-            }
-        };
-
-        // Concurrency control (5 parallel requests)
-        const CONCURRENCY = 5;
-        const queue = [...assetIds];
-        const active: Promise<void>[] = [];
-
-        try {
-            while (queue.length > 0 || active.length > 0) {
-                while (queue.length > 0 && active.length < CONCURRENCY) {
-                    const id = queue.shift();
-                    if (id !== undefined) {
-                        const promise = fetchSinglePrice(id).then(() => {
-                            active.splice(active.indexOf(promise), 1);
-                        });
-                        active.push(promise);
-                    }
-                }
-                if (active.length > 0) {
-                    await Promise.race(active);
-                }
-            }
-        } finally {
-            dispatch({ type: 'SET_IS_REFRESHING_PRICES', value: false });
-        }
-    }, [config.use_price_fallback, config.price_staleness_window_days, dispatch]);
-
-    // Refresh a single asset price (used after manual price entry)
-    const refreshSinglePrice = useCallback(async (assetId: number) => {
-        try {
-            dispatch({
-                type: 'SET_LOADING_PRICE_ASSET_IDS',
-                ids: new Set([...loadingIdsRef.current, assetId]),
+                    price_state: 'failed',
+                },
             });
-
-            const response = await fetch(
-                `${API_URL}/pnl/prices/${assetId}?base_currency=${encodeURIComponent(config.base_currency_symbol)}&use_fallback=${config.use_price_fallback}&staleness_window_days=${config.price_staleness_window_days}&max_timeout_seconds=10`,
-                { signal: AbortSignal.timeout(PRICE_FETCH_TIMEOUT_MS) },
-            );
-            if (!response.ok) throw new Error('Failed to fetch price');
-            const data: PriceResponse = await response.json();
-
-            dispatch({ type: 'UPSERT_PRICE', assetId, price: data });
-        } catch (err) {
-            console.error(`Refresh failed for asset ${assetId}`, err);
         } finally {
             dispatch({ type: 'REMOVE_LOADING_PRICE_ASSET_ID', id: assetId });
         }
-    }, [config.base_currency_symbol, config.use_price_fallback, config.price_staleness_window_days, dispatch]);
+    }, [dispatch, priceUrl]);
+
+    const loadCachedPrices = useCallback(async (assetIds: number[], baseCurrency: string): Promise<PriceResponse[]> => {
+        try {
+            const response = await fetch(`${API_URL}/pnl/prices/cached`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    asset_ids: assetIds,
+                    base_currency: baseCurrency,
+                    staleness_window_days: config.price_staleness_window_days,
+                }),
+            });
+            if (!response.ok) throw new Error(`Cached price request failed (${response.status})`);
+            return await response.json();
+        } catch (err) {
+            console.error('Cached price load failed', err);
+            return [];
+        }
+    }, [config.price_staleness_window_days]);
+
+    const fetchPrices = useCallback(async (balances: BalanceEntry[], baseCurrency: string, options: FetchPricesOptions = {}) => {
+        const force = !!options.force;
+        const priceable = (balances ?? []).filter(b => b.price_fetch_eligible !== false && b.asset.id != null);
+        if (priceable.length === 0) return;
+
+        dispatch({ type: 'SET_IS_REFRESHING_PRICES', value: true });
+        dispatch({ type: 'SET_LAST_PRICE_REFRESH', date: new Date() });
+
+        try {
+            let toRefresh = priceable;
+            if (!force) {
+                const cached = await loadCachedPrices(priceable.map(b => b.asset.id!), baseCurrency);
+                const cachedById = new Map<number, PriceResponse>();
+                for (const p of cached) {
+                    if (p.asset.id == null) continue;
+                    cachedById.set(p.asset.id, p);
+                    if (p.price != null) dispatch({ type: 'UPSERT_PRICE', assetId: p.asset.id, price: p });
+                }
+                toRefresh = priceable.filter(b => needsLiveRefresh(cachedById.get(b.asset.id!)));
+            }
+
+            dispatch({
+                type: 'SET_LOADING_PRICE_ASSET_IDS',
+                ids: new Set([...loadingIdsRef.current, ...toRefresh.map(b => b.asset.id!)]),
+            });
+
+            const queue = [...toRefresh];
+            const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+                for (let next = queue.shift(); next; next = queue.shift()) {
+                    await fetchLivePrice(next.asset, baseCurrency, force);
+                }
+            });
+            await Promise.all(workers);
+        } finally {
+            dispatch({ type: 'SET_IS_REFRESHING_PRICES', value: false });
+        }
+    }, [dispatch, loadCachedPrices, fetchLivePrice]);
+
+    // Refresh a single asset price (after manual price entry, or from a row's refresh button)
+    const refreshSinglePrice = useCallback(async (assetId: number, options: FetchPricesOptions = {}) => {
+        const row = assets.find(a => a.asset.id === assetId);
+        const asset = row?.asset ?? { id: assetId, symbol: `#${assetId}` };
+        dispatch({ type: 'SET_LOADING_PRICE_ASSET_IDS', ids: new Set([...loadingIdsRef.current, assetId]) });
+        await fetchLivePrice(asset, config.base_currency_symbol, !!options.force);
+    }, [assets, config.base_currency_symbol, dispatch, fetchLivePrice]);
 
     // Remove a warning by ID (used after manual price fixes the issue)
     const removeWarning = useCallback((warningId: string) => {
@@ -151,54 +172,30 @@ export function usePnLPrices() {
         if (warningId) removeWarning(warningId);
     }, [refreshSinglePrice, removeWarning]);
 
-    // Manual refresh button handler
+    // Only assets with cost lots need pricing (has_lots=false rows have zero quantity)
+    const priceableRows = useCallback(
+        () => assets.filter(a => a.has_lots !== false && a.price_fetch_eligible !== false),
+        [assets],
+    );
+
+    // Manual "Refresh all" — forces a live fetch for every priceable asset
     const handleRefreshPrices = useCallback(async () => {
-        if (assets && assets.length > 0) {
-            // Only refresh assets that have cost lots — DB-only assets with
-            // has_lots=false have zero quantity and don't need pricing.
-            const priceable = assets.filter(a => a.has_lots !== false && a.price_fetch_eligible !== false);
-            if (priceable.length === 0) return;
-            const balanceEntries: BalanceEntry[] = priceable.map(a => ({
-                asset: a.asset,
-                qty: a.quantity,
-                cost_basis_in_base: a.cost_basis,
-                avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
-                lot_count: a.lot_count,
-                has_open_position: a.has_open_position,
-                price_fetch_eligible: a.price_fetch_eligible,
-                valuation_status: a.valuation_status,
-                valuation_note: a.valuation_note,
-            }));
-            await fetchPrices(balanceEntries, config.base_currency_symbol);
-            versionMetrics.refetch();
-            queryClient.invalidateQueries({ queryKey: ['portfolio-timeline'] });
-        }
-    }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics, queryClient]);
-
-    // Retry only failed prices, then trigger the same post-refresh logic
-    const retryFailedPrices = useCallback(async () => {
-        const failedIds = pricesRef.current
-            .filter(p => !!p.error || (p.price == null && !(p as any)._isNa))
-            .map(p => p.asset.id)
-            .filter((id): id is number => id !== undefined);
-        if (failedIds.length === 0 || !assets || assets.length === 0) return;
-
-        const priceable = assets.filter(a => a.has_lots !== false && a.price_fetch_eligible !== false && failedIds.includes(a.asset.id!));
-        if (priceable.length === 0) return;
-        const balanceEntries: BalanceEntry[] = priceable.map(a => ({
-            asset: a.asset,
-            qty: a.quantity,
-            cost_basis_in_base: a.cost_basis,
-            avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
-            lot_count: a.lot_count,
-            has_open_position: a.has_open_position,
-            price_fetch_eligible: a.price_fetch_eligible,
-            valuation_status: a.valuation_status,
-            valuation_note: a.valuation_note,
-        }));
-        await fetchPrices(balanceEntries, config.base_currency_symbol);
+        const rows = priceableRows();
+        if (rows.length === 0) return;
+        await fetchPrices(rowsToBalanceEntries(rows), config.base_currency_symbol, { force: true });
         versionMetrics.refetch();
-    }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics]);
+        queryClient.invalidateQueries({ queryKey: ['portfolio-timeline'] });
+    }, [priceableRows, config.base_currency_symbol, fetchPrices, versionMetrics, queryClient]);
+
+    const retryFailedPrices = useCallback(async () => {
+        const failedIds = new Set(
+            prices.filter(p => p.price == null && !p.skipped).map(p => p.asset.id).filter((id): id is number => id != null),
+        );
+        const rows = priceableRows().filter(a => a.asset.id != null && failedIds.has(a.asset.id));
+        if (rows.length === 0) return;
+        await fetchPrices(rowsToBalanceEntries(rows), config.base_currency_symbol, { force: true });
+        versionMetrics.refetch();
+    }, [prices, priceableRows, config.base_currency_symbol, fetchPrices, versionMetrics]);
 
     // Refs for values read inside effects that should NOT trigger re-runs
     const pnlAssetsRef = useRef(state.pnlAssets);
@@ -206,15 +203,14 @@ export function usePnLPrices() {
     const summaryRef = useRef(state.summary);
     summaryRef.current = state.summary;
 
-    // --- Effect: Recompute unrealized P&L using live prices ---
+    // --- Effect: Recompute unrealized P&L using current prices ---
     useEffect(() => {
         if (prices.length === 0) return;
-        const priceMap = buildPriceMap(prices);
         dispatch({
             type: 'SET_PNL_ASSETS',
-            assets: applyPricesToAssets(pnlAssetsRef.current, priceMap),
+            assets: applyPricesToAssets(pnlAssetsRef.current, buildPriceMap(prices), loadingPriceAssetIds),
         });
-    }, [prices, dispatch]);
+    }, [prices, loadingPriceAssetIds, dispatch]);
 
     // --- Effect: Recalculate summary unrealized P&L when assets change ---
     useEffect(() => {
@@ -240,4 +236,3 @@ export function usePnLPrices() {
         removeWarning,
     };
 }
-

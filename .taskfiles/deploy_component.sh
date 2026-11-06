@@ -29,6 +29,8 @@ case "$COMPONENT" in
   backend)
     # shellcheck disable=SC2046
     docker build $(image_tags backend) -f "$SRC/backend/Dockerfile" "$SRC"
+    # --no-deps skips postgres; ensure it exists or the backend cannot resolve host "postgres".
+    "${COMPOSE[@]}" up -d --wait postgres
     "${COMPOSE[@]}" up -d --no-deps --wait backend
     HEALTH_URL="http://localhost:$BACKEND_PORT/api/v1/health"
     echo "Smoke test: GET $HEALTH_URL"
