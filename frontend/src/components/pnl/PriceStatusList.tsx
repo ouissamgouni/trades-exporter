@@ -1,37 +1,86 @@
-
-import React, { useState, useMemo } from 'react';
-import { Badge, Button, Input, Spinner } from '../ui/primitives';
-import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiDatabase, FiLoader, FiRefreshCw, FiChevronDown } from 'react-icons/fi';
-import { AssetRef, PriceResponse } from '../../types';
-import { formatRelativeTime } from '../../utils/dateUtils';
+import React, { useMemo, useState } from 'react';
+import { Badge, Button, Input, Spinner, type BadgeColorScheme } from '../ui/primitives';
+import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiDatabase, FiRefreshCw, FiChevronDown, FiEdit2, FiArchive, FiArrowDown, FiArrowUp } from 'react-icons/fi';
+import { PriceResponse, PriceState } from '../../types';
+import { formatRelativeTime, formatDateTimeLocale } from '../../utils/dateUtils';
 import { Tooltip } from '../ui/tooltip';
 import { PriceSetterDialog } from './PriceSetterDialog';
 import { GapFixPanel } from '../GapFixPanel';
-import { PriceGapBulkFix } from '../PriceGapBulkFix';
-import { usePriceGapsSummary } from '../../hooks/usePriceGaps';
+import { AssetNameCell } from './AssetNameCell';
+import { PRICE_STATE_LABELS, effectiveDate, effectivePrice, effectiveSource, resolvePriceState } from './priceState';
+
+export interface AssetGapInfo {
+    gap_count: number;
+    total_missing_days: number;
+}
 
 interface PriceStatusListProps {
     prices: PriceResponse[];
     baseCurrency: string;
-    quoteAssetId?: number;  // Base currency asset ID for manual price entry
-    onPriceAdded?: (assetId: number) => void;  // Callback after manual price is saved
-    onRetryFailed?: () => void;  // Callback to retry all failed price fetches
-    onBulkGapFixComplete?: () => void | Promise<void>;  // Callback after global gap backfill completes
-    loadingAssetIds?: Set<number>;  // Asset IDs currently being fetched
-    assetNameMap?: Map<number, string>;  // id → display name for loading placeholders
-    totalAssetCount?: number;  // Total assets in table (including non-PnL)
-    naAssets?: Array<{ id: number; symbol: string }>;  // Assets with no lots / zero qty
+    quoteAssetId?: number;
+    onPriceAdded?: (assetId: number) => void;
+    onRetryFailed?: () => void;
+    onRefreshAll?: () => void;
+    onRefreshAsset?: (assetId: number) => void;
+    loadingAssetIds?: Set<number>;
+    /** id → asset ref for rows that have no price response yet */
+    assetRefs?: Map<number, { symbol?: string | null; label?: string | null }>;
+    totalAssetCount?: number;
+    naAssets?: Array<{ id: number; symbol?: string | null; label?: string | null }>;
+    gapMap?: Map<number, AssetGapInfo>;
+    onGapsClick?: (assetId: number) => void;
+    pnlVersionId?: number;
 }
 
-type StatusFilter = 'all' | 'ok' | 'stale' | 'error' | 'na' | 'loading';
+type Category = 'loading' | 'live' | 'cached' | 'fallback' | 'failed' | 'na';
+type GapSort = 'none' | 'desc' | 'asc';
 
-// Using formatTimeLocale from utils/dateUtils for time formatting
+interface Row {
+    item: PriceResponse;
+    state: PriceState;
+    category: Category;
+    isLoading: boolean;
+}
+
+const CATEGORY_ORDER: Category[] = ['loading', 'failed', 'fallback', 'cached', 'live', 'na'];
+
+const CATEGORY_META: Record<Category, { label: string; scheme: BadgeColorScheme; ring: string }> = {
+    loading: { label: 'Refreshing', scheme: 'blue', ring: 'ring-blue-400' },
+    live: { label: 'Live', scheme: 'green', ring: 'ring-green-400' },
+    cached: { label: 'Cached', scheme: 'gray', ring: 'ring-slate-400' },
+    fallback: { label: 'Fallback / stale', scheme: 'orange', ring: 'ring-orange-400' },
+    failed: { label: 'No price', scheme: 'red', ring: 'ring-red-400' },
+    na: { label: 'N/A', scheme: 'gray', ring: 'ring-slate-400' },
+};
+
+const STATE_STYLE: Record<PriceState, { icon: React.ComponentType<{ size?: number }>; color: string; bg: string }> = {
+    live: { icon: FiCheckCircle, color: 'text-green-500', bg: 'hover:bg-gray-50' },
+    cached: { icon: FiArchive, color: 'text-slate-500', bg: 'hover:bg-gray-50' },
+    fallback: { icon: FiAlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 hover:bg-orange-100' },
+    stale: { icon: FiAlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 hover:bg-orange-100' },
+    failed_with_last_known: { icon: FiAlertTriangle, color: 'text-orange-600', bg: 'bg-orange-50 hover:bg-orange-100' },
+    failed: { icon: FiAlertCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100' },
+    missing: { icon: FiAlertCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100' },
+    skipped: { icon: FiDatabase, color: 'text-gray-400', bg: 'bg-gray-50 hover:bg-gray-100' },
+};
+
+const categoryOf = (state: PriceState): Category => {
+    switch (state) {
+        case 'live': return 'live';
+        case 'cached': return 'cached';
+        case 'fallback':
+        case 'stale':
+        case 'failed_with_last_known': return 'fallback';
+        case 'skipped': return 'na';
+        default: return 'failed';
+    }
+};
 
 const formatCurrency = (value: number | null | undefined, currency: string): string => {
     if (value == null) return '—';
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
-        currency: currency,
+        currency,
         minimumFractionDigits: 2,
         maximumFractionDigits: 6,
     }).format(value);
@@ -43,191 +92,123 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
     quoteAssetId,
     onPriceAdded,
     onRetryFailed,
-    onBulkGapFixComplete,
+    onRefreshAll,
+    onRefreshAsset,
     loadingAssetIds,
-    assetNameMap,
+    assetRefs,
     totalAssetCount,
     naAssets,
+    gapMap,
+    onGapsClick,
+    pnlVersionId,
 }) => {
     const [search, setSearch] = useState('');
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [filter, setFilter] = useState<Category | 'all'>('all');
+    const [gapSort, setGapSort] = useState<GapSort>('none');
     const [expandedAssetId, setExpandedAssetId] = useState<number | null>(null);
+    const [dialogAsset, setDialogAsset] = useState<{ id: number; name: string } | null>(null);
 
-    // Fetch gap summary for all assets in the list
-    const assetIds = useMemo(
-        () => prices.map(p => p.asset.id).filter((id): id is number => id != null),
-        [prices],
-    );
-    const { data: gapSummary } = usePriceGapsSummary(assetIds);
-    const gapMap = useMemo(() => {
-        const m = new Map<number, number>();
-        if (gapSummary?.items) {
-            for (const item of gapSummary.items) {
-                if (item.total_missing_days > 0) m.set(item.asset_id, item.total_missing_days);
+    const rows: Row[] = useMemo(() => {
+        const byId = new Map<number, PriceResponse>();
+        for (const p of prices) if (p.asset.id != null) byId.set(p.asset.id, p);
+        // Loading assets without any stored price yet get a placeholder row
+        for (const id of loadingAssetIds ?? []) {
+            if (!byId.has(id)) {
+                const ref = assetRefs?.get(id);
+                byId.set(id, { asset: { id, symbol: ref?.symbol ?? `#${id}`, label: ref?.label }, price: null, price_quote: baseCurrency, price_state: 'missing' });
             }
         }
-        return m;
-    }, [gapSummary]);
-
-    // State for manual price dialog (triggered from expanded GapFixPanel or direct CTA)
-    const [dialogOpen, setDialogOpen] = useState(false);
-    const [selectedAsset, setSelectedAsset] = useState<{ id: number; symbol: string } | null>(null);
-
-    const handleOpenPriceSetter = (asset: AssetRef) => {
-        if (asset.id == null || asset.symbol == null) return;
-        setSelectedAsset({ id: asset.id, symbol: asset.symbol });
-        setDialogOpen(true);
-    };
-
-    const handlePriceSaved = () => {
-        if (selectedAsset && onPriceAdded) {
-            onPriceAdded(selectedAsset.id);
+        for (const na of naAssets ?? []) {
+            if (!byId.has(na.id)) {
+                byId.set(na.id, { asset: { id: na.id, symbol: na.symbol ?? `#${na.id}`, label: na.label }, price: null, price_quote: baseCurrency, skipped: true, price_state: 'skipped' });
+            }
         }
-        setDialogOpen(false);
-        setSelectedAsset(null);
-    };
+        return [...byId.values()].map(item => {
+            const state = resolvePriceState(item);
+            const isLoading = loadingAssetIds?.has(item.asset.id!) ?? false;
+            return { item, state, isLoading, category: isLoading ? 'loading' : categoryOf(state) };
+        });
+    }, [prices, loadingAssetIds, assetRefs, naAssets, baseCurrency]);
 
-    // Merge loading-only assets (in loadingAssetIds but not yet in prices) as placeholder rows
-    const allItems = useMemo(() => {
-        const priceAssetIds = new Set(prices.map(p => p.asset.id).filter(Boolean));
-        const placeholders: PriceResponse[] = [];
-        if (loadingAssetIds) {
-            for (const id of loadingAssetIds) {
-                if (!priceAssetIds.has(id)) {
-                    placeholders.push({
-                        asset: { id, symbol: assetNameMap?.get(id) ?? `#${id}` },
-                        price: null,
-                        price_quote: baseCurrency,
-                        fetched_at: undefined,
-                    });
+    const counts = useMemo(() => {
+        const c: Record<Category, number> = { loading: 0, live: 0, cached: 0, fallback: 0, failed: 0, na: 0 };
+        for (const r of rows) c[r.category] += 1;
+        return c;
+    }, [rows]);
+
+    const missingDays = (id: number | null | undefined) => (id != null ? gapMap?.get(id)?.total_missing_days ?? 0 : 0);
+
+    const displayed = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        const nameOf = (r: Row) => (r.item.asset.label || r.item.asset.symbol || '').toLowerCase();
+        return rows
+            .filter(r => filter === 'all' || r.category === filter)
+            .filter(r => !q
+                || nameOf(r).includes(q)
+                || (r.item.asset.symbol ?? '').toLowerCase().includes(q)
+                || String(r.item.asset.id) === q
+                || (effectiveSource(r.item) ?? '').toLowerCase().includes(q))
+            .sort((a, b) => {
+                if (gapSort !== 'none') {
+                    const diff = missingDays(a.item.asset.id) - missingDays(b.item.asset.id);
+                    if (diff !== 0) return gapSort === 'desc' ? -diff : diff;
                 }
-            }
-        }
-        // Add N/A assets as placeholder rows
-        const naPlaceholders: PriceResponse[] = [];
-        if (naAssets) {
-            for (const na of naAssets) {
-                if (!priceAssetIds.has(na.id) && !(loadingAssetIds?.has(na.id))) {
-                    naPlaceholders.push({
-                        asset: { id: na.id, symbol: na.symbol },
-                        price: null,
-                        price_quote: baseCurrency,
-                        fetched_at: undefined,
-                        _isNa: true,
-                    } as PriceResponse & { _isNa?: boolean });
-                }
-            }
-        }
-        return [...prices, ...placeholders, ...naPlaceholders];
-    }, [prices, loadingAssetIds, baseCurrency, naAssets]);
+                const ca = CATEGORY_ORDER.indexOf(a.category);
+                const cb = CATEGORY_ORDER.indexOf(b.category);
+                if (ca !== cb) return ca - cb;
+                return nameOf(a).localeCompare(nameOf(b));
+            });
+    }, [rows, filter, search, gapSort, gapMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const filtered = allItems.filter(p =>
-        (p.asset.symbol && p.asset.symbol.toLowerCase().includes(search.toLowerCase())) ||
-        (p.source && p.source.toLowerCase().includes(search.toLowerCase()))
-    );
+    const pricedTotal = rows.length - counts.na;
+    const skippedCount = totalAssetCount != null ? Math.max(totalAssetCount - rows.length, 0) : 0;
+    const failedOrFallback = counts.failed + rows.filter(r => r.category !== 'loading' && r.state === 'failed_with_last_known').length;
 
-    // Sort: Loading first (if panel is open during fetch), then errors, stale, then by name
-    const sorted = [...filtered].sort((a, b) => {
-        const aLoading = loadingAssetIds?.has(a.asset.id!) ?? false;
-        const bLoading = loadingAssetIds?.has(b.asset.id!) ?? false;
-        if (aLoading && !bLoading) return -1;
-        if (!aLoading && bLoading) return 1;
-        const aErr = !!a.error;
-        const bErr = !!b.error;
-        const aStale = !!a.is_stale;
-        const bStale = !!b.is_stale;
-        if (aErr && !bErr) return -1;
-        if (!aErr && bErr) return 1;
-        if (aStale && !bStale) return -1;
-        if (!aStale && bStale) return 1;
-        return (a.asset.symbol || '').localeCompare(b.asset.symbol || '');
-    });
-
-    // Apply status filter
-    const displayed = statusFilter === 'all' ? sorted : sorted.filter(item => {
-        const isLoading = loadingAssetIds?.has(item.asset.id!) ?? false;
-        const isNa = (item as any)._isNa === true;
-        const isError = !isLoading && !isNa && (!!item.error || item.price == null);
-        const isStale = !isLoading && !isNa && !!item.is_stale;
-        const isOk = !isLoading && !isNa && !isError && !isStale;
-        switch (statusFilter) {
-            case 'loading': return isLoading;
-            case 'ok': return isOk;
-            case 'stale': return isStale;
-            case 'error': return isError;
-            case 'na': return isNa;
-            default: return true;
-        }
-    });
-
-    // Count stats
-    const loadingCount = loadingAssetIds?.size ?? 0;
-    const okCount = allItems.filter(p => !p.error && p.price != null && !p.is_stale && !(loadingAssetIds?.has(p.asset.id!)) && !(p as any)._isNa).length;
-    const staleCount = allItems.filter(p => p.is_stale && p.price != null).length;
-    const failedCount = allItems.filter(p => (!!p.error || p.price == null) && !(loadingAssetIds?.has(p.asset.id!)) && !(p as any)._isNa).length;
-    const naCount = naAssets?.length ?? 0;
-    const pricedTotal = okCount + staleCount + failedCount + loadingCount;
-    const skippedCount = totalAssetCount != null ? Math.max(totalAssetCount - pricedTotal - naCount, 0) : 0;
-
-    const toggleFilter = (f: StatusFilter) => setStatusFilter(prev => prev === f ? 'all' : f);
+    const cycleGapSort = () => setGapSort(s => (s === 'none' ? 'desc' : s === 'desc' ? 'asc' : 'none'));
 
     return (
         <div className="flex h-full flex-col">
-            {/* Header / Stats */}
             <div className="border-b border-gray-100 bg-gray-50 p-4">
-                <div className="mb-4 flex items-center justify-between">
-                    <div>
-                        <div className="text-lg font-bold">Price Status</div>
-                        <div className="mt-1 flex gap-2">
-                            {loadingCount > 0 && (
-                                <Badge colorScheme="blue" className={`cursor-pointer ${statusFilter === 'loading' ? 'ring-2 ring-blue-400' : ''}`} onClick={() => toggleFilter('loading')}>
-                                    {loadingCount} Loading
-                                </Badge>
-                            )}
-                            <Badge colorScheme="green" className={`cursor-pointer ${statusFilter === 'ok' ? 'ring-2 ring-green-400' : ''}`} onClick={() => toggleFilter('ok')}>
-                                {okCount} OK
-                            </Badge>
-                            {staleCount > 0 && (
-                                <Badge colorScheme="orange" className={`cursor-pointer ${statusFilter === 'stale' ? 'ring-2 ring-orange-400' : ''}`} onClick={() => toggleFilter('stale')}>
-                                    {staleCount} Stale
-                                </Badge>
-                            )}
-                            <Badge colorScheme="red" className={`cursor-pointer ${statusFilter === 'error' ? 'ring-2 ring-red-400' : ''}`} onClick={() => toggleFilter('error')}>
-                                {failedCount} Failed
-                            </Badge>
-                            {failedCount > 0 && onRetryFailed && (
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    colorScheme="gray"
-                                    onClick={onRetryFailed}
-                                    disabled={loadingCount > 0}
-                                    className="h-6 px-2 text-xs"
-                                >
-                                    <FiRefreshCw size={12} />
-                                    <span className="ml-1 text-xs">Retry Failed</span>
-                                </Button>
-                            )}
-                            {naCount > 0 && (
-                                <Badge colorScheme="gray" className={`cursor-pointer ${statusFilter === 'na' ? 'ring-2 ring-slate-400' : ''}`} onClick={() => toggleFilter('na')}>
-                                    {naCount} N/A
-                                </Badge>
-                            )}
-                        </div>
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                    {CATEGORY_ORDER.filter(c => counts[c] > 0 || c === 'live').map(c => (
+                        <Badge
+                            key={c}
+                            colorScheme={CATEGORY_META[c].scheme}
+                            className={`cursor-pointer ${filter === c ? `ring-2 ${CATEGORY_META[c].ring}` : ''}`}
+                            onClick={() => setFilter(prev => (prev === c ? 'all' : c))}
+                        >
+                            {c === 'loading' && <Spinner size="xs" className="mr-1" />}
+                            {counts[c]} {CATEGORY_META[c].label}
+                        </Badge>
+                    ))}
+                    {skippedCount > 0 && <span className="text-xs text-gray-400">{skippedCount} without P&L</span>}
+                    <div className="ml-auto flex items-center gap-2">
+                        {failedOrFallback > 0 && onRetryFailed && (
+                            <Button size="sm" variant="outline" colorScheme="gray" onClick={onRetryFailed} disabled={counts.loading > 0} className="h-7 px-2 text-xs">
+                                <FiRefreshCw size={12} />
+                                <span className="ml-1">Retry failed ({failedOrFallback})</span>
+                            </Button>
+                        )}
+                        {onRefreshAll && (
+                            <Button size="sm" colorScheme="blue" onClick={onRefreshAll} disabled={counts.loading > 0} className="h-7 px-2 text-xs">
+                                {counts.loading > 0 ? <Spinner size="xs" /> : <FiRefreshCw size={12} />}
+                                <span className="ml-1">Refresh all live</span>
+                            </Button>
+                        )}
                     </div>
-                    <PriceGapBulkFix
-                        quoteAssetId={quoteAssetId ?? null}
-                        onComplete={onBulkGapFixComplete}
-                        compact
-                    />
                 </div>
-
+                {counts.loading > 0 && (
+                    <div className="mb-3 border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                        Refreshing {counts.loading} of {pricedTotal} price{pricedTotal !== 1 ? 's' : ''} live. Stored prices are shown and used for P&L until each refresh completes.
+                    </div>
+                )}
                 <div className="relative">
                     <Input
-                        placeholder="Search assets..."
+                        placeholder="Search by name, symbol, #id or source…"
+                        aria-label="Search assets"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="rounded-md bg-white pl-8"
+                        className="bg-white pl-8"
                     />
                     <div className="absolute left-2.5 top-2.5 text-gray-400">
                         <FiSearch size={14} />
@@ -235,123 +216,114 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                 </div>
             </div>
 
-            {/* List Content */}
-            <div className="flex-1 overflow-y-auto p-0">
+            <div className="flex-1 overflow-y-auto">
                 {displayed.length === 0 ? (
                     <div className="flex h-[200px] flex-col items-center justify-center text-gray-400">
                         <FiDatabase size={32} />
-                        <div className="mt-2">{statusFilter !== 'all' ? `No ${statusFilter} assets` : 'No price data available'}</div>
+                        <div className="mt-2">{filter !== 'all' ? `No ${CATEGORY_META[filter].label.toLowerCase()} assets` : 'No price data available'}</div>
                     </div>
                 ) : (
                     <table className="w-full text-xs">
-                        <thead className="sticky top-0 bg-white">
-                            <tr>
-                                <th className="w-[40px]"></th>
-                                <th className="text-left">Asset</th>
-                                <th className="text-left">Price</th>
-                                <th className="text-left">Source</th>
-                                <th className="w-[40px]"></th>
+                        <thead className="sticky top-0 z-[1] bg-white text-left text-gray-500">
+                            <tr className="border-b border-gray-100">
+                                <th className="w-[28px] py-2 pl-3"></th>
+                                <th className="py-2">Asset</th>
+                                <th className="py-2">Price</th>
+                                <th className="py-2">Status · source · as of</th>
+                                <th className="py-2">
+                                    <button type="button" onClick={cycleGapSort} className="inline-flex items-center gap-1 hover:text-blue-600" aria-label="Sort by missing price days">
+                                        Gaps
+                                        {gapSort === 'desc' && <FiArrowDown size={11} />}
+                                        {gapSort === 'asc' && <FiArrowUp size={11} />}
+                                    </button>
+                                </th>
+                                <th className="w-[84px] py-2 pr-3"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {displayed.map((item) => {
-                                const isLoading = loadingAssetIds?.has(item.asset.id!) ?? false;
-                                const isNa = (item as any)._isNa === true;
-                                const isError = !isLoading && !isNa && !!item.error;
-                                const isStale = !isLoading && !isNa && !!item.is_stale;
-                                const rowBg = isLoading ? 'bg-blue-50 hover:bg-blue-100' : isNa ? 'bg-gray-50 hover:bg-gray-100' : isError ? 'bg-red-50 hover:bg-red-100' : isStale ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50';
-                                const iconColorClass = isLoading ? 'text-blue-500' : isNa ? 'text-gray-400' : isError ? 'text-red-500' : isStale ? 'text-orange-500' : 'text-green-500';
-                                const StatusIcon = isLoading ? FiLoader : isNa ? FiDatabase : isError ? FiAlertCircle : isStale ? FiAlertTriangle : FiCheckCircle;
-                                const isExpanded = expandedAssetId === item.asset.id;
-
-                                // Determine source text and date for this row
-                                const sourceText = isLoading ? 'Fetching…'
-                                    : isNa ? 'No active lots'
-                                        : isError ? (item.last_known_source || item.error || 'Error')
-                                            : isStale ? (item.source || 'Unknown')
-                                                : (item.source || 'Unknown');
-                                const sourceDate = isError ? item.last_known_price_date
-                                    : item.fetched_at;
-
+                            {displayed.map(({ item, state, isLoading }) => {
+                                const id = item.asset.id!;
+                                const style = STATE_STYLE[state];
+                                const Icon = style.icon;
+                                const price = effectivePrice(item);
+                                const source = effectiveSource(item);
+                                const asOf = effectiveDate(item);
+                                const gaps = gapMap?.get(id);
+                                const isExpanded = expandedAssetId === id;
+                                const isNa = state === 'skipped';
+                                const name = item.asset.label || item.asset.symbol || `#${id}`;
                                 return (
-                                    <React.Fragment key={item.asset.id}>
-                                        <tr
-                                            className={`cursor-pointer ${rowBg}`}
-                                            onClick={() => setExpandedAssetId(isExpanded ? null : item.asset.id!)}
-                                        >
-                                            <td>
-                                                {isLoading ? (
-                                                    <Spinner size="xs" className="text-blue-500" />
-                                                ) : (
-                                                    <span className={iconColorClass}>
-                                                        <StatusIcon />
-                                                    </span>
-                                                )}
+                                    <React.Fragment key={id}>
+                                        <tr className={`border-b border-gray-50 ${isLoading ? 'bg-blue-50/40' : style.bg}`}>
+                                            <td className="py-1.5 pl-3">
+                                                {isLoading ? <Spinner size="xs" className="text-blue-500" /> : <span className={style.color}><Icon size={13} /></span>}
                                             </td>
-                                            <td className="font-medium">
-                                                <div className="flex items-center gap-1">
-                                                    <Tooltip content={item.asset.label || item.asset.symbol || ''} openDelay={300} disabled={!item.asset.label}>
-                                                        <span>{item.asset.symbol}</span>
-                                                    </Tooltip>
-                                                    {gapMap.has(item.asset.id!) && (
-                                                        <Badge colorScheme="orange">
-                                                            {gapMap.get(item.asset.id!)} gap{gapMap.get(item.asset.id!)! !== 1 ? 's' : ''}
+                                            <td className="max-w-[260px] py-1.5">
+                                                <AssetNameCell id={id} symbol={item.asset.symbol} label={item.asset.label} pnlVersionId={pnlVersionId} />
+                                            </td>
+                                            <td className="py-1.5">
+                                                <span className={`${state === 'live' ? 'font-semibold' : ''} ${isLoading ? 'text-gray-400' : ''}`}>
+                                                    {formatCurrency(price, baseCurrency)}
+                                                </span>
+                                            </td>
+                                            <td className="py-1.5">
+                                                {isNa ? (
+                                                    <span className="text-gray-500">{item.valuation_note || 'No active lots'}</span>
+                                                ) : (
+                                                    <div className="flex flex-wrap items-center gap-1">
+                                                        <Badge colorScheme={isLoading ? 'blue' : CATEGORY_META[categoryOf(state)].scheme}>
+                                                            {isLoading ? (price != null ? `${PRICE_STATE_LABELS[state]} · refreshing` : 'Fetching') : PRICE_STATE_LABELS[state]}
                                                         </Badge>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <span className={isError ? 'font-normal' : 'font-bold'}>
-                                                    {isError && item.last_known_price != null
-                                                        ? formatCurrency(item.last_known_price, baseCurrency)
-                                                        : formatCurrency(item.price, baseCurrency)}
-                                                </span>
-                                            </td>
-                                            <td>
-                                                {isLoading ? (
-                                                    <span className="text-xs font-medium text-blue-600">Fetching…</span>
-                                                ) : isNa ? (
-                                                    <span className="text-xs text-gray-500">No active lots</span>
-                                                ) : isError ? (
-                                                    <div className="flex items-center gap-1">
-                                                        <Tooltip content={item.error || ''} openDelay={200}>
-                                                            <span className="max-w-[120px] truncate text-xs font-medium text-red-600">
-                                                                {item.error}
-                                                            </span>
-                                                        </Tooltip>
-                                                        {sourceDate && (
-                                                            <span className="whitespace-nowrap text-xs text-gray-400">
-                                                                {formatRelativeTime(sourceDate)}
-                                                            </span>
+                                                        {source && <span className="max-w-[120px] truncate text-gray-600" title={source}>{source}</span>}
+                                                        {asOf && (
+                                                            <Tooltip content={formatDateTimeLocale(asOf)} openDelay={200}>
+                                                                <span className="whitespace-nowrap text-gray-400">{formatRelativeTime(asOf)}</span>
+                                                            </Tooltip>
                                                         )}
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex items-center gap-1">
-                                                        <span className="max-w-[100px] truncate text-xs text-gray-600">
-                                                            {sourceText}
-                                                        </span>
-                                                        {sourceDate && (
-                                                            <span className="whitespace-nowrap text-xs text-gray-400">
-                                                                {formatRelativeTime(sourceDate)}
-                                                            </span>
+                                                        {item.error && !isLoading && (
+                                                            <Tooltip content={item.error} openDelay={150}>
+                                                                <span className="max-w-[160px] truncate text-red-600">{item.error}</span>
+                                                            </Tooltip>
                                                         )}
                                                     </div>
                                                 )}
                                             </td>
-                                            <td>
-                                                <span className={`inline-block text-gray-500 transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`}>
-                                                    <FiChevronDown />
-                                                </span>
+                                            <td className="py-1.5">
+                                                {gaps && gaps.total_missing_days > 0 ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onGapsClick?.(id)}
+                                                        className="whitespace-nowrap text-orange-700 underline decoration-dotted hover:text-orange-800"
+                                                        title="Open in Gaps tab"
+                                                    >
+                                                        {gaps.gap_count} range{gaps.gap_count !== 1 ? 's' : ''} · {gaps.total_missing_days} d
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-gray-300">—</span>
+                                                )}
+                                            </td>
+                                            <td className="py-1.5 pr-3">
+                                                <div className="flex items-center justify-end gap-0.5">
+                                                    {onRefreshAsset && !isNa && (
+                                                        <button type="button" aria-label={`Refresh ${name} live`} title="Refresh live" disabled={isLoading} onClick={() => onRefreshAsset(id)} className="p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50">
+                                                            <FiRefreshCw size={12} />
+                                                        </button>
+                                                    )}
+                                                    {quoteAssetId && !isNa && (
+                                                        <button type="button" aria-label={`Set ${name} price manually`} title="Set price manually" onClick={() => setDialogAsset({ id, name })} className="p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600">
+                                                            <FiEdit2 size={12} />
+                                                        </button>
+                                                    )}
+                                                    <button type="button" aria-label={isExpanded ? 'Collapse price history' : 'Expand price history'} title="Price history & gaps" onClick={() => setExpandedAssetId(isExpanded ? null : id)} className="p-1 text-gray-500 hover:bg-gray-100">
+                                                        <span className={`inline-block transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`}><FiChevronDown size={12} /></span>
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                         {isExpanded && (
                                             <tr>
-                                                <td colSpan={5} className="bg-gray-50 p-3">
-                                                    <GapFixPanel
-                                                        assetId={item.asset.id!}
-                                                        symbol={item.asset.symbol || ''}
-                                                        onOpenPriceSetter={() => handleOpenPriceSetter(item.asset)}
-                                                    />
+                                                <td colSpan={6} className="bg-gray-50 p-3">
+                                                    <GapFixPanel assetId={id} symbol={item.asset.symbol || ''} onOpenPriceSetter={quoteAssetId ? () => setDialogAsset({ id, name }) : undefined} />
                                                 </td>
                                             </tr>
                                         )}
@@ -363,17 +335,16 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                 )}
             </div>
 
-            {/* Manual Price Dialog */}
-            {selectedAsset && quoteAssetId && (
+            {dialogAsset && quoteAssetId && (
                 <PriceSetterDialog
-                    isOpen={dialogOpen}
-                    onClose={() => {
-                        setDialogOpen(false);
-                        setSelectedAsset(null);
+                    isOpen
+                    onClose={() => setDialogAsset(null)}
+                    onSave={() => {
+                        onPriceAdded?.(dialogAsset.id);
+                        setDialogAsset(null);
                     }}
-                    onSave={handlePriceSaved}
-                    assetId={selectedAsset.id}
-                    assetName={selectedAsset.symbol}
+                    assetId={dialogAsset.id}
+                    assetName={dialogAsset.name}
                     defaultDate={new Date().toISOString()}
                     quoteAssetId={quoteAssetId}
                     quoteAssetName={baseCurrency}

@@ -26,6 +26,11 @@ from backend.services.price_service import (
     GapDetectionResult,
     GapRange as GapRangeData,
 )
+from backend.services.price_gap_job_service import (
+    fetch_day_price,
+    gap_fix_jobs,
+    missing_dates_for_gaps,
+)
 
 router = APIRouter(prefix="/price-snapshots", tags=["Price Snapshots"])
 
@@ -131,6 +136,7 @@ class GapDetectionResponse(BaseModel):
 class GapSummaryItem(BaseModel):
     asset_id: int
     symbol: str
+    label: Optional[str] = None
     gap_count: int
     total_missing_days: int
 
@@ -165,6 +171,11 @@ class BackfillResponse(BaseModel):
     asset_id: int
     fetched: List[BackfillFetchedItem]
     failed: List[BackfillFailedItem]
+
+
+class GapFixJobStartRequest(BaseModel):
+    asset_ids: Optional[List[int]] = None  # None = all transaction-backed assets
+    quote_asset_id: Optional[int] = None
 
 
 class BulkManualRequest(BaseModel):
@@ -357,17 +368,33 @@ def get_price_gaps(
         raise HTTPException(status_code=500, detail=f"Gap detection error: {str(e)}")
 
 
+def _transaction_asset_ids(session: Session) -> List[int]:
+    rows = session.exec(
+        select(NormalizedTransaction.asset_id)
+        .where(NormalizedTransaction.asset_id.isnot(None))
+        .distinct()
+    ).all()
+    ids = {row[0] if isinstance(row, tuple) else row for row in rows}
+    return sorted(aid for aid in ids if aid is not None)
+
+
 @router.get("/gaps/summary", response_model=GapSummaryResponse)
 def get_price_gaps_summary(
-    asset_ids: str = Query(..., description="Comma-separated asset IDs"),
+    asset_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated asset IDs (omit for all transaction-backed assets)",
+    ),
     quote_asset_id: Optional[int] = Query(None, description="Filter by quote asset ID"),
     session: Session = Depends(get_db),
 ):
     """Get gap counts for multiple assets (lightweight, for dashboards)."""
-    try:
-        ids = [int(x.strip()) for x in asset_ids.split(",") if x.strip()]
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid asset_ids format.")
+    if asset_ids is None:
+        ids = _transaction_asset_ids(session)
+    else:
+        try:
+            ids = [int(x.strip()) for x in asset_ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid asset_ids format.")
 
     if not ids:
         return GapSummaryResponse(items=[])
@@ -387,10 +414,12 @@ def get_price_gaps_summary(
             result = detect_gaps(session, aid, quote_asset_id=quote_asset_id)
             total_missing = sum(g.missing_days_count for g in result.gaps)
             if result.gaps:
+                asset = session.get(Asset, aid)
                 items.append(
                     GapSummaryItem(
                         asset_id=aid,
                         symbol=result.symbol,
+                        label=asset.label if asset else None,
                         gap_count=len(result.gaps),
                         total_missing_days=total_missing,
                     )
@@ -500,12 +529,7 @@ def backfill_prices(
     gap_result = detect_gaps(
         session, req.asset_id, d_from, d_to, quote_asset_id=quote_id
     )
-    missing_dates: set[date] = set()
-    for g in gap_result.gaps:
-        gs = date.fromisoformat(g.start_date)
-        ge = date.fromisoformat(g.end_date)
-        for d in _expected_trading_days(gs, ge, is_crypto):
-            missing_dates.add(d)
+    missing_dates = missing_dates_for_gaps(gap_result.gaps, is_crypto)
 
     if not missing_dates:
         return BackfillResponse(asset_id=req.asset_id, fetched=[], failed=[])
@@ -522,15 +546,9 @@ def backfill_prices(
     fetched: List[BackfillFetchedItem] = []
     failed: List[BackfillFailedItem] = []
 
-    for d in sorted(missing_dates):
-        dt = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+    for d in missing_dates:
         try:
-            result = svc.get_price_with_fallback(
-                asset_id=req.asset_id,
-                dt=dt,
-                use_fallback=False,
-                max_timeout_seconds=15,
-            )
+            result = fetch_day_price(svc, req.asset_id, d)
             fetched.append(
                 BackfillFetchedItem(
                     date=d.isoformat(),
@@ -547,6 +565,44 @@ def backfill_prices(
             )
 
     return BackfillResponse(asset_id=req.asset_id, fetched=fetched, failed=failed)
+
+
+# ---------------------------------------------------------------------------
+# Gap-fix background job
+# ---------------------------------------------------------------------------
+
+
+@router.post("/gaps/jobs")
+def start_gap_fix_job(
+    req: GapFixJobStartRequest,
+    session: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    quote_id = req.quote_asset_id
+    if quote_id is None:
+        base_asset = session.exec(
+            select(Asset).where(Asset.symbol == _get_app_settings(session).base_currency)
+        ).first()
+        if base_asset:
+            quote_id = base_asset.asset_id
+    try:
+        return gap_fix_jobs.start(req.asset_ids, quote_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/gaps/jobs/current")
+def get_gap_fix_job() -> Dict[str, Any]:
+    return gap_fix_jobs.get_status()
+
+
+@router.post("/gaps/jobs/current/cancel")
+def cancel_gap_fix_job() -> Dict[str, Any]:
+    return gap_fix_jobs.cancel()
+
+
+@router.post("/gaps/jobs/current/skip/{asset_id}")
+def skip_gap_fix_asset(asset_id: int) -> Dict[str, Any]:
+    return gap_fix_jobs.skip_asset(asset_id)
 
 
 # ---------------------------------------------------------------------------

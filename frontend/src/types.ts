@@ -478,12 +478,54 @@ export interface GapDetectionResponse {
 export interface GapSummaryItem {
     asset_id: number;
     symbol: string;
+    label?: string | null;
     gap_count: number;
     total_missing_days: number;
 }
 
 export interface GapSummaryResponse {
     items: GapSummaryItem[];
+}
+
+export type GapFixJobStatus = 'idle' | 'scanning' | 'running' | 'complete' | 'cancelled' | 'error';
+export type GapFixAssetStatus = 'pending' | 'running' | 'done' | 'partial' | 'failed' | 'skipped' | 'cancelled';
+
+export interface GapFixJobAsset {
+    asset_id: number;
+    symbol: string;
+    label?: string | null;
+    gap_count: number;
+    missing_days: number;
+    status: GapFixAssetStatus;
+    fetched: number;
+    failed: number;
+    last_error?: string | null;
+    note?: string | null;
+}
+
+export interface GapFixJobLogEntry {
+    ts: string;
+    level: 'info' | 'warning' | 'error';
+    asset_id?: number | null;
+    message: string;
+}
+
+export interface GapFixJobState {
+    status: GapFixJobStatus;
+    scope_asset_ids: number[] | null;
+    started_at: string | null;
+    finished_at: string | null;
+    total_assets: number;
+    completed_assets: number;
+    total_missing_days: number;
+    processed_days: number;
+    fetched_count: number;
+    failed_count: number;
+    current_asset_id: number | null;
+    current_date: string | null;
+    error: string | null;
+    assets: GapFixJobAsset[];
+    log: GapFixJobLogEntry[];
 }
 
 export interface GapCandidatesResponse {
@@ -948,7 +990,18 @@ export interface PriceResponse {
     last_known_price?: number | null;
     last_known_price_date?: string | null;
     last_known_source?: string | null;
+    price_state?: PriceState;
 }
+
+export type PriceState =
+    | 'live'
+    | 'cached'
+    | 'fallback'
+    | 'stale'
+    | 'failed_with_last_known'
+    | 'failed'
+    | 'missing'
+    | 'skipped';
 
 
 /**

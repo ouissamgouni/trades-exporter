@@ -372,7 +372,6 @@ class TestGetVersionBalances:
         assert balance.realized_pnl_in_base == 12.34
         assert balance.realized_event_count == 1
 
-
     def test_grouped_balances_scoped_to_account_ids(
         self, mock_session, mock_version, no_filters
     ):
@@ -407,7 +406,10 @@ class TestGetVersionBalances:
         mock_session.get.return_value = mock_version
 
         get_version_balances(
-            version_id=1, group_by_asset=True, tx_filters=no_filters, session=mock_session
+            version_id=1,
+            group_by_asset=True,
+            tx_filters=no_filters,
+            session=mock_session,
         )
 
         sqls = [str(c.args[0]) for c in mock_session.exec.call_args_list]
@@ -419,7 +421,10 @@ class TestGetVersionBalances:
 
         with pytest.raises(HTTPException) as exc_info:
             get_version_balances(
-                version_id=1, account_ids="abc", tx_filters=no_filters, session=mock_session
+                version_id=1,
+                account_ids="abc",
+                tx_filters=no_filters,
+                session=mock_session,
             )
         assert exc_info.value.status_code == 422
 
@@ -1104,3 +1109,80 @@ def test_units_filter_options_route_is_not_shadowed_by_unit_detail():
     assert paths.index("/pnl/versions/{version_id}/units/filter-options") < paths.index(
         "/pnl/versions/{version_id}/units/{unit_id}"
     )
+
+
+class TestPriceState:
+    def test_derived_states(self):
+        from backend.api.routes.pnl import PriceResponse, AssetRef
+
+        ref = AssetRef(id=1, symbol="BTC", label=None)
+        assert (
+            PriceResponse(asset=ref, price=1.0, price_quote="EUR").price_state == "live"
+        )
+        assert (
+            PriceResponse(
+                asset=ref, price=1.0, price_quote="EUR", is_fallback=True
+            ).price_state
+            == "fallback"
+        )
+        assert (
+            PriceResponse(
+                asset=ref, price=1.0, price_quote="EUR", is_fallback=True, is_stale=True
+            ).price_state
+            == "stale"
+        )
+        assert (
+            PriceResponse(
+                asset=ref, price_quote="EUR", error="x", last_known_price=2.0
+            ).price_state
+            == "failed_with_last_known"
+        )
+        assert (
+            PriceResponse(asset=ref, price_quote="EUR", error="x").price_state
+            == "failed"
+        )
+
+
+class TestCachedPrices:
+    def test_returns_latest_snapshot_without_live_fetch(self, mock_session):
+        from backend.api.routes import pnl
+
+        btc = MagicMock(asset_id=1, symbol="BTC", label="Bitcoin", source_symbol=None)
+        eth = MagicMock(asset_id=2, symbol="ETH", label="Ether", source_symbol=None)
+        exec_result = MagicMock()
+        exec_result.all.return_value = [btc, eth]
+        mock_session.exec.return_value = exec_result
+        old = datetime.now(timezone.utc) - timedelta(days=30)
+        snap = MagicMock(
+            asset_id=1, price=Decimal("50000"), source="coingecko", snapshot_time=old
+        )
+
+        with (
+            patch.object(pnl, "PriceService") as svc_cls,
+            patch.object(pnl, "_get_enabled_price_getters_by_asset", return_value={}),
+            patch.object(
+                pnl,
+                "_classify_asset_price_policy",
+                return_value={
+                    "price_fetch_eligible": True,
+                    "valuation_status": "open",
+                    "valuation_note": None,
+                },
+            ),
+        ):
+            svc = svc_cls.return_value
+            svc.cache.get_latest_many.return_value = {1: snap}
+            items = pnl.get_cached_prices(
+                pnl.CachedPricesRequest(
+                    asset_ids=[1, 2], base_currency="EUR", staleness_window_days=7
+                ),
+                session=mock_session,
+            )
+
+        svc.get_price_with_fallback.assert_not_called()
+        by_id = {i.asset.id: i for i in items}
+        assert by_id[1].price == 50000.0
+        assert by_id[1].price_state == "stale"
+        assert by_id[1].source == "coingecko"
+        assert by_id[2].price is None
+        assert by_id[2].price_state == "missing"
