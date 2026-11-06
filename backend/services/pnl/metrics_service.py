@@ -30,12 +30,14 @@ from backend.db.models import (
     Asset,
     AssetCategory,
     CalculationUnit,
+    CalculationUnitLeg,
     CalculationVersion,
     Category,
     CostLot,
     CostLotEvent,
     FeeEntry,
     IncomeEvent,
+    NormalizedTransaction,
     PriceSnapshot,
     RealizedPnl,
 )
@@ -858,18 +860,28 @@ def _refresh_prices_for_assets(
         log.warning("price_refresh_failed", asset_count=len(asset_ids))
 
 
+def _scope_fees_to_accounts(query, account_ids: Optional[List[int]]):
+    """Restrict a FeeEntry query to fees paid from the given accounts (via the fee leg's transaction)."""
+    if not account_ids:
+        return query
+    return (
+        query.join(CalculationUnitLeg, FeeEntry.fee_leg_id == CalculationUnitLeg.id)
+        .join(NormalizedTransaction, CalculationUnitLeg.transaction_id == NormalizedTransaction.id)
+        .where(NormalizedTransaction.account_id.in_(account_ids))
+    )
+
+
 def _compute_fee_summary(
     session: Session,
     version_id: int,
+    account_ids: Optional[List[int]] = None,
 ) -> Tuple[float, int]:
     """Compute total fees and fee entry count for a version."""
-    fee_summary = session.exec(
-        select(
-            func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0).label("total_fees"),
-            func.count(FeeEntry.id).label("fee_count"),
-        )
-        .where(FeeEntry.version_id == version_id)
-    ).first()
+    query = select(
+        func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0).label("total_fees"),
+        func.count(FeeEntry.id).label("fee_count"),
+    ).where(FeeEntry.version_id == version_id)
+    fee_summary = session.exec(_scope_fees_to_accounts(query, account_ids)).first()
     total_fees = float(fee_summary.total_fees) if fee_summary else 0.0
     fee_count = fee_summary.fee_count if fee_summary else 0
     return total_fees, fee_count
@@ -880,9 +892,10 @@ def _compute_fees_in_period(
     version_id: int,
     start_dt: datetime,
     end_dt: datetime,
+    account_ids: Optional[List[int]] = None,
 ) -> float:
     """Compute total fees within a date range by joining FeeEntry → CalculationUnit."""
-    result = session.exec(
+    query = (
         select(
             func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0)
         )
@@ -892,16 +905,18 @@ def _compute_fees_in_period(
             CalculationUnit.timestamp >= start_dt,
             CalculationUnit.timestamp <= end_dt,
         )
-    ).first()
+    )
+    result = session.exec(_scope_fees_to_accounts(query, account_ids)).first()
     return float(result or 0)
 
 
 def _get_fees_by_asset(
     session: Session,
     version_id: int,
+    account_ids: Optional[List[int]] = None,
 ) -> Dict[int, float]:
     """Aggregate total fees per asset (by related_asset_id)."""
-    rows = session.exec(
+    query = (
         select(
             FeeEntry.related_asset_id,
             func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0),
@@ -911,7 +926,8 @@ def _get_fees_by_asset(
             FeeEntry.related_asset_id.isnot(None),
         )
         .group_by(FeeEntry.related_asset_id)
-    ).all()
+    )
+    rows = session.exec(_scope_fees_to_accounts(query, account_ids)).all()
     return {int(r[0]): float(r[1]) for r in rows}
 
 
@@ -1521,7 +1537,7 @@ def _compute_book_core(
     total_invested = sum(snap.now_lot_invested.get(aid, 0.0) for aid in all_asset_ids)
 
     # Fee summary
-    total_fees, fee_count = _compute_fee_summary(session, version_id)
+    total_fees, fee_count = _compute_fee_summary(session, version_id, account_ids)
 
     # Realized PnL
     cumulative_rpnl = _build_realized_pnl_snapshots(
@@ -1567,7 +1583,7 @@ def _compute_book_core(
         else:
             start_cost = sum(start_costs.get(aid, 0.0) for aid in all_asset_ids)
             cost_basis_in_period = cost_basis - start_cost
-            fees_in_period = _compute_fees_in_period(session, version_id, start_dt, snap.now)
+            fees_in_period = _compute_fees_in_period(session, version_id, start_dt, snap.now, account_ids)
             start_invested = snap.invested_snapshots.get(start_ds, {})
             invested_in_period = total_invested - sum(
                 start_invested.get(aid, 0.0) for aid in all_asset_ids
@@ -1703,7 +1719,7 @@ def compute_version_metrics(
         version = session.get(CalculationVersion, version_id)
         if not version:
             return None
-        total_fees, fee_count = _compute_fee_summary(session, version_id)
+        total_fees, fee_count = _compute_fee_summary(session, version_id, account_ids)
         return VersionMetrics(
             version_id=version_id,
             summary=SummaryMetrics(
@@ -1735,7 +1751,7 @@ def compute_version_metrics(
     all_asset_ids_list = list(all_asset_ids)
     asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
     asset_labels = _get_asset_labels(session, all_asset_ids_list)
-    fees_by_asset = _get_fees_by_asset(session, version_id)
+    fees_by_asset = _get_fees_by_asset(session, version_id, account_ids)
 
     now_balances, now_costs, now_prices, now_rpnl_total, now_rpnl_by_asset = _snapshot_at(
         snap, price_snapshots, cumulative_rpnl, snap.now,
@@ -1842,7 +1858,7 @@ def compute_book_metrics(
         version = session.get(CalculationVersion, version_id)
         if not version:
             return None
-        total_fees, fee_count = _compute_fee_summary(session, version_id)
+        total_fees, fee_count = _compute_fee_summary(session, version_id, account_ids)
         return BookVersionMetrics(
             version_id=version_id,
             summary=BookSummary(
@@ -1912,7 +1928,7 @@ def compute_performers(
     all_asset_ids_list = list(all_asset_ids)
     asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
     asset_labels = _get_asset_labels(session, all_asset_ids_list)
-    fees_by_asset = _get_fees_by_asset(session, version_id)
+    fees_by_asset = _get_fees_by_asset(session, version_id, account_ids)
 
     now_balances, now_costs, now_prices, _, now_rpnl_by_asset = _snapshot_at(
         snap, price_snapshots, cumulative_rpnl, snap.now,

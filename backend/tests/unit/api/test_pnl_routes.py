@@ -373,6 +373,57 @@ class TestGetVersionBalances:
         assert balance.realized_event_count == 1
 
 
+    def test_grouped_balances_scoped_to_account_ids(
+        self, mock_session, mock_version, no_filters
+    ):
+        """Regression: account_ids scopes lots, realized, fees, income and warnings to the holding account."""
+        from backend.api.routes.pnl import get_version_balances
+
+        mock_session.get.return_value = mock_version
+
+        get_version_balances(
+            version_id=1,
+            group_by_asset=True,
+            account_ids="5,6",
+            tx_filters=no_filters,
+            session=mock_session,
+        )
+
+        sqls = [str(c.args[0]) for c in mock_session.exec.call_args_list]
+        lots_sql = next(q for q in sqls if "FROM cost_lots" in q)
+        assert "cost_lots.account_id IN" in lots_sql
+        for table in ("realized_pnl", "pnl_warnings", "income_events"):
+            q = next(q for q in sqls if f"FROM {table}" in q)
+            assert "normalized_transactions.account_id IN" in q, table
+        fee_sql = next(q for q in sqls if "FROM fee_entries" in q)
+        assert "calculation_unit_legs" in fee_sql
+        assert "normalized_transactions.account_id IN" in fee_sql
+
+    def test_grouped_balances_without_account_ids_is_unscoped(
+        self, mock_session, mock_version, no_filters
+    ):
+        from backend.api.routes.pnl import get_version_balances
+
+        mock_session.get.return_value = mock_version
+
+        get_version_balances(
+            version_id=1, group_by_asset=True, tx_filters=no_filters, session=mock_session
+        )
+
+        sqls = [str(c.args[0]) for c in mock_session.exec.call_args_list]
+        assert not any("account_id IN" in q for q in sqls)
+
+    def test_balances_invalid_account_ids_returns_422(self, mock_session, no_filters):
+        from backend.api.routes.pnl import get_version_balances
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            get_version_balances(
+                version_id=1, account_ids="abc", tx_filters=no_filters, session=mock_session
+            )
+        assert exc_info.value.status_code == 422
+
+
 class TestGetVersionRealizedPnl:
     """Tests for GET /pnl/versions/{id}/realized-pnl endpoint."""
 

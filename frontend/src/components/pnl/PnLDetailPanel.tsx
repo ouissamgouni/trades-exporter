@@ -29,6 +29,7 @@ import { AccountBadge } from '../AccountBadge';
 import { Tooltip } from '../ui/tooltip';
 import { useCategoryMaps } from '../../hooks/useCategoryMaps';
 import { useVersionMetrics, usePortfolioTimeline } from '../../hooks/useChartData';
+import { useAccountScopedAssets } from '../../hooks/useAccountScopedAssets';
 import { formatQuantity } from '../../utils/numberUtils';
 import type { Range } from './TotalReturnScorecard';
 import type { DrillDownState } from './pnlState';
@@ -142,6 +143,12 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
         !!currentVersionId && hasEntityScope,
     );
 
+    const drillAccountIds = useMemo(
+        () => (drill.entityType === 'account' && drill.entityId != null ? [drill.entityId] : []),
+        [drill.entityType, drill.entityId],
+    );
+    const accountScoped = useAccountScopedAssets(currentVersionId, drillAccountIds, assets, state.showUnsettledNegative);
+
     // ── Filter assets by scope ──
     const scopedAssets: AssetPnLRow[] = useMemo(() => {
         let filtered = assets;
@@ -150,7 +157,7 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
         if (drill.entityType === 'category' && drill.entityId != null) {
             filtered = filtered.filter(a => a.category_ids.includes(drill.entityId!));
         } else if (drill.entityType === 'account' && drill.entityId != null) {
-            filtered = filtered.filter(a => a.account_ids.includes(drill.entityId!));
+            filtered = accountScoped.rows ?? [];
         }
 
         // Filter by single asset for L2
@@ -159,7 +166,7 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
         }
 
         return filtered;
-    }, [assets, drill, dimensions, state.performerDimensionId, accountBalances]);
+    }, [assets, drill, dimensions, state.performerDimensionId, accountBalances, accountScoped.rows]);
 
     // ── Scope label ──
     const scopeLabel = useMemo(() => {
@@ -545,6 +552,7 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                             renderAfterFilters={assetsViewToggle}
                             contentHidden={assetsView !== 'list'}
                             pnlVersionId={currentVersionId ?? undefined}
+                            loading={accountScoped.isLoading}
                         />
                         {assetsView === 'treemap' && (
                             <div className="mx-3 mb-3 mt-1 overflow-hidden border-2 border-blue-100">

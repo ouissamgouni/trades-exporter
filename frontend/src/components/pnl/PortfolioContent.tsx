@@ -22,6 +22,8 @@ import { DrillDownBreadcrumb } from './DrillDownBreadcrumb';
 import { ViewModeToggle, type AssetsViewMode } from './ViewModeToggle';
 import { usePortfolioTimeline } from '../../hooks/useChartData';
 import { useAssets } from '../../hooks/useAssets';
+import { useAccountScopedAssets } from '../../hooks/useAccountScopedAssets';
+import { sumLiveBalancesForAccounts } from './pnlCalculations';
 import type { AssetPeriodDelta } from '../../hooks/useChartData';
 import type { Range } from './TotalReturnScorecard';
 
@@ -165,8 +167,19 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
     const [pnlStatus, setPnlStatus] = useState<PnlStatusFilter>('with_pnl');
     const [balanceStatus, setBalanceStatus] = useState<BalanceStatusFilter>('all');
 
+    // With an account filter, rows hold only the selected accounts' share of each asset
+    const hasAccountFilter = selectedAccountIds.length > 0;
+    const accountScoped = useAccountScopedAssets(currentVersionId, selectedAccountIds, displayAssets, pnlState.showUnsettledNegative);
+    const tableAssets = hasAccountFilter ? (accountScoped.rows ?? []) : displayAssets;
+    const tableLiveBalanceMap = useMemo(
+        () => (hasAccountFilter && liveAccountBalanceMap
+            ? sumLiveBalancesForAccounts(liveAccountBalanceMap, selectedAccountIds)
+            : liveBalanceMap),
+        [hasAccountFilter, liveAccountBalanceMap, selectedAccountIds, liveBalanceMap],
+    );
+
     const filteredTreemapAssets = useMemo(() => {
-        return displayAssets.filter(a => {
+        return tableAssets.filter(a => {
             if (search && (!a.asset.symbol || !a.asset.symbol.toLowerCase().includes(search.toLowerCase()))) return false;
             if (selectedAccountIds.length > 0) {
                 if (!a.account_ids || a.account_ids.length === 0) return false;
@@ -179,7 +192,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
             if (pnlStatus === 'with_pnl' && !a.has_lots) return false;
             if (pnlStatus === 'no_pnl' && a.has_lots) return false;
             const sym = a.asset.symbol?.toUpperCase() ?? '';
-            const liveQty = liveBalanceMap?.get(sym);
+            const liveQty = tableLiveBalanceMap?.get(sym);
             if (balanceStatus === 'mapped' && (liveQty == null || liveQty === 0)) return false;
             if (balanceStatus === 'unmapped' && liveQty != null && liveQty > 0) return false;
             if (minMarketValue > 0 && a.has_lots && a.unit_value != null) {
@@ -189,7 +202,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
             }
             return true;
         });
-    }, [displayAssets, search, selectedAccountIds, selectedCategoryIds, pnlStatus, balanceStatus, minMarketValue, liveBalanceMap]);
+    }, [tableAssets, search, selectedAccountIds, selectedCategoryIds, pnlStatus, balanceStatus, minMarketValue, tableLiveBalanceMap]);
 
     const [filteredAssetCount, setFilteredAssetCount] = useState<number>(displayAssets.length);
 
@@ -197,7 +210,8 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
     const assetsTable = (
         <>
             <AssetPnLTable
-                assets={displayAssets}
+                assets={tableAssets}
+                loading={accountScoped.isLoading}
                 baseCurrency={config.base_currency_symbol}
                 onAssetClick={onAssetClick}
                 onAccountClick={onAccountClick}
@@ -207,7 +221,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
                 availableAccountIds={availableAccountIds}
                 availableCategoryIds={availableCategoryIds}
                 onLoadAccountBalances={onLoadAccountBalances}
-                liveBalances={liveBalanceMap}
+                liveBalances={tableLiveBalanceMap}
                 liveAccountBalances={liveAccountBalanceMap}
                 liveBalanceLoading={liveBalanceLoading}
                 unmappedLiveAssets={unmappedLiveAssets}

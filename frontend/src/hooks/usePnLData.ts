@@ -13,7 +13,7 @@ import type { BalanceEntry } from '../types';
 import { toaster } from '../components/ui/toaster';
 import { usePnL } from '../components/pnl/PnLContext';
 import { usePnLCalculationStatus } from './usePnLCalculationStatus';
-import { applyPriceToAssetRow, buildPriceMap, computeSummaryTotals } from '../components/pnl/pnlCalculations';
+import { applyPriceToAssetRow, balancesToAssetRows, buildPriceMap, computeSummaryTotals } from '../components/pnl/pnlCalculations';
 import { PNL_STATUS, VERSION_STATUS } from '../components/pnl/pnlState';
 import type {
     PnLVersionResponse,
@@ -92,31 +92,10 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
     }, [dispatch, getResponseErrorMessage]);
 
     // Transform aggregated balances to AssetPnLRow array
-    const transformBalances = useCallback((balances: AggregatedBalanceItem[]): AssetPnLRow[] => {
-        return balances.map((balance) => ({
-            asset: balance.asset,
-            account_ids: balance.account_ids || [],
-            category_ids: balance.category_ids || [],
-            quantity: balance.qty,
-            market_value: 0,
-            cost_basis: balance.cost_basis_in_base,
-            total_invested: balance.total_invested_in_base,
-            unit_cost: balance.avg_unit_cost_in_base,
-            unrealized_pnl: 0,
-            unrealized_pnl_pct: 0,
-            realized_pnl: balance.realized_pnl_in_base,
-            taxable_realized_pnl: balance.taxable_realized_pnl_in_base ?? 0,
-            total_fees: balance.total_fees_in_base ?? 0,
-            lot_count: balance.lot_count,
-            realized_event_count: balance.realized_event_count,
-            warning_count: balance.warning_count,
-            has_lots: balance.lot_count > 0 || balance.realized_event_count > 0,
-            has_open_position: balance.has_open_position,
-            price_fetch_eligible: balance.price_fetch_eligible,
-            valuation_status: balance.valuation_status,
-            valuation_note: balance.valuation_note,
-        }));
-    }, []);
+    const transformBalances = useCallback(
+        (balances: AggregatedBalanceItem[]): AssetPnLRow[] => balancesToAssetRows(balances),
+        [],
+    );
 
     // Load per-account balances for expandable rows
     const loadAccountBalances = useCallback(async (versionId: number): Promise<Map<number, AccountBalanceBreakdown[]>> => {

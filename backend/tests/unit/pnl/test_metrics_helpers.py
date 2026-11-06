@@ -475,3 +475,40 @@ class TestComputeLiveMetricsVersionField:
         assert result.version_id == 42
         assert "all" in result.ranges
         assert result.ranges["all"].roi_pct != 0.0
+
+
+# ============================================================================
+# Fee scoping by account
+# ============================================================================
+
+
+class TestFeeAccountScoping:
+    def test_fee_helpers_scope_to_account_ids(self):
+        from backend.services.pnl.metrics_service import (
+            _compute_fee_summary,
+            _compute_fees_in_period,
+            _get_fees_by_asset,
+        )
+
+        session = MagicMock()
+        session.exec.return_value.first.return_value = None
+        session.exec.return_value.all.return_value = []
+
+        _compute_fee_summary(session, 1, [5])
+        _compute_fees_in_period(session, 1, _utc(2024, 1, 1), _utc(2024, 12, 31), [5])
+        _get_fees_by_asset(session, 1, [5])
+
+        for call in session.exec.call_args_list:
+            sql = str(call.args[0])
+            assert "calculation_unit_legs" in sql
+            assert "normalized_transactions.account_id IN" in sql
+
+    def test_fee_summary_unscoped_without_account_ids(self):
+        from backend.services.pnl.metrics_service import _compute_fee_summary
+
+        session = MagicMock()
+        session.exec.return_value.first.return_value = None
+
+        _compute_fee_summary(session, 1)
+
+        assert "normalized_transactions" not in str(session.exec.call_args.args[0])
