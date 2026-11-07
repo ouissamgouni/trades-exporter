@@ -111,7 +111,9 @@ class ConnectorPolymarketPolygon(ConnectorAnkr):
         tx_from = tr.get("fromAddress") or ""
         tx_to = tr.get("toAddress") or ""
         contract = tr.get("contractAddress") or ""
-        symbol = USDC_CONTRACTS.get(contract.lower(), (tr.get("tokenSymbol") or "USDC").upper())
+        symbol = USDC_CONTRACTS.get(
+            contract.lower(), (tr.get("tokenSymbol") or "USDC").upper()
+        )
         decimals = int(tr.get("tokenDecimals") or 6)
         quantity = Decimal(str(tr.get("valueRawInteger") or 0)) / Decimal(10**decimals)
         direction = "outflow" if tx_from.lower() == self.wallet_address else "inflow"
@@ -123,10 +125,14 @@ class ConnectorPolymarketPolygon(ConnectorAnkr):
             source_account=self.source_account,
             source_transaction_id=f"{tx_hash}_{tr.get('logIndex', '')}",
             network_transaction_id=tx_hash,
-            date_time=datetime.fromtimestamp(int(tr.get("timestamp") or 0), tz=timezone.utc),
+            date_time=datetime.fromtimestamp(
+                int(tr.get("timestamp") or 0), tz=timezone.utc
+            ),
             direction=direction,
             transaction_type="transfer",
-            source_transaction_type="deposit" if direction == "inflow" else "withdrawal",
+            source_transaction_type="deposit"
+            if direction == "inflow"
+            else "withdrawal",
             source_asset_symbol=symbol,
             quantity=float(quantity),
             fee=0.0,
