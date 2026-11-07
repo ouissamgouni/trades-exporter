@@ -126,6 +126,8 @@ def mock_cost_lot():
     # Mock computed properties
     lot.qty_consumed = Decimal("2")
     lot.remaining_cost_in_base = Decimal("800")
+    lot.economic_unit_cost = Decimal("100")
+    lot.economic_remaining_cost_in_base = Decimal("800")
 
     # Cost provenance fields
     lot.cost_source = "fmv"

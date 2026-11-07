@@ -69,6 +69,7 @@ class YahooDirectPriceGetter(BasePriceGetter):
     name = "yahoo_direct"
 
     DEFAULT_NATIVE_QUOTE = "USD"
+    supports_range = True
 
     def __init__(self):
         """Initialize Yahoo Direct price getter."""
@@ -417,3 +418,79 @@ class YahooDirectPriceGetter(BasePriceGetter):
 
         log.info(f"[yahoo_direct] ✓ Got {len(points)} daily bars for {ticker}")
         return points
+
+    def get_historical_prices_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> List[PriceResult]:
+        ticker_symbol, native_quote = self._resolve_ticker_with_quote(asset, config)
+        result = self._fetch_range_chart(ticker_symbol, start, end)
+        native_quote = (result.get("meta", {}).get("currency") or native_quote).upper()
+        return self._range_bars(result, ticker_symbol, native_quote, start, end)
+
+    supports_current_with_range = True
+
+    def get_current_and_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> Tuple[PriceResult, List[PriceResult]]:
+        """The chart response carries the live quote in its metadata: one request for both."""
+        ticker_symbol, native_quote = self._resolve_ticker_with_quote(asset, config)
+        result = self._fetch_range_chart(ticker_symbol, start, end)
+        meta = result.get("meta", {})
+        native_quote = (meta.get("currency") or native_quote).upper()
+        bars = self._range_bars(result, ticker_symbol, native_quote, start, end)
+        live = meta.get("regularMarketPrice")
+        if live is None or live <= 0:
+            if not bars:
+                raise PriceGetterError(
+                    message=f"[yahoo_direct] No current price for {ticker_symbol}",
+                    reason=PriceErrorReason.NO_DATA_RETURNED,
+                    getter_name="yahoo_direct",
+                    ticker_used=ticker_symbol,
+                )
+            live = bars[-1].price
+        current = PriceResult(
+            price=float(live),
+            quote_currency=native_quote,
+            source="yahoo_direct",
+            timestamp=datetime.now(),
+            ticker_used=ticker_symbol,
+        )
+        return current, bars
+
+    def _fetch_range_chart(self, ticker_symbol: str, start: date, end: date) -> Dict[str, Any]:
+        period1 = int(datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc).timestamp())
+        period2 = int(
+            datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).timestamp()
+        )
+        return self._fetch_chart(
+            ticker_symbol, {"interval": "1d", "period1": period1, "period2": period2}
+        )
+
+    def _range_bars(
+        self, result: Dict[str, Any], ticker_symbol: str, native_quote: str, start: date, end: date
+    ) -> List[PriceResult]:
+        closes = result.get("indicators", {}).get("quote", [{}])[0].get("close") or []
+
+        bars: List[PriceResult] = []
+        for ts, close in zip(result.get("timestamp") or [], closes):
+            if close is None:
+                continue
+            bar_date = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+            if start <= bar_date <= end:
+                bars.append(PriceResult(
+                    price=float(close),
+                    quote_currency=native_quote,
+                    source="yahoo_direct",
+                    timestamp=datetime.combine(bar_date, datetime.min.time()),
+                    ticker_used=ticker_symbol,
+                ))
+        log.info(f"[yahoo_direct] Range {start}..{end} for {ticker_symbol}: {len(bars)} bars")
+        return bars

@@ -6,6 +6,7 @@ from sqlalchemy import func
 
 from backend.db.models import NormalizedTransaction
 from backend.services.suggestion_service import SuggestionService
+from backend.services.bundle_health import BundleHealthService
 from .models import IssueCounts, HealthSummary
 from .detectors import (
     LinkageIssueDetector,
@@ -57,6 +58,8 @@ class IssueService:
             duplicates=self.duplicate_detector.count(account_ids, include_dismissed),
             pending_reviews=self.pending_detector.count(account_ids, include_dismissed),
             bundle_suggestions=self._count_bundle_suggestions(account_ids),
+            broken_bundles=0 if account_ids else BundleHealthService(self.session).count_broken(),
+            dismissed_transfer_issues=self.transfer_detector.count(account_ids, dismissed_only=True),
         )
     
     def get_health_summary(
@@ -124,6 +127,7 @@ class IssueService:
         per_page: int = 50,
         account_ids: Optional[List[int]] = None,
         include_dismissed: bool = False,
+        dismissed_only: bool = False,
     ):
         """Get paginated transfer issues with account/connector info.
         
@@ -136,7 +140,9 @@ class IssueService:
         Returns:
             Tuple of (issues_list, total_count)
         """
-        return self.transfer_detector.fetch(page, per_page, account_ids, include_dismissed)
+        return self.transfer_detector.fetch(
+            page, per_page, account_ids, include_dismissed, dismissed_only=dismissed_only
+        )
     
     def get_duplicate_groups(
         self,

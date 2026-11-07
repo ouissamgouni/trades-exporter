@@ -1154,6 +1154,8 @@ def get_transaction_status(
             linkage_issues_count=counts.linkage_issues,
             transfer_issues_count=counts.transfer_issues,
             duplicate_count=counts.duplicates,
+            broken_bundles_count=counts.broken_bundles,
+            dismissed_transfer_issues_count=counts.dismissed_transfer_issues,
             total_issues=total_issues,
             has_issues=has_issues,
         )
@@ -1293,6 +1295,7 @@ def get_transfer_issues(
     include_dismissed: bool = Query(
         False, description="Include dismissed transfer issues"
     ),
+    dismissed_only: bool = Query(False, description="Only return dismissed transfer issues"),
     session: Session = Depends(get_db),
 ):
     """
@@ -1326,6 +1329,7 @@ def get_transfer_issues(
             per_page=per_page,
             account_ids=account_id_list,
             include_dismissed=include_dismissed,
+            dismissed_only=dismissed_only,
         )
 
         return TransferIssuesResponse(
@@ -1345,6 +1349,29 @@ def get_transfer_issues(
 # =============================================================================
 # Transfer Issue Dismissal Endpoints
 # =============================================================================
+
+
+def _transfer_dismissal_tag(field: str, reason: Optional[str]) -> dict:
+    # Detector matches on {"sys_transfer_dismissed": field} via JSONB containment; extra keys are fine.
+    tag = {"sys_transfer_dismissed": field, "sys_dismissed_at": datetime.now().isoformat()}
+    if reason:
+        tag["sys_dismissed_reason"] = reason
+    return tag
+
+
+def _strip_transfer_dismissal(tags: Optional[list], field: str) -> list:
+    """Remove dismissal tags for `field`, including the legacy multi-tag format."""
+    tags = [t for t in (tags or []) if isinstance(t, dict)]
+    legacy_field = any(t.get("sys_dismissed_field") == field for t in tags)
+    legacy_keys = {"sys_dismissed_field", "sys_dismissed_at", "sys_dismissed_reason"}
+    kept = []
+    for t in tags:
+        if t.get("sys_transfer_dismissed") == field:
+            continue
+        if legacy_field and (t.get("sys_transfer_dismissed") == "true" or set(t) <= legacy_keys):
+            continue
+        kept.append(t)
+    return kept
 
 
 class DismissTransferIssueRequest(BaseModel):
@@ -1401,27 +1428,8 @@ def dismiss_transfer_issue(
     if tx.transaction_type != "transfer":
         raise HTTPException(status_code=400, detail="Transaction is not a transfer")
 
-    # Remove any existing dismissal tags for this field
-    tags = list(tx.tags or [])
-    tags = [
-        tag
-        for tag in tags
-        if not (
-            tag.get("sys_transfer_dismissed") == "true"
-            and any(t.get("sys_dismissed_field") == request.field for t in tags)
-        )
-    ]
-
-    # Add new dismissal tags
-    dismissal_tags = [
-        {"sys_transfer_dismissed": "true"},
-        {"sys_dismissed_field": request.field},
-        {"sys_dismissed_at": datetime.now().isoformat()},
-    ]
-    if request.reason:
-        dismissal_tags.append({"sys_dismissed_reason": request.reason})
-
-    tags.extend(dismissal_tags)
+    tags = _strip_transfer_dismissal(tx.tags, request.field)
+    tags.append(_transfer_dismissal_tag(request.field, request.reason))
 
     tx.tags = tags if tags else None
     flag_modified(tx, "tags")
@@ -1463,37 +1471,11 @@ def undismiss_transfer_issue(
             status_code=404, detail=f"Transaction {transaction_id} not found"
         )
 
-    # Remove dismissal tags for this field
-    tags = list(tx.tags or [])
-
-    # First, find if this field is dismissed
-    is_dismissed = any(
-        tag.get("sys_transfer_dismissed") == "true" for tag in tags
-    ) and any(tag.get("sys_dismissed_field") == field for tag in tags)
-
-    if not is_dismissed:
+    tags = _strip_transfer_dismissal(tx.tags, field)
+    if len(tags) == len(tx.tags or []):
         raise HTTPException(
             status_code=404, detail=f"No dismissal found for field '{field}'"
         )
-
-    # Remove all sys_transfer_dismissed, sys_dismissed_field, sys_dismissed_reason, sys_dismissed_at tags
-    # that are associated with this field
-    tags = [
-        tag
-        for tag in tags
-        if not (
-            tag.get("sys_transfer_dismissed")
-            or tag.get("sys_dismissed_field") == field
-            or (
-                tag.get("sys_dismissed_reason")
-                and any(t.get("sys_dismissed_field") == field for t in tags)
-            )
-            or (
-                tag.get("sys_dismissed_at")
-                and any(t.get("sys_dismissed_field") == field for t in tags)
-            )
-        )
-    ]
 
     tx.tags = tags if tags else None
     flag_modified(tx, "tags")
@@ -1542,18 +1524,8 @@ def bulk_dismiss_transfer_issues(
                 errors.append(f"Transaction {tx_id} is not a transfer")
                 continue
 
-            # Build clean tags list: remove any existing sys_transfer_dismissed for this field
-            tags = [
-                tag
-                for tag in (tx.tags or [])
-                if not (
-                    isinstance(tag, dict)
-                    and tag.get("sys_transfer_dismissed") == request.field
-                )
-            ]
-
-            # Add single dismissal tag
-            tags.append({"sys_transfer_dismissed": request.field})
+            tags = _strip_transfer_dismissal(tx.tags, request.field)
+            tags.append(_transfer_dismissal_tag(request.field, request.reason))
 
             tx.tags = tags
             flag_modified(tx, "tags")
@@ -1665,7 +1637,7 @@ def get_tx_list_query(
     ),
     connector_run_outcome: Optional[str] = Query(
         None,
-        description="Filter by outcome within connector run: synced, updated, or skipped. Requires connector_run_id.",
+        description="Filter by outcome within connector run: synced, updated, skipped, or all. Requires connector_run_id.",
     ),
     source_transaction_id: Optional[str] = Query(
         None,
@@ -1911,7 +1883,7 @@ def apply_tx_list_filters(session: Session, statement, q: TxListQuery):
     # so the frontend doesn't need to send potentially hundreds of IDs in the URL.
     if connector_run_outcome and connector_run_id:
         outcome = connector_run_outcome.strip().lower()
-        if outcome in ("synced", "updated", "skipped"):
+        if outcome in ("synced", "updated", "skipped", "all"):
             run_id_list = [
                 int(r.strip())
                 for r in connector_run_id.split(",")
@@ -1927,6 +1899,14 @@ def apply_tx_list_filters(session: Session, statement, q: TxListQuery):
                         outcome_ids = run.updated_ids or []
                     elif outcome == "skipped":
                         outcome_ids = run.skipped_ids or []
+                    elif outcome == "all":
+                        outcome_ids = list(
+                            dict.fromkeys(
+                                (run.synced_ids or [])
+                                + (run.updated_ids or [])
+                                + (run.skipped_ids or [])
+                            )
+                        )
 
                     if outcome_ids:
                         if len(outcome_ids) == 1:

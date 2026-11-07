@@ -16,8 +16,9 @@ Quote Currency Handling:
 - Defaults to "USD" if not specified or parseable from ticker
 """
 
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+import math
+from datetime import date, datetime, timedelta
+from typing import List, Optional, Tuple
 
 import yfinance as yf
 
@@ -57,6 +58,7 @@ class YahooPriceGetter(BasePriceGetter):
     """
 
     name = "yahoo"
+    supports_range = True
 
     # Yahoo aggressively rate-limits/blocks rapid successive requests (e.g. in
     # test runs). Retrying with the base default (3 attempts + backoff) just
@@ -293,3 +295,27 @@ class YahooPriceGetter(BasePriceGetter):
             timestamp=dt,
             ticker_used=ticker_symbol,
         )
+
+    def get_historical_prices_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> List[PriceResult]:
+        ticker_symbol, native_quote = self._resolve_ticker_with_quote(asset, config)
+        hist = yf.Ticker(ticker_symbol).history(start=start, end=end + timedelta(days=1))
+        bars: List[PriceResult] = []
+        if hist.empty:
+            return bars
+        for idx, close in hist["Close"].items():
+            if close is None or math.isnan(float(close)):
+                continue
+            bars.append(PriceResult(
+                price=float(close),
+                quote_currency=native_quote,
+                source="yahoo",
+                timestamp=datetime.combine(idx.date(), datetime.min.time()),
+                ticker_used=ticker_symbol,
+            ))
+        return bars

@@ -30,6 +30,7 @@ from backend.services.price_gap_job_service import (
     fetch_day_price,
     gap_fix_jobs,
     missing_dates_for_gaps,
+    prefill_with_ranges,
 )
 
 router = APIRouter(prefix="/price-snapshots", tags=["Price Snapshots"])
@@ -566,9 +567,20 @@ def backfill_prices(
     fetched: List[BackfillFetchedItem] = []
     failed: List[BackfillFailedItem] = []
 
+    filled, tried = prefill_with_ranges(session, svc, {req.asset_id: missing_dates})
+    by_date = filled.get(req.asset_id, {})
+    exclude = tried.get(req.asset_id, set())
+
     for d in missing_dates:
+        if d in by_date:
+            fetched.append(
+                BackfillFetchedItem(
+                    date=d.isoformat(), price=by_date[d].price, source=by_date[d].source
+                )
+            )
+            continue
         try:
-            result = fetch_day_price(svc, req.asset_id, d)
+            result = fetch_day_price(svc, req.asset_id, d, exclude_getters=exclude)
             fetched.append(
                 BackfillFetchedItem(
                     date=d.isoformat(),

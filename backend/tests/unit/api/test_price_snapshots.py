@@ -89,7 +89,7 @@ def _run_job(monkeypatch, fetch):
 
 
 def test_gap_job_circuit_breaker_skips_failing_asset_and_continues(monkeypatch):
-    def fetch(svc, asset_id, d):
+    def fetch(svc, asset_id, d, **kwargs):
         if asset_id == 1:
             raise RuntimeError("getter down")
         return MagicMock()
@@ -111,7 +111,7 @@ def test_gap_job_cancel_marks_remaining_assets(monkeypatch):
 
     holder = {}
 
-    def fetch(svc, asset_id, d):
+    def fetch(svc, asset_id, d, **kwargs):
         holder["svc"].cancel()
         return MagicMock()
 

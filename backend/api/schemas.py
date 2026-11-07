@@ -899,11 +899,17 @@ class TransactionStatusResponse(BaseModel):
     duplicate_count: int = Field(
         0, description="Count of unresolved duplicate transactions"
     )
+    broken_bundles_count: int = Field(
+        0, description="Confirmed bundles that are empty or missing one side"
+    )
+    dismissed_transfer_issues_count: int = Field(
+        0, description="Transfer issues dismissed by the user (not counted in total_issues)"
+    )
 
     # Aggregated totals
     total_issues: int = Field(
         0,
-        description="Total data issues: missing data + linkage + transfer + duplicates + pending",
+        description="Total data issues: missing data + linkage + transfer + duplicates + broken bundles + pending",
     )
     has_issues: bool = Field(False, description="True if any data issues exist")
 

@@ -208,6 +208,7 @@ export interface MetricsSummary {
     unrealized_pnl: number;
     realized_pnl: number;
     taxable_realized_pnl: number;
+    deferred_gain?: number;
     total_fees: number;
     fee_entry_count: number;
     total_invested?: number;
@@ -229,6 +230,7 @@ export interface BookSummary {
     cost_basis: number;
     realized_pnl: number;
     taxable_realized_pnl: number;
+    deferred_gain?: number;
     total_fees: number;
     fee_entry_count: number;
     total_invested: number;
@@ -241,6 +243,7 @@ export interface BookRangeData {
     cost_basis: number;
     realized_pnl: number;
     taxable_realized_pnl: number;
+    deferred_gain?: number;
     realized_in_period: number;
     cost_basis_in_period: number;
     fees_in_period: number;

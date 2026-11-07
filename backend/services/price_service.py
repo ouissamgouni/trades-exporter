@@ -13,9 +13,11 @@ Architecture:
 - CurrencyConverter: Handles fiat currency conversion
 """
 
-from datetime import datetime, date, timedelta
+import time
+from bisect import bisect_right
+from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict, Any, Collection
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field, asdict
 
@@ -47,6 +49,11 @@ from backend.services.price_getters.manual import MANUAL_GETTER_NAME
 log = configure_logging("price_service")
 
 MANUAL_FALLBACK_SEARCH_DAYS = 36500
+# A day without its own bar (weekend/holiday) reuses the latest bar this many days back
+RANGE_CARRY_FORWARD_DAYS = 5
+# Live refreshes retry a history date that could not be filled at most this often (API quotas)
+HISTORY_RETRY_SECONDS = 6 * 3600
+_history_attempts: Dict[Tuple[int, date], float] = {}
 
 
 # ============================================================================
@@ -904,6 +911,7 @@ class PriceService:
         staleness_window_days: int = 7,
         max_timeout_seconds: Optional[int] = None,
         force_live: bool = False,
+        exclude_getters: Optional[Collection[str]] = None,
     ) -> PriceResult:
         """
         Get asset price with fallback to latest known price if fetch fails.
@@ -967,6 +975,10 @@ class PriceService:
 
             # Get price getters for this asset
             price_getters = self.resolver.resolve(session, asset)
+            if exclude_getters:
+                price_getters = [
+                    g for g in price_getters if g[0] not in exclude_getters
+                ]
             stored_prices_only = bool(price_getters) and all(
                 name == MANUAL_GETTER_NAME for name, _ in price_getters
             )
@@ -1065,6 +1077,299 @@ class PriceService:
 
         finally:
             self._close_session(session)
+
+    def fill_missing_range(
+        self,
+        getter_name: str,
+        items: List[Tuple[Asset, PriceGetterConfig, List[date]]],
+        price_quote: Optional[str] = None,
+    ) -> Dict[int, Dict[date, PriceResult]]:
+        """
+        Fill missing daily prices with one period request (per asset, or per batch for
+        multi-symbol APIs) instead of one request per day, and cache them.
+
+        Returns the stored prices per asset_id and date.
+        """
+        getter = get_price_getter(getter_name)
+        if not getter.supports_range:
+            return {}
+        if getter.max_history_days is not None:
+            floor = date.today() - timedelta(days=getter.max_history_days)
+            items = [(a, c, [d for d in ds if d >= floor]) for a, c, ds in items]
+        items = [item for item in items if item[2]]
+        all_dates = [d for _, _, dates in items for d in dates]
+        if not all_dates:
+            return {}
+        start = min(all_dates) - timedelta(days=RANGE_CARRY_FORWARD_DAYS)
+        end = max(all_dates)
+        if getter.max_history_days is not None:
+            start = max(start, floor)
+
+        bars_by_asset = getter.get_historical_prices_range_many(
+            [(asset, config) for asset, config, _ in items], start, end
+        )
+
+        session = self._get_session()
+        try:
+            requested_quote = (
+                price_quote or self.default_base_currency or "USD"
+            ).upper()
+            quote_asset_id = self._get_quote_asset_id(session, requested_quote)
+            filled = self._store_range_bars(
+                session, items, bars_by_asset, requested_quote, quote_asset_id
+            )
+            log.info(
+                f"Range fill via {getter_name} ({start}..{end}): "
+                f"{sum(len(v) for v in filled.values())}/{len(all_dates)} day(s) for {len(items)} asset(s)"
+            )
+            return filled
+        finally:
+            self._close_session(session)
+
+    def _store_range_bars(
+        self,
+        session: Session,
+        items: List[Tuple[Asset, PriceGetterConfig, List[date]]],
+        bars_by_asset: Dict[int, List[PriceResult]],
+        requested_quote: str,
+        quote_asset_id: Optional[int],
+    ) -> Dict[int, Dict[date, PriceResult]]:
+        """Cache, at 00:00 UTC of each requested date, the latest bar on or before it."""
+        filled: Dict[int, Dict[date, PriceResult]] = {}
+        for asset, _, dates in items:
+            bars = sorted(
+                bars_by_asset.get(asset.asset_id) or [], key=lambda b: b.timestamp
+            )
+            bar_dates = [b.timestamp.date() for b in bars]
+            for d in dates:
+                i = bisect_right(bar_dates, d) - 1
+                if i < 0 or (d - bar_dates[i]).days > RANGE_CARRY_FORWARD_DAYS:
+                    continue
+                bar = bars[i]
+                dt = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+                price = bar.price
+                if bar.quote_currency.upper() != requested_quote:
+                    try:
+                        price = self.converter.convert(
+                            session, price, bar.quote_currency, requested_quote, dt
+                        )
+                    except ValueError as e:
+                        log.warning(
+                            f"Range fill conversion failed for {asset.symbol} {d}: {e}"
+                        )
+                        continue
+                self.cache.store(
+                    session, asset.asset_id, quote_asset_id, price, dt, bar.source
+                )
+                filled.setdefault(asset.asset_id, {})[d] = PriceResult(
+                    price=price,
+                    quote_currency=requested_quote,
+                    source=bar.source,
+                    timestamp=dt,
+                    ticker_used=bar.ticker_used,
+                    actual_price_date=bar.timestamp,
+                )
+        return filled
+
+    def refresh_current_prices(
+        self,
+        asset_ids: List[int],
+        price_quote: Optional[str] = None,
+        history_dates: Optional[List[date]] = None,
+        staleness_window_days: int = 7,
+    ) -> Dict[int, PriceResult]:
+        """
+        Live price for many assets with as few requests as possible: multi-symbol APIs
+        are called once per getter, and history_dates lacking a price are fetched on the
+        same request when the getter returns both, else in batched period requests.
+
+        Returns the price per asset_id; assets that could not be priced are omitted.
+        """
+        from backend.services.price_gap_job_service import prefill_with_ranges
+
+        now = datetime.now(timezone.utc)
+        session = self._get_session()
+        try:
+            requested_quote = (
+                price_quote or self.default_base_currency or "USD"
+            ).upper()
+            quote_asset_id = self._get_quote_asset_id(session, requested_quote)
+            exclude = self._get_cache_exclude_sources(session)
+
+            results: Dict[int, PriceResult] = {}
+            assets: Dict[int, Asset] = {}
+            pending: Dict[int, Tuple[str, PriceGetterConfig]] = {}
+            for aid in asset_ids:
+                asset = session.get(Asset, aid)
+                if asset is None or asset.symbol.upper() == requested_quote:
+                    continue
+                assets[aid] = asset
+                cached = self.cache.get_with_source(
+                    session, aid, quote_asset_id, now, exclude_sources=exclude
+                )
+                if cached is not None:
+                    results[aid] = PriceResult(
+                        price=float(cached.price),
+                        quote_currency=requested_quote,
+                        source=cached.source or "cached",
+                        timestamp=cached.snapshot_time,
+                        actual_price_date=cached.snapshot_time,
+                    )
+                    continue
+                getters = self.resolver.resolve(session, asset)
+                if getters and getters[0][0] != MANUAL_GETTER_NAME:
+                    pending[aid] = getters[0]
+                else:
+                    pending[aid] = ("", PriceGetterConfig())
+
+            missing = self._missing_history_dates(
+                session, list(assets), quote_asset_id, history_dates or [], exclude, now.date()
+            )
+
+            # Getters returning live price + history in one response: one request per asset
+            tried_history: Dict[int, set] = {}
+            for aid, (name, config) in list(pending.items()):
+                getter = self._getter_or_none(name)
+                if not missing.get(aid) or getter is None or not getter.supports_current_with_range:
+                    continue
+                dates = missing[aid]
+                start = min(dates) - timedelta(days=RANGE_CARRY_FORWARD_DAYS)
+                tried_history[aid] = {name}
+                try:
+                    current, bars = getter.get_current_and_range(
+                        assets[aid], start, now.date(), config
+                    )
+                except Exception as e:
+                    log.warning(f"{name} current+range failed for {assets[aid].symbol}: {e}")
+                    continue
+                filled = self._store_range_bars(
+                    session, [(assets[aid], config, dates)], {aid: bars},
+                    requested_quote, quote_asset_id,
+                )
+                missing[aid] = [d for d in dates if d not in filled.get(aid, {})]
+                stored = self._store_current(
+                    session, assets[aid], current, requested_quote, quote_asset_id, now
+                )
+                if stored is not None:
+                    results[aid] = stored
+                    del pending[aid]
+
+            # Remaining live prices: one batched call per primary getter
+            groups: Dict[str, List[Tuple[Asset, PriceGetterConfig]]] = {}
+            for aid, (name, config) in pending.items():
+                if name:
+                    groups.setdefault(name, []).append((assets[aid], config))
+            for name, items in groups.items():
+                getter = self._getter_or_none(name)
+                if getter is None:
+                    continue
+                try:
+                    got = getter.get_current_prices_many(items)
+                except Exception as e:
+                    log.warning(f"{name} batch current price failed: {e}")
+                    continue
+                for aid, res in got.items():
+                    stored = self._store_current(
+                        session, assets[aid], res, requested_quote, quote_asset_id, now
+                    )
+                    if stored is not None:
+                        results[aid] = stored
+
+            # Unpriced: the other getters one by one, then the latest cached price
+            for aid, (name, _) in pending.items():
+                if aid in results:
+                    continue
+                try:
+                    results[aid] = self.get_price_with_fallback(
+                        asset_id=aid,
+                        dt=now,
+                        price_quote=requested_quote,
+                        use_fallback=True,
+                        staleness_window_days=staleness_window_days,
+                        exclude_getters={name} if name else None,
+                    )
+                except Exception as e:
+                    log.warning(f"Current price failed for {assets[aid].symbol}: {e}")
+
+            remaining = {aid: dates for aid, dates in missing.items() if dates}
+            if remaining:
+                try:
+                    prefill_with_ranges(session, self, remaining, already_tried=tried_history)
+                except Exception as e:
+                    log.warning(f"History prefill during live refresh failed: {e}")
+            return results
+        finally:
+            self._close_session(session)
+
+    @staticmethod
+    def _getter_or_none(name: str) -> Optional[BasePriceGetter]:
+        if not name:
+            return None
+        try:
+            return get_price_getter(name)
+        except Exception:
+            return None
+
+    def _store_current(
+        self,
+        session: Session,
+        asset: Asset,
+        result: PriceResult,
+        requested_quote: str,
+        quote_asset_id: Optional[int],
+        now: datetime,
+    ) -> Optional[PriceResult]:
+        price = result.price
+        if result.quote_currency.upper() != requested_quote:
+            try:
+                price = self.converter.convert(
+                    session, price, result.quote_currency, requested_quote, now
+                )
+            except ValueError as e:
+                log.warning(f"Current price conversion failed for {asset.symbol}: {e}")
+                return None
+        self.cache.store(session, asset.asset_id, quote_asset_id, price, now, result.source)
+        return PriceResult(
+            price=price,
+            quote_currency=requested_quote,
+            source=result.source,
+            timestamp=now,
+            ticker_used=result.ticker_used,
+            actual_price_date=now,
+        )
+
+    def _missing_history_dates(
+        self,
+        session: Session,
+        asset_ids: List[int],
+        quote_asset_id: Optional[int],
+        dates: List[date],
+        exclude: Optional[List[str]],
+        today: date,
+    ) -> Dict[int, List[date]]:
+        """Past dates with no snapshot close enough to carry forward, skipping recent retries."""
+        missing: Dict[int, List[date]] = {}
+        if not asset_ids:
+            return missing
+        now_ts = time.time()
+        for d in sorted({d for d in dates if d < today}):
+            day_end = datetime.combine(d + timedelta(days=1), datetime.min.time())
+            stmt = select(PriceSnapshot.asset_id).where(
+                PriceSnapshot.asset_id.in_(asset_ids),
+                PriceSnapshot.snapshot_time >= day_end - timedelta(days=RANGE_CARRY_FORWARD_DAYS + 1),
+                PriceSnapshot.snapshot_time < day_end,
+            )
+            if quote_asset_id is not None:
+                stmt = stmt.where(PriceSnapshot.quote_asset_id == quote_asset_id)
+            if exclude:
+                stmt = stmt.where(PriceSnapshot.source.notin_(exclude))
+            covered = set(session.exec(stmt.distinct()).all())
+            for aid in asset_ids:
+                if aid in covered or now_ts - _history_attempts.get((aid, d), 0) < HISTORY_RETRY_SECONDS:
+                    continue
+                _history_attempts[(aid, d)] = now_ts
+                missing.setdefault(aid, []).append(d)
+        return missing
 
     def _fetch_price_with_timeout(
         self,

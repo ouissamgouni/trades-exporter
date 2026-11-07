@@ -8,9 +8,9 @@ New price getters should inherit from BasePriceGetter and implement the required
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
-from typing import Optional, Callable, TypeVar, Dict, Any, List
+from typing import Optional, Callable, TypeVar, Dict, Any, List, Tuple
 
 from backend.config.loader import load_settings, configure_logging
 from backend.db.models import Asset
@@ -331,6 +331,13 @@ class BasePriceGetter(ABC):
     initial_delay: float = 1.0
     backoff_multiplier: float = 2.0
 
+    # True when get_historical_prices_range returns a whole period in one request
+    supports_range: bool = False
+    # Oldest data the API serves, in days back from today (None = unlimited)
+    max_history_days: Optional[int] = None
+    # True when get_current_and_range returns the live price and daily bars in one request
+    supports_current_with_range: bool = False
+
     def __init__(self):
         """Initialize base price getter with common settings."""
         settings = load_settings()
@@ -429,6 +436,58 @@ class BasePriceGetter(ABC):
             RuntimeError: If unable to fetch price after retries.
             ValueError: If asset not supported or date out of range.
         """
+
+    def get_historical_prices_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> List[PriceResult]:
+        """Daily closes in [start, end]: one PriceResult per bar, timestamp = bar date at 00:00."""
+        raise NotImplementedError(f"{self.name} does not support range fetching")
+
+    def get_current_prices_many(
+        self, items: List[Tuple[Asset, Optional[PriceGetterConfig]]]
+    ) -> Dict[int, PriceResult]:
+        """Current price for several assets; override when the API takes many symbols per request."""
+        results: Dict[int, PriceResult] = {}
+        for asset, config in items:
+            try:
+                results[asset.asset_id] = self.get_current_price(asset, config)
+            except Exception as e:
+                log.warning(f"[{self.name}] Current price failed for {asset.symbol}: {e}")
+        return results
+
+    def get_current_and_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> Tuple[PriceResult, List[PriceResult]]:
+        """Live price plus daily bars in [start, end]."""
+        return (
+            self.get_current_price(asset, config),
+            self.get_historical_prices_range(asset, start, end, config),
+        )
+
+    def get_historical_prices_range_many(
+        self,
+        items: List[Tuple[Asset, Optional[PriceGetterConfig]]],
+        start: date,
+        end: date,
+    ) -> Dict[int, List[PriceResult]]:
+        """Range fetch for several assets; override when the API takes many symbols per request."""
+        results: Dict[int, List[PriceResult]] = {}
+        for asset, config in items:
+            try:
+                results[asset.asset_id] = self.get_historical_prices_range(
+                    asset, start, end, config
+                )
+            except Exception as e:
+                log.warning(f"[{self.name}] Range fetch failed for {asset.symbol}: {e}")
+        return results
 
     def _fetch_with_retry(
         self,

@@ -14,11 +14,16 @@ class IssueCounts:
     duplicates: int = 0
     pending_reviews: int = 0
     bundle_suggestions: int = 0
+    broken_bundles: int = 0
+    dismissed_transfer_issues: int = 0
     
     @property
     def data_quality_total(self) -> int:
-        """Total data quality issues (missing data + linkage + transfer + duplicates)."""
-        return self.missing_data_issues + self.linkage_issues + self.transfer_issues + self.duplicates
+        """Total data quality issues (missing data + linkage + transfer + duplicates + broken bundles)."""
+        return (
+            self.missing_data_issues + self.linkage_issues + self.transfer_issues
+            + self.duplicates + self.broken_bundles
+        )
     
     @property
     def workflow_total(self) -> int:
@@ -49,6 +54,7 @@ class HealthSummary:
                 "linkage_issues": counts.linkage_issues,
                 "transfer_issues": counts.transfer_issues,
                 "duplicates": counts.duplicates,
+                "broken_bundles": counts.broken_bundles,
             },
             workflow_status={
                 "pending_reviews": counts.pending_reviews,

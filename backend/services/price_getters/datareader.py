@@ -15,8 +15,9 @@ Quote Currency Handling:
 - Configure native_quote_currency in AssetPriceGetter.params if different
 """
 
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+import math
+from datetime import date, datetime, timedelta
+from typing import List, Optional, Tuple
 
 import pandas_datareader.data as web
 
@@ -64,6 +65,7 @@ class DataReaderPriceGetter(BasePriceGetter):
     # Default settings
     DEFAULT_SOURCE = "stooq"
     DEFAULT_NATIVE_QUOTE = "USD"
+    supports_range = True
 
     def __init__(self):
         """Initialize pandas_datareader price getter."""
@@ -282,3 +284,28 @@ class DataReaderPriceGetter(BasePriceGetter):
             timestamp=dt,
             ticker_used=ticker_symbol,
         )
+
+    def get_historical_prices_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> List[PriceResult]:
+        ticker_symbol, source, native_quote = self._resolve_ticker_with_quote(asset, config)
+        df = web.DataReader(ticker_symbol, source, start=start, end=end)
+        close_col = next((c for c in ("Close", "close") if c in df.columns), None)
+        if df.empty or close_col is None:
+            return []
+        bars: List[PriceResult] = []
+        for idx, close in df[close_col].items():
+            if close is None or math.isnan(float(close)):
+                continue
+            bars.append(PriceResult(
+                price=float(close),
+                quote_currency=native_quote,
+                source=f"datareader:{source}",
+                timestamp=datetime.combine(idx.date(), datetime.min.time()),
+                ticker_used=ticker_symbol,
+            ))
+        return sorted(bars, key=lambda b: b.timestamp)

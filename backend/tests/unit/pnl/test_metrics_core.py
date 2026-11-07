@@ -237,7 +237,7 @@ class TestAsDictComposition:
         d = asdict(book)
         expected_keys = {
             "cost_basis", "realized_pnl", "taxable_realized_pnl",
-            "total_fees", "fee_entry_count", "total_invested",
+            "total_fees", "fee_entry_count", "total_invested", "deferred_gain",
             "total_income", "total_withholding", "income_event_count",
         }
         assert set(d.keys()) == expected_keys

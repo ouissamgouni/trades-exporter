@@ -166,3 +166,61 @@ def test_results_is_list(client):
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data["results"], list)
+
+
+# ============================================================================
+# Connector Run Outcome Tests
+# ============================================================================
+
+
+def test_connector_run_outcome_all_unions_run_ids():
+    from sqlmodel import select
+    from backend.api.routes.transactions import TxListQuery, apply_tx_list_filters
+    from backend.db.models import NormalizedTransaction, SyncJobConnectorRun
+
+    session = MagicMock()
+    session.get.return_value = SyncJobConnectorRun(
+        id=7,
+        job_id=1,
+        connector_id=1,
+        synced_ids=["a", "b"],
+        updated_ids=["b", "c"],
+        skipped_ids=["d"],
+    )
+    q = TxListQuery(connector_run_id="7", connector_run_outcome="all")
+
+    statement, _, _ = apply_tx_list_filters(session, select(NormalizedTransaction), q)
+
+    params = statement.compile().params
+    in_values = next(v for v in params.values() if isinstance(v, list))
+    assert in_values == ["a", "b", "c", "d"]
+
+
+def test_connector_run_detail_reports_invalid_count():
+    from fastapi import FastAPI
+    from backend.api.routes.sync_job import router
+    from backend.db.models import SyncJobConnectorRun
+
+    run = SyncJobConnectorRun(
+        id=7,
+        job_id=1,
+        connector_id=1,
+        status="completed",
+        synced_ids=["a"],
+        updated_ids=["b"],
+        skipped_ids=["a"],
+    )
+    session = MagicMock()
+    session.exec.return_value.one.return_value = 2
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_session_dependency] = lambda: session
+
+    with patch(
+        "backend.db.repositories.sync_job_repository.SyncJobRepository.get_connector_run",
+        return_value=run,
+    ), patch("backend.api.routes.sync_job.get_sync_job_service", return_value=None):
+        response = TestClient(app).get("/sync-job/connector-runs/7")
+
+    assert response.status_code == 200
+    assert response.json()["invalid_count"] == 2

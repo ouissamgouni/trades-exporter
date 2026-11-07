@@ -21,6 +21,7 @@ import { AccountSelector } from '../../AccountSelector';
 import { toaster } from '../../ui/toaster';
 import { Tooltip } from '../../ui/tooltip';
 import { ISSUE_CONFIG } from '../../../constants/issueConfig';
+import { useShowInContextRowAction } from '../rowActions';
 import { linkRawAccount, linkRawAsset } from '../../../utils/rawAccountApi';
 
 const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
@@ -56,6 +57,8 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
     onAccountsUpdated,
 }) => {
     const queryClient = useQueryClient();
+    const showInContextAction = useShowInContextRowAction();
+    const rowActions = useMemo(() => [showInContextAction], [showInContextAction]);
     const [fixedKeys, setFixedKeys] = useState<Set<string>>(new Set());
     const [applyingKeys, setApplyingKeys] = useState<Set<string>>(new Set());
     const [isApplyingAll, setIsApplyingAll] = useState(false);
@@ -341,6 +344,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                 showSuggestions={false}
                 compact={true}
                 additionalColumns={additionalColumns}
+                additionalRowActions={rowActions}
                 config={tableConfig}
             />
         </div>

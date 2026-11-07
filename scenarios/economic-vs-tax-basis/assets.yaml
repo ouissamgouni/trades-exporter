@@ -1,0 +1,24 @@
+# Economic vs Tax Cost Basis — Assets
+# ====================================
+# Base currency: EUR
+
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: BTC
+    label: Bitcoin
+    price_type: crypto
+
+  - symbol: ETH
+    label: Ethereum
+    price_type: crypto
+
+  - symbol: USDC
+    label: USD Coin
+    price_type: crypto
+
+  - symbol: SOL
+    label: Solana
+    price_type: crypto

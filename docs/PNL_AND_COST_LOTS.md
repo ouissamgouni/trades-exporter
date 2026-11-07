@@ -49,6 +49,21 @@ The actual treatment depends on transaction type, grouping, fee handling, price 
 
 Review realized P&L by asset, account, date, and calculation version. Surprising values usually come from missing prices, wrong mappings, duplicate records, incorrect grouping, or missing historical acquisition data.
 
+### Economic and Tax Views
+
+Every lot carries two costs:
+
+- **Tax cost** — follows the tax rules. On a tax-deferred (non-taxable) swap, such as a crypto-to-crypto swap under French rules, the asset received keeps the cost of the asset given up.
+- **Economic cost** — the market value at the time of the swap. Each gain is counted once, when it happens.
+
+The two costs are the same unless a non-taxable swap happened earlier in the lot's history.
+
+- **Realized** (and Unrealized, Cost, Total return) uses the economic view.
+- **Taxable** uses the tax view. Tax reports only read the tax view.
+- **Deferred** is the gain already included in Realized but not yet taxed: the economic cost minus the tax cost of the lots you still hold. It is shown next to Taxable when it is not zero.
+
+Example: BTC bought for 30 000 is swapped for ETH worth 40 000, and the ETH is later sold for 40 000 EUR. Realized shows +10 000 at the swap and 0 at the sale. Taxable shows 0 at the swap and +10 000 at the sale. In the Realized P&L list, rows where the two views differ show the tax figures in a grey "Tax: …" line.
+
 ## Fees
 
 Fees can affect both economic P&L and tax reporting. A fee may be paid in fiat, the disposed asset, the acquired asset, a platform token, or another asset.

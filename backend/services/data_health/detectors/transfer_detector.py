@@ -18,6 +18,8 @@ from .base import IssueDetector
 class TransferIssueDetector(IssueDetector):
     """Detector for transfer issues (missing/unlinked from/to accounts)."""
     
+    # Bundled transfers are excluded: the bundle already pairs them with their counterpart
+    # (broken bundles are reported separately by BundleHealthService).
     # Dismiss tag format: {"sys_transfer_dismissed": "<field>"}
     # Field is "source_from_account" or "source_to_account"
     DISMISS_TAG_KEY = "sys_transfer_dismissed"
@@ -26,6 +28,7 @@ class TransferIssueDetector(IssueDetector):
         self,
         account_ids: Optional[List[int]] = None,
         include_dismissed: bool = False,
+        dismissed_only: bool = False,
     ) -> int:
         """Count all transfer issues.
         
@@ -36,7 +39,7 @@ class TransferIssueDetector(IssueDetector):
         Returns:
             Total count of transfer issues
         """
-        issues_union = self._build_issues_union(account_ids, include_dismissed)
+        issues_union = self._build_issues_union(account_ids, include_dismissed, dismissed_only)
         total_query = select(func.count()).select_from(issues_union)
         return self.session.exec(total_query).one()
     
@@ -46,6 +49,7 @@ class TransferIssueDetector(IssueDetector):
         per_page: int = 50,
         account_ids: Optional[List[int]] = None,
         include_dismissed: bool = False,
+        dismissed_only: bool = False,
     ) -> Tuple[List[TransactionIssue], int]:
         """Fetch paginated transfer issues with account and connector info.
         
@@ -59,10 +63,10 @@ class TransferIssueDetector(IssueDetector):
             Tuple of (issues_list, total_count)
         """
         # Get total count
-        total_count = self.count(account_ids, include_dismissed)
+        total_count = self.count(account_ids, include_dismissed, dismissed_only)
         
         # Build issues union
-        issues_union = self._build_issues_union(account_ids, include_dismissed)
+        issues_union = self._build_issues_union(account_ids, include_dismissed, dismissed_only)
         
         # Fetch paginated issues with transaction details
         offset = (page - 1) * per_page
@@ -130,10 +134,22 @@ class TransferIssueDetector(IssueDetector):
         
         return issues_list, total_count
     
+    @classmethod
+    def _apply_dismissed_filter(cls, query, field: str, include_dismissed: bool, dismissed_only: bool):
+        dismissed = NormalizedTransaction.tags.op('@>')(
+            type_coerce([{cls.DISMISS_TAG_KEY: field}], PG_JSONB)
+        )
+        if dismissed_only:
+            return query.where(NormalizedTransaction.tags.isnot(None) & dismissed)
+        if include_dismissed:
+            return query
+        return query.where(NormalizedTransaction.tags.is_(None) | ~dismissed)
+
     def _build_issues_union(
         self,
         account_ids: Optional[List[int]] = None,
         include_dismissed: bool = False,
+        dismissed_only: bool = False,
     ):
         """Build the SQL UNION query for all transfer issue types.
         
@@ -160,12 +176,11 @@ class TransferIssueDetector(IssueDetector):
             )
             .where(NormalizedTransaction.from_account_id.is_(None))
             .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+            .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
         )
-        if not include_dismissed:
-            dismissed_json = type_coerce([{"sys_transfer_dismissed": "source_from_account"}], PG_JSONB)
-            missing_transfer_from_subq = missing_transfer_from_subq.where(
-                NormalizedTransaction.tags.is_(None) | ~NormalizedTransaction.tags.op('@>')(dismissed_json)
-            )
+        missing_transfer_from_subq = self._apply_dismissed_filter(
+            missing_transfer_from_subq, "source_from_account", include_dismissed, dismissed_only
+        )
         if account_ids:
             missing_transfer_from_subq = missing_transfer_from_subq.where(
                 NormalizedTransaction.account_id.in_(account_ids)
@@ -184,12 +199,11 @@ class TransferIssueDetector(IssueDetector):
             .where(NormalizedTransaction.source_from_account != '')
             .where(NormalizedTransaction.from_account_id.is_(None))
             .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+            .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
         )
-        if not include_dismissed:
-            dismissed_json = type_coerce([{"sys_transfer_dismissed": "source_from_account"}], PG_JSONB)
-            unlinked_transfer_from_subq = unlinked_transfer_from_subq.where(
-                NormalizedTransaction.tags.is_(None) | ~NormalizedTransaction.tags.op('@>')(dismissed_json)
-            )
+        unlinked_transfer_from_subq = self._apply_dismissed_filter(
+            unlinked_transfer_from_subq, "source_from_account", include_dismissed, dismissed_only
+        )
         if account_ids:
             unlinked_transfer_from_subq = unlinked_transfer_from_subq.where(
                 NormalizedTransaction.account_id.in_(account_ids)
@@ -211,12 +225,11 @@ class TransferIssueDetector(IssueDetector):
             )
             .where(NormalizedTransaction.to_account_id.is_(None))
             .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+            .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
         )
-        if not include_dismissed:
-            dismissed_json = type_coerce([{"sys_transfer_dismissed": "source_to_account"}], PG_JSONB)
-            missing_transfer_to_subq = missing_transfer_to_subq.where(
-                NormalizedTransaction.tags.is_(None) | ~NormalizedTransaction.tags.op('@>')(dismissed_json)
-            )
+        missing_transfer_to_subq = self._apply_dismissed_filter(
+            missing_transfer_to_subq, "source_to_account", include_dismissed, dismissed_only
+        )
         if account_ids:
             missing_transfer_to_subq = missing_transfer_to_subq.where(
                 NormalizedTransaction.account_id.in_(account_ids)
@@ -235,12 +248,11 @@ class TransferIssueDetector(IssueDetector):
             .where(NormalizedTransaction.source_to_account != '')
             .where(NormalizedTransaction.to_account_id.is_(None))
             .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+            .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
         )
-        if not include_dismissed:
-            dismissed_json = type_coerce([{"sys_transfer_dismissed": "source_to_account"}], PG_JSONB)
-            unlinked_transfer_to_subq = unlinked_transfer_to_subq.where(
-                NormalizedTransaction.tags.is_(None) | ~NormalizedTransaction.tags.op('@>')(dismissed_json)
-            )
+        unlinked_transfer_to_subq = self._apply_dismissed_filter(
+            unlinked_transfer_to_subq, "source_to_account", include_dismissed, dismissed_only
+        )
         if account_ids:
             unlinked_transfer_to_subq = unlinked_transfer_to_subq.where(
                 NormalizedTransaction.account_id.in_(account_ids)

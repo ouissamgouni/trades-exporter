@@ -9,8 +9,8 @@ The external_id should be the CoinGecko coin ID (e.g., "bitcoin", "ethereum", "s
 
 import requests
 import time
-from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from datetime import date, datetime, timezone
+from typing import Optional, List, Dict, Tuple
 
 from backend.config.loader import (
     load_settings,
@@ -46,6 +46,8 @@ class CoinGeckoPriceGetter(BasePriceGetter):
 
     name = "coingecko"
     max_retries = 5
+    supports_range = True
+    max_history_days = 365  # demo/public API limit for market_chart/range
     initial_delay = 2.0
 
     def __init__(self):
@@ -319,6 +321,46 @@ class CoinGeckoPriceGetter(BasePriceGetter):
             ticker_used=coin_id,
         )
 
+    SIMPLE_PRICE_MAX_IDS = 250
+
+    def get_current_prices_many(
+        self, items: List[Tuple[Asset, Optional[PriceGetterConfig]]]
+    ) -> Dict[int, PriceResult]:
+        """simple/price takes many coin ids per request: one call per quote currency."""
+        groups: Dict[str, List[Tuple[Asset, str]]] = {}
+        for asset, config in items:
+            quote = "USD"
+            if config and config.extra.get("native_quote_currency"):
+                quote = config.extra["native_quote_currency"].upper()
+            groups.setdefault(quote, []).append((asset, self.resolve_ticker(asset, config)))
+
+        results: Dict[int, PriceResult] = {}
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        for quote, group in groups.items():
+            ids = sorted({coin_id for _, coin_id in group})
+            for i in range(0, len(ids), self.SIMPLE_PRICE_MAX_IDS):
+                chunk = ids[i : i + self.SIMPLE_PRICE_MAX_IDS]
+                try:
+                    data = self._fetch_from_api(
+                        "https://api.coingecko.com/api/v3/simple/price",
+                        {"ids": ",".join(chunk), "vs_currencies": quote.lower()},
+                        f"Fetch current prices for {len(chunk)} coin(s)",
+                    )
+                except PriceGetterError as e:
+                    log.warning(f"[coingecko] Batch current price failed: {e}")
+                    continue
+                for asset, coin_id in group:
+                    price = (data or {}).get(coin_id, {}).get(quote.lower())
+                    if coin_id in chunk and price is not None:
+                        results[asset.asset_id] = PriceResult(
+                            price=float(price),
+                            quote_currency=quote,
+                            source="coingecko",
+                            timestamp=now,
+                            ticker_used=coin_id,
+                        )
+        return results
+
     def get_historical_price(
         self,
         asset: Asset,
@@ -401,3 +443,46 @@ class CoinGeckoPriceGetter(BasePriceGetter):
             timestamp=dt,
             ticker_used=coin_id,
         )
+
+    def get_historical_prices_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> List[PriceResult]:
+        native_quote = "USD"
+        if config and config.extra.get("native_quote_currency"):
+            native_quote = config.extra["native_quote_currency"].upper()
+        coin_id = self.resolve_ticker(asset, config)
+        from_ts = int(datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc).timestamp())
+        to_ts = int(datetime.combine(end, datetime.min.time(), tzinfo=timezone.utc).timestamp()) + 86400
+
+        data = self._fetch_from_api(
+            f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range",
+            {"vs_currency": native_quote.lower(), "from": from_ts, "to": to_ts},
+            f"Fetch price range for {asset.symbol} {start}..{end}",
+            asset=asset,
+            ticker=coin_id,
+        )
+
+        # Earliest point of each UTC day, matching get_historical_price at 00:00
+        first_of_day: Dict[date, Tuple[float, float]] = {}
+        for ts_ms, price in data.get("prices", []):
+            if price is None:
+                continue
+            d = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date()
+            if d not in first_of_day or ts_ms < first_of_day[d][0]:
+                first_of_day[d] = (ts_ms, price)
+
+        return [
+            PriceResult(
+                price=float(price),
+                quote_currency=native_quote,
+                source="coingecko",
+                timestamp=datetime.combine(d, datetime.min.time()),
+                ticker_used=coin_id,
+            )
+            for d, (_, price) in sorted(first_of_day.items())
+            if start <= d <= end
+        ]

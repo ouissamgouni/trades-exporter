@@ -485,8 +485,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         const result = allAssets
             .filter((a) => {
                 // Text search
-                if (search && (!a.asset.symbol || !a.asset.symbol.toLowerCase().includes(search.toLowerCase()))) {
-                    return false;
+                if (search) {
+                    const q = search.toLowerCase();
+                    const matches = [a.asset.symbol, a.asset.label].some(v => v?.toLowerCase().includes(q));
+                    if (!matches) return false;
                 }
 
                 // Account filter
@@ -975,7 +977,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     {!hideFilters && (
                         <div className="relative w-full max-w-[220px] shrink-0">
                             <Input
-                                placeholder="Search asset..."
+                                placeholder="Search asset or label..."
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 className="h-7 pl-7 text-xs"
