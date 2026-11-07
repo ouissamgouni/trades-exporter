@@ -94,6 +94,8 @@ class ConnectorInfo:
     recommended_for: List[str] = field(default_factory=list)  # canonical names
     # Start used by the connector itself when no since/start_datetime is given
     default_start: Optional[str] = None
+    # Also stores the wallet's own txs, so unsolicited incoming token transfers can be detected
+    detects_unsolicited_spam: bool = False
     required_env: List[str] = field(default_factory=list)
     # UI grouping: "exchange" | "evm" | "chain" | "app" | "file"; derived when empty
     group: str = ""
@@ -515,6 +517,7 @@ class ConnectorRegistry:
                     "include_token_transfers",
                 ],
                 supports_balance=True,
+                detects_unsolicited_spam=True,
             )
         )
 
@@ -535,6 +538,7 @@ class ConnectorRegistry:
                     "include_token_transfers",
                 ],
                 supports_balance=True,
+                detects_unsolicited_spam=True,
             )
         )
 
@@ -586,6 +590,7 @@ class ConnectorRegistry:
                 optional_config=["start_datetime"],
                 supports_incremental_sync=True,
                 supports_balance=True,
+                detects_unsolicited_spam=True,
             )
         )
 

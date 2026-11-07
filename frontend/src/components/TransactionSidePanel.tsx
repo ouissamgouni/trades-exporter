@@ -45,6 +45,7 @@ import {
     dateTimeLocalToISO,
 } from '../utils/dateUtils';
 import { useTransactionPatch } from '../hooks/useTransactionPatch';
+import { getSpamLevel, useSpamVerdict, SpamVerdict } from '../hooks/useSpamReview';
 import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
 import { useAssets } from '../hooks/useAssets';
 import { usePositions } from '../hooks/usePositions';
@@ -241,6 +242,16 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
     const { patchField, patchFields } = useTransactionPatch(tx.id);
     const { getConnectorColor } = useEntityColors();
     const queryClient = useQueryClient();
+    const { applyVerdict, isApplying: isApplyingSpamVerdict } = useSpamVerdict();
+
+    const applySpamVerdict = async (txs: Transaction[], verdict: SpamVerdict) => {
+        await applyVerdict(txs, verdict);
+        const response = await fetch(`${API_URL}/transactions/${tx.id}`);
+        if (!response.ok) return;
+        const updated: Transaction = await response.json();
+        setTx(updated);
+        onTransactionUpdate?.(updated);
+    };
 
     // ------- Assets query -------
     const { assets, refetchAssets } = useAssets();
@@ -1250,6 +1261,28 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         <p className="whitespace-pre-wrap font-mono text-[9px] text-red-200">
                             {tx.review_notes}
                         </p>
+                        {tx.token_contract_address && (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                <button
+                                    type="button"
+                                    className="border border-slate-200 bg-white px-2 py-0.5 text-[9px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={isApplyingSpamVerdict}
+                                    onClick={() => applySpamVerdict([tx], 'allow')}
+                                >
+                                    ✓ Not spam (whole token)
+                                </button>
+                                {getSpamLevel(tx) === 'suspected' && (
+                                    <button
+                                        type="button"
+                                        className="border border-slate-200 bg-white px-2 py-0.5 text-[9px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        disabled={isApplyingSpamVerdict}
+                                        onClick={() => applySpamVerdict([tx], 'block')}
+                                    >
+                                        🚫 Confirm spam (whole token)
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
 

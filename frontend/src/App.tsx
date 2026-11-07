@@ -46,6 +46,7 @@ const UnifiedSetupView = React.lazy(() => import('./components/UnifiedSetupView'
 const SyncJobPanel = React.lazy(() => import('./components/SyncJobPanel').then(m => ({ default: m.SyncJobPanel })));
 const AddImportPanel = React.lazy(() => import('./components/AddImportPanel').then(m => ({ default: m.AddImportPanel })));
 const InboxView = React.lazy(() => import('./components/InboxView').then(m => ({ default: m.InboxView })));
+const DataHealthView = React.lazy(() => import('./components/DataHealthView'));
 const AllTransactionsView = React.lazy(() => import('./components/AllTransactionsView').then(m => ({ default: m.AllTransactionsView })));
 const TransactionsTable = React.lazy(() => import('./components/TransactionsTable').then(m => ({ default: m.TransactionsTable })));
 const PositionsView = React.lazy(() => import('./components/PositionsView'));
@@ -63,7 +64,7 @@ const TabLoadingFallback = () => (
 // Top-level tab ids (nav order) and, for tabs with a first-level sub-tab, the
 // set of valid sub-tab values + the default sub-tab to redirect to.
 const KNOWN_TABS = [
-    'setup', 'sync', 'add-transaction', 'inbox', 'all-transactions',
+    'setup', 'sync', 'add-transaction', 'inbox', 'health', 'all-transactions',
     'positions', 'pnl', 'prices',
 ] as const;
 type TabId = typeof KNOWN_TABS[number];
@@ -291,6 +292,16 @@ const AppContent = () => {
                                 )}
                             </span>
                         </TabsTrigger>
+                        <TabsTrigger value="health">
+                            <span className="inline-flex items-center gap-1">
+                                🩺 Health
+                                {validationSummary?.has_issues && (
+                                    <Badge colorScheme="orange" className="ml-1">
+                                        {validationSummary.total_issues}
+                                    </Badge>
+                                )}
+                            </span>
+                        </TabsTrigger>
                         <TabsTrigger value="all-transactions">
                             📋 All
                         </TabsTrigger>
@@ -347,6 +358,11 @@ const AppContent = () => {
                     <TabsContent value="inbox">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <InboxView />
+                        </Suspense>
+                    </TabsContent>
+                    <TabsContent value="health">
+                        <Suspense fallback={<TabLoadingFallback />}>
+                            <DataHealthView />
                         </Suspense>
                     </TabsContent>
                     <TabsContent value="all-transactions">

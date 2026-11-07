@@ -820,6 +820,7 @@ class SyncJobService:
 
             # --- Derivative position processing (per-connector, scoped to this run) ---
             self._run_derivative_position_sync(connector_id, cstatus.connector_type)
+            self._run_spam_heuristic(connector_id, cstatus)
 
             # Add to completed list for job-level tracking
             if cstatus.account_name not in self.progress.connectors_completed:
@@ -888,6 +889,28 @@ class SyncJobService:
         except Exception as e:
             self.logger.warning(
                 f"⚠️ Derivative position sync failed for connector {connector_id} (non-fatal): {e}"
+            )
+
+    def _run_spam_heuristic(self, connector_id: int, cstatus: ConnectorProgress) -> None:
+        """Flag unsolicited incoming transfers of unpriced tokens from this run as suspected spam."""
+        try:
+            from backend.connectors.connector_registry import get_connector_registry
+            from backend.services.spam_heuristic_service import scan_suspected_spam
+
+            info = get_connector_registry().get(cstatus.connector_type)
+            run_id = getattr(self, "_run_job_db_connector_runs", {}).get(connector_id)
+            if not info or not info.detects_unsolicited_spam or not run_id:
+                return
+
+            from backend.db.database import get_session
+
+            with get_session() as session:
+                flagged = scan_suspected_spam(session, sync_connector_run_id=run_id)
+            if flagged:
+                cstatus.add_log("INFO", f"🚫 {len(flagged)} suspected spam transfer(s) auto-excluded")
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ Spam heuristic failed for connector {connector_id} (non-fatal): {e}"
             )
 
     def _update_connector_run_metrics(

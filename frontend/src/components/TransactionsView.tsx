@@ -3,8 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, TransactionFilterState } from './TransactionFilters';
 import { BundlesListPanel, BundleSuggestionsPanel } from './bundles';
-import { API_URL, BundleSuggestion } from '../types';
+import { API_URL, BundleSuggestion, Transaction } from '../types';
 import { Badge, Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
+import { BulkAction } from './tables/types';
+import { SUSPECTED_SPAM_TAG, useSpamVerdict, useSuspectedSpamCount } from '../hooks/useSpamReview';
 
 // ============================================================================
 // View Presets
@@ -36,6 +38,12 @@ const EMPTY_FILTERS: TransactionFilterState = {
     bundlePatterns: [],
 };
 
+const SPAM_FILTERS: TransactionFilterState = {
+    ...EMPTY_FILTERS,
+    reviewStatus: ['invalid'],
+    tagKeys: [SUSPECTED_SPAM_TAG],
+};
+
 interface ViewPreset {
     /** Tab label shown to the user */
     heading: string;
@@ -51,6 +59,8 @@ interface ViewPreset {
     showSuggestions: boolean;
     /** Bundles tab title */
     bundlesTitle: string;
+    /** Show the suspected-spam review tab */
+    showSpam?: boolean;
 }
 
 const VIEW_PRESETS: Record<string, ViewPreset> = {
@@ -62,6 +72,7 @@ const VIEW_PRESETS: Record<string, ViewPreset> = {
         resetFilters: defaultFilterState,
         showSuggestions: true,
         bundlesTitle: '📦 Your Bundles',
+        showSpam: true,
     },
     all: {
         heading: '',
@@ -109,6 +120,27 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
         staleTime: 60_000, // Avoid refetching if App.tsx already populated the cache
     });
 
+    const spamCount = useSuspectedSpamCount();
+    const { applyVerdict, isApplying } = useSpamVerdict();
+    const spamBulkActions = React.useMemo<BulkAction<Transaction>[]>(() => [
+        {
+            id: 'spam-allow',
+            label: 'Not spam (whole token)',
+            icon: '✓',
+            colorPalette: 'green',
+            onClick: (_ids, txs) => applyVerdict(txs, 'allow'),
+            isDisabled: () => isApplying,
+        },
+        {
+            id: 'spam-block',
+            label: 'Confirm spam (whole token)',
+            icon: '🚫',
+            colorPalette: 'gray',
+            onClick: (_ids, txs) => applyVerdict(txs, 'block'),
+            isDisabled: () => isApplying,
+        },
+    ], [applyVerdict, isApplying]);
+
     return (
         <div className="flex flex-col gap-1 p-2 pt-0">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -122,6 +154,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
                             <Badge colorScheme="green" className="ml-2">{suggestions.length} 💡</Badge>
                         )}
                     </TabsTrigger>
+                    {preset.showSpam && (
+                        <TabsTrigger value="spam">
+                            🚫 Suspected spam
+                            {spamCount > 0 && (
+                                <Badge colorScheme="orange" className="ml-2">{spamCount}</Badge>
+                            )}
+                        </TabsTrigger>
+                    )}
                 </TabsList>
 
                 <TabsContent value="transactions">
@@ -139,6 +179,24 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
                     {preset.showSuggestions && <BundleSuggestionsPanel mb={2} />}
                     <BundlesListPanel title="" />
                 </TabsContent>
+
+                {preset.showSpam && (
+                    <TabsContent value="spam">
+                        <p className="mb-2 text-xs text-slate-600">
+                            Incoming transfers your wallet did not initiate, of tokens with no price source.
+                            They are excluded from P&amp;L and Data Health. A verdict applies to every transaction of the token, including future syncs.
+                        </p>
+                        <TransactionsTable
+                            tableId="inbox-spam"
+                            title=""
+                            subtitle=""
+                            resetFilters={SPAM_FILTERS}
+                            emptyMessage="No suspected spam 🎉"
+                            expandInvalidRows
+                            additionalBulkActions={spamBulkActions}
+                        />
+                    </TabsContent>
+                )}
             </Tabs>
         </div>
     );

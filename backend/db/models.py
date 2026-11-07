@@ -744,6 +744,22 @@ class RawAsset(SQLModel, table=True):
     asset: Optional[Asset] = Relationship(back_populates="raw_assets")
 
 
+class SpamTokenRule(SQLModel, table=True):
+    """User verdict on a token contract: "allow" (never spam) or "block" (always spam)."""
+
+    __tablename__ = "spam_token_rules"
+    __table_args__ = (
+        UniqueConstraint("network", "contract_address", name="uq_spam_token_rule"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    network: str = Field(nullable=False)
+    contract_address: str = Field(nullable=False)
+    verdict: str = Field(nullable=False)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 # ============================================================================
 # Category Models (for flexible asset classification)
 # ============================================================================

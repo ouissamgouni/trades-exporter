@@ -11,7 +11,7 @@ for validation and serialization without separate Pydantic duplicates.
 
 from decimal import Decimal
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Literal, Union
 from datetime import datetime, timezone
 
 # Re-export SQLModel classes for convenience (these ARE Pydantic models)
@@ -1236,7 +1236,32 @@ class IncomeFilterOptionsResponse(BaseModel):
 # Exports
 # =============================================================================
 
+# ============================================================================
+# Spam review
+# ============================================================================
+
+
+class SpamVerdictRequest(BaseModel):
+    transaction_id: int
+    verdict: Literal["allow", "block"]
+
+
+class SpamVerdictResponse(BaseModel):
+    network: str
+    contract_address: str
+    verdict: str
+    updated_count: int
+
+
+class SpamSummaryResponse(BaseModel):
+    suspected_count: int
+
+
 __all__ = [
+    # Spam review
+    "SpamVerdictRequest",
+    "SpamVerdictResponse",
+    "SpamSummaryResponse",
     # SQLModel re-exports
     "NormalizedTransaction",
     "Asset",

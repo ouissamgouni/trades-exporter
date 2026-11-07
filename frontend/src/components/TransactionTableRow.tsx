@@ -36,6 +36,7 @@ import { hasPotentialDuplicateTag, getDuplicateResolutionTag, getDuplicateGroupH
 import type { AccountSuggestion } from '../hooks/useAccountSuggestions';
 import type { SuggestionEntry } from '../hooks/useBundleSuggestionMap';
 import type { DuplicateEntry } from '../hooks/useDuplicateMap';
+import { getSpamLevel } from '../hooks/useSpamReview';
 import type { TransactionColumnKey, ColumnPlugin, RowAction } from './tables';
 
 // Direction options (mirrored from TransactionsTable)
@@ -217,6 +218,17 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
         invalidateBundleQueries,
     } = callbacks;
 
+    const spamLevel = getSpamLevel(tx);
+    const spamBadge = spamLevel && (
+        <Badge
+            colorScheme="orange"
+            className="shrink-0 px-1 text-[7px]"
+            title={spamLevel === 'suspected' ? 'Suspected spam — review in Inbox › Suspected spam' : 'Flagged as spam'}
+        >
+            {spamLevel === 'suspected' ? 'Spam?' : 'Spam'}
+        </Badge>
+    );
+
     // ============== Collapsed Invalid Row ==============
     if (isInvalidCollapsed) {
         return (
@@ -243,6 +255,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                         <Badge colorScheme="red" className="px-1 text-[7px]">
                             <LuX size={8} /> Invalid
                         </Badge>
+                        {spamBadge}
                         <span className="max-w-[200px] truncate text-[7px] text-slate-400">
                             {formatDateTimeCompact(tx.date_time)} · {tx.source_asset_symbol || tx.linked_asset?.symbol || '—'}
                             {tx.source ? ` · ${tx.source}` : ''}
@@ -368,6 +381,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 <LuMinus size={11} />
                             </button>
                         )}
+                        {spamBadge}
                         {(!embeddedMode || showSelectionInEmbedded) && (
                             <input
                                 type="checkbox"

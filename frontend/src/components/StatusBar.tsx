@@ -1,10 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FiActivity, FiCheckCircle, FiClipboard, FiDatabase, FiMonitor, FiServer } from 'react-icons/fi';
 import { useDataHealth } from '../contexts/DataHealthContext';
 import { useQaContext } from './QaTestPlanPanel';
-import { DataHealthCheckDrawer } from './DataHealthCheckDrawer';
-import { API_URL, Account, Asset } from '../types';
-import { useAssets } from '../hooks/useAssets';
 
 const STATUS_BAR_HEIGHT = 22;
 
@@ -64,26 +62,7 @@ export const StatusBar: React.FC = () => {
     const { validationSummary, refreshHealthData } = useDataHealth();
     const { appInfo, isOpen: qaIsOpen, setIsOpen: setQaIsOpen, doneCount, totalSteps } = useQaContext();
 
-    // Data health drawer state
-    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
-    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
-    const { assets, refetchAssets } = useAssets();
-    const [accounts, setAccounts] = useState<Account[]>([]);
-
-    const fetchAccounts = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts/`);
-            if (response.ok) {
-                setAccounts(await response.json());
-            }
-        } catch {
-            // ignore
-        }
-    }, []);
-
-    useEffect(() => {
-        if (isHealthCheckOpen) fetchAccounts();
-    }, [isHealthCheckOpen, fetchAccounts]);
+    const navigate = useNavigate();
 
     const frontendVersion = import.meta.env.VITE_APP_VERSION;
     const versionTooltip = [
@@ -116,7 +95,7 @@ export const StatusBar: React.FC = () => {
                     <>
                         <Segment onClick={() => {
                             refreshHealthData();
-                            setIsHealthCheckOpen(true);
+                            navigate('/health');
                         }}>
                             {validationSummary.has_issues ? (
                                 <>
@@ -207,20 +186,6 @@ export const StatusBar: React.FC = () => {
                 <span className="w-1 shrink-0" />
             </div>
 
-            {/* Data Health Drawer — triggered from status bar */}
-            <DataHealthCheckDrawer
-                isOpen={isHealthCheckOpen}
-                onClose={() => setIsHealthCheckOpen(false)}
-                refreshTrigger={healthCheckRefreshTrigger}
-                assets={assets}
-                accounts={accounts}
-                onAssetsUpdated={refetchAssets}
-                onAccountsUpdated={fetchAccounts}
-                onIssueFixed={() => {
-                    refreshHealthData();
-                    setHealthCheckRefreshTrigger(prev => prev + 1);
-                }}
-            />
         </>
     );
 };

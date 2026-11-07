@@ -32,6 +32,8 @@ _REASON_DESCRIPTIONS: Dict[str, str] = {
     "spam_token_tag": "Token tagged as spam by the block explorer",
     "phish_hack_tag": "Address tagged as Phish/Hack by the block explorer",
     "phishing_contract_name": "Contract name contains URL-like phishing lure",
+    "unsolicited_unpriced": "Incoming transfer the wallet did not initiate, of a token with no price source",
+    "user_blocklisted": "Token marked as spam by the user",
 }
 
 
@@ -207,9 +209,9 @@ def detect_blockscout_phishing(tx: Dict[str, Any]) -> List[str]:
 # Shared helpers for connectors
 # ---------------------------------------------------------------------------
 
-def _build_review_notes(reasons: List[str]) -> str:
+def _build_review_notes(reasons: List[str], suspected: bool = False) -> str:
     """Build a human-readable review notes string from detection reasons."""
-    lines = ["⚠️ Auto-flagged as spam/phishing:"]
+    lines = ["⚠️ Auto-flagged as suspected spam:" if suspected else "⚠️ Auto-flagged as spam/phishing:"]
     for reason in reasons:
         description = _REASON_DESCRIPTIONS.get(reason, reason)
         lines.append(f"  • {description}")
@@ -221,6 +223,7 @@ def apply_spam_markers(
     reasons: List[str],
     tags: Any,
     tx_id: str = "",
+    suspected: bool = False,
 ) -> None:
     """
     Mutate a NormalizedTransaction in-place to mark it as spam/phishing.
@@ -239,9 +242,11 @@ def apply_spam_markers(
     """
     normalized.review_status = "invalid"
     normalized.taxability_status = "non_taxable"
-    normalized.review_notes = _build_review_notes(reasons)
+    normalized.review_notes = _build_review_notes(reasons, suspected)
 
     spam_tag = {"spam": True, "spam_reasons": reasons}
+    if suspected:
+        spam_tag["spam_level"] = "suspected"
 
     # Handle both list and dict tag formats
     if isinstance(tags, list):
