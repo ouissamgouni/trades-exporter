@@ -1,6 +1,6 @@
 import { Badge, Button, Spinner, type BadgeColorScheme } from './ui/primitives';
 import { cn } from '../lib/cn';
-import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuPlus, LuMinus, LuX } from 'react-icons/lu';
+import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuBan, LuFilter, LuList, LuPlus, LuMinus, LuX } from 'react-icons/lu';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import * as RadixDialog from '@radix-ui/react-dialog';
@@ -22,6 +22,7 @@ import { ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
 
 import { TransactionDetailDrawer } from './TransactionDetailDrawer';
 import { TransactionFilters, TransactionFilterState, defaultFilterState } from './TransactionFilters';
+import { PageSection } from './ui/PageSection';
 import { toaster } from './ui/toaster';
 import { getAssetSuggestions } from '../utils/similarity';
 import { linkRawAccount } from '../utils/rawAccountApi';
@@ -48,6 +49,7 @@ import {
     StickyScrollContainer,
     groupsUrlFor,
     idsUrlFor,
+    withoutInvalid,
     FACET_FILTER_KEY,
     type GroupingMode,
     type GroupFacetSelection,
@@ -561,6 +563,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const serverGrouping = groupingActive && !embeddedMode && !!groupsUrl;
     const pageGrouping = groupingActive && !serverGrouping;
     const filterParams = useMemo(() => buildTransactionFilterParams(filters), [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const [showInvalidGroups, setShowInvalidGroups] = useState(expandInvalidRows);
+    const [excludedInvalidCount, setExcludedInvalidCount] = useState<number | null>(null);
+    const canHideInvalidGroups = serverGrouping && withoutInvalid(filterParams) !== null;
 
     // TanStack Query for transactions - use stable string key to avoid reference issues
     const { data: transactionResponse, isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
@@ -1710,42 +1715,259 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
     };
 
+    const filtersPanel = (
+        <TransactionFilters
+            filters={filters}
+            onChange={setFilters}
+            onClear={() => setFilters(effectiveResetFilters)}
+            expanded={filtersExpanded}
+            onExpandedChange={setFiltersExpanded}
+            appliedFilters={appliedFilters}
+            filterMetadata={filterMetadata}
+            resetFilters={effectiveResetFilters}
+            className={embeddedMode ? undefined : ''}
+        />
+    );
+
+    const tableActions = (
+        <>
+            {groupingMode !== 'off' && sortBy !== 'date' && (
+                <button
+                    type="button"
+                    className="text-[10px] text-slate-500 hover:text-blue-600"
+                    title="Date grouping needs date sorting"
+                    onClick={() => setSorting([{ id: 'date', desc: true }])}
+                >
+                    Grouping paused (sorted by {sortBy}) · sort by date
+                </button>
+            )}
+            <div className="inline-flex items-center text-[10px]" role="group" aria-label="Group transactions">
+                <span className="mr-1 text-slate-500">Group:</span>
+                {(['month-day', 'off'] as const).map(mode => (
+                    <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={groupingMode === mode}
+                        onClick={() => setGroupingMode(mode)}
+                        className={cn(
+                            'border px-1.5 py-0.5',
+                            groupingMode === mode
+                                ? 'border-blue-500 bg-blue-500 text-white'
+                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                        )}
+                    >
+                        {mode === 'month-day' ? 'Month·Day' : 'Off'}
+                    </button>
+                ))}
+            </div>
+            <ColumnVisibilityPopover
+                table={tanstackTable}
+                onReset={() => {
+                    setColumnVisibility(presetToVisibility(
+                        tableConfig.columnPreset,
+                        tableConfig.hiddenColumns,
+                        tableConfig.shownColumns
+                    ));
+                }}
+                size="xs"
+            />
+            <Button
+                onClick={error ? handleRetry : handleReset}
+                variant="outline"
+                colorScheme={error ? "red" : "gray"}
+                size="xs"
+            >
+                {error ? "🔄 Retry" : "↺ Reset"}
+            </Button>
+            <Button
+                onClick={() => handleRefresh()}
+                variant="outline"
+                size="xs"
+            >
+                🔄 Refresh
+            </Button>
+        </>
+    );
+
+    const invalidControl = serverGrouping ? (
+        canHideInvalidGroups && (showInvalidGroups || !!excludedInvalidCount) && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                <LuBan size={12} className="text-slate-400" />
+                {showInvalidGroups ? 'Invalid shown' : `${excludedInvalidCount} invalid hidden`}
+                <button
+                    type="button"
+                    className="inline-flex items-center gap-0.5 border border-slate-200 bg-white px-1.5 py-px text-slate-700 hover:bg-slate-50"
+                    onClick={() => setShowInvalidGroups(v => !v)}
+                >
+                    {showInvalidGroups ? <><LuMinus size={12} /> Hide</> : <><LuPlus size={12} /> Show</>}
+                </button>
+            </span>
+        )
+    ) : (
+        totalInvalidCount > 0 && (
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+                <Badge colorScheme="red">
+                    <LuX size={10} />
+                    {totalInvalidCount} invalid
+                </Badge>
+                {collapsedInvalidCount > 0 ? (
+                    <button
+                        type="button"
+                        onClick={expandAllInvalid}
+                        title="Expand all invalid rows"
+                        className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
+                    >
+                        <LuPlus size={12} /> Show
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={collapseAllInvalid}
+                        title="Collapse all invalid rows"
+                        className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
+                    >
+                        <LuMinus size={12} /> Hide
+                    </button>
+                )}
+            </div>
+        )
+    );
+
+    const tableContent = (
+        <>
+            {/* Top Pagination - show when more than 15 transactions */}
+            {!loading && !error && !embeddedMode && !serverGrouping && (filterMetadata?.filtered_count ?? 0) > 15 && (
+                <div className="mb-2">
+                    <TablePagination
+                        pagination={pagination}
+                        total={filterMetadata?.filtered_count ?? 0}
+                    />
+                </div>
+            )}
+
+            {/* Error state for transactions */}
+            {error && (
+                <div className="mb-4 border border-red-200 bg-red-50 py-6 text-center">
+                    <span className="block font-bold text-red-600">Error loading transactions</span>
+                    <span className="block text-sm text-red-600">{error}</span>
+                    <Button className="mt-3" onClick={handleRetry} colorScheme="gray" size="sm">
+                        🔄 Retry
+                    </Button>
+                </div>
+            )}
+
+            {/* Loading overlay for transactions */}
+            {loading && !error && (
+                <div className="mb-4 bg-slate-50 py-10 text-center">
+                    <Spinner size="lg" className="text-blue-500" />
+                    <span className="mt-4 block">Loading transactions...</span>
+                </div>
+            )}
+
+
+
+            {/* Transaction table - only show when not loading or erroring */}
+            {!loading && !error && (
+                <StickyScrollContainer className={cn('relative overflow-x-auto bg-white text-xs', embeddedMode ? 'border border-slate-200 shadow-sm' : 'max-h-[75vh] overflow-y-auto')}>
+                    <table className="w-full">
+                        <thead className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-slate-100 [&_th]:py-1.5">
+                            <tr>
+                                <th className="sticky left-0 z-10 min-w-[50px] border-r-2 border-slate-300 bg-slate-100">
+                                    {(!embeddedMode || showSelectionInEmbedded) && (
+                                        <input
+                                            type="checkbox"
+                                            title="Select all on page"
+                                            className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+                                            checked={allCurrentPageSelected}
+                                            onChange={toggleSelectAll}
+                                        />
+                                    )}
+                                </th>
+                                {showColumn('id') && renderSortableHeader('id', 'ID')}
+                                {showColumn('date') && renderSortableHeader('date', 'Date/Time', undefined, 'pr-1')}
+                                {showColumn('source') && renderSortableHeader('source', 'Source Info', 'min-w-[180px]', 'pr-1')}
+                                {showColumn('accounts') && <th className="w-[130px]">From / To</th>}
+                                {showColumn('direction') && renderSortableHeader('direction', 'Dir')}
+                                {showColumn('type') && renderSortableHeader('type', 'Type')}
+                                {showColumn('asset') && renderSortableHeader('asset', 'Asset', 'min-w-[60px]')}
+                                {showColumn('qty') && renderSortableHeader('qty', 'Qty')}
+                                {showColumn('price') && renderSortableHeader('price', 'Price')}
+                                {showColumn('total') && <th>Total</th>}
+                                {showColumn('fee') && renderSortableHeader('fee', 'Fee')}
+                                {showColumn('taxability') && <th>Taxable</th>}
+                                {showColumn('feeInBase') && <th>Include Fee</th>}
+                                {showColumn('bundle') && <th>Bundle</th>}
+                                {showColumn('tags') && <th>Tags</th>}
+                                {showColumn('sourceTransactionId') && <th>Source Tx ID</th>}
+                                {/* Additional plugin columns */}
+                                {additionalColumns.map(col => (
+                                    <th key={col.id} style={{ width: col.width, ...(col.headerBg ? { backgroundColor: col.headerBg } : {}) }}>{col.header}</th>
+                                ))}
+                                {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, 'sticky right-[50px] z-10 w-[1%] whitespace-nowrap border-l-2 border-slate-300 bg-slate-100 px-1')}
+                                {!embeddedMode && <th className="sticky right-0 z-10 min-w-[50px] bg-slate-100 px-0" />}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {serverGrouping && groupsUrl ? (
+                                <GroupedTransactionsBody
+                                    groupsUrl={groupsUrl}
+                                    listUrl={(customApiUrl || `${API_URL}/transactions`)}
+                                    idsUrl={idsUrlFor(customApiUrl)}
+                                    params={filterParams}
+                                    sortDir={sortDir}
+                                    colSpan={visibleColumnCount}
+                                    selectable={!embeddedMode || showSelectionInEmbedded}
+                                    renderRow={renderRow}
+                                    onRowsLoaded={handleGroupRowsLoaded}
+                                    selectedIds={selectedIds}
+                                    setSelectedIds={setSelectedIds}
+                                    onApplyFacetsGlobally={applyFacetsGlobally}
+                                    onMarkGroupReviewed={isInbox ? markGroupReviewed : undefined}
+                                    reviewedOverlay={reviewedOverlay}
+                                    onUndoReviewed={undoReviewed}
+                                    emptyMessage={emptyMessage}
+                                    baseCurrency={baseCurrency}
+                                    hideInvalid={!showInvalidGroups}
+                                    onExcludedInvalidCount={setExcludedInvalidCount}
+                                />
+                            ) : paginatedTransactions.length === 0 ? (
+                                <tr>
+                                    <td colSpan={visibleColumnCount}>
+                                        <span className="block py-8 text-center text-slate-500">
+                                            {emptyMessage || 'No transactions found'}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ) : (
+                                pageGrouping ? (
+                                    <PageDayGroupedRows transactions={paginatedTransactions} colSpan={visibleColumnCount} renderRow={renderRow} />
+                                ) : (
+                                    paginatedTransactions.map(tx => renderRow(tx))
+                                )
+                            )}
+                        </tbody>
+                    </table>
+                </StickyScrollContainer>
+            )}
+
+            {/* Pagination Controls - show even when loading/error */}
+            {!loading && !error && !embeddedMode && !serverGrouping && (
+                <TablePagination
+                    pagination={pagination}
+                    total={filterMetadata?.filtered_count ?? 0}
+                />
+            )}
+        </>
+    );
+
     return (
         <div className="pb-0" style={selectedIds.size > 0 && !embeddedMode ? { paddingBottom: '48px' } : undefined}>
-            {!embeddedMode && (
-                <div className="mb-6 flex items-center justify-between border-b border-slate-200 pb-2">
+            {!embeddedMode && (title || subtitle) && (
+                <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-2">
                     <div>
                         <h2 className="mb-1 text-lg font-semibold">{title}</h2>
                         <span className="block text-sm text-slate-600">{subtitle}</span>
                     </div>
-                    {/* Invalid row collapse indicator */}
-                    {totalInvalidCount > 0 && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <Badge colorScheme="red">
-                                <LuX size={10} />
-                                {totalInvalidCount} invalid
-                            </Badge>
-                            {collapsedInvalidCount > 0 ? (
-                                <button
-                                    type="button"
-                                    onClick={expandAllInvalid}
-                                    title="Expand all invalid rows"
-                                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
-                                >
-                                    <LuPlus size={12} /> Show
-                                </button>
-                            ) : (
-                                <button
-                                    type="button"
-                                    onClick={collapseAllInvalid}
-                                    title="Collapse all invalid rows"
-                                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
-                                >
-                                    <LuMinus size={12} /> Hide
-                                </button>
-                            )}
-                        </div>
-                    )}
                 </div>
             )}
 
@@ -1940,85 +2162,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             )}
 
             {/* Transactions content */}
-            <>
-                {/* Transactions tab header with actions */}
-                {!embeddedMode && !hideLegend && (
-                    <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
-                        {/* Actions (right side) */}
-                        <div className="flex flex-wrap items-center gap-2">
-                            {groupingMode !== 'off' && sortBy !== 'date' && (
-                                <button
-                                    type="button"
-                                    className="text-[10px] text-slate-500 hover:text-blue-600"
-                                    title="Date grouping needs date sorting"
-                                    onClick={() => setSorting([{ id: 'date', desc: true }])}
-                                >
-                                    Grouping paused (sorted by {sortBy}) · sort by date
-                                </button>
-                            )}
-                            <div className="inline-flex items-center text-[10px]" role="group" aria-label="Group transactions">
-                                <span className="mr-1 text-slate-500">Group:</span>
-                                {(['month-day', 'off'] as const).map(mode => (
-                                    <button
-                                        key={mode}
-                                        type="button"
-                                        aria-pressed={groupingMode === mode}
-                                        onClick={() => setGroupingMode(mode)}
-                                        className={cn(
-                                            'border px-1.5 py-0.5',
-                                            groupingMode === mode
-                                                ? 'border-blue-500 bg-blue-500 text-white'
-                                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-                                        )}
-                                    >
-                                        {mode === 'month-day' ? 'Month·Day' : 'Off'}
-                                    </button>
-                                ))}
-                            </div>
-                            <ColumnVisibilityPopover
-                                table={tanstackTable}
-                                onReset={() => {
-                                    setColumnVisibility(presetToVisibility(
-                                        tableConfig.columnPreset,
-                                        tableConfig.hiddenColumns,
-                                        tableConfig.shownColumns
-                                    ));
-                                }}
-                                size="xs"
-                            />
-                            <Button
-                                onClick={error ? handleRetry : handleReset}
-                                variant="outline"
-                                colorScheme={error ? "red" : "gray"}
-                                size="xs"
-                            >
-                                {error ? "🔄 Retry" : "↺ Reset"}
-                            </Button>
-                            <Button
-                                onClick={() => handleRefresh()}
-                                variant="outline"
-                                size="xs"
-                            >
-                                🔄 Refresh
-                            </Button>
-                        </div>
-                    </div>
-                )}
-
-                {showFilters && (
-                    <div className="mb-2">
-                        <TransactionFilters
-                            filters={filters}
-                            onChange={setFilters}
-                            onClear={() => setFilters(effectiveResetFilters)}
-                            expanded={filtersExpanded}
-                            onExpandedChange={setFiltersExpanded}
-                            appliedFilters={appliedFilters}
-                            filterMetadata={filterMetadata}
-                            resetFilters={effectiveResetFilters}
-                        />
-                    </div>
-                )}
+            <div className={cn(!embeddedMode && 'flex flex-col gap-4')}>
+                {showFilters && (embeddedMode ? (
+                    <div className="mb-2">{filtersPanel}</div>
+                ) : (
+                    <PageSection icon={<LuFilter size={14} />} title="Filters" bodyClassName="p-3">
+                        {filtersPanel}
+                    </PageSection>
+                ))}
 
                 {serverGrouping && groupsUrl && showFilters && !hideLegend && (
                     <ActivityHeader
@@ -2030,127 +2181,17 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     />
                 )}
 
-                {/* Top Pagination - show when more than 15 transactions */}
-                {!loading && !error && !embeddedMode && !serverGrouping && (filterMetadata?.filtered_count ?? 0) > 15 && (
-                    <div className="mb-2">
-                        <TablePagination
-                            pagination={pagination}
-                            total={filterMetadata?.filtered_count ?? 0}
-                        />
-                    </div>
+                {embeddedMode ? tableContent : (
+                    <PageSection
+                        icon={<LuList size={14} />}
+                        title="Transactions"
+                        meta={invalidControl}
+                        actions={!hideLegend && tableActions}
+                    >
+                        {tableContent}
+                    </PageSection>
                 )}
-
-                {/* Error state for transactions */}
-                {error && (
-                    <div className="mb-4 border border-red-200 bg-red-50 py-6 text-center">
-                        <span className="block font-bold text-red-600">Error loading transactions</span>
-                        <span className="block text-sm text-red-600">{error}</span>
-                        <Button className="mt-3" onClick={handleRetry} colorScheme="gray" size="sm">
-                            🔄 Retry
-                        </Button>
-                    </div>
-                )}
-
-                {/* Loading overlay for transactions */}
-                {loading && !error && (
-                    <div className="mb-4 bg-slate-50 py-10 text-center">
-                        <Spinner size="lg" className="text-blue-500" />
-                        <span className="mt-4 block">Loading transactions...</span>
-                    </div>
-                )}
-
-
-
-                {/* Transaction table - only show when not loading or erroring */}
-                {!loading && !error && (
-                    <StickyScrollContainer className={cn('relative overflow-x-auto border border-slate-200 bg-white text-xs shadow-sm', !embeddedMode && 'max-h-[75vh] overflow-y-auto')}>
-                        <table className="w-full">
-                            <thead className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-slate-100 [&_th]:py-1.5">
-                                <tr>
-                                    <th className="sticky left-0 z-10 min-w-[50px] border-r-2 border-slate-300 bg-slate-100">
-                                        {(!embeddedMode || showSelectionInEmbedded) && (
-                                            <input
-                                                type="checkbox"
-                                                title="Select all on page"
-                                                className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
-                                                checked={allCurrentPageSelected}
-                                                onChange={toggleSelectAll}
-                                            />
-                                        )}
-                                    </th>
-                                    {showColumn('id') && renderSortableHeader('id', 'ID')}
-                                    {showColumn('date') && renderSortableHeader('date', 'Date/Time', undefined, 'pr-1')}
-                                    {showColumn('source') && renderSortableHeader('source', 'Source Info', 'min-w-[180px]', 'pr-1')}
-                                    {showColumn('accounts') && <th className="w-[130px]">From / To</th>}
-                                    {showColumn('direction') && renderSortableHeader('direction', 'Dir')}
-                                    {showColumn('type') && renderSortableHeader('type', 'Type')}
-                                    {showColumn('asset') && renderSortableHeader('asset', 'Asset', 'min-w-[60px]')}
-                                    {showColumn('qty') && renderSortableHeader('qty', 'Qty')}
-                                    {showColumn('price') && renderSortableHeader('price', 'Price')}
-                                    {showColumn('total') && <th>Total</th>}
-                                    {showColumn('fee') && renderSortableHeader('fee', 'Fee')}
-                                    {showColumn('taxability') && <th>Taxable</th>}
-                                    {showColumn('feeInBase') && <th>Include Fee</th>}
-                                    {showColumn('bundle') && <th>Bundle</th>}
-                                    {showColumn('tags') && <th>Tags</th>}
-                                    {showColumn('sourceTransactionId') && <th>Source Tx ID</th>}
-                                    {/* Additional plugin columns */}
-                                    {additionalColumns.map(col => (
-                                        <th key={col.id} style={{ width: col.width, ...(col.headerBg ? { backgroundColor: col.headerBg } : {}) }}>{col.header}</th>
-                                    ))}
-                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, 'sticky right-[50px] z-10 w-[1%] whitespace-nowrap border-l-2 border-slate-300 bg-slate-100 px-1')}
-                                    {!embeddedMode && <th className="sticky right-0 z-10 min-w-[50px] bg-slate-100 px-0" />}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {serverGrouping && groupsUrl ? (
-                                    <GroupedTransactionsBody
-                                        groupsUrl={groupsUrl}
-                                        listUrl={(customApiUrl || `${API_URL}/transactions`)}
-                                        idsUrl={idsUrlFor(customApiUrl)}
-                                        params={filterParams}
-                                        sortDir={sortDir}
-                                        colSpan={visibleColumnCount}
-                                        selectable={!embeddedMode || showSelectionInEmbedded}
-                                        renderRow={renderRow}
-                                        onRowsLoaded={handleGroupRowsLoaded}
-                                        selectedIds={selectedIds}
-                                        setSelectedIds={setSelectedIds}
-                                        onApplyFacetsGlobally={applyFacetsGlobally}
-                                        onMarkGroupReviewed={isInbox ? markGroupReviewed : undefined}
-                                        reviewedOverlay={reviewedOverlay}
-                                        onUndoReviewed={undoReviewed}
-                                        emptyMessage={emptyMessage}
-                                        baseCurrency={baseCurrency}
-                                    />
-                                ) : paginatedTransactions.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={visibleColumnCount}>
-                                            <span className="block py-8 text-center text-slate-500">
-                                                {emptyMessage || 'No transactions found'}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    pageGrouping ? (
-                                        <PageDayGroupedRows transactions={paginatedTransactions} colSpan={visibleColumnCount} renderRow={renderRow} />
-                                    ) : (
-                                        paginatedTransactions.map(tx => renderRow(tx))
-                                    )
-                                )}
-                            </tbody>
-                        </table>
-                    </StickyScrollContainer>
-                )}
-
-                {/* Pagination Controls - show even when loading/error */}
-                {!loading && !error && !embeddedMode && !serverGrouping && (
-                    <TablePagination
-                        pagination={pagination}
-                        total={filterMetadata?.filtered_count ?? 0}
-                    />
-                )}
-            </>
+            </div>
 
             {/* Bulk Set Type Dialog */}
             <RadixDialog.Root open={showBulkTypeDialog} onOpenChange={(open) => setShowBulkTypeDialog(open)}>

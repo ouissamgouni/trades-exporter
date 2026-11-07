@@ -70,6 +70,16 @@ def _issue_tx_ids(session: Session):
     return union(select(missing.c.tx_id), select(linkage.c.tx_id))
 
 
+def count_invalid_transactions(session: Session, tx_ids_query) -> int:
+    nt = NormalizedTransaction
+    return session.exec(
+        select(func.count(nt.id))
+        .where(nt.id.in_(tx_ids_query))
+        .where(nt.date_time.isnot(None))
+        .where(nt.review_status == ReviewStatus.INVALID.value)
+    ).one()
+
+
 def compute_transaction_groups(
     session: Session,
     tx_ids_query,
@@ -79,6 +89,7 @@ def compute_transaction_groups(
     sort_dir: str = "desc",
     limit: int = 24,
     offset: int = 0,
+    hide_invalid_only: bool = False,
 ) -> Tuple[List[TransactionGroup], int]:
     """Aggregate the transactions selected by `tx_ids_query` (a SELECT of ids) per local period."""
     if granularity not in GRANULARITIES:
@@ -110,10 +121,13 @@ def compute_transaction_groups(
     )
     not_invalid = base.c.review_status != ReviewStatus.INVALID.value
 
-    total_groups = session.exec(select(func.count(func.distinct(base.c.period)))).one()
+    groups_count = select(func.count(func.distinct(base.c.period)))
+    if hide_invalid_only:
+        groups_count = groups_count.where(not_invalid)
+    total_groups = session.exec(groups_count).one()
 
     order = base.c.period.asc() if sort_dir == "asc" else base.c.period.desc()
-    period_rows = session.exec(
+    period_query = (
         select(
             base.c.period,
             func.count().filter(not_invalid),
@@ -126,7 +140,10 @@ def compute_transaction_groups(
         .order_by(order)
         .offset(offset)
         .limit(limit)
-    ).all()
+    )
+    if hide_invalid_only:
+        period_query = period_query.having(func.count().filter(not_invalid) > 0)
+    period_rows = session.exec(period_query).all()
     if not period_rows:
         return [], total_groups
 

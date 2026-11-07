@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { LuChevronDown, LuChevronLeft, LuChevronRight, LuChevronUp, LuActivity } from 'react-icons/lu';
+import { LuChevronLeft, LuChevronRight, LuActivity } from 'react-icons/lu';
 import { CalendarHeatmap, DailyStats } from '../../CalendarHeatmap';
 import { cn } from '../../../lib/cn';
+import { PageSection } from '../../ui/PageSection';
 import { localFilterToUtcNaive, toLocalDateKey } from '../../../utils/dateUtils';
 import { useTransactionGroups } from './useTransactionGroups';
 import type { TransactionGroup } from './types';
@@ -100,51 +101,45 @@ export const ActivityHeader: React.FC<ActivityHeaderProps> = ({ groupsUrl, param
     const visible = view !== 'hidden';
 
     return (
-        <div className="mb-2 border border-slate-200 bg-white px-3 py-2">
-            <div className="flex flex-wrap items-center gap-3">
-                <button
-                    type="button"
-                    aria-expanded={visible}
-                    className="inline-flex items-center gap-1 text-sm font-semibold text-slate-700 hover:text-blue-600"
-                    onClick={() => setView(visible ? 'hidden' : lastVisible)}
-                >
-                    <LuActivity size={14} /> Activity
-                    {visible ? <LuChevronUp size={14} /> : <LuChevronDown size={14} />}
-                </button>
-                {visible && (
-                    <>
-                        <span className="inline-flex text-xs" role="group" aria-label="Activity view">
-                            {(['months', 'year'] as const).map(v => (
-                                <button
-                                    key={v}
-                                    type="button"
-                                    aria-pressed={view === v}
-                                    onClick={() => setView(v)}
-                                    className={cn(
-                                        'border px-2 py-0.5 first:border-r-0',
-                                        view === v ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
-                                    )}
-                                >
-                                    {v === 'months' ? 'Months' : 'Year'}
-                                </button>
-                            ))}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                            <button type="button" aria-label="Previous year" className="p-0.5 text-slate-500 hover:text-blue-600" onClick={() => setYear(y => y - 1)}>
-                                <LuChevronLeft size={14} />
+        <PageSection
+            icon={<LuActivity size={14} />}
+            title="Activity"
+            collapsed={!visible}
+            onToggleCollapsed={() => setView(visible ? 'hidden' : lastVisible)}
+            bodyClassName="px-3 pb-3 pt-4"
+            meta={visible && (
+                <>
+                    <span className="inline-flex text-xs" role="group" aria-label="Activity view">
+                        {(['months', 'year'] as const).map(v => (
+                            <button
+                                key={v}
+                                type="button"
+                                aria-pressed={view === v}
+                                onClick={() => setView(v)}
+                                className={cn(
+                                    'border px-2 py-0.5 first:border-r-0',
+                                    view === v ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
+                                )}
+                            >
+                                {v === 'months' ? 'Months' : 'Year'}
                             </button>
-                            <span className="text-sm font-medium tabular-nums text-slate-700">{year}</span>
-                            <button type="button" aria-label="Next year" className="p-0.5 text-slate-500 hover:text-blue-600" onClick={() => setYear(y => y + 1)}>
-                                <LuChevronRight size={14} />
-                            </button>
-                        </span>
-                        <span className="text-xs text-slate-400">Click a {view === 'year' ? 'day' : 'month'} to focus on it</span>
-                    </>
-                )}
-            </div>
-
+                        ))}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                        <button type="button" aria-label="Previous year" className="p-0.5 text-slate-500 hover:text-blue-600" onClick={() => setYear(y => y - 1)}>
+                            <LuChevronLeft size={14} />
+                        </button>
+                        <span className="text-sm font-medium tabular-nums text-slate-700">{year}</span>
+                        <button type="button" aria-label="Next year" className="p-0.5 text-slate-500 hover:text-blue-600" onClick={() => setYear(y => y + 1)}>
+                            <LuChevronRight size={14} />
+                        </button>
+                    </span>
+                    <span className="text-xs text-slate-400">Click a {view === 'year' ? 'day' : 'month'} to focus on it</span>
+                </>
+            )}
+        >
             {view === 'months' && (
-                <div className="mt-2 grid grid-cols-12 gap-1" role="list" aria-label={`Transactions per month in ${year}`}>
+                <div className="grid grid-cols-12 gap-1" role="list" aria-label={`Transactions per month in ${year}`}>
                     {monthCells.map(cell => {
                         const count = cell.group?.total_count ?? 0;
                         const pending = cell.group?.pending_count ?? 0;
@@ -190,6 +185,6 @@ export const ActivityHeader: React.FC<ActivityHeaderProps> = ({ groupsUrl, param
                     isLoading={days.isLoading}
                 />
             )}
-        </div>
+        </PageSection>
     );
 };

@@ -7831,6 +7831,7 @@ def get_enriched_transaction_groups(
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(24, ge=1, le=400),
     offset: int = Query(0, ge=0),
+    hide_invalid: bool = Query(False),
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     session: Session = Depends(get_session_dependency),
 ):
@@ -7838,6 +7839,7 @@ def get_enriched_transaction_groups(
     from backend.api.schemas import TransactionGroupsResponse
     from backend.services.transaction_groups import (
         compute_transaction_groups,
+        count_invalid_transactions,
         resolve_timezone,
     )
 
@@ -7880,6 +7882,7 @@ def get_enriched_transaction_groups(
         sort_dir=sort_dir,
         limit=limit,
         offset=offset,
+        hide_invalid_only=hide_invalid,
     )
 
     for group in groups:
@@ -7906,6 +7909,9 @@ def get_enriched_transaction_groups(
         total_groups=total_groups,
         limit=limit,
         offset=offset,
+        excluded_invalid_count=(
+            count_invalid_transactions(session, ids_statement) if hide_invalid else 0
+        ),
     )
 
 

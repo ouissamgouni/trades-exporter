@@ -1,76 +1,61 @@
 import React from 'react';
-import { LuArrowDown, LuArrowUp, LuArrowLeftRight, LuTriangleAlert } from 'react-icons/lu';
+import type { IconType } from 'react-icons';
+import { LuArrowDown, LuArrowUp, LuArrowLeftRight, LuBan, LuCircleCheck, LuClock, LuTriangleAlert } from 'react-icons/lu';
 import { cn } from '../../../lib/cn';
 import { AccountBadge } from '../../AccountBadge';
 import { formatNetQty, truncateSymbol } from './groupUtils';
-import type { GroupAccountRecap, TransactionGroup } from './types';
+import type { FacetKey, GroupAccountRecap, GroupFacetSelection, TransactionGroup } from './types';
 
 /**
- * Shared column template for month and day header rows so totals, status counts and
+ * Shared column template for month and day header rows so status counts and
  * account recaps line up vertically regardless of label length.
- * Columns: select | label | total | pending | valid | invalid | health | [P&L] | accounts | actions
+ * Columns: select | label | valid | pending | invalid | health | [P&L] | accounts | actions
  */
-export const GROUP_GRID = 'grid grid-cols-[20px_150px_52px_96px_88px_88px_52px_minmax(0,1fr)_auto] items-center gap-x-2';
-export const GROUP_GRID_PNL = 'grid grid-cols-[20px_150px_52px_96px_88px_88px_52px_120px_minmax(0,1fr)_auto] items-center gap-x-2';
-/** Grid column where the recap cells start (after select + label). */
-export const GROUP_RECAP_COL_START = 'col-[3/-1]';
+export const GROUP_GRID = 'grid grid-cols-[20px_150px_56px_56px_56px_44px_minmax(0,1fr)_auto] items-center gap-x-2';
+export const GROUP_GRID_PNL = 'grid grid-cols-[20px_150px_56px_56px_56px_44px_120px_minmax(0,1fr)_auto] items-center gap-x-2';
 
-const STATUS_CLASS: Record<'pending' | 'valid' | 'invalid', string> = {
-    pending: 'border-amber-200 bg-amber-50 text-amber-800',
+type StatusKind = 'valid' | 'pending' | 'invalid';
+
+const STATUS_CLASS: Record<StatusKind, string> = {
     valid: 'border-green-200 bg-green-50 text-green-800',
-    invalid: 'border-slate-200 bg-slate-50 text-slate-400 line-through decoration-slate-300',
+    pending: 'border-amber-200 bg-amber-50 text-amber-800',
+    invalid: 'border-slate-200 bg-slate-50 text-slate-400',
 };
-const INVALID_TOGGLE = 'inline-flex items-center gap-1 border border-slate-300 bg-white px-1.5 py-px text-xs tabular-nums text-slate-500 hover:border-slate-400 hover:text-slate-800';
+const STATUS_ICON: Record<StatusKind, IconType> = { valid: LuCircleCheck, pending: LuClock, invalid: LuBan };
+const STATUS_LABEL: Record<StatusKind, string> = {
+    valid: 'valid',
+    pending: 'pending review',
+    invalid: 'invalid (excluded from totals)',
+};
 
-const StatusCell: React.FC<{ kind: 'pending' | 'valid' | 'invalid'; count: number }> = ({ kind, count }) => (
-    <span>
-        {count > 0 && (
-            <span
-                className={cn('inline-block border px-1.5 py-px text-xs tabular-nums', STATUS_CLASS[kind])}
-                title={kind === 'invalid' ? 'Invalid transactions are excluded from totals' : undefined}
-            >
-                {count} {kind}
-            </span>
-        )}
-    </span>
-);
+const StatusCell: React.FC<{ kind: StatusKind; count: number; title?: string }> = ({ kind, count, title }) => {
+    const Icon = STATUS_ICON[kind];
+    const label = title ?? `${count} ${STATUS_LABEL[kind]}`;
+    return (
+        <span>
+            {count > 0 && (
+                <span
+                    className={cn('inline-flex items-center gap-1 border px-1.5 py-px text-xs tabular-nums', STATUS_CLASS[kind])}
+                    title={label}
+                    aria-label={label}
+                >
+                    <Icon size={11} aria-hidden /> {count}
+                </span>
+            )}
+        </span>
+    );
+};
 
-/** Grid cells: total, pending, valid, invalid, health and (P&L tables) realized P&L. */
+/** Grid cells: valid, pending, invalid, health and (P&L tables) realized P&L. */
 export const GroupStatusCells: React.FC<{
     group: TransactionGroup;
     showPnl: boolean;
     baseCurrency?: string;
-    /** When set, the invalid pill becomes a +/- toggle for the invalid rows. */
-    onToggleInvalid?: () => void;
-    invalidShown?: boolean;
-}> = ({ group, showPnl, baseCurrency, onToggleInvalid, invalidShown }) => (
+}> = ({ group, showPnl, baseCurrency }) => (
     <>
-        <span>
-            <span
-                className="inline-block min-w-[28px] border border-slate-300 bg-white px-1.5 py-px text-center text-xs font-semibold tabular-nums text-slate-700"
-                title="Transactions excluding invalid"
-            >
-                {group.total_count}
-            </span>
-        </span>
+        <StatusCell kind="valid" count={group.valid_count} title={`${group.valid_count} valid · ${group.total_count} total excluding invalid`} />
         <StatusCell kind="pending" count={group.pending_count} />
-        <StatusCell kind="valid" count={group.valid_count} />
-        {onToggleInvalid && group.invalid_count > 0 ? (
-            <span>
-                <button
-                    type="button"
-                    aria-pressed={!!invalidShown}
-                    className={INVALID_TOGGLE}
-                    title={invalidShown ? 'Hide invalid transactions' : 'Show invalid transactions'}
-                    onClick={e => { e.stopPropagation(); onToggleInvalid(); }}
-                >
-                    <span className="font-semibold">{invalidShown ? '−' : '+'}</span>
-                    <span className="line-through decoration-slate-300">{group.invalid_count} invalid</span>
-                </button>
-            </span>
-        ) : (
-            <StatusCell kind="invalid" count={group.invalid_count} />
-        )}
+        <StatusCell kind="invalid" count={group.invalid_count} />
         <span>
             {group.health_issue_count > 0 && (
                 <span
@@ -116,32 +101,78 @@ const AccountFlow: React.FC<{ recap: GroupAccountRecap }> = ({ recap }) => (
     </span>
 );
 
-const AccountPill: React.FC<{ recap: GroupAccountRecap }> = ({ recap }) => (
-    <AccountBadge accountId={recap.account_id} accountName={recap.account_name} maxLength={18} fallback="Unmapped" />
-);
+interface FacetToggleProps {
+    selection?: GroupFacetSelection;
+    onToggleFacet?: (dim: FacetKey, value: string) => void;
+}
+
+const accountFacetValue = (recap: GroupAccountRecap) => (recap.account_id != null ? String(recap.account_id) : 'unmapped');
+
+const isSelected = (selection: GroupFacetSelection | undefined, dim: FacetKey, value: string) =>
+    (selection?.[dim] ?? []).includes(value);
+
+/** Account pill; acts as a filter toggle when `onToggleFacet` is set (wrapper span: the badge contains its own info button). */
+const AccountChip: React.FC<{ recap: GroupAccountRecap } & FacetToggleProps> = ({ recap, selection, onToggleFacet }) => {
+    const badge = <AccountBadge accountId={recap.account_id} accountName={recap.account_name} maxLength={18} fallback="Unmapped" />;
+    if (!onToggleFacet) return badge;
+    const value = accountFacetValue(recap);
+    const on = isSelected(selection, 'accounts', value);
+    const toggle = () => onToggleFacet('accounts', value);
+    return (
+        <span
+            role="button"
+            tabIndex={0}
+            aria-pressed={on}
+            title={on ? 'Remove account filter' : 'Filter this period by account'}
+            className={cn('inline-flex cursor-pointer outline-offset-1', on ? 'outline outline-2 outline-blue-500' : 'hover:outline hover:outline-1 hover:outline-blue-300')}
+            onClick={toggle}
+            onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+            }}
+        >
+            {badge}
+        </span>
+    );
+};
 
 /** Month recap: one compact card per account, laid out horizontally (scrolls when overflowing). */
-export const GroupAccountsStrip: React.FC<{ group: TransactionGroup }> = ({ group }) => (
+export const GroupAccountsStrip: React.FC<{ group: TransactionGroup } & FacetToggleProps> = ({ group, selection, onToggleFacet }) => (
     <div className="flex min-w-0 gap-1.5 overflow-x-auto py-0.5" onClick={e => e.stopPropagation()}>
         {group.accounts.map(recap => (
             <div
                 key={recap.account_id ?? 'unmapped'}
-                className="flex shrink-0 flex-col gap-0.5 border border-slate-200 bg-white px-1.5 py-0.5"
+                className="flex shrink-0 flex-col gap-0.5 border border-slate-300 bg-slate-100 px-1.5 py-0.5"
             >
                 <span className="inline-flex items-center gap-1.5">
-                    <AccountPill recap={recap} />
+                    <AccountChip recap={recap} selection={selection} onToggleFacet={onToggleFacet} />
                     <AccountFlow recap={recap} />
                 </span>
                 {recap.assets.length > 0 && (
                     <span className="inline-flex items-center gap-x-2 text-[11px] tabular-nums text-slate-500">
-                        {recap.assets.map(a => (
-                            <span key={a.asset_id ?? a.symbol} className="whitespace-nowrap">
-                                <span className={a.net_quantity > 0 ? 'text-green-700' : a.net_quantity < 0 ? 'text-red-700' : ''}>
-                                    {formatNetQty(a.net_quantity)}
-                                </span>{' '}
-                                <span className="text-slate-600" title={a.symbol}>{truncateSymbol(a.symbol)}</span>
-                            </span>
-                        ))}
+                        {recap.assets.map(a => {
+                            const value = a.asset_id != null ? String(a.asset_id) : null;
+                            const on = value != null && isSelected(selection, 'assets', value);
+                            return (
+                                <span key={a.asset_id ?? a.symbol} className="whitespace-nowrap">
+                                    <span className={a.net_quantity > 0 ? 'text-green-700' : a.net_quantity < 0 ? 'text-red-700' : ''}>
+                                        {formatNetQty(a.net_quantity)}
+                                    </span>{' '}
+                                    {value != null && onToggleFacet ? (
+                                        <button
+                                            type="button"
+                                            aria-pressed={on}
+                                            title={on ? `Remove ${a.symbol} filter` : `Filter this period by ${a.symbol}`}
+                                            className={cn('px-0.5', on ? 'bg-blue-500 text-white' : 'text-slate-600 hover:text-blue-700 hover:underline')}
+                                            onClick={() => onToggleFacet('assets', value)}
+                                        >
+                                            {truncateSymbol(a.symbol)}
+                                        </button>
+                                    ) : (
+                                        <span className="text-slate-600" title={a.symbol}>{truncateSymbol(a.symbol)}</span>
+                                    )}
+                                </span>
+                            );
+                        })}
                         {recap.more_assets_count > 0 && (
                             <span className="text-slate-400" title={`${recap.more_assets_count} more asset(s)`}>+{recap.more_assets_count}</span>
                         )}
@@ -153,11 +184,11 @@ export const GroupAccountsStrip: React.FC<{ group: TransactionGroup }> = ({ grou
 );
 
 /** Day recap: account pills with flow counts on a single line. */
-export const GroupAccountsInline: React.FC<{ group: TransactionGroup }> = ({ group }) => (
+export const GroupAccountsInline: React.FC<{ group: TransactionGroup } & FacetToggleProps> = ({ group, selection, onToggleFacet }) => (
     <div className="flex min-w-0 items-center gap-x-3 overflow-x-auto" onClick={e => e.stopPropagation()}>
         {group.accounts.map(recap => (
             <span key={recap.account_id ?? 'unmapped'} className="inline-flex shrink-0 items-center gap-1">
-                <AccountPill recap={recap} />
+                <AccountChip recap={recap} selection={selection} onToggleFacet={onToggleFacet} />
                 <AccountFlow recap={recap} />
             </span>
         ))}

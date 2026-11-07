@@ -85,6 +85,12 @@ def test_transaction_groups_empty(client):
     assert data["timezone"] == "Europe/Paris"
 
 
+def test_transaction_groups_hide_invalid(client):
+    response = client.get("/transactions/groups?hide_invalid=true")
+    assert response.status_code == 200
+    assert response.json()["excluded_invalid_count"] == 0
+
+
 def test_transaction_groups_rejects_unknown_timezone(client):
     response = client.get("/transactions/groups?tz=Mars/Olympus")
     assert response.status_code == 400

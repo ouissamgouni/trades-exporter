@@ -12,7 +12,10 @@ import pytest
 from sqlmodel import select
 
 from backend.db.models import Account, Asset, NormalizedTransaction, ReviewStatus
-from backend.services.transaction_groups import compute_transaction_groups
+from backend.services.transaction_groups import (
+    compute_transaction_groups,
+    count_invalid_transactions,
+)
 
 
 def _account(session, name, owned=True):
@@ -100,6 +103,38 @@ class TestTransactionGroups:
         assert (recap.inflow_count, recap.outflow_count) == (2, 1)
         nets = {a.symbol: a.net_quantity for a in recap.assets}
         assert nets == {"GRPBTC": 1.5, "GRPETH": 3.0}
+
+    def test_hide_invalid_only_drops_invalid_only_periods(self, pg_session):
+        acct = _account(pg_session, "GrpHideInv")
+        btc = _asset(pg_session, "GRPHIDE")
+        _tx(pg_session, acct, btc, datetime(2024, 3, 2, 10))
+        _tx(
+            pg_session,
+            acct,
+            btc,
+            datetime(2024, 3, 3, 10),
+            review_status=ReviewStatus.INVALID,
+        )
+        _tx(
+            pg_session,
+            acct,
+            btc,
+            datetime(2024, 2, 3, 10),
+            review_status=ReviewStatus.INVALID,
+        )
+
+        groups, total = compute_transaction_groups(
+            pg_session,
+            _ids(acct),
+            granularity="month",
+            tz=ZoneInfo("UTC"),
+            hide_invalid_only=True,
+        )
+
+        assert total == 1
+        assert [g.period_start for g in groups] == ["2024-03-01"]
+        assert groups[0].invalid_count == 1
+        assert count_invalid_transactions(pg_session, _ids(acct)) == 2
 
     def test_day_boundary_follows_timezone(self, pg_session):
         acct = _account(pg_session, "GrpTzAcct")
