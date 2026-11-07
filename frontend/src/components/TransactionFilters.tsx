@@ -157,6 +157,7 @@ interface TransactionFiltersProps {
     quickBar?: boolean;
     /** Callback receiving loaded filterOptions for parent to access (e.g. non_owned_count) */
     onFilterOptionsLoaded?: (options: FilterOptions) => void;
+    className?: string;
 }
 
 // Filter definitions - ordered: date, account, source, type, direction, taxability, status, assets, category
@@ -1019,6 +1020,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     extraFilterCards,
     onFilterOptionsLoaded,
     quickBar = true,
+    className = 'mb-3',
 }) => {
     const effectiveBaseUrl = filterOptionsUrl || `${API_URL}/transactions/filter-options`;
     const hiddenSet = React.useMemo(() => new Set(hiddenFilters || []), [hiddenFilters]);
@@ -1429,7 +1431,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     };
 
     return (
-        <div className="mb-3">
+        <div className={className}>
             {quickBar && (
                 <QuickFilterBar
                     filters={localFilters}

@@ -8,15 +8,14 @@ import { toaster } from '../../ui/toaster';
 import {
     GROUP_GRID,
     GROUP_GRID_PNL,
-    GROUP_RECAP_COL_START,
     GroupAccountsInline,
     GroupAccountsStrip,
     GroupStatusCells,
 } from './GroupRecap';
-import { GroupFacetBar } from './GroupFacetBar';
-import { applyFacetSelection, facetDimensions, groupRowCount, shouldAutoExpandDays, withoutInvalid } from './groupUtils';
+import { AppliedFacetsBar } from './GroupFacetBar';
+import { applyFacetSelection, groupRowCount, hasFacetSelection, shouldAutoExpandDays, withoutInvalid } from './groupUtils';
 import { fetchGroupIds, PeriodBounds, useGroupRows, useTransactionGroups } from './useTransactionGroups';
-import type { GroupFacetSelection, TransactionGroup } from './types';
+import type { FacetKey, GroupFacetSelection, TransactionGroup } from './types';
 
 export interface ReviewedOverlayEntry {
     tx: Transaction;
@@ -43,18 +42,24 @@ export interface GroupedTransactionsBodyProps {
     onUndoReviewed: (id: number) => void;
     emptyMessage?: string;
     baseCurrency?: string;
+    /** Hide invalid rows and periods that only contain invalid transactions. */
+    hideInvalid?: boolean;
+    onExcludedInvalidCount?: (count: number | null) => void;
 }
 
-type SharedProps = Omit<GroupedTransactionsBodyProps, 'groupsUrl' | 'params' | 'sortDir' | 'colSpan' | 'emptyMessage'> & {
+type SharedProps = Omit<GroupedTransactionsBodyProps, 'groupsUrl' | 'params' | 'sortDir' | 'colSpan' | 'emptyMessage' | 'hideInvalid' | 'onExcludedInvalidCount'> & {
     groupsUrl: string;
     sortDir: 'asc' | 'desc';
     colSpan: number;
     showPnl: boolean;
+    hideInvalid: boolean;
 };
 
 // Month header height is fixed (h-14) so day headers can stick right below it.
 const MONTH_STICKY_TD = 'sticky top-[var(--thead-h,0px)] z-[8] p-0';
 const DAY_STICKY_TD = 'sticky top-[calc(var(--thead-h,0px)+3.5rem)] z-[7] p-0';
+// Month header grows by the h-7 applied-filters bar.
+const DAY_STICKY_TD_FILTERED = 'sticky top-[calc(var(--thead-h,0px)+5.25rem)] z-[7] p-0';
 // Keeps header content within the visible scroll width when the table is wider than the viewport.
 const VIEWPORT_BOX = 'sticky left-0 w-[var(--scroll-w,100%)]';
 
@@ -67,17 +72,26 @@ function inBounds(tx: Transaction, bounds: PeriodBounds): boolean {
     return key >= bounds.from && key <= bounds.to;
 }
 
-export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = ({ params, emptyMessage, ...shared }) => {
+export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = ({
+    params, emptyMessage, hideInvalid: hideInvalidRequested = false, onExcludedInvalidCount, ...shared
+}) => {
+    // Nothing to hide when the status filter keeps only invalid transactions.
+    const hideInvalid = hideInvalidRequested && withoutInvalid(params) !== null;
     const months = useTransactionGroups({
         groupsUrl: shared.groupsUrl,
         params,
         granularity: 'month',
         sortDir: shared.sortDir,
+        hideInvalid,
     });
 
     const groups = useMemo(() => months.data?.pages.flatMap(p => p.groups) ?? [], [months.data]);
     const total = months.data?.pages[0]?.total_groups ?? 0;
     const showPnl = shared.groupsUrl.includes('/enriched-transactions/groups');
+    const excludedInvalid = hideInvalid ? months.data?.pages[0]?.excluded_invalid_count ?? null : null;
+    useEffect(() => {
+        onExcludedInvalidCount?.(excludedInvalid);
+    }, [excludedInvalid, onExcludedInvalidCount]);
 
     if (months.isLoading) {
         return <StatusRow colSpan={shared.colSpan}><Spinner size="sm" className="text-blue-500" /> Loading months…</StatusRow>;
@@ -92,7 +106,7 @@ export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = (
     return (
         <>
             {groups.map((month, i) => (
-                <MonthSection key={month.period_start} month={month} defaultExpanded={i === 0} params={params} showPnl={showPnl} {...shared} />
+                <MonthSection key={month.period_start} month={month} defaultExpanded={i === 0} params={params} showPnl={showPnl} hideInvalid={hideInvalid} {...shared} />
             ))}
             {months.hasNextPage && (
                 <tr>
@@ -131,7 +145,7 @@ async function loadGroupIds(idsUrl: string, params: URLSearchParams, group: Tran
 }
 
 /** First grid cell: select every transaction of the period. */
-const GroupSelect: React.FC<GroupScopeProps> = ({ group, params, scopeLabel, idsUrl, selectable, selectedIds, setSelectedIds }) => {
+const GroupSelect: React.FC<GroupScopeProps> = ({ group, params, scopeLabel, idsUrl, selectable, selectedIds, setSelectedIds, hideInvalid }) => {
     const [groupIds, setGroupIds] = useState<number[] | null>(null);
     const [busy, setBusy] = useState(false);
     const allSelected = !!groupIds && groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
@@ -155,7 +169,7 @@ const GroupSelect: React.FC<GroupScopeProps> = ({ group, params, scopeLabel, ids
         }
     };
 
-    const title = `Select all ${groupRowCount(group)} in ${scopeLabel}`;
+    const title = `Select all ${hideInvalid ? group.total_count : groupRowCount(group)} in ${scopeLabel}`;
     return (
         <span className="inline-flex items-center" onClick={e => e.stopPropagation()}>
             <input
@@ -213,44 +227,37 @@ const MarkReviewedAction: React.FC<GroupScopeProps> = ({ group, params, scopeLab
     );
 };
 
-const FacetRow: React.FC<{
-    colSpan: number;
-    grid: string;
-    group: TransactionGroup;
-    scopeLabel: string;
-    selection: GroupFacetSelection;
-    onChange: (selection: GroupFacetSelection) => void;
-    onApplyToAll: (selection: GroupFacetSelection) => void;
-    className?: string;
-}> = ({ colSpan, grid, className, ...bar }) => {
-    if (facetDimensions(bar.group).length === 0) return null;
-    return (
-        <tr>
-            <td colSpan={colSpan} className={cn('border-b border-slate-200 p-0', className)}>
-                <div className={cn(VIEWPORT_BOX, grid, 'border-l-4 border-transparent px-2')}>
-                    <div className={GROUP_RECAP_COL_START}>
-                        <GroupFacetBar {...bar} />
-                    </div>
-                </div>
-            </td>
-        </tr>
-    );
+const toggleFacetValue = (selection: GroupFacetSelection, dim: FacetKey, value: string): GroupFacetSelection => {
+    const current = selection[dim] ?? [];
+    return { ...selection, [dim]: current.includes(value) ? current.filter(v => v !== value) : [...current, value] };
 };
+
+const FilterBarRow: React.FC<{ grid: string; children: React.ReactNode }> = ({ grid, children }) => (
+    <div className={cn(grid, 'h-7 border-t border-slate-300 bg-blue-50 px-2')}>
+        <div className="col-[2/-1] min-w-0">{children}</div>
+    </div>
+);
 
 const toggleKeys = (toggle: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
 };
 
 const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExpanded: boolean; params: URLSearchParams }> = (props) => {
-    const { month, defaultExpanded, params, colSpan, onApplyFacetsGlobally, showPnl } = props;
+    const { month, defaultExpanded, params, colSpan, onApplyFacetsGlobally, showPnl, hideInvalid } = props;
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [facets, setFacets] = useState<GroupFacetSelection>({});
     const [expandAllDays, setExpandAllDays] = useState(() => shouldAutoExpandDays(month));
     const [expandVersion, setExpandVersion] = useState(0);
     const label = formatMonthLabel(month.period_start);
     const scopedParams = useMemo(() => applyFacetSelection(params, facets), [params, facets]);
+    const rowParams = useMemo(() => (hideInvalid ? withoutInvalid(scopedParams) : null) ?? scopedParams, [scopedParams, hideInvalid]);
+    const filtered = hasFacetSelection(facets);
     const grid = showPnl ? GROUP_GRID_PNL : GROUP_GRID;
     const toggle = () => setExpanded(e => !e);
+    const toggleFacet = (dim: FacetKey, value: string) => {
+        setFacets(f => toggleFacetValue(f, dim, value));
+        setExpanded(true);
+    };
 
     const days = useTransactionGroups({
         groupsUrl: props.groupsUrl,
@@ -260,6 +267,7 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
         bounds: boundsOf(month),
         enabled: expanded,
         pageSize: 31,
+        hideInvalid,
     });
     const dayGroups = useMemo(() => days.data?.pages.flatMap(p => p.groups) ?? [], [days.data]);
 
@@ -267,52 +275,52 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
         <>
             <tr>
                 <td colSpan={colSpan} className={MONTH_STICKY_TD}>
-                    <div
-                        className={cn(VIEWPORT_BOX, grid, 'h-14 cursor-pointer border-l-4 border-t border-slate-700 border-t-slate-300 bg-slate-200 px-2 hover:bg-slate-300/70')}
-                        role="button"
-                        aria-expanded={expanded}
-                        tabIndex={0}
-                        onClick={toggle}
-                        onKeyDown={toggleKeys(toggle)}
-                    >
-                        <GroupSelect {...props} group={month} params={scopedParams} scopeLabel={label} />
-                        <span className="inline-flex min-w-0 items-center gap-1 text-slate-900">
-                            {expanded ? <LuChevronDown size={16} /> : <LuChevronRight size={16} />}
-                            <span className="truncate text-base font-semibold">{label}</span>
-                        </span>
-                        <GroupStatusCells group={month} showPnl={showPnl} baseCurrency={props.baseCurrency} />
-                        <GroupAccountsStrip group={month} />
-                        <span className="inline-flex items-center gap-2">
-                            <MarkReviewedAction {...props} group={month} params={scopedParams} scopeLabel={label} />
-                            {expanded && (
-                                <button
-                                    type="button"
-                                    className="whitespace-nowrap text-xs text-slate-500 hover:text-blue-600"
-                                    onClick={e => {
-                                        e.stopPropagation();
-                                        setExpandAllDays(v => !v);
-                                        setExpandVersion(v => v + 1);
-                                    }}
-                                >
-                                    {expandAllDays ? 'Collapse days' : 'Expand days'}
-                                </button>
-                            )}
-                        </span>
+                    <div className={cn(VIEWPORT_BOX, 'border-l-4 border-t border-slate-700 border-t-slate-300 bg-slate-200')}>
+                        <div
+                            className={cn(grid, 'h-14 cursor-pointer px-2 hover:bg-slate-300/70')}
+                            role="button"
+                            aria-expanded={expanded}
+                            tabIndex={0}
+                            onClick={toggle}
+                            onKeyDown={toggleKeys(toggle)}
+                        >
+                            <GroupSelect {...props} group={month} params={rowParams} scopeLabel={label} />
+                            <span className="flex min-w-0 flex-col justify-center text-slate-900">
+                                <span className="inline-flex min-w-0 items-center gap-1">
+                                    {expanded ? <LuChevronDown size={16} /> : <LuChevronRight size={16} />}
+                                    <span className="truncate text-base font-semibold">{label}</span>
+                                </span>
+                                {expanded && (
+                                    <button
+                                        type="button"
+                                        className="self-start pl-5 text-[11px] leading-tight text-slate-500 hover:text-blue-600"
+                                        onClick={e => {
+                                            e.stopPropagation();
+                                            setExpandAllDays(v => !v);
+                                            setExpandVersion(v => v + 1);
+                                        }}
+                                    >
+                                        {expandAllDays ? 'Collapse days' : 'Expand days'}
+                                    </button>
+                                )}
+                            </span>
+                            <GroupStatusCells group={month} showPnl={showPnl} baseCurrency={props.baseCurrency} />
+                            <GroupAccountsStrip group={month} selection={facets} onToggleFacet={toggleFacet} />
+                            <MarkReviewedAction {...props} group={month} params={rowParams} scopeLabel={label} />
+                        </div>
+                        {filtered && (
+                            <FilterBarRow grid={grid}>
+                                <AppliedFacetsBar
+                                    group={month}
+                                    selection={facets}
+                                    onChange={setFacets}
+                                    onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
+                                />
+                            </FilterBarRow>
+                        )}
                     </div>
                 </td>
             </tr>
-            {expanded && (
-                <FacetRow
-                    colSpan={colSpan}
-                    grid={grid}
-                    className="bg-slate-50"
-                    group={month}
-                    scopeLabel="month"
-                    selection={facets}
-                    onChange={setFacets}
-                    onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
-                />
-            )}
             {expanded && days.isLoading && (
                 <StatusRow colSpan={colSpan}><Spinner size="sm" className="text-blue-500" /> Loading days…</StatusRow>
             )}
@@ -323,6 +331,7 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
                     day={day}
                     params={scopedParams}
                     defaultExpanded={expandAllDays}
+                    monthFiltered={filtered}
                 />
             ))}
             {expanded && !days.isLoading && dayGroups.length === 0 && (
@@ -332,29 +341,23 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
     );
 };
 
-const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSearchParams; defaultExpanded: boolean }> = (props) => {
+const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSearchParams; defaultExpanded: boolean; monthFiltered: boolean }> = (props) => {
     const {
-        day, params, defaultExpanded, colSpan, listUrl, sortDir, renderRow, onRowsLoaded,
-        reviewedOverlay, onUndoReviewed, onApplyFacetsGlobally, showPnl,
+        day, params, defaultExpanded, monthFiltered, colSpan, listUrl, sortDir, renderRow, onRowsLoaded,
+        reviewedOverlay, onUndoReviewed, onApplyFacetsGlobally, showPnl, hideInvalid,
     } = props;
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [facets, setFacets] = useState<GroupFacetSelection>({});
-    const [showInvalid, setShowInvalid] = useState(false);
     const label = formatDayLabel(day.period_start);
     const bounds = boundsOf(day);
     const scopedParams = useMemo(() => applyFacetSelection(params, facets), [params, facets]);
-    const validOnlyParams = useMemo(() => withoutInvalid(scopedParams), [scopedParams]);
-    const canHideInvalid = day.invalid_count > 0 && validOnlyParams !== null;
-    const rowParams = canHideInvalid && !showInvalid ? validOnlyParams! : scopedParams;
+    const rowParams = useMemo(() => (hideInvalid ? withoutInvalid(scopedParams) : null) ?? scopedParams, [scopedParams, hideInvalid]);
+    const filtered = hasFacetSelection(facets);
     const grid = showPnl ? GROUP_GRID_PNL : GROUP_GRID;
     const toggle = () => setExpanded(e => !e);
-    const toggleInvalid = () => {
-        if (!expanded) {
-            setExpanded(true);
-            setShowInvalid(true);
-        } else {
-            setShowInvalid(v => !v);
-        }
+    const toggleFacet = (dim: FacetKey, value: string) => {
+        setFacets(f => toggleFacetValue(f, dim, value));
+        setExpanded(true);
     };
 
     const rowsQuery = useGroupRows({ listUrl, params: rowParams, bounds, sortDir, enabled: expanded });
@@ -383,44 +386,38 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
     return (
         <>
             <tr>
-                <td colSpan={colSpan} className={DAY_STICKY_TD}>
-                    <div
-                        className={cn(VIEWPORT_BOX, grid, 'h-9 cursor-pointer border-b border-l-4 border-slate-200 border-l-slate-300 bg-slate-100 px-2 hover:bg-slate-200/70')}
-                        role="button"
-                        aria-expanded={expanded}
-                        tabIndex={0}
-                        onClick={toggle}
-                        onKeyDown={toggleKeys(toggle)}
-                    >
-                        <GroupSelect {...props} group={day} params={scopedParams} scopeLabel={label} />
-                        <span className="inline-flex min-w-0 items-center gap-1 pl-4 text-slate-700">
-                            {expanded ? <LuChevronDown size={14} /> : <LuChevronRight size={14} />}
-                            <span className="truncate text-sm font-semibold">{label}</span>
-                        </span>
-                        <GroupStatusCells
-                            group={day}
-                            showPnl={showPnl}
-                            baseCurrency={props.baseCurrency}
-                            invalidShown={canHideInvalid ? expanded && showInvalid : undefined}
-                            onToggleInvalid={canHideInvalid ? toggleInvalid : undefined}
-                        />
-                        <GroupAccountsInline group={day} />
-                        <MarkReviewedAction {...props} group={day} params={scopedParams} scopeLabel={label} />
+                <td colSpan={colSpan} className={monthFiltered ? DAY_STICKY_TD_FILTERED : DAY_STICKY_TD}>
+                    <div className={cn(VIEWPORT_BOX, 'border-b border-l-4 border-slate-200 border-l-slate-300 bg-slate-100')}>
+                        <div
+                            className={cn(grid, 'h-9 cursor-pointer px-2 hover:bg-slate-200/70')}
+                            role="button"
+                            aria-expanded={expanded}
+                            tabIndex={0}
+                            onClick={toggle}
+                            onKeyDown={toggleKeys(toggle)}
+                        >
+                            <GroupSelect {...props} group={day} params={rowParams} scopeLabel={label} />
+                            <span className="inline-flex min-w-0 items-center gap-1 pl-4 text-slate-700">
+                                {expanded ? <LuChevronDown size={14} /> : <LuChevronRight size={14} />}
+                                <span className="truncate text-sm font-semibold">{label}</span>
+                            </span>
+                            <GroupStatusCells group={day} showPnl={showPnl} baseCurrency={props.baseCurrency} />
+                            <GroupAccountsInline group={day} selection={facets} onToggleFacet={toggleFacet} />
+                            <MarkReviewedAction {...props} group={day} params={rowParams} scopeLabel={label} />
+                        </div>
+                        {filtered && (
+                            <FilterBarRow grid={grid}>
+                                <AppliedFacetsBar
+                                    group={day}
+                                    selection={facets}
+                                    onChange={setFacets}
+                                    onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
+                                />
+                            </FilterBarRow>
+                        )}
                     </div>
                 </td>
             </tr>
-            {expanded && (
-                <FacetRow
-                    colSpan={colSpan}
-                    grid={grid}
-                    className="bg-white"
-                    group={day}
-                    scopeLabel="day"
-                    selection={facets}
-                    onChange={setFacets}
-                    onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
-                />
-            )}
             {expanded && rowsQuery.isLoading && (
                 <StatusRow colSpan={colSpan}><Spinner size="sm" className="text-blue-500" /> Loading…</StatusRow>
             )}

@@ -231,6 +231,9 @@ class TransactionGroupsResponse(BaseModel):
     total_groups: int = 0
     limit: int
     offset: int
+    excluded_invalid_count: int = Field(
+        0, description="Invalid transactions hidden when hide_invalid is set"
+    )
 
 
 class TransactionIdsResponse(BaseModel):

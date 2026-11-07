@@ -33,6 +33,8 @@ interface UseTransactionGroupsOptions {
     bounds?: PeriodBounds;
     enabled?: boolean;
     pageSize?: number;
+    /** Skip periods with only invalid transactions (server reports how many were hidden). */
+    hideInvalid?: boolean;
 }
 
 export function useTransactionGroups({
@@ -43,11 +45,12 @@ export function useTransactionGroups({
     bounds,
     enabled = true,
     pageSize = MONTHS_PAGE_SIZE,
+    hideInvalid = false,
 }: UseTransactionGroupsOptions) {
     const scoped = intersectBounds(params, bounds);
     const tz = browserTimeZone();
     return useInfiniteQuery({
-        queryKey: ['transactions', 'groups', groupsUrl, scoped.toString(), granularity, sortDir, tz, pageSize],
+        queryKey: ['transactions', 'groups', groupsUrl, scoped.toString(), granularity, sortDir, tz, pageSize, hideInvalid],
         enabled: enabled && !!groupsUrl,
         initialPageParam: 0,
         queryFn: async ({ pageParam }) => {
@@ -57,6 +60,7 @@ export function useTransactionGroups({
             p.set('sort_dir', sortDir);
             p.set('limit', String(pageSize));
             p.set('offset', String(pageParam));
+            if (hideInvalid) p.set('hide_invalid', 'true');
             const response = await fetch(withParams(groupsUrl!, p));
             if (!response.ok) throw new Error('Failed to load transaction groups');
             return response.json() as Promise<TransactionGroupsResponse>;

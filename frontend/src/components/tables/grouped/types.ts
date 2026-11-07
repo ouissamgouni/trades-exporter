@@ -52,6 +52,7 @@ export interface TransactionGroupsResponse {
     total_groups: number;
     limit: number;
     offset: number;
+    excluded_invalid_count: number;
 }
 
 export type FacetKey = keyof TransactionGroupFacets;
