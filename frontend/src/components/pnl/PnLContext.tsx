@@ -334,6 +334,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
                 unrealizedPnl: mm?.unrealized_pnl ?? 0,
                 realizedPnl: ss.realized_pnl,
                 taxableRealizedPnl: ss.taxable_realized_pnl ?? 0,
+                deferredGain: ss.deferred_gain ?? 0,
                 totalFees: ss.total_fees,
                 feeEntryCount: ss.fee_entry_count,
             };
@@ -346,6 +347,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
                 unrealizedPnl: ms.unrealized_pnl,
                 realizedPnl: ms.realized_pnl,
                 taxableRealizedPnl: ms.taxable_realized_pnl ?? 0,
+                deferredGain: ms.deferred_gain ?? 0,
                 totalFees: ms.total_fees,
                 feeEntryCount: ms.fee_entry_count,
             };

@@ -30,6 +30,13 @@ from backend.services.pnl.metrics_service import (
 MOCK_PREFIX = "backend.services.pnl.metrics_service"
 
 
+@pytest.fixture(autouse=True)
+def _no_deferred_gain_query():
+    # Sessions are mocked here; the deferred-gain DB aggregate is covered elsewhere.
+    with patch(f"{MOCK_PREFIX}._get_deferred_gain", return_value=0.0):
+        yield
+
+
 def _utc(year, month, day):
     return datetime(year, month, day, tzinfo=timezone.utc)
 

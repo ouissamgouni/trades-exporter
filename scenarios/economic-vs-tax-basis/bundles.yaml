@@ -1,0 +1,10 @@
+# Economic vs Tax Cost Basis — Bundles
+# =====================================
+# A3: ETH moved from the Exchange to the Cold Wallet (internal transfer).
+
+bundles:
+  - id: 1
+    label: "Exchange → Cold Wallet ETH transfer"
+    pattern: internal_transfer
+    notes: "Both costs (tax and economic) must travel with the lot"
+    reason: "Self-custody move between owned accounts"

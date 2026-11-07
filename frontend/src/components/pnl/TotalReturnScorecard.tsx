@@ -29,6 +29,8 @@ export interface ScorecardSummary {
     unrealizedPnl: number;
     realizedPnl: number;
     taxableRealizedPnl: number;
+    /** Gain already counted in Realized (economic) but not yet taxed */
+    deferredGain?: number;
     totalFees: number;
     feeEntryCount: number;
 }
@@ -77,6 +79,18 @@ function tokenToClass(token: string | undefined, prefix: 'text' | 'bg', fallback
     return fallback;
 }
 
+/** "Taxable: X", plus the tax-deferred part of Realized when there is one */
+export function realizedSubValue(
+    m: { taxableRealizedPnl: number; deferredGain?: number },
+    currency: string,
+    fmt: (val: number, currency: string) => string,
+): string {
+    const taxable = `Taxable: ${fmt(m.taxableRealizedPnl, currency)}`;
+    return m.deferredGain && Math.abs(m.deferredGain) >= 0.01
+        ? `${taxable} · Deferred: ${fmt(m.deferredGain, currency)}`
+        : taxable;
+}
+
 export type Range = 'all' | '3y' | '1y' | '6m' | '3m' | '1m' | '1w';
 export const RANGES: { key: Range; label: string; days: number | null }[] = [
     { key: '1w', label: '1W', days: 7 },
@@ -97,6 +111,7 @@ export interface RangeMetrics {
     unrealizedPnl: number;
     realizedPnl: number;
     taxableRealizedPnl: number;
+    deferredGain?: number;
     realizedInPeriod: number;
     taxableRealizedInPeriod: number;
     totalFees: number;
@@ -129,6 +144,7 @@ export function computeMetricsForRange(
             unrealizedPnl: summary.unrealizedPnl,
             realizedPnl: summary.realizedPnl,
             taxableRealizedPnl: summary.taxableRealizedPnl,
+            deferredGain: summary.deferredGain,
             realizedInPeriod: summary.realizedPnl,
             taxableRealizedInPeriod: summary.taxableRealizedPnl,
             totalFees: summary.totalFees,
@@ -371,6 +387,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 unrealizedPnl: live?.unrealized_pnl ?? 0,
                 realizedPnl: book.realized_pnl,
                 taxableRealizedPnl: book.taxable_realized_pnl ?? 0,
+                deferredGain: book.deferred_gain ?? 0,
                 realizedInPeriod: book.realized_in_period,
                 taxableRealizedInPeriod: (book as any).taxable_realized_in_period ?? 0,
                 totalFees: book.fees_in_period ?? summary?.totalFees ?? 0,
@@ -575,7 +592,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         bg={metrics.unrealizedPnl >= 0 ? 'green.50' : 'red.50'}
                                         onClick={onMetricClick ? () => onMetricClick('unrealized') : undefined}
                                     />
-                                    <MetricItem label="Realized" value={fmtCurrencySigned(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} icon={metrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={metrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} subValue={`Taxable: ${fmtCurrencySigned(metrics.taxableRealizedPnl, baseCurrency)}`} onClick={onMetricClick ? () => onMetricClick('realized') : undefined} />
+                                    <MetricItem label="Realized" value={fmtCurrencySigned(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} icon={metrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={metrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} subValue={realizedSubValue(metrics, baseCurrency, fmtCurrencySigned)} onClick={onMetricClick ? () => onMetricClick('realized') : undefined} />
                                     <MetricItem label="Fees" value={fmtCurrency(metrics.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" subValue={`${metrics.feeEntryCount} events`} onClick={onFeesClick} />
                                     {metrics.incomeEventCount > 0 && (
                                         <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />
@@ -961,7 +978,7 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
                         <MetricItem label="Portfolio Value" value={fmtCurrency(metrics.currentValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} />
                         <MetricItem label="Cost Basis" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.600" />
                         <MetricItem label="Unrealized P&L" value={fmtCurrency(metrics.unrealizedPnl, baseCurrency)} color={color(metrics.unrealizedPnl)} />
-                        <MetricItem label="Realized P&L" value={fmtCurrency(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} subValue={`Taxable: ${fmtCurrency(metrics.taxableRealizedPnl, baseCurrency)}`} />
+                        <MetricItem label="Realized P&L" value={fmtCurrency(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} subValue={realizedSubValue(metrics, baseCurrency, fmtCurrency)} />
                         <MetricItem label="Total Fees" value={fmtCurrency(metrics.totalFees, baseCurrency)} subValue={`${metrics.feeEntryCount} fee events`} color="gray.600" onClick={onFeesClick} />
                         {metrics.incomeEventCount > 0 && (
                             <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />

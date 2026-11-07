@@ -41,6 +41,8 @@ interface RealizedPnLEntry {
     proceeds_in_base: number;
     cost_basis_in_base: number;
     pnl_in_base: number;
+    economic_cost_basis_in_base?: number;
+    economic_pnl_in_base?: number;
     taxable: boolean;
     is_fee: boolean;
     transaction_id?: number;
@@ -63,6 +65,16 @@ export interface RealizedPnLSlidePanelProps {
     onTransactionClick?: (txId: number) => void;
     onUnitClick?: (unitId: number) => void;
 }
+
+/** Shows the tax-view value under the economic one when they differ (tax-deferred swaps). */
+const TaxViewLine: React.FC<{ economic?: number; tax: number; currency: string }> = ({ economic, tax, currency }) => {
+    if (economic == null || Math.abs(economic - tax) < 0.005) return null;
+    return (
+        <div className="text-[9px] text-gray-500" title="Tax view: cost carried over from the asset given up">
+            Tax: <ValueDisplay value={tax} currency={currency} />
+        </div>
+    );
+};
 
 /* ─── Constants ─── */
 
@@ -525,7 +537,8 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                                     </span>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
-                                                    <ValueDisplay value={e.cost_basis_in_base} currency={baseCurrency} />
+                                                    <ValueDisplay value={e.economic_cost_basis_in_base ?? e.cost_basis_in_base} currency={baseCurrency} />
+                                                    <TaxViewLine economic={e.economic_cost_basis_in_base} tax={e.cost_basis_in_base} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
                                                     <CostBasisChainTooltip
@@ -535,9 +548,10 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                                     </CostBasisChainTooltip>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
-                                                    <span className={`text-[10px] font-medium ${e.pnl_in_base >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                        <ValueDisplay value={e.pnl_in_base} currency={baseCurrency} />
+                                                    <span className={`text-[10px] font-medium ${(e.economic_pnl_in_base ?? e.pnl_in_base) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                        <ValueDisplay value={e.economic_pnl_in_base ?? e.pnl_in_base} currency={baseCurrency} />
                                                     </span>
+                                                    <TaxViewLine economic={e.economic_pnl_in_base} tax={e.pnl_in_base} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
                                                     <Tooltip content={e.taxable ? 'Taxable' : 'Non-Taxable'}>

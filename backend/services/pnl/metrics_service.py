@@ -40,6 +40,8 @@ from backend.db.models import (
     NormalizedTransaction,
     PriceSnapshot,
     RealizedPnl,
+    ECONOMIC_PNL,
+    ECONOMIC_UNIT_COST,
 )
 from backend.config.loader import configure_logging
 
@@ -90,6 +92,7 @@ class BookSummary:
     total_fees: float
     fee_entry_count: int
     total_invested: float = 0.0
+    deferred_gain: float = 0.0
     total_income: float = 0.0
     total_withholding: float = 0.0
     income_event_count: int = 0
@@ -105,6 +108,7 @@ class BookRangeMetrics:
     cost_basis_in_period: float
     fees_in_period: float
     total_invested: float = 0.0
+    deferred_gain: float = 0.0
     income_in_period: float = 0.0
     withholding_in_period: float = 0.0
 
@@ -254,7 +258,7 @@ def _get_current_from_cost_lots(
         select(
             CostLot.asset_id,
             func.sum(CostLot.qty_remaining).label("total_qty"),
-            func.sum(CostLot.qty_remaining * CostLot.unit_cost_in_base).label("total_cost"),
+            func.sum(CostLot.qty_remaining * ECONOMIC_UNIT_COST).label("total_cost"),
             invested_expr,
         )
         .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
@@ -290,6 +294,35 @@ def _get_current_from_cost_lots(
     return balances, remaining_costs, total_invested
 
 
+def _get_deferred_gain(
+    session: Session,
+    version_id: int,
+    asset_ids: Optional[List[int]] = None,
+    account_ids: Optional[List[int]] = None,
+) -> float:
+    """Gain recognized economically but not yet taxed: economic minus tax cost of open lots."""
+    query = (
+        select(
+            func.coalesce(
+                func.sum(
+                    CostLot.qty_remaining
+                    * (CostLot.economic_unit_cost_in_base - CostLot.unit_cost_in_base)
+                ),
+                0,
+            )
+        )
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+        .where(CostLot.economic_unit_cost_in_base.isnot(None))
+        .where(CostLot.is_negative == False)  # noqa: E712
+    )
+    if asset_ids:
+        query = query.where(CostLot.asset_id.in_(asset_ids))
+    if account_ids:
+        query = query.where(CostLot.account_id.in_(account_ids))
+    return float(session.exec(query).one() or 0)
+
+
 def _get_current_from_cost_lots_by_account(
     session: Session,
     version_id: int,
@@ -307,7 +340,7 @@ def _get_current_from_cost_lots_by_account(
             CostLot.account_id,
             CostLot.asset_id,
             func.sum(CostLot.qty_remaining).label("total_qty"),
-            func.sum(CostLot.qty_remaining * CostLot.unit_cost_in_base).label("total_cost"),
+            func.sum(CostLot.qty_remaining * ECONOMIC_UNIT_COST).label("total_cost"),
         )
         .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
         .where(CalculationUnit.version_id == version_id)
@@ -429,7 +462,7 @@ def _get_cost_basis_snapshots_at_dates(
             CostLotEvent.lot_id,
             CostLot.asset_id,
             CostLotEvent.qty_remaining_after,
-            CostLot.unit_cost_in_base,
+            ECONOMIC_UNIT_COST.label("unit_cost_in_base"),
         )
         .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
         .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
@@ -640,8 +673,8 @@ def _get_cumulative_realized_pnl(
     For each date bucket, compute cumulative realized P&L.
 
     Args:
-        taxable_only: If True, only include disposal_taxable=True entries.
-                     Defaults to False (include all realized P&L).
+        taxable_only: If True, only include disposal_taxable=True entries (tax view).
+                     Defaults to False (all realized P&L, economic view).
 
     Returns: { date_str: (total_cumulative_pnl, { asset_id: cumulative_pnl }) }
     """
@@ -651,7 +684,7 @@ def _get_cumulative_realized_pnl(
     rpnl_query = (
         select(
             func.coalesce(RealizedPnl.attributed_asset_id, RealizedPnl.asset_id).label("effective_asset_id"),
-            RealizedPnl.pnl_in_base,
+            (RealizedPnl.pnl_in_base if taxable_only else ECONOMIC_PNL).label("pnl_in_base"),
             RealizedPnl.realized_at,
         )
         .join(CalculationUnit, RealizedPnl.origin_unit_id == CalculationUnit.id)
@@ -723,7 +756,7 @@ def _get_cumulative_realized_pnl_by_account(
     rpnl_query = (
         select(
             NormalizedTransaction.account_id,
-            RealizedPnl.pnl_in_base,
+            ECONOMIC_PNL.label("pnl_in_base"),
             RealizedPnl.realized_at,
         )
         .join(CalculationUnit, RealizedPnl.origin_unit_id == CalculationUnit.id)
@@ -1545,6 +1578,7 @@ def _compute_book_core(
 
     now_rpnl_total = cumulative_rpnl.get(snap.now_ds, (0.0, {}))[0]
     taxable_rpnl_total = cumulative_rpnl_taxable.get(snap.now_ds, (0.0, {}))[0]
+    deferred_gain = _get_deferred_gain(session, version_id, asset_ids, account_ids)
 
     # Income summary
     total_income, total_withholding, income_count = _compute_income_summary(session, version_id)
@@ -1556,6 +1590,7 @@ def _compute_book_core(
         total_fees=round(total_fees, 2),
         fee_entry_count=fee_count,
         total_invested=round(total_invested, 2),
+        deferred_gain=round(deferred_gain, 2),
         total_income=round(total_income, 2),
         total_withholding=round(total_withholding, 2),
         income_event_count=income_count,
@@ -1595,6 +1630,7 @@ def _compute_book_core(
             cost_basis_in_period=round(cost_basis_in_period, 2),
             fees_in_period=round(fees_in_period, 2),
             total_invested=round(invested_in_period, 2),
+            deferred_gain=round(deferred_gain, 2),
             income_in_period=round(income_in_period, 2),
             withholding_in_period=round(withholding_in_period, 2),
         )

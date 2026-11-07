@@ -1,0 +1,172 @@
+# Economic vs Tax Cost Basis — Transactions
+# ==========================================
+# Base currency: EUR. Crypto-to-crypto swaps are non-taxable (default config,
+# French "sursis d'imposition"): the tax cost carries over, while the economic
+# cost of the received asset is its market value at the swap.
+#
+# Case A — chain of non-taxable swaps, a transfer, then a taxable sale:
+#   A0  deposit 31 000 EUR (funding for A1 and B1)
+#   A1  buy 1 BTC for 30 000 EUR
+#   A2  swap 1 BTC (FMV 40 000) → 16 ETH            non-taxable
+#   A3  transfer 8 ETH Exchange → Cold Wallet       non-taxable, costs travel
+#   A4  swap 8 ETH (FMV 24 000) → 24 000 USDC        non-taxable
+#   A5  sell 24 000 USDC → 24 000 EUR                taxable
+#   8 ETH stay in the Cold Wallet (tax cost 15 000, economic cost 20 000).
+#
+# Case B — control: plain buy/sell to EUR, both views must be identical.
+#   B1  buy 10 SOL @ 100 EUR
+#   B2  sell 4 SOL @ 150 EUR                          taxable
+
+transactions:
+  # ── Case A ─────────────────────────────────────────────────────
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_a0_deposit_eur"
+    account_name: Exchange
+    asset_symbol: EUR
+    quantity: "31000.000000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    source_transaction_type: "deposit"
+    date_time: "2024-01-05T10:00:00"
+    review_status: valid
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "A0"
+      - title: "Fund the exchange with EUR"
+
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_a1_buy_btc"
+    account_name: Exchange
+    asset_symbol: BTC
+    quantity: "1.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-01-10T10:00:00"
+    price: "30000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "A1"
+      - title: "Buy BTC with EUR"
+
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_a2_swap_btc_eth"
+    account_name: Exchange
+    asset_symbol: ETH
+    quantity: "16.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-03-01T10:00:00"
+    price: "0.062500000000000000"
+    price_quote_asset_symbol: BTC
+    review_status: valid
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "A2"
+      - title: "Swap BTC → ETH (non-taxable)"
+
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_a3_eth_withdrawal"
+    bundle_id: 1
+    account_name: Exchange
+    asset_symbol: ETH
+    quantity: "8.000000000000000000"
+    direction: outflow
+    transaction_type: withdrawal
+    source_transaction_type: "withdrawal"
+    date_time: "2024-04-15T10:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "A3"
+      - title: "Transfer ETH to Cold Wallet (withdrawal)"
+
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_a3_eth_deposit"
+    bundle_id: 1
+    account_name: Cold Wallet
+    asset_symbol: ETH
+    quantity: "8.000000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    source_transaction_type: "deposit"
+    date_time: "2024-04-15T10:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "A3"
+      - title: "Transfer ETH to Cold Wallet (deposit)"
+
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_a4_swap_eth_usdc"
+    account_name: Exchange
+    asset_symbol: ETH
+    quantity: "8.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    source_transaction_type: "sell"
+    date_time: "2024-05-01T10:00:00"
+    price: "3000.000000000000000000"
+    price_quote_asset_symbol: USDC
+    review_status: valid
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "A4"
+      - title: "Swap ETH → USDC (non-taxable)"
+
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_a5_sell_usdc"
+    account_name: Exchange
+    asset_symbol: USDC
+    quantity: "24000.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    source_transaction_type: "sell"
+    date_time: "2024-07-01T10:00:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "A5"
+      - title: "Sell USDC for EUR (taxable)"
+
+  # ── Case B (control) ───────────────────────────────────────────
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_b1_buy_sol"
+    account_name: Exchange
+    asset_symbol: SOL
+    quantity: "10.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-02-01T10:00:00"
+    price: "100.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "B1"
+      - title: "Buy SOL with EUR"
+
+  - source: "scenario-econ-tax"
+    source_transaction_id: "econ_b2_sell_sol"
+    account_name: Exchange
+    asset_symbol: SOL
+    quantity: "4.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    source_transaction_type: "sell"
+    date_time: "2024-04-01T10:00:00"
+    price: "150.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: economic-vs-tax-basis
+      - case: "B2"
+      - title: "Sell SOL for EUR (taxable)"

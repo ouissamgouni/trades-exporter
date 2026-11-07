@@ -311,6 +311,8 @@ class TestEnrichedTransactionsPnlOnDisposalLeg:
         mock_rpnl.proceeds_in_base = Decimal("25000")
         mock_rpnl.cost_basis_in_base = Decimal("20000")
         mock_rpnl.pnl_in_base = Decimal("5000")
+        mock_rpnl.economic_cost_basis = Decimal("20000")
+        mock_rpnl.economic_pnl = Decimal("5000")
         mock_rpnl.disposal_taxable = True
         mock_rpnl.proceeds_source = "fmv"
         mock_rpnl.proceeds_price = Decimal("50000")

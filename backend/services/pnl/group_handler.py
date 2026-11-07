@@ -68,6 +68,24 @@ def _is_priced_resolution(disposal: CalculationUnitLeg) -> bool:
     return _flatten_tags(getattr(tx, "tags", None)).get("synthetic") is True
 
 
+def _economic_unit_cost_or_none(
+    economic_total: Decimal, tax_total: Decimal, qty: Decimal
+) -> Optional[Decimal]:
+    """Economic unit cost for a new lot, or None when it equals the tax cost."""
+    if qty <= 0 or abs(economic_total - tax_total) < Decimal("1e-12"):
+        return None
+    return economic_total / qty
+
+
+def _set_economic_view(entry: RealizedPnl, slices: List[ConsumedLotSlice]) -> None:
+    """Store the economic cost/P&L on an entry when its slices carry an economic cost."""
+    if not any(s.economic_total_cost_in_base is not None for s in slices):
+        return
+    economic_cost = sum((s.economic_cost for s in slices), Decimal(0))
+    entry.economic_cost_basis_in_base = economic_cost
+    entry.economic_pnl_in_base = entry.proceeds_in_base - economic_cost
+
+
 def _counter_leg_proceeds(
     disposal: CalculationUnitLeg,
     inflows: List[CalculationUnitLeg],
@@ -184,7 +202,7 @@ def handle_unit(
             disposal_legs = outflows + fees
 
             # 2. Process disposals (outflows + fees) - consume lots and compute P&L
-            consumed_slices, absorbed_fee_cost = _process_disposals(
+            consumed_slices, absorbed_fee_cost, absorbed_fee_economic_cost = _process_disposals(
                 disposals=disposal_legs,
                 inflows=inflows,
                 unit=unit,
@@ -198,6 +216,7 @@ def handle_unit(
                 unit=unit,
                 consumed_slices=consumed_slices,
                 absorbed_fee_cost=absorbed_fee_cost,
+                absorbed_fee_economic_cost=absorbed_fee_economic_cost,
                 lot_manager=lot_manager,
                 fmv_service=fmv_service,
                 config=config,
@@ -258,12 +277,13 @@ def _process_disposals(
     - Cost basis is preserved and transferred to new lots
 
     Returns:
-        Tuple of (consumed_slices, absorbed_fee_cost) where absorbed_fee_cost
-        is the total cost basis of non-taxable fee slices on cost-basis transfers
-        that should be rolled into the transferred asset's cost basis.
+        Tuple of (consumed_slices, absorbed_fee_cost, absorbed_fee_economic_cost)
+        where the absorbed costs are the tax/economic cost of non-taxable fee
+        slices on cost-basis transfers, rolled into the transferred asset's cost.
     """
     all_consumed_slices: List[ConsumedLotSlice] = []
     absorbed_fee_cost: Decimal = Decimal(0)
+    absorbed_fee_economic_cost: Decimal = Decimal(0)
     taxability_calculator = TaxabilityCalculator(config)
     is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
     is_cost_basis_transfer = unit.is_cost_basis_transfer
@@ -354,6 +374,7 @@ def _process_disposals(
                 # (they would create phantom lots in _handle_cost_basis_transfer).
                 absorbed_cost = sum(s.total_cost_in_base for s in slices)
                 absorbed_fee_cost += absorbed_cost
+                absorbed_fee_economic_cost += sum(s.economic_cost for s in slices)
                 # Still create FeeEntry for reporting (no RealizedPnl)
                 _create_fee_entry(
                     disposal=disposal,
@@ -449,7 +470,7 @@ def _process_disposals(
             )
        
 
-    return all_consumed_slices, absorbed_fee_cost
+    return all_consumed_slices, absorbed_fee_cost, absorbed_fee_economic_cost
 
 
 def _create_unmatched_internal_transfer_warning(
@@ -829,6 +850,8 @@ def _proceeds_and_pnl_entry(
         attributed_asset_id=_deriv_attributed_asset_id,
     )
 
+    _set_economic_view(entry, slices)
+
     # RealizedPnl.slices is viewonly (CostLot owns slices via cascade), so
     # setting slices= above populates the in-memory list but does NOT write
     # pnl_id FK on the slice rows. Set it from the non-viewonly side.
@@ -875,6 +898,7 @@ def _process_inflows(
     lot_manager: LotManager,
     fmv_service: FMVService,
     config: PnLConfig,
+    absorbed_fee_economic_cost: Decimal = Decimal(0),
 ) -> None:
     """
     Handle inflows based on the unit pattern.
@@ -919,6 +943,7 @@ def _process_inflows(
             lot_manager=lot_manager,
             unit=unit,
             config=config,
+            absorbed_fee_economic_cost=absorbed_fee_economic_cost,
         )
     else:
         _handle_acquisition(
@@ -1505,6 +1530,8 @@ def _handle_cash_in_lieu(
             proceeds_source="fmv_lookup",
         )
 
+        _set_economic_view(realized, consumed_slices)
+
         # Set pnl FK on slices from the non-viewonly side
         for s in consumed_slices:
             s.pnl = realized
@@ -1682,6 +1709,7 @@ def _handle_spinoff(
     for source_lot in lots_to_consume:
         original_qty = source_lot.qty_remaining
         original_cost = source_lot.unit_cost_in_base
+        original_economic_cost = source_lot.economic_unit_cost_in_base
         original_acquired_at = ensure_utc(source_lot.acquired_at) if source_lot.acquired_at else utc_now()
 
         # Consume the source lot fully
@@ -1704,6 +1732,11 @@ def _handle_spinoff(
             qty=original_qty,
             qty_remaining=original_qty,
             unit_cost_in_base=original_cost * retain_pct,
+            economic_unit_cost_in_base=(
+                original_economic_cost * retain_pct
+                if original_economic_cost is not None
+                else None
+            ),
             acquired_at=original_acquired_at,
             origin_transaction_id=trigger_tx.id if trigger_tx else None,
             origin_transaction=trigger_tx,
@@ -1723,6 +1756,11 @@ def _handle_spinoff(
         # Proportional qty: (this lot's share of total source) * target inflow qty
         target_lot_qty = (original_qty / total_source_qty) * target_inflow_qty
         target_unit_cost = (original_cost * allocation_pct_dec * original_qty) / target_lot_qty if target_lot_qty > 0 else Decimal(0)
+        target_economic_unit_cost = (
+            (original_economic_cost * allocation_pct_dec * original_qty) / target_lot_qty
+            if original_economic_cost is not None and target_lot_qty > 0
+            else None
+        )
 
         new_target_lot = CostLot(
             asset_id=target_asset_id,
@@ -1732,6 +1770,7 @@ def _handle_spinoff(
             qty=target_lot_qty,
             qty_remaining=target_lot_qty,
             unit_cost_in_base=target_unit_cost,
+            economic_unit_cost_in_base=target_economic_unit_cost,
             acquired_at=original_acquired_at,
             origin_transaction_id=trigger_tx.id if trigger_tx else None,
             origin_transaction=trigger_tx,
@@ -1773,6 +1812,7 @@ def _handle_cost_basis_transfer(
     lot_manager: LotManager,
     unit: CalculationUnit,
     config: PnLConfig,
+    absorbed_fee_economic_cost: Decimal = Decimal(0),
 ) -> None:
     """
     Handle transfer or same-asset swap by preserving individual lot slices.
@@ -1863,11 +1903,13 @@ def _handle_cost_basis_transfer(
 
             # Base cost from the consumed slice
             slice_cost = slice.total_cost_in_base
+            slice_economic_cost = slice.economic_cost
 
             # Distribute absorbed fee cost proportionally by each slice's share of total cost
-            if absorbed_fee_cost > 0 and total_transfer_cost > 0:
-                fee_share = (slice.total_cost_in_base / total_transfer_cost) * absorbed_fee_cost
-                slice_cost += fee_share
+            if total_transfer_cost > 0:
+                share = slice.total_cost_in_base / total_transfer_cost
+                slice_cost += share * absorbed_fee_cost
+                slice_economic_cost += share * absorbed_fee_economic_cost
 
             unit_cost = slice_cost / new_qty if new_qty > 0 else Decimal(0)
 
@@ -1890,6 +1932,9 @@ def _handle_cost_basis_transfer(
                 qty=new_qty,
                 qty_remaining=new_qty,
                 unit_cost_in_base=unit_cost,
+                economic_unit_cost_in_base=_economic_unit_cost_or_none(
+                    slice_economic_cost, slice_cost, new_qty
+                ),
                 acquired_at=original_acquired_at,  # Preserve original holding period
                 origin_transaction_id=inflow.origin_transaction_id,
                 origin_transaction=inflow.origin_transaction,
@@ -1971,6 +2016,7 @@ def _handle_acquisition(
     if taxable_non_fee_entries:
         # Taxable disposals: new asset cost = proceeds from non-fee disposals only
         total_cost = sum(e.proceeds_in_base for e in taxable_non_fee_entries)
+        economic_total_cost = total_cost
         cost_source = "proceeds"
         acq_fmv_metadata = None  # No FMV metadata — cost from realized proceeds
         # Link to the primary disposal entry that generated the proceeds
@@ -1978,6 +2024,16 @@ def _handle_acquisition(
     elif consumed_slices and not is_deriv_settlement:
         # Non-taxable disposals: new asset inherits cost basis from all consumed slices
         total_cost = sum(s.total_cost_in_base for s in consumed_slices)
+        # Economic cost: a gain already recognized on a disposal steps the cost up to
+        # its proceeds; slices without a realized entry carry their economic cost.
+        recognized: Dict[int, RealizedPnl] = {}
+        economic_total_cost = Decimal(0)
+        for s in consumed_slices:
+            if s.pnl is not None:
+                recognized[id(s.pnl)] = s.pnl
+            else:
+                economic_total_cost += s.economic_cost
+        economic_total_cost += sum((e.proceeds_in_base for e in recognized.values()), Decimal(0))
         cost_source = "inherited"
         acq_fmv_metadata = None  # No FMV metadata — cost inherited from source lots
         origin_pnl_entry = None  # No single origin P&L — cost inherited from consumed lots
@@ -2028,6 +2084,7 @@ def _handle_acquisition(
                     tx_id=inflow.origin_transaction_id,
                 )
         cost_source = "provisional" if fmv_failed_any else "fmv"
+        economic_total_cost = total_cost
 
         # --- Derivative settlement gain: create RealizedPnl(proceeds=FMV, cost=0) ---
         # For derivative settlements (perp_close gains, funding), the inflow is income,
@@ -2188,6 +2245,7 @@ def _handle_acquisition(
         # Special case: base currency (e.g., EUR) always has unit_cost = 1.0
         lot_cost_source = cost_source  # Default from branch above
         lot_fmv_metadata = acq_fmv_metadata  # Default from branch above
+        economic_unit_cost = None
         if inflow.asset_id == config.base_currency_id:
             unit_cost = Decimal(1)
             lot_cost_source = "base_currency"
@@ -2197,18 +2255,20 @@ def _handle_acquisition(
                 # Allocate cost proportionally by FMV (handles different asset units correctly)
                 if total_inflow_fmv > 0:
                     proportion = inflow_fmvs[idx] / total_inflow_fmv
-                    allocated_cost = total_cost * proportion
                 else:
-                    allocated_cost = Decimal(0)
+                    proportion = Decimal(0)
             else:
                 # Single-asset: allocate proportionally by quantity (backward compatible)
                 if total_inflow_qty > 0:
                     proportion = inflow_qty / total_inflow_qty
-                    allocated_cost = total_cost * proportion
                 else:
-                    allocated_cost = Decimal(0)
+                    proportion = Decimal(0)
+            allocated_cost = total_cost * proportion
 
             unit_cost = allocated_cost / inflow_qty if inflow_qty > 0 else Decimal(0)
+            economic_unit_cost = _economic_unit_cost_or_none(
+                economic_total_cost * proportion, allocated_cost, inflow_qty
+            )
 
 
         inflow_date = ensure_utc(inflow.date_time)
@@ -2235,6 +2295,7 @@ def _handle_acquisition(
             qty=inflow_qty,
             qty_remaining=inflow_qty,  # Will be updated after settlement
             unit_cost_in_base=unit_cost,
+            economic_unit_cost_in_base=economic_unit_cost,
             acquired_at=inflow_date,
             origin_transaction_id=inflow.origin_transaction_id,
             origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
@@ -2360,6 +2421,10 @@ def _handle_acquisition(
                 notes=f"Cost basis settlement for negative lot #{settlement.negative_lot_id} "
                       f"(provisional={float(provisional_cost):.2f}, actual={float(actual_cost):.2f})",
             )
+            if economic_unit_cost is not None:
+                economic_delta = economic_unit_cost * settlement.qty_settled - provisional_cost
+                adjustment_entry.economic_cost_basis_in_base = economic_delta
+                adjustment_entry.economic_pnl_in_base = -economic_delta
             # Manual append - back-population unreliable for transient objects
             if unit.realized_pnl_records is None:
                 unit.realized_pnl_records = []

@@ -1,0 +1,19 @@
+# Economic vs Tax Cost Basis — Accounts
+# ======================================
+# One exchange for trading, one self-custody wallet to check that both
+# costs travel with a transfer.
+
+accounts:
+  - name: "Exchange"
+    account_type: "cex"
+    owned: true
+    group: "Crypto"
+    color: "#F0B90B"
+    address_or_identifier: "exchange_econ_tax_qa"
+
+  - name: "Cold Wallet"
+    account_type: "wallet"
+    owned: true
+    group: "Crypto"
+    color: "#627EEA"
+    address_or_identifier: "0xECON_TAX_COLD_WALLET"

@@ -1391,6 +1391,10 @@ class CostLot(SQLModel, table=True):
         default=Decimal("0"),
         sa_column=Column(Numeric(36, 18), nullable=False, default=0),
     )
+    # Economic (market-value) unit cost; NULL means it equals the tax cost.
+    economic_unit_cost_in_base: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18), nullable=True)
+    )
     acquired_at: datetime = Field(default_factory=utc_now, index=True)
 
     # Traceability
@@ -1529,6 +1533,16 @@ class CostLot(SQLModel, table=True):
         """Remaining cost basis for unconsumed quantity."""
         return self.qty_remaining * self.unit_cost_in_base
 
+    @property
+    def economic_unit_cost(self) -> Decimal:
+        if self.economic_unit_cost_in_base is None:
+            return self.unit_cost_in_base
+        return self.economic_unit_cost_in_base
+
+    @property
+    def economic_remaining_cost_in_base(self) -> Decimal:
+        return self.qty_remaining * self.economic_unit_cost
+
     # Alias for backward compatibility
     @property
     def cost_remaining_in_base(self) -> Decimal:
@@ -1548,10 +1562,13 @@ class CostLot(SQLModel, table=True):
 
         self.qty_remaining -= qty
 
+        econ_unit = self.economic_unit_cost_in_base
         slice_record = ConsumedLotSlice(
             quantity=qty,
             unit_cost_in_base=self.unit_cost_in_base,
             total_cost_in_base=qty * self.unit_cost_in_base,
+            economic_unit_cost_in_base=econ_unit,
+            economic_total_cost_in_base=(qty * econ_unit) if econ_unit is not None else None,
             cost_lot=self,  # Set cost_lot relationship - cascade handles persistence
             unit_id=self.unit_id,  # Set unit_id for direct link to calculation unit
         )
@@ -1590,10 +1607,23 @@ class ConsumedLotSlice(SQLModel, table=True):
     total_cost_in_base: Decimal = Field(
         sa_column=Column(Numeric(36, 18), nullable=False)
     )
+    # NULL means economic cost equals the tax cost.
+    economic_unit_cost_in_base: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18), nullable=True)
+    )
+    economic_total_cost_in_base: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18), nullable=True)
+    )
     created_at: datetime = Field(default_factory=utc_now)
 
     # Runtime-only fields (used during P&L calculation, derived from cost_lot)
     consumed_at: Optional[datetime] = Field(default=None, exclude=True)
+
+    @property
+    def economic_cost(self) -> Decimal:
+        if self.economic_total_cost_in_base is None:
+            return self.total_cost_in_base
+        return self.economic_total_cost_in_base
 
     # Relationships - cost_lot is the owner
     pnl: Optional["RealizedPnl"] = Relationship(
@@ -1657,6 +1687,13 @@ class RealizedPnl(SQLModel, table=True):
         sa_column=Column(Numeric(36, 18), nullable=False)
     )
     pnl_in_base: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
+    # Economic view (market-value cost); NULL means it equals the tax view above.
+    economic_cost_basis_in_base: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18), nullable=True)
+    )
+    economic_pnl_in_base: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18), nullable=True)
+    )
     disposal_taxable: bool = Field(
         default=False
     )  # Whether this disposal is a taxable event
@@ -1716,6 +1753,18 @@ class RealizedPnl(SQLModel, table=True):
         back_populates="realized_pnl",
         sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.transaction_id]"},
     )
+
+    @property
+    def economic_pnl(self) -> Decimal:
+        if self.economic_pnl_in_base is None:
+            return self.pnl_in_base
+        return self.economic_pnl_in_base
+
+    @property
+    def economic_cost_basis(self) -> Decimal:
+        if self.economic_cost_basis_in_base is None:
+            return self.cost_basis_in_base
+        return self.economic_cost_basis_in_base
 
 
 class FeeEntry(SQLModel, table=True):
@@ -2041,7 +2090,7 @@ class CalculationUnit(SQLModel, table=True):
     def total_realized_pnl_in_base(self) -> Decimal:
         if not self.realized_pnl_records:
             return Decimal("0")
-        return sum(r.pnl_in_base for r in self.realized_pnl_records if r.pnl_in_base)
+        return sum(r.economic_pnl for r in self.realized_pnl_records if r.pnl_in_base is not None)
 
     # Persisted leg accessors (for API/queries)
     @property
@@ -3188,3 +3237,12 @@ class DividendIncomeAnnualSummary(SQLModel, table=True):
             "foreign_keys": "[DividendIncomeAnnualSummary.account_id]"
         }
     )
+
+
+# SQL expressions for the economic view (fall back to the tax columns when NULL).
+from sqlalchemy import func as _sa_func  # noqa: E402
+
+ECONOMIC_UNIT_COST = _sa_func.coalesce(
+    CostLot.economic_unit_cost_in_base, CostLot.unit_cost_in_base
+)
+ECONOMIC_PNL = _sa_func.coalesce(RealizedPnl.economic_pnl_in_base, RealizedPnl.pnl_in_base)
