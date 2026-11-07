@@ -165,6 +165,8 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     defaultGrouping?: GroupingMode;
     /** Base currency symbol shown next to realized P&L in group recaps */
     baseCurrency?: string;
+    /** Show invalid rows expanded instead of collapsed (e.g. spam review) */
+    expandInvalidRows?: boolean;
 
     // ============== Plugin Architecture Props ==============
 
@@ -230,6 +232,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     hideLegend = false,
     defaultGrouping = 'month-day',
     baseCurrency,
+    expandInvalidRows = false,
     // Plugin architecture props
     tableId = 'default',
     initialColumnVisibility: initialVisibilityProp,
@@ -459,8 +462,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     }, []);
 
     const isInvalidCollapsed = useCallback((tx: Transaction) => {
-        return tx.review_status === 'invalid' && !expandedInvalidIds.has(tx.id);
-    }, [expandedInvalidIds]);
+        return !expandInvalidRows && tx.review_status === 'invalid' && !expandedInvalidIds.has(tx.id);
+    }, [expandedInvalidIds, expandInvalidRows]);
 
     const collapseAllInvalid = useCallback(() => {
         setExpandedInvalidIds(new Set());

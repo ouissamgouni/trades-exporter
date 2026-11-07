@@ -1,7 +1,7 @@
 /**
- * DataHealthCheckDrawer
- * 
- * Slide-in drawer showing data completeness issues for P&L calculations.
+ * DataHealthView
+ *
+ * Top-level "Health" tab showing data completeness issues for P&L calculations.
  * Transaction-centric view with table layout and inline fixing.
  */
 
@@ -12,104 +12,53 @@ import {
     FiAlertCircle,
     FiCheckCircle,
     FiRefreshCw,
-    FiX,
 } from 'react-icons/fi';
+import { useNavigate } from 'react-router-dom';
 import {
     API_URL,
     TransactionStatusResponse,
-    Asset,
     Account,
 } from '../types';
 import { toaster } from './ui/toaster';
 import { TransactionDetailDrawer } from './TransactionDetailDrawer';
-import { TransactionsTable } from './TransactionsTable';
 import { AssetLinkageTable } from './tables/wrappers/AssetLinkageTable';
 import { MissingDataTable } from './tables/wrappers/MissingDataTable';
 import { AccountsLinkageTable } from './tables/wrappers/AccountsLinkageTable';
-import { defaultFilterState } from './TransactionFilters';
 import { DuplicateResolutionPanel } from './DuplicateResolutionPanel';
+import { useAssets } from '../hooks/useAssets';
+import { useDataHealth } from '../contexts/DataHealthContext';
 
 // =============================================================================
-// Main Drawer Component
+// Main Component
 // =============================================================================
 
-interface DataHealthCheckDrawerProps {
-    isOpen: boolean;
-    onClose: () => void;
-    accountIds?: number[];
-    onNavigateToPendingTransactions?: () => void;
-    onNavigateToBundleSuggestions?: () => void;
-    refreshTrigger?: number;
-    assets?: Asset[];
-    accounts?: Account[];
-    onAssetsUpdated?: () => void;
-    onAccountsUpdated?: () => void;
-    onIssueFixed?: () => void;
-}
-
-export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
-    isOpen,
-    onClose,
-    accountIds,
-    onNavigateToPendingTransactions,
-    onNavigateToBundleSuggestions,
-    refreshTrigger,
-    assets = [],
-    accounts = [],
-    onAssetsUpdated,
-    onAccountsUpdated,
-    onIssueFixed,
-}) => {
+export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds }) => {
+    const navigate = useNavigate();
+    const { refreshHealthData } = useDataHealth();
+    const { assets, refetchAssets: onAssetsUpdated } = useAssets();
+    const [accounts, setAccounts] = useState<Account[]>([]);
     const [data, setData] = useState<TransactionStatusResponse | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'pending' | 'duplicates'>('missing-data');
+    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'duplicates'>('missing-data');
 
     // Transaction detail drawer state
     const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
     const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
 
-    // Resizable drawer state
-    const [drawerWidth, setDrawerWidth] = useState<number>(() => {
-        const saved = localStorage.getItem('dataHealthDrawerWidth');
-        return saved ? parseInt(saved, 10) : Math.min(window.innerWidth * 0.75, 1400);
-    });
-    const [isResizing, setIsResizing] = useState(false);
-    const resizeStartX = React.useRef<number>(0);
-    const resizeStartWidth = React.useRef<number>(0);
-
-    // Resize handlers
-    const handleResizeStart = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        setIsResizing(true);
-        resizeStartX.current = e.clientX;
-        resizeStartWidth.current = drawerWidth;
-    }, [drawerWidth]);
-
-    const handleResizeMove = useCallback((e: MouseEvent) => {
-        if (!isResizing) return;
-        const deltaX = resizeStartX.current - e.clientX;
-        const newWidth = Math.max(600, Math.min(window.innerWidth * 0.95, resizeStartWidth.current + deltaX));
-        setDrawerWidth(newWidth);
-    }, [isResizing]);
-
-    const handleResizeEnd = useCallback(() => {
-        if (!isResizing) return;
-        setIsResizing(false);
-        localStorage.setItem('dataHealthDrawerWidth', drawerWidth.toString());
-    }, [isResizing, drawerWidth]);
-
-    // Add/remove resize event listeners
-    useEffect(() => {
-        if (isResizing) {
-            document.addEventListener('mousemove', handleResizeMove);
-            document.addEventListener('mouseup', handleResizeEnd);
-            return () => {
-                document.removeEventListener('mousemove', handleResizeMove);
-                document.removeEventListener('mouseup', handleResizeEnd);
-            };
+    const onAccountsUpdated = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/accounts/`);
+            if (response.ok) setAccounts(await response.json());
+        } catch {
+            // ignore
         }
-    }, [isResizing, handleResizeMove, handleResizeEnd]);
+    }, []);
+    useEffect(() => { onAccountsUpdated(); }, [onAccountsUpdated]);
+
+    const onIssueFixed = refreshHealthData;
+    const onNavigateToPendingTransactions = () => navigate('/inbox');
+    const onNavigateToBundleSuggestions = () => navigate('/inbox');
 
     // Fetch status data
     const fetchStatus = useCallback(async () => {
@@ -128,12 +77,9 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
         }
     }, [accountIds]);
 
-    // Fetch on open/refresh
     useEffect(() => {
-        if (isOpen) {
-            fetchStatus();
-        }
-    }, [isOpen, activeTab, fetchStatus, refreshTrigger]);
+        fetchStatus();
+    }, [activeTab, fetchStatus]);
 
     // Refresh after fix
     const handleFixComplete = useCallback(() => {
@@ -145,52 +91,30 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
         }, 500);
     }, [fetchStatus, onAssetsUpdated, onAccountsUpdated, onIssueFixed]);
 
-    if (!isOpen) return null;
-
     const allClear = data && !data.has_issues && data.bundle_suggestions_count === 0;
 
     return (
         <>
-            {/* Backdrop */}
-            <div
-                className="fixed inset-0 z-[99] bg-black/40"
-                onClick={onClose}
-            />
-
-            {/* Panel: bottom sheet on mobile, right-side panel on sm+ */}
-            <div
-                className="fixed inset-x-0 bottom-0 top-auto z-[100] max-h-[90vh] w-full max-w-full overflow-y-auto border-t border-gray-200 bg-white shadow-xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[var(--sheet-w)] sm:max-w-[95vw] sm:border-l sm:border-t-0"
-                style={{ ['--sheet-w' as string]: `${drawerWidth}px` }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                {/* Resize Handle (desktop only) */}
-                <div
-                    className={`absolute bottom-0 left-0 top-0 z-[1] hidden w-[4px] cursor-col-resize transition-colors hover:bg-blue-200 sm:block ${isResizing ? 'bg-blue-400' : 'bg-transparent'}`}
-                    onMouseDown={handleResizeStart}
-                />
-
+            <div className="border border-gray-200 bg-white">
                 {/* Header */}
-                <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">
                     <div className="flex items-center gap-2">
                         <FiActivity size={16} />
                         <Heading as="h3" className="text-sm">Data Health Check</Heading>
                     </div>
-                    <div className="flex gap-1">
-                        <Button
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            onClick={() => {
-                                fetchStatus();
-                            }}
-                            disabled={isLoading}
-                            title="Refresh all tabs"
-                        >
-                            <FiRefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
-                        </Button>
-                        <Button variant="ghost" className="h-7 w-7 p-0" onClick={onClose}>
-                            <FiX size={16} />
-                        </Button>
-                    </div>
+                    <Button
+                        variant="ghost"
+                        className="h-7 w-7 p-0"
+                        onClick={() => {
+                            fetchStatus();
+                            refreshHealthData();
+                        }}
+                        disabled={isLoading}
+                        title="Refresh all tabs"
+                        aria-label="Refresh"
+                    >
+                        <FiRefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+                    </Button>
                 </div>
 
                 {/* Content */}
@@ -251,14 +175,6 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                         {(data.transfer_issues_count || 0) > 0 && (
                                             <Badge colorScheme="orange" className="ml-1 text-[10px]">
                                                 {data.transfer_issues_count}
-                                            </Badge>
-                                        )}
-                                    </TabsTrigger>
-                                    <TabsTrigger value="pending">
-                                        Pending
-                                        {data.pending_count > 0 && (
-                                            <Badge colorScheme="yellow" className="ml-1 text-[10px]">
-                                                {data.pending_count}
                                             </Badge>
                                         )}
                                     </TabsTrigger>
@@ -347,25 +263,6 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                 </div>
                             )}
 
-                            {/* Pending tab content */}
-                            {activeTab === 'pending' && (
-                                <div>
-                                    {data.pending_count > 0 ? (
-                                        <TransactionsTable
-                                            tableId="dataHealth-pending"
-                                            filters={{ ...defaultFilterState, reviewStatus: ['pending'] }}
-                                            showFilters={false}
-                                            compact={true}
-                                        />
-                                    ) : (
-                                        <div className="bg-green-50 p-3 text-center">
-                                            <span className="text-sm text-green-700">
-                                                All transactions reviewed! ✓
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     )}
                 </div>
@@ -385,4 +282,4 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
     );
 };
 
-export default DataHealthCheckDrawer;
+export default DataHealthView;

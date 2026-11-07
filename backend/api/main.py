@@ -29,6 +29,7 @@ from backend.api.routes import (
     timeline,
     balance,
     positions,
+    spam,
 )
 from backend.config.loader import get_database_url
 from backend.db import init_db
@@ -116,6 +117,7 @@ app.include_router(data_health.router)
 app.include_router(timeline.router)
 app.include_router(balance.router)
 app.include_router(positions.router)
+app.include_router(spam.router)
 
 
 @app.get("/")
