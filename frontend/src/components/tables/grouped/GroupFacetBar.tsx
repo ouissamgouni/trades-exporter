@@ -28,7 +28,7 @@ export const GroupFacetBar: React.FC<GroupFacetBarProps> = ({ group, scopeLabel,
     };
 
     return (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 py-1 text-[10px]" onClick={e => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5 text-xs" onClick={e => e.stopPropagation()}>
             <span className="text-slate-500">Filter this {scopeLabel}:</span>
             {dims.map(dim => {
                 const values = group.facets[dim];

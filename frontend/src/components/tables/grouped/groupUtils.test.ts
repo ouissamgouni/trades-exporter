@@ -5,8 +5,7 @@ import {
     formatNetQty,
     groupsUrlFor,
     shouldAutoExpandDays,
-    shouldAutoShowFacetBar,
-    statusChips,
+    truncateSymbol,
 } from './groupUtils'
 import { intersectBounds } from './useTransactionGroups'
 import type { TransactionGroup } from './types'
@@ -29,18 +28,16 @@ const makeGroup = (overrides: Partial<TransactionGroup> = {}): TransactionGroup 
 })
 
 describe('group recap rules (major)', () => {
-    it('shows only non-zero status chips', () => {
-        const chips = statusChips(makeGroup({ pending_count: 3, valid_count: 0, invalid_count: 2 }))
-        expect(chips.map(c => c.key)).toEqual(['pending', 'invalid'])
-    })
-
-    it('auto-shows the facet bar only for 20+ rows with a dimension of 2+ values', () => {
+    it('offers only facet dimensions with 2+ values', () => {
         const twoAccounts = { accounts: [facet('1'), facet('2')], assets: [facet('9')], networks: [], sources: [] }
-        expect(shouldAutoShowFacetBar(makeGroup({ total_count: 19, facets: twoAccounts }))).toBe(false)
-        expect(shouldAutoShowFacetBar(makeGroup({ total_count: 20, facets: twoAccounts }))).toBe(true)
         expect(facetDimensions(makeGroup({ facets: twoAccounts }))).toEqual(['accounts'])
         const single = { accounts: [facet('1')], assets: [facet('9')], networks: [], sources: [] }
-        expect(shouldAutoShowFacetBar(makeGroup({ total_count: 500, facets: single }))).toBe(false)
+        expect(facetDimensions(makeGroup({ facets: single }))).toEqual([])
+    })
+
+    it('truncates asset symbols to 8 characters', () => {
+        expect(truncateSymbol('BNKE.PA')).toBe('BNKE.PA')
+        expect(truncateSymbol('VERYLONGSYMBOL')).toBe('VERYLONG…')
     })
 
     it('auto-expands days only for months with at most 50 rows (invalid included)', () => {

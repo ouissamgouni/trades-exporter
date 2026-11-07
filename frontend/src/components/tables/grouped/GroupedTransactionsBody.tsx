@@ -1,19 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LuChevronDown, LuChevronRight, LuFilter, LuCheck, LuUndo2 } from 'react-icons/lu';
+import { LuChevronDown, LuChevronRight, LuCheck, LuUndo2 } from 'react-icons/lu';
 import type { Transaction } from '../../../types';
 import { Spinner } from '../../ui/primitives';
 import { cn } from '../../../lib/cn';
 import { formatDayLabel, formatMonthLabel, parseApiDate } from '../../../utils/dateUtils';
 import { toaster } from '../../ui/toaster';
-import { GroupAccountsInline, GroupAccountsRecap, GroupStatusSummary } from './GroupRecap';
-import { GroupFacetBar } from './GroupFacetBar';
 import {
-    applyFacetSelection,
-    groupRowCount,
-    hasFacetSelection,
-    shouldAutoExpandDays,
-    shouldAutoShowFacetBar,
-} from './groupUtils';
+    GROUP_GRID,
+    GROUP_GRID_PNL,
+    GROUP_RECAP_COL_START,
+    GroupAccountsInline,
+    GroupAccountsStrip,
+    GroupStatusCells,
+} from './GroupRecap';
+import { GroupFacetBar } from './GroupFacetBar';
+import { applyFacetSelection, facetDimensions, groupRowCount, shouldAutoExpandDays } from './groupUtils';
 import { fetchGroupIds, PeriodBounds, useGroupRows, useTransactionGroups } from './useTransactionGroups';
 import type { GroupFacetSelection, TransactionGroup } from './types';
 
@@ -48,7 +49,14 @@ type SharedProps = Omit<GroupedTransactionsBodyProps, 'groupsUrl' | 'params' | '
     groupsUrl: string;
     sortDir: 'asc' | 'desc';
     colSpan: number;
+    showPnl: boolean;
 };
+
+// Month header height is fixed (h-14) so day headers can stick right below it.
+const MONTH_STICKY_TD = 'sticky top-[var(--thead-h,0px)] z-[8] p-0';
+const DAY_STICKY_TD = 'sticky top-[calc(var(--thead-h,0px)+3.5rem)] z-[7] p-0';
+// Keeps header content within the visible scroll width when the table is wider than the viewport.
+const VIEWPORT_BOX = 'sticky left-0 w-[var(--scroll-w,100%)]';
 
 const boundsOf = (g: TransactionGroup): PeriodBounds => ({ from: g.date_from, to: g.date_to });
 
@@ -69,6 +77,7 @@ export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = (
 
     const groups = useMemo(() => months.data?.pages.flatMap(p => p.groups) ?? [], [months.data]);
     const total = months.data?.pages[0]?.total_groups ?? 0;
+    const showPnl = shared.groupsUrl.includes('/enriched-transactions/groups');
 
     if (months.isLoading) {
         return <StatusRow colSpan={shared.colSpan}><Spinner size="sm" className="text-blue-500" /> Loading months…</StatusRow>;
@@ -83,7 +92,7 @@ export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = (
     return (
         <>
             {groups.map((month, i) => (
-                <MonthSection key={month.period_start} month={month} defaultExpanded={i === 0} params={params} {...shared} />
+                <MonthSection key={month.period_start} month={month} defaultExpanded={i === 0} params={params} showPnl={showPnl} {...shared} />
             ))}
             {months.hasNextPage && (
                 <tr>
@@ -111,30 +120,29 @@ const StatusRow: React.FC<{ colSpan: number; children: React.ReactNode }> = ({ c
     </tr>
 );
 
-/** Header checkbox + inbox "mark reviewed" for a period. */
-const GroupActions: React.FC<SharedProps & { group: TransactionGroup; params: URLSearchParams; scopeLabel: string }> = ({
-    group, params, scopeLabel, idsUrl, selectable, selectedIds, setSelectedIds, onMarkGroupReviewed,
-}) => {
+type GroupScopeProps = SharedProps & { group: TransactionGroup; params: URLSearchParams; scopeLabel: string };
+
+async function loadGroupIds(idsUrl: string, params: URLSearchParams, group: TransactionGroup): Promise<number[]> {
+    const result = await fetchGroupIds(idsUrl, params, boundsOf(group));
+    if (result.truncated) {
+        toaster.info({ title: 'Selection capped', description: `Only the first ${result.ids.length} of ${result.total} transactions were selected.` });
+    }
+    return result.ids;
+}
+
+/** First grid cell: select every transaction of the period. */
+const GroupSelect: React.FC<GroupScopeProps> = ({ group, params, scopeLabel, idsUrl, selectable, selectedIds, setSelectedIds }) => {
     const [groupIds, setGroupIds] = useState<number[] | null>(null);
     const [busy, setBusy] = useState(false);
-    const [confirming, setConfirming] = useState(false);
-
-    const loadIds = async () => {
-        if (!idsUrl) return [];
-        const result = await fetchGroupIds(idsUrl, params, boundsOf(group));
-        if (result.truncated) {
-            toaster.info({ title: 'Selection capped', description: `Only the first ${result.ids.length} of ${result.total} transactions were selected.` });
-        }
-        setGroupIds(result.ids);
-        return result.ids;
-    };
-
     const allSelected = !!groupIds && groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
 
-    const toggleSelectGroup = async () => {
+    if (!selectable || !idsUrl) return <span />;
+
+    const toggle = async () => {
         setBusy(true);
         try {
-            const ids = allSelected ? groupIds! : await loadIds();
+            const ids = allSelected ? groupIds! : await loadGroupIds(idsUrl, params, group);
+            setGroupIds(ids);
             setSelectedIds(prev => {
                 const next = new Set(prev);
                 ids.forEach(id => (allSelected ? next.delete(id) : next.add(id)));
@@ -147,82 +155,102 @@ const GroupActions: React.FC<SharedProps & { group: TransactionGroup; params: UR
         }
     };
 
+    const title = `Select all ${groupRowCount(group)} in ${scopeLabel}`;
+    return (
+        <span className="inline-flex items-center" onClick={e => e.stopPropagation()}>
+            <input
+                type="checkbox"
+                aria-label={title}
+                title={title}
+                className="h-3.5 w-3.5 cursor-pointer accent-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                checked={allSelected}
+                disabled={busy}
+                onChange={toggle}
+            />
+        </span>
+    );
+};
+
+/** Inbox triage: mark all pending in the period as valid. */
+const MarkReviewedAction: React.FC<GroupScopeProps> = ({ group, params, scopeLabel, idsUrl, onMarkGroupReviewed }) => {
+    const [busy, setBusy] = useState(false);
+    const [confirming, setConfirming] = useState(false);
+    if (!onMarkGroupReviewed || !idsUrl || group.pending_count === 0) return null;
+
     const markReviewed = async () => {
-        if (!onMarkGroupReviewed) return;
         setBusy(true);
         try {
-            await onMarkGroupReviewed(await loadIds());
+            await onMarkGroupReviewed(await loadGroupIds(idsUrl, params, group));
         } finally {
             setBusy(false);
             setConfirming(false);
         }
     };
 
-    return (
-        <span className="inline-flex items-center gap-1" onClick={e => e.stopPropagation()}>
-            {selectable && idsUrl && (
-                <input
-                    type="checkbox"
-                    aria-label={`Select all ${groupRowCount(group)} in ${scopeLabel}`}
-                    title={`Select all ${groupRowCount(group)} in ${scopeLabel}`}
-                    className="h-3.5 w-3.5 cursor-pointer accent-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    checked={allSelected}
-                    disabled={busy}
-                    onChange={toggleSelectGroup}
-                />
-            )}
-            {onMarkGroupReviewed && idsUrl && group.pending_count > 0 && (
-                confirming ? (
-                    <span className="inline-flex items-center gap-1 text-[10px]">
-                        <button
-                            type="button"
-                            className="bg-blue-500 px-1.5 py-0.5 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={busy}
-                            onClick={markReviewed}
-                        >
-                            {busy ? 'Saving…' : `Mark ${group.pending_count} valid`}
-                        </button>
-                        <button type="button" className="text-slate-500 hover:text-slate-800" onClick={() => setConfirming(false)}>
-                            Cancel
-                        </button>
-                    </span>
-                ) : (
-                    <button
-                        type="button"
-                        className="inline-flex items-center gap-0.5 border border-slate-200 bg-white px-1 py-0.5 text-[10px] text-slate-700 hover:bg-slate-50"
-                        title={`Mark all pending in ${scopeLabel} as valid`}
-                        onClick={() => setConfirming(true)}
-                    >
-                        <LuCheck size={10} /> Mark reviewed
-                    </button>
-                )
-            )}
+    return confirming ? (
+        <span className="inline-flex items-center gap-1.5 text-xs" onClick={e => e.stopPropagation()}>
+            <button
+                type="button"
+                className="bg-blue-500 px-2 py-0.5 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={busy}
+                onClick={markReviewed}
+            >
+                {busy ? 'Saving…' : `Mark ${group.pending_count} valid`}
+            </button>
+            <button type="button" className="text-slate-500 hover:text-slate-800" onClick={() => setConfirming(false)}>
+                Cancel
+            </button>
         </span>
+    ) : (
+        <button
+            type="button"
+            className="inline-flex items-center gap-1 border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
+            title={`Mark all pending in ${scopeLabel} as valid`}
+            onClick={e => { e.stopPropagation(); setConfirming(true); }}
+        >
+            <LuCheck size={12} /> Mark reviewed
+        </button>
     );
 };
 
-const FacetToggle: React.FC<{ active: boolean; open: boolean; onClick: () => void }> = ({ active, open, onClick }) => (
-    <button
-        type="button"
-        aria-label="Filter this group"
-        aria-pressed={open}
-        title="Filter this group"
-        className={cn('inline-flex items-center p-0.5', active ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600')}
-        onClick={e => { e.stopPropagation(); onClick(); }}
-    >
-        <LuFilter size={11} />
-    </button>
-);
+const FacetRow: React.FC<{
+    colSpan: number;
+    grid: string;
+    group: TransactionGroup;
+    scopeLabel: string;
+    selection: GroupFacetSelection;
+    onChange: (selection: GroupFacetSelection) => void;
+    onApplyToAll: (selection: GroupFacetSelection) => void;
+    className?: string;
+}> = ({ colSpan, grid, className, ...bar }) => {
+    if (facetDimensions(bar.group).length === 0) return null;
+    return (
+        <tr>
+            <td colSpan={colSpan} className={cn('border-b border-slate-200 p-0', className)}>
+                <div className={cn(VIEWPORT_BOX, grid, 'border-l-4 border-transparent px-2')}>
+                    <div className={GROUP_RECAP_COL_START}>
+                        <GroupFacetBar {...bar} />
+                    </div>
+                </div>
+            </td>
+        </tr>
+    );
+};
+
+const toggleKeys = (toggle: () => void) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+};
 
 const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExpanded: boolean; params: URLSearchParams }> = (props) => {
-    const { month, defaultExpanded, params, colSpan, onApplyFacetsGlobally } = props;
+    const { month, defaultExpanded, params, colSpan, onApplyFacetsGlobally, showPnl } = props;
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [facets, setFacets] = useState<GroupFacetSelection>({});
-    const [showFacets, setShowFacets] = useState(() => shouldAutoShowFacetBar(month));
     const [expandAllDays, setExpandAllDays] = useState(() => shouldAutoExpandDays(month));
     const [expandVersion, setExpandVersion] = useState(0);
     const label = formatMonthLabel(month.period_start);
     const scopedParams = useMemo(() => applyFacetSelection(params, facets), [params, facets]);
+    const grid = showPnl ? GROUP_GRID_PNL : GROUP_GRID;
+    const toggle = () => setExpanded(e => !e);
 
     const days = useTransactionGroups({
         groupsUrl: props.groupsUrl,
@@ -237,51 +265,54 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
 
     return (
         <>
-            <tr className="border-t-2 border-slate-300 bg-slate-100">
-                <td colSpan={colSpan} className="px-2 py-1.5">
+            <tr>
+                <td colSpan={colSpan} className={MONTH_STICKY_TD}>
                     <div
-                        className="flex cursor-pointer flex-wrap items-start gap-x-3 gap-y-1"
+                        className={cn(VIEWPORT_BOX, grid, 'h-14 cursor-pointer border-l-4 border-t border-slate-700 border-t-slate-300 bg-slate-100 px-2 hover:bg-slate-200/70')}
                         role="button"
                         aria-expanded={expanded}
                         tabIndex={0}
-                        onClick={() => setExpanded(e => !e)}
-                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(x => !x); } }}
+                        onClick={toggle}
+                        onKeyDown={toggleKeys(toggle)}
                     >
-                        <span className="inline-flex items-center gap-1">
-                            {expanded ? <LuChevronDown size={14} /> : <LuChevronRight size={14} />}
-                            <span className="text-sm font-semibold text-slate-800">{label}</span>
+                        <GroupSelect {...props} group={month} params={scopedParams} scopeLabel={label} />
+                        <span className="inline-flex min-w-0 items-center gap-1 text-slate-900">
+                            {expanded ? <LuChevronDown size={16} /> : <LuChevronRight size={16} />}
+                            <span className="truncate text-base font-semibold">{label}</span>
                         </span>
-                        <GroupStatusSummary group={month} baseCurrency={props.baseCurrency} />
-                        <GroupActions {...props} group={month} params={scopedParams} scopeLabel={label} />
-                        <FacetToggle active={hasFacetSelection(facets)} open={showFacets} onClick={() => setShowFacets(s => !s)} />
-                        {expanded && (
-                            <button
-                                type="button"
-                                className="text-[10px] text-slate-500 hover:text-blue-600"
-                                onClick={e => {
-                                    e.stopPropagation();
-                                    setExpandAllDays(v => !v);
-                                    setExpandVersion(v => v + 1);
-                                }}
-                            >
-                                {expandAllDays ? 'Collapse all days' : 'Expand all days'}
-                            </button>
-                        )}
-                    </div>
-                    <div className="mt-1 pl-5">
-                        <GroupAccountsRecap group={month} />
-                        {showFacets && (
-                            <GroupFacetBar
-                                group={month}
-                                scopeLabel="month"
-                                selection={facets}
-                                onChange={setFacets}
-                                onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
-                            />
-                        )}
+                        <GroupStatusCells group={month} showPnl={showPnl} baseCurrency={props.baseCurrency} />
+                        <GroupAccountsStrip group={month} />
+                        <span className="inline-flex items-center gap-2">
+                            <MarkReviewedAction {...props} group={month} params={scopedParams} scopeLabel={label} />
+                            {expanded && (
+                                <button
+                                    type="button"
+                                    className="whitespace-nowrap text-xs text-slate-500 hover:text-blue-600"
+                                    onClick={e => {
+                                        e.stopPropagation();
+                                        setExpandAllDays(v => !v);
+                                        setExpandVersion(v => v + 1);
+                                    }}
+                                >
+                                    {expandAllDays ? 'Collapse days' : 'Expand days'}
+                                </button>
+                            )}
+                        </span>
                     </div>
                 </td>
             </tr>
+            {expanded && (
+                <FacetRow
+                    colSpan={colSpan}
+                    grid={grid}
+                    className="bg-slate-50"
+                    group={month}
+                    scopeLabel="month"
+                    selection={facets}
+                    onChange={setFacets}
+                    onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
+                />
+            )}
             {expanded && days.isLoading && (
                 <StatusRow colSpan={colSpan}><Spinner size="sm" className="text-blue-500" /> Loading days…</StatusRow>
             )}
@@ -304,14 +335,15 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
 const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSearchParams; defaultExpanded: boolean }> = (props) => {
     const {
         day, params, defaultExpanded, colSpan, listUrl, sortDir, renderRow, onRowsLoaded,
-        reviewedOverlay, onUndoReviewed, onApplyFacetsGlobally,
+        reviewedOverlay, onUndoReviewed, onApplyFacetsGlobally, showPnl,
     } = props;
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [facets, setFacets] = useState<GroupFacetSelection>({});
-    const [showFacets, setShowFacets] = useState(() => shouldAutoShowFacetBar(day));
     const label = formatDayLabel(day.period_start);
     const bounds = boundsOf(day);
     const scopedParams = useMemo(() => applyFacetSelection(params, facets), [params, facets]);
+    const grid = showPnl ? GROUP_GRID_PNL : GROUP_GRID;
+    const toggle = () => setExpanded(e => !e);
 
     const rowsQuery = useGroupRows({ listUrl, params: scopedParams, bounds, sortDir, enabled: expanded });
     const rows = useMemo(() => rowsQuery.data?.pages.flatMap(p => p.results) ?? [], [rowsQuery.data]);
@@ -338,46 +370,47 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
 
     return (
         <>
-            <tr className="bg-slate-50">
-                <td colSpan={colSpan} className="sticky top-0 z-[6] border-b border-slate-200 bg-slate-50 px-2 py-1 pl-6">
+            <tr>
+                <td colSpan={colSpan} className={DAY_STICKY_TD}>
                     <div
-                        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-0.5"
+                        className={cn(VIEWPORT_BOX, grid, 'h-9 cursor-pointer border-b border-l-4 border-slate-200 border-l-slate-300 bg-white px-2 hover:bg-slate-50')}
                         role="button"
                         aria-expanded={expanded}
                         tabIndex={0}
-                        onClick={() => setExpanded(e => !e)}
-                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(x => !x); } }}
+                        onClick={toggle}
+                        onKeyDown={toggleKeys(toggle)}
                     >
-                        <span className="inline-flex items-center gap-1">
-                            {expanded ? <LuChevronDown size={12} /> : <LuChevronRight size={12} />}
-                            <span className="text-xs font-semibold text-slate-700">{label}</span>
+                        <GroupSelect {...props} group={day} params={scopedParams} scopeLabel={label} />
+                        <span className="inline-flex min-w-0 items-center gap-1 pl-4 text-slate-700">
+                            {expanded ? <LuChevronDown size={14} /> : <LuChevronRight size={14} />}
+                            <span className="truncate text-sm font-semibold">{label}</span>
                         </span>
-                        <GroupStatusSummary group={day} baseCurrency={props.baseCurrency} />
+                        <GroupStatusCells group={day} showPnl={showPnl} baseCurrency={props.baseCurrency} />
                         <GroupAccountsInline group={day} />
-                        <GroupActions {...props} group={day} params={scopedParams} scopeLabel={label} />
-                        <FacetToggle active={hasFacetSelection(facets)} open={showFacets} onClick={() => setShowFacets(s => !s)} />
+                        <MarkReviewedAction {...props} group={day} params={scopedParams} scopeLabel={label} />
                     </div>
-                    {showFacets && (
-                        <div className="pl-4">
-                            <GroupFacetBar
-                                group={day}
-                                scopeLabel="day"
-                                selection={facets}
-                                onChange={setFacets}
-                                onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
-                            />
-                        </div>
-                    )}
                 </td>
             </tr>
+            {expanded && (
+                <FacetRow
+                    colSpan={colSpan}
+                    grid={grid}
+                    className="bg-white"
+                    group={day}
+                    scopeLabel="day"
+                    selection={facets}
+                    onChange={setFacets}
+                    onApplyToAll={sel => { onApplyFacetsGlobally(sel); setFacets({}); }}
+                />
+            )}
             {expanded && rowsQuery.isLoading && (
                 <StatusRow colSpan={colSpan}><Spinner size="sm" className="text-blue-500" /> Loading…</StatusRow>
             )}
             {expanded && merged.map(({ tx, overlay }) => overlay ? (
                 <tr key={`overlay-${tx.id}`} className="bg-slate-100 text-slate-400">
-                    <td colSpan={colSpan} className="px-3 py-1 text-[10px]">
+                    <td colSpan={colSpan} className="px-3 py-1 text-xs">
                         <span className="inline-flex items-center gap-2">
-                            <LuCheck size={10} className="text-green-600" />
+                            <LuCheck size={12} className="text-green-600" />
                             <span className="line-through">#{tx.id} · {tx.linked_asset?.symbol || tx.source_asset_symbol || '—'} · {tx.quantity}</span>
                             <span>marked {overlay.newStatus}</span>
                             <button
@@ -385,7 +418,7 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
                                 className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
                                 onClick={() => onUndoReviewed(tx.id)}
                             >
-                                <LuUndo2 size={10} /> Undo
+                                <LuUndo2 size={12} /> Undo
                             </button>
                         </span>
                     </td>
@@ -398,7 +431,7 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
                     <td colSpan={colSpan} className="py-1 pl-8">
                         <button
                             type="button"
-                            className="text-[10px] text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                            className="text-xs text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={rowsQuery.isFetchingNextPage}
                             onClick={() => rowsQuery.fetchNextPage()}
                         >

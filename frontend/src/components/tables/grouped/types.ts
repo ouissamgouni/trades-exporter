@@ -63,7 +63,5 @@ export type GroupingMode = 'month-day' | 'off';
 
 /** Rows of a group fit on screen without collapsing its days. */
 export const AUTO_EXPAND_DAYS_MAX = 50;
-/** Facet bar shows by default only for groups at least this large. */
-export const FACET_BAR_MIN_TX = 20;
 export const GROUP_ROWS_PAGE_SIZE = 50;
 export const MONTHS_PAGE_SIZE = 24;
