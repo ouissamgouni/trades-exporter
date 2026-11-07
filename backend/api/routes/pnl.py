@@ -30,6 +30,7 @@ from backend.db.models import (
     CostLot,
     RealizedPnl,
     PnlWarning,
+    PnlWarningAck,
     LotSettlement,
     ConsumedLotSlice,
     CostLotEvent,
@@ -52,6 +53,7 @@ from backend.db.models import (
     IncomeEvent,
 )
 from backend.services.pnl.engine import PnLEngine
+from backend.services.pnl import warning_status
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.services.pnl.models import PnLResult
 from backend.services.price_service import PriceService
@@ -383,6 +385,7 @@ class WarningsFilterOptionsResponse(BaseModel):
     warning_types: List[FilterOptionWithCount] = []
     levels: List[FilterOptionWithCount] = []
     assets: List[FilterOptionWithCount] = []
+    statuses: List[FilterOptionWithCount] = []
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
@@ -563,6 +566,8 @@ class WarningResponse(BaseModel):
     details: Optional[Dict[str, Any]] = (
         None  # Additional context (transaction_date, error, etc.)
     )
+    id: Optional[int] = None
+    status: Optional[str] = None  # open | acknowledged | dust
 
 
 class SettlementResponse(BaseModel):
@@ -4238,6 +4243,7 @@ def get_version_balances(
             .join(PnlWarning.unit)
             .where(CalculationUnit.version_id == version_id)
             .where(PnlWarning.asset_id.isnot(None))
+            .where(warning_status.status_clause(warning_status.STATUS_OPEN))
             .group_by(PnlWarning.asset_id)
         )
         if filtered_unit_ids is not None:
@@ -4452,6 +4458,7 @@ def get_version_warnings(
     level: Optional[str] = None,  # "error", "warning", "info"
     asset_id: Optional[int] = None,
     search: Optional[str] = None,  # Search message text
+    status: str = Query(warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"),
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
@@ -4501,6 +4508,8 @@ def get_version_warnings(
     if search:
         base_query = base_query.where(PnlWarning.message.ilike(f"%{search}%"))
 
+    base_query = warning_status.apply_status(base_query, status)
+
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
     total = session.exec(count_query).one()
@@ -4510,9 +4519,12 @@ def get_version_warnings(
     query = base_query.order_by(PnlWarning.created_at).offset(offset).limit(limit)
 
     warnings = session.exec(query).all()
+    acked_keys = warning_status.load_ack_keys(session, warnings)
 
     items = [
         WarningResponse(
+            id=w.id,
+            status=warning_status.warning_status(w, acked_keys),
             warning_type=w.warning_type,
             message=w.message,
             timestamp=w.created_at,
@@ -4528,9 +4540,59 @@ def get_version_warnings(
     return {"items": items, "total": total, "page": page, "limit": limit}
 
 
+class WarningAckRequest(BaseModel):
+    warning_ids: List[int]
+    note: Optional[str] = None
+
+
+@router.post("/warnings/acknowledge")
+def acknowledge_warnings(request: WarningAckRequest, session: Session = Depends(get_session_dependency)):
+    """Acknowledge warnings. Kept across recalculations until the warning's amount changes."""
+    created = 0
+    for w in session.exec(select(PnlWarning).where(PnlWarning.id.in_(request.warning_ids))).all():
+        fingerprint = (w.details or {}).get("fingerprint", "")
+        exists_q = select(PnlWarningAck).where(
+            PnlWarningAck.warning_type == w.warning_type,
+            func.coalesce(PnlWarningAck.transaction_id, 0) == (w.transaction_id or 0),
+            func.coalesce(PnlWarningAck.asset_id, 0) == (w.asset_id or 0),
+            PnlWarningAck.fingerprint == fingerprint,
+        )
+        if session.exec(exists_q).first():
+            continue
+        session.add(PnlWarningAck(
+            warning_type=w.warning_type,
+            transaction_id=w.transaction_id,
+            asset_id=w.asset_id,
+            fingerprint=fingerprint,
+            note=request.note,
+        ))
+        created += 1
+    session.commit()
+    return {"acknowledged": created}
+
+
+@router.post("/warnings/unacknowledge")
+def unacknowledge_warnings(request: WarningAckRequest, session: Session = Depends(get_session_dependency)):
+    """Remove acknowledgements so the warnings are open again."""
+    removed = 0
+    for w in session.exec(select(PnlWarning).where(PnlWarning.id.in_(request.warning_ids))).all():
+        acks = session.exec(select(PnlWarningAck).where(
+            PnlWarningAck.warning_type == w.warning_type,
+            func.coalesce(PnlWarningAck.transaction_id, 0) == (w.transaction_id or 0),
+            func.coalesce(PnlWarningAck.asset_id, 0) == (w.asset_id or 0),
+            PnlWarningAck.fingerprint == (w.details or {}).get("fingerprint", ""),
+        )).all()
+        for ack in acks:
+            session.delete(ack)
+            removed += 1
+    session.commit()
+    return {"unacknowledged": removed}
+
+
 @router.get("/versions/{version_id}/warnings/type-counts")
 def get_version_warning_type_counts(
     version_id: int,
+    status: str = Query(warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"),
     session: Session = Depends(get_session_dependency),
 ):
     """
@@ -4543,10 +4605,12 @@ def get_version_warning_type_counts(
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
 
     rows = session.exec(
-        select(PnlWarning.warning_type, func.count())
-        .join(PnlWarning.unit)
-        .where(CalculationUnit.version_id == version_id)
-        .group_by(PnlWarning.warning_type)
+        warning_status.apply_status(
+            select(PnlWarning.warning_type, func.count())
+            .join(PnlWarning.unit)
+            .where(CalculationUnit.version_id == version_id),
+            status,
+        ).group_by(PnlWarning.warning_type)
     ).all()
 
     return {wtype: count for wtype, count in rows}
@@ -4558,6 +4622,7 @@ def get_version_warning_type_counts(
 )
 def get_warnings_filter_options(
     version_id: int,
+    status: str = Query(warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"),
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     session: Session = Depends(get_session_dependency),
 ):
@@ -4574,6 +4639,13 @@ def get_warnings_filter_options(
     base_q, _ = _apply_unit_filter(
         base_q, tx_filters, version_id, session, unit_column=PnlWarning.unit_id
     )
+    # Status counts are computed before narrowing to the requested status
+    status_counts = {}
+    for st in (warning_status.STATUS_OPEN, warning_status.STATUS_ACKNOWLEDGED, warning_status.STATUS_DUST):
+        status_counts[st] = session.exec(
+            select(func.count()).select_from(warning_status.apply_status(base_q, st).subquery())
+        ).one()
+    base_q = warning_status.apply_status(base_q, status)
     scoped_sq = base_q.subquery()
 
     # Warning types with counts
@@ -4617,6 +4689,10 @@ def get_warnings_filter_options(
         warning_types=warning_types,
         levels=levels,
         assets=assets,
+        statuses=[
+            FilterOptionWithCount(value=st, label=st.title(), count=cnt)
+            for st, cnt in status_counts.items()
+        ],
     )
 
 
@@ -5632,7 +5708,7 @@ def get_units_filter_options(
 
     has_warnings_q = select(func.count(func.distinct(PnlWarning.unit_id))).where(
         PnlWarning.unit_id.in_(select(scoped_ids_sq))
-    )
+    ).where(warning_status.status_clause(warning_status.STATUS_OPEN))
     has_warnings_count = session.exec(has_warnings_q).one() or 0
 
     has_realized_q = select(
@@ -5649,6 +5725,7 @@ def get_units_filter_options(
     warning_type_q = (
         select(PnlWarning.warning_type, func.count(func.distinct(PnlWarning.unit_id)))
         .where(PnlWarning.unit_id.in_(select(scoped_ids_sq)))
+        .where(warning_status.status_clause(warning_status.STATUS_OPEN))
         .group_by(PnlWarning.warning_type)
     )
     wt_rows = session.exec(warning_type_q).all()
@@ -5997,6 +6074,7 @@ def get_audit_summary(
         select(PnlWarning.warning_type, func.count(PnlWarning.id))
         .join(PnlWarning.unit)
         .where(CalculationUnit.version_id == version_id)
+        .where(warning_status.status_clause(warning_status.STATUS_OPEN))
         .group_by(PnlWarning.warning_type)
     )
     warn_type_q = _unit_filter(warn_type_q, PnlWarning.unit_id)
@@ -6253,6 +6331,7 @@ def get_version_units(
         warning_exists = (
             select(PnlWarning.id)
             .where(PnlWarning.unit_id == CalculationUnit.id)
+            .where(warning_status.status_clause(warning_status.STATUS_OPEN))
             .correlate(CalculationUnit)
             .exists()
         )
@@ -7472,6 +7551,7 @@ def _enriched_tx_ids_subquery(
         warning_exists = (
             select(PnlWarning.id)
             .where(PnlWarning.unit_id == CalculationUnit.id)
+            .where(warning_status.status_clause(warning_status.STATUS_OPEN))
             .correlate(CalculationUnit)
             .exists()
         )

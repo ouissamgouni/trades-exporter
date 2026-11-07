@@ -169,6 +169,8 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     baseCurrency?: string;
     /** Show invalid rows expanded instead of collapsed (e.g. spam review) */
     expandInvalidRows?: boolean;
+    /** Highlight this transaction and scroll it into view once rendered */
+    focusTransactionId?: number;
 
     // ============== Plugin Architecture Props ==============
 
@@ -235,6 +237,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     defaultGrouping = 'month-day',
     baseCurrency,
     expandInvalidRows = false,
+    focusTransactionId,
     // Plugin architecture props
     tableId = 'default',
     initialColumnVisibility: initialVisibilityProp,
@@ -408,6 +411,20 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const [drawerTransactionId, setDrawerTransactionId] = useState<number | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [filtersExpanded, setFiltersExpanded] = useState(!defaultFiltersCollapsed);
+
+    // Rows may arrive asynchronously (grouped server pages), so poll briefly for the focused row.
+    useEffect(() => {
+        if (focusTransactionId == null) return;
+        let tries = 0;
+        const timer = window.setInterval(() => {
+            const row = document.querySelector(`tr[data-tx-id="${focusTransactionId}"]`);
+            if (row || ++tries > 40) {
+                window.clearInterval(timer);
+                row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+        }, 250);
+        return () => window.clearInterval(timer);
+    }, [focusTransactionId]);
 
     // ============== Bundle Suggestion State ==============
     // Fetch suggestions and build tx→suggestion lookup map
@@ -1398,6 +1415,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     // since that component no longer depends on Chakra design tokens.
     const getRowBgColor = (tx: Transaction) => {
         if (selectedIds.has(tx.id)) return '#dbeafe'; // blue-100
+        if (tx.id === focusTransactionId) return '#fef9c3'; // yellow-100
         // Highlight sibling rows when hovering a suggestion indicator
         if (hoveredSuggestionGroup !== null && showSuggestions) {
             const entry = suggestionMap.get(tx.id);
@@ -1632,6 +1650,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
             duplicateEntry={duplicateMap.get(tx.id)}
             rowBgColor={getRowBgColor(tx)}
+            isFocused={tx.id === focusTransactionId}
             rowBorderColor={getRowBorderColor(tx)}
             isInvalidCollapsed={isInvalidCollapsed(tx)}
             accounts={accounts}

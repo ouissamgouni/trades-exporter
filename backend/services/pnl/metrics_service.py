@@ -805,6 +805,7 @@ def _refresh_prices_for_assets(
     session: Session,
     asset_ids: List[int],
     base_currency_id: Optional[int],
+    history_dates: Optional[List[datetime]] = None,
 ) -> None:
     """
     Refresh prices for held assets by calling the PriceService.
@@ -818,32 +819,24 @@ def _refresh_prices_for_assets(
 
     try:
         from backend.services.price_service import PriceService
-        price_service = PriceService(session=session)
 
         base_asset = session.get(Asset, base_currency_id)
         base_symbol = base_asset.symbol if base_asset else "USD"
+        price_service = PriceService(session=session, base_currency=base_symbol)
 
-        now = datetime.now(timezone.utc)
-        stale_assets = []
-        failed_assets = []
-        for aid in asset_ids:
-            if aid == base_currency_id:
-                continue
-            try:
-                result = price_service.get_price_with_fallback(
-                    asset_id=aid,
-                    dt=now,
-                    price_quote=base_symbol,
-                    use_fallback=True,
-                    staleness_window_days=7,
-                )
-                if result.is_stale:
-                    stale_assets.append((aid, result.staleness_days))
-                elif result.is_fallback:
-                    stale_assets.append((aid, result.staleness_days))
-            except Exception as e:
-                failed_assets.append(aid)
-                log.warning("price_refresh_asset_failed", asset_id=aid, error=str(e))
+        priced_ids = [aid for aid in asset_ids if aid != base_currency_id]
+        results = price_service.refresh_current_prices(
+            priced_ids,
+            price_quote=base_symbol,
+            history_dates=[d.date() for d in history_dates or []],
+            staleness_window_days=7,
+        )
+        stale_assets = [
+            (aid, r.staleness_days)
+            for aid, r in results.items()
+            if r.is_stale or r.is_fallback
+        ]
+        failed_assets = [aid for aid in priced_ids if aid not in results]
         if stale_assets:
             log.warning(
                 "stale_prices_detected",
@@ -1122,7 +1115,9 @@ def _build_price_snapshot(
     """Build price snapshots for all boundary dates. Optionally refreshes prices first."""
     all_asset_ids_list = list(snap.all_asset_ids)
     if refresh and all_asset_ids_list:
-        _refresh_prices_for_assets(session, all_asset_ids_list, snap.base_currency_id)
+        _refresh_prices_for_assets(
+            session, all_asset_ids_list, snap.base_currency_id, snap.unique_dates
+        )
     return _get_price_at_dates(
         session, snap.base_currency_id, all_asset_ids_list, snap.unique_dates,
     )

@@ -114,7 +114,7 @@ class TestIssueServiceGetCounts:
                 None, False,
                 issue_types=mock_linkage_detector.ASSET_ISSUE_TYPES,
             )
-            mock_transfer_detector.count.assert_called_once_with(None, False)
+            mock_transfer_detector.count.assert_any_call(None, False)
             mock_duplicate_detector.count.assert_called_once_with(None, False)
             mock_pending_detector.count.assert_called_once_with(None, False)
             
@@ -149,7 +149,7 @@ class TestIssueServiceGetCounts:
                 account_ids, False,
                 issue_types=mock_linkage_detector.ASSET_ISSUE_TYPES,
             )
-            mock_transfer_detector.count.assert_called_once_with(account_ids, False)
+            mock_transfer_detector.count.assert_any_call(account_ids, False)
             mock_duplicate_detector.count.assert_called_once_with(account_ids, False)
             mock_pending_detector.count.assert_called_once_with(account_ids, False)
     
@@ -176,7 +176,7 @@ class TestIssueServiceGetCounts:
                 None, True,
                 issue_types=mock_linkage_detector.ASSET_ISSUE_TYPES,
             )
-            mock_transfer_detector.count.assert_called_once_with(None, True)
+            mock_transfer_detector.count.assert_any_call(None, True)
             mock_duplicate_detector.count.assert_called_once_with(None, True)
             mock_pending_detector.count.assert_called_once_with(None, True)
 
@@ -391,7 +391,7 @@ class TestIssueServiceEdgeCases:
                 account_ids, True,
                 issue_types=mock_linkage.ASSET_ISSUE_TYPES,
             )
-            mock_transfer.count.assert_called_once_with(account_ids, True)
+            mock_transfer.count.assert_any_call(account_ids, True)
             mock_duplicate.count.assert_called_once_with(account_ids, True)
             mock_pending.count.assert_called_once_with(account_ids, True)
             

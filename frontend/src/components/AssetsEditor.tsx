@@ -457,21 +457,23 @@ export const AssetsEditor: React.FC = () => {
         setCellValue('');
     }, []);
 
-    const saveCellEdit = useCallback(async () => {
+    const saveCellEdit = useCallback(async (override?: unknown) => {
         if (!editingCell) return;
         const { assetId, field } = editingCell;
+        // Selects save on change with the picked value; blur/Enter pass an event or nothing.
+        const value = typeof override === 'string' ? override : cellValue;
         try {
             const res = await fetch(`${API_URL}/assets/${assetId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ [field]: field === 'status' ? parseInt(cellValue) : field === 'denomination_currency_id' ? (cellValue ? parseInt(cellValue) : null) : field === 'isin' ? (cellValue || null) : cellValue }),
+                body: JSON.stringify({ [field]: field === 'status' ? parseInt(value) : field === 'denomination_currency_id' ? (value ? parseInt(value) : null) : field === 'isin' ? (value || null) : value }),
             });
             if (!res.ok) throw new Error('Failed to save');
             // Optimistic update
             setAllAssets(prev => prev.map(a => {
                 if (a.asset_id !== assetId) return a;
                 if (field === 'denomination_currency_id') {
-                    const denomId = cellValue ? parseInt(cellValue) : null;
+                    const denomId = value ? parseInt(value) : null;
                     const denomAsset = denomId ? prev.find(x => x.asset_id === denomId) : null;
                     return {
                         ...a,
@@ -479,7 +481,7 @@ export const AssetsEditor: React.FC = () => {
                         denomination_currency: denomAsset ? { asset_id: denomAsset.asset_id!, symbol: denomAsset.symbol, label: denomAsset.label } : null,
                     };
                 }
-                return { ...a, [field]: field === 'status' ? parseInt(cellValue) : cellValue };
+                return { ...a, [field]: field === 'status' ? parseInt(value) : value };
             }));
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
@@ -1554,9 +1556,11 @@ export const AssetsEditor: React.FC = () => {
                                                 autoFocus
                                                 className="h-8 border border-slate-300 px-2 text-sm"
                                                 value={cellValue}
-                                                onChange={e => { setCellValue(e.target.value); }}
-                                                onBlur={saveCellEdit}
+                                                onClick={e => e.stopPropagation()}
+                                                onChange={e => saveCellEdit(e.target.value)}
+                                                onBlur={cancelCellEdit}
                                             >
+                                                <option value="" disabled>—</option>
                                                 <option value="crypto">Crypto</option>
                                                 <option value="stock">Stock</option>
                                                 <option value="fiat">Fiat</option>
@@ -1578,8 +1582,9 @@ export const AssetsEditor: React.FC = () => {
                                                 autoFocus
                                                 className="h-8 border border-slate-300 px-2 text-sm"
                                                 value={cellValue}
-                                                onChange={e => setCellValue(e.target.value)}
-                                                onBlur={saveCellEdit}
+                                                onClick={e => e.stopPropagation()}
+                                                onChange={e => saveCellEdit(e.target.value)}
+                                                onBlur={cancelCellEdit}
                                             >
                                                 <option value="">—</option>
                                                 {allAssets.filter(a => a.price_type === 'fiat' && a.asset_id).map(a => (
@@ -1645,8 +1650,9 @@ export const AssetsEditor: React.FC = () => {
                                                 autoFocus
                                                 className="h-8 border border-slate-300 px-2 text-sm"
                                                 value={cellValue}
-                                                onChange={e => setCellValue(e.target.value)}
-                                                onBlur={saveCellEdit}
+                                                onClick={e => e.stopPropagation()}
+                                                onChange={e => saveCellEdit(e.target.value)}
+                                                onBlur={cancelCellEdit}
                                             >
                                                 <option value="0">Active</option>
                                                 <option value="1">Inactive</option>

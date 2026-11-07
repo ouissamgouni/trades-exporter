@@ -25,6 +25,7 @@ import { AssetLinkageTable } from './tables/wrappers/AssetLinkageTable';
 import { MissingDataTable } from './tables/wrappers/MissingDataTable';
 import { AccountsLinkageTable } from './tables/wrappers/AccountsLinkageTable';
 import { DuplicateResolutionPanel } from './DuplicateResolutionPanel';
+import { BrokenBundlesPanel } from './BrokenBundlesPanel';
 import { useAssets } from '../hooks/useAssets';
 import { useDataHealth } from '../contexts/DataHealthContext';
 
@@ -40,7 +41,7 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
     const [data, setData] = useState<TransactionStatusResponse | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'duplicates'>('missing-data');
+    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'broken-bundles' | 'duplicates' | 'dismissed'>('missing-data');
     const [tabAutoSelected, setTabAutoSelected] = useState(false);
 
     // Transaction detail drawer state
@@ -91,6 +92,7 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                 ['missing-data', data.missing_data_issues_count],
                 ['assets-linkage', data.linkage_issues_count],
                 ['accounts-linkage', data.transfer_issues_count],
+                ['broken-bundles', data.broken_bundles_count],
                 ['duplicates', data.duplicate_count],
             ] as const
         ).find(([, count]) => (count || 0) > 0);
@@ -194,11 +196,27 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                                             </Badge>
                                         )}
                                     </TabsTrigger>
+                                    <TabsTrigger value="broken-bundles">
+                                        Broken Bundles
+                                        {(data.broken_bundles_count || 0) > 0 && (
+                                            <Badge colorScheme="orange" className="ml-1 text-[10px]">
+                                                {data.broken_bundles_count}
+                                            </Badge>
+                                        )}
+                                    </TabsTrigger>
                                     <TabsTrigger value="duplicates">
                                         Duplicates
                                         {(data.duplicate_count || 0) > 0 && (
                                             <Badge colorScheme="red" className="ml-1 text-[10px]">
                                                 {data.duplicate_count}
+                                            </Badge>
+                                        )}
+                                    </TabsTrigger>
+                                    <TabsTrigger value="dismissed">
+                                        Dismissed
+                                        {(data.dismissed_transfer_issues_count || 0) > 0 && (
+                                            <Badge colorScheme="gray" className="ml-1 text-[10px]">
+                                                {data.dismissed_transfer_issues_count}
                                             </Badge>
                                         )}
                                     </TabsTrigger>
@@ -262,6 +280,14 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                                 <AccountsLinkageTable
                                     onFixed={handleFixComplete}
                                 />
+                            )}
+
+                            {activeTab === 'broken-bundles' && (
+                                <BrokenBundlesPanel onFixed={handleFixComplete} />
+                            )}
+
+                            {activeTab === 'dismissed' && (
+                                <AccountsLinkageTable mode="dismissed" onFixed={handleFixComplete} />
                             )}
 
                             {/* Duplicates tab content */}

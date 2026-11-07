@@ -5,15 +5,17 @@
  * Fetches issues from /transactions/data-health-check/transfer-issues,
  * groups by transaction_id, and renders TransactionsTable with an
  * "Account Issue" badge column. Fixes happen via inline-edit cells.
- * Supports bulk dismiss via checkboxes + floating action bar.
+ * Supports dismiss per row (icon next to the TX id) and in bulk; `mode="dismissed"`
+ * lists dismissed issues with a Restore action instead.
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { LuEyeOff } from 'react-icons/lu';
+import { LuEyeOff, LuRotateCcw } from 'react-icons/lu';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
-import { BulkAction, ColumnPlugin, TableConfig } from '../types';
+import { BulkAction, ColumnPlugin, RowAction, TableConfig } from '../types';
+import { useShowInContextRowAction } from '../rowActions';
 import { presetToVisibility } from '../useTransactionsTable';
 import { API_URL, Account, Asset, Transaction, TransactionIssue } from '../../../types';
 import { Tooltip } from '../../ui/tooltip';
@@ -25,9 +27,14 @@ import { Badge, type BadgeColorScheme, Spinner } from '../../ui/primitives';
 // ============================================================================
 
 interface AccountsLinkageTableProps {
-    /** Callback when an issue is fixed */
+    /** Callback when an issue is fixed, dismissed or restored */
     onFixed?: () => void;
+    /** 'open' (default) lists active issues; 'dismissed' lists dismissed ones with Restore actions */
+    mode?: 'open' | 'dismissed';
 }
+
+const dismissFieldFor = (issueType: string) =>
+    issueType.includes('_from_') ? 'source_from_account' : issueType.includes('_to_') ? 'source_to_account' : null;
 
 // Issue type configuration for account issues
 const ACCOUNT_ISSUE_CONFIG: Record<string, { color: BadgeColorScheme; label: string }> = {
@@ -45,14 +52,17 @@ const ACCOUNT_ISSUE_CONFIG: Record<string, { color: BadgeColorScheme; label: str
 
 export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
     onFixed,
+    mode = 'open',
 }) => {
     const queryClient = useQueryClient();
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [isDismissing, setIsDismissing] = useState(false);
+    const isDismissedMode = mode === 'dismissed';
+    const showInContextAction = useShowInContextRowAction();
 
     // Fetch all account linkage issues
     const { data: issuesData, isLoading } = useQuery({
-        queryKey: ['accountLinkageIssues'],
+        queryKey: ['accountLinkageIssues', mode],
         queryFn: async () => {
             const allIssues: TransactionIssue[] = [];
             let page = 1;
@@ -63,6 +73,7 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
                     page: String(page),
                     per_page: '200',
                 });
+                if (isDismissedMode) params.set('dismissed_only', 'true');
                 const response = await fetch(`${API_URL}/transactions/data-health-check/transfer-issues?${params}`);
                 if (!response.ok) throw new Error('Failed to fetch account linkage issues');
 
@@ -99,6 +110,48 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
     const handleSelectionChange = useCallback((ids: Set<number>) => {
         setSelectedIds(ids);
     }, []);
+
+    const refreshAfterChange = useCallback(() => {
+        setSelectedIds(new Set());
+        queryClient.invalidateQueries({ queryKey: ['accountLinkageIssues'] });
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['dataHealthStatus'] });
+        onFixed?.();
+    }, [queryClient, onFixed]);
+
+    // Restore (un-dismiss) every dismissed field of the given transactions
+    const restoreIssues = useCallback(async (txIds: number[]) => {
+        const requests: Promise<Response>[] = [];
+        for (const txId of txIds) {
+            const fields = new Set((issuesByTxId.get(txId) || []).map(i => dismissFieldFor(i.issue_type)).filter(Boolean));
+            for (const field of fields) {
+                requests.push(fetch(`${API_URL}/transactions/${txId}/dismiss-transfer-issue/${field}`, { method: 'DELETE' }));
+            }
+        }
+        const results = await Promise.all(requests);
+        const failed = results.filter(r => !r.ok).length;
+        toaster.create({
+            title: failed ? `Restored ${results.length - failed}, ${failed} failed` : `Restored ${results.length} issue(s)`,
+            type: failed ? 'warning' : 'success',
+        });
+        refreshAfterChange();
+    }, [issuesByTxId, refreshAfterChange]);
+
+    // Dismiss every open field of a single transaction
+    const dismissOne = useCallback(async (txId: number) => {
+        const fields = new Set((issuesByTxId.get(txId) || []).map(i => dismissFieldFor(i.issue_type)).filter(Boolean));
+        const results = await Promise.all([...fields].map(field => fetch(`${API_URL}/transactions/${txId}/dismiss-transfer-issue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ field, reason: 'Dismissed from data health table' }),
+        })));
+        if (results.some(r => !r.ok)) {
+            toaster.create({ title: `Failed to dismiss #${txId}`, type: 'error' });
+        } else {
+            toaster.create({ title: `Dismissed #${txId}`, description: 'Find it again in the Dismissed tab.', type: 'success' });
+        }
+        refreshAfterChange();
+    }, [issuesByTxId, refreshAfterChange]);
 
     // Bulk dismiss selected transactions
     const handleBulkDismiss = useCallback(async () => {
@@ -169,12 +222,7 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
                 });
             }
 
-            // Refresh data
-            setSelectedIds(new Set());
-            queryClient.invalidateQueries({ queryKey: ['accountLinkageIssues'] });
-            queryClient.invalidateQueries({ queryKey: ['transactions'] });
-            queryClient.invalidateQueries({ queryKey: ['dataHealthStatus'] });
-            onFixed?.();
+            refreshAfterChange();
         } catch (err) {
             toaster.create({
                 title: err instanceof Error ? err.message : 'Failed to dismiss issues',
@@ -183,21 +231,49 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
         } finally {
             setIsDismissing(false);
         }
-    }, [selectedIds, issuesByTxId, queryClient, onFixed]);
+    }, [selectedIds, issuesByTxId, refreshAfterChange]);
 
-    // Bulk dismiss action as plugin for the main floating bar
+    // Bulk action as plugin for the main floating bar
     const additionalBulkActions: BulkAction<Transaction>[] = useMemo(() => [
-        {
-            id: 'dismiss-account-issues',
-            label: 'Dismiss Issues',
-            icon: <LuEyeOff size={12} />,
-            colorPalette: 'orange',
-            variant: 'outline' as const,
-            onClick: async () => {
-                await handleBulkDismiss();
+        isDismissedMode
+            ? {
+                id: 'restore-account-issues',
+                label: 'Restore Issues',
+                icon: <LuRotateCcw size={12} />,
+                colorPalette: 'blue',
+                variant: 'outline' as const,
+                onClick: async () => { await restoreIssues([...selectedIds]); },
+            }
+            : {
+                id: 'dismiss-account-issues',
+                label: 'Dismiss Issues',
+                icon: <LuEyeOff size={12} />,
+                colorPalette: 'orange',
+                variant: 'outline' as const,
+                onClick: async () => { await handleBulkDismiss(); },
             },
-        },
-    ], [handleBulkDismiss]);
+    ], [isDismissedMode, restoreIssues, selectedIds, handleBulkDismiss]);
+
+    const additionalRowActions: RowAction<Transaction>[] = useMemo(() => [
+        showInContextAction,
+        isDismissedMode
+            ? {
+                id: 'restore-issue',
+                icon: <LuRotateCcw size={11} />,
+                label: 'Restore issue (un-dismiss)',
+                placement: 'id' as const,
+                colorPalette: 'blue',
+                onClick: (tx: Transaction) => restoreIssues([tx.id]),
+            }
+            : {
+                id: 'dismiss-issue',
+                icon: <LuEyeOff size={11} />,
+                label: 'Dismiss issue (kept in the Dismissed tab)',
+                placement: 'id' as const,
+                colorPalette: 'orange',
+                onClick: (tx: Transaction) => dismissOne(tx.id),
+            },
+    ], [showInContextAction, isDismissedMode, restoreIssues, dismissOne]);
 
     // Account issue column plugin
     const additionalColumns: ColumnPlugin<Transaction>[] = useMemo(() => [
@@ -261,7 +337,9 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
     if (transactionIds.length === 0) {
         return (
             <div className="bg-green-50 p-6 text-center">
-                <span className="font-medium text-green-600">✓ No account linkage issues found!</span>
+                <span className="font-medium text-green-600">
+                    {isDismissedMode ? 'No dismissed account issues.' : '✓ No account linkage issues found!'}
+                </span>
             </div>
         );
     }
@@ -269,9 +347,11 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
     return (
         <div className="relative">
             <TransactionsTable
-                title="Account Linkage Issues"
-                subtitle={`${transactionIds.length} transaction${transactionIds.length !== 1 ? 's' : ''} with unlinked accounts`}
-                tableId="accountsLinkage"
+                title={isDismissedMode ? 'Dismissed Account Issues' : 'Account Linkage Issues'}
+                subtitle={isDismissedMode
+                    ? `${transactionIds.length} dismissed transaction${transactionIds.length !== 1 ? 's' : ''} — restore to put them back in the issue list`
+                    : `${transactionIds.length} transaction${transactionIds.length !== 1 ? 's' : ''} with unlinked accounts`}
+                tableId={isDismissedMode ? 'accountsLinkageDismissed' : 'accountsLinkage'}
                 initialColumnVisibility={initialColumnVisibility}
                 filters={{
                     ...defaultFilterState,
@@ -284,6 +364,7 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
                 compact={true}
                 additionalColumns={additionalColumns}
                 additionalBulkActions={additionalBulkActions}
+                additionalRowActions={additionalRowActions}
                 config={tableConfig}
                 onDataChange={onFixed}
                 onSelectionChange={handleSelectionChange}

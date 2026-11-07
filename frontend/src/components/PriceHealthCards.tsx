@@ -1,6 +1,7 @@
 /**
  * PriceHealthCards — Compact card-grid price health view.
  *
+ * - Bulk gap-fix bar (shared server-side job) with per-card job status
  * - Filter pills + search + sort toolbar
  * - Responsive grid of compact cards (as many per row as fit)
  * - PnL-style pagination bar (top + bottom) with chevron icons
@@ -8,25 +9,30 @@
  * - Info icon next to asset name opens AssetDetailSlidePanel
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Badge, type BadgeColorScheme, Button, Input, Spinner, Text,
 } from './ui/primitives';
 import {
     FiInfo, FiSearch, FiRefreshCw, FiX,
     FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight,
-    FiChevronDown, FiEdit3, FiList,
+    FiChevronDown, FiEdit3, FiList, FiSkipForward,
 } from 'react-icons/fi';
 import { usePriceHealth } from '../hooks/usePriceHealth';
-import { usePriceGapsSummary, PRICE_GAPS_QUERY_KEY, PRICE_GAPS_SUMMARY_QUERY_KEY } from '../hooks/usePriceGaps';
+import {
+    usePriceGapsSummary, useGapFixJob,
+    PRICE_GAPS_QUERY_KEY, PRICE_GAPS_SUMMARY_QUERY_KEY, GAP_FIX_JOB_QUERY_KEY,
+} from '../hooks/usePriceGaps';
 import { PRICE_TIMESERIES_QUERY_KEY, PRICE_HEALTH_QUERY_KEY } from '../hooks/usePriceHealth';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAssetDetailPanel } from '../contexts/AssetDetailPanelContext';
 import { GapFixPanel } from './GapFixPanel';
+import { GapFixJobBar } from './GapFixJobBar';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 import { Tooltip } from './ui/tooltip';
+import { toaster } from './ui/toaster';
 import { formatRelativeTime } from '../utils/dateUtils';
-import type { PriceHealthRow } from '../types';
+import type { GapFixAssetStatus, GapFixJobAsset, GapFixJobState, PriceHealthRow } from '../types';
 
 // ---------------------------------------------------------------------------
 // Lightweight sparkline — pure SVG, no deps, no HTTP fetch
@@ -73,6 +79,16 @@ const PILL_ACTIVE: Record<string, string> = {
     orange: 'bg-orange-600 text-white',
 };
 
+const JOB_STATUS_META: Record<GapFixAssetStatus, { label: string; scheme: BadgeColorScheme }> = {
+    pending: { label: 'Queued', scheme: 'gray' },
+    running: { label: 'Fetching', scheme: 'blue' },
+    done: { label: 'Fixed', scheme: 'green' },
+    partial: { label: 'Partial', scheme: 'orange' },
+    failed: { label: 'Failed', scheme: 'red' },
+    skipped: { label: 'Skipped', scheme: 'orange' },
+    cancelled: { label: 'Cancelled', scheme: 'gray' },
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -83,6 +99,8 @@ function formatPrice(price: number): string {
     if (price >= 0.0001) return price.toFixed(6);
     return price.toFixed(8);
 }
+
+const displayName = (row: PriceHealthRow) => row.label || row.symbol;
 
 // ---------------------------------------------------------------------------
 // Sort
@@ -100,13 +118,13 @@ function sortRows(rows: PriceHealthRow[], key: SortKey, gapMap: Map<number, numb
             }
             case 'gaps': return (gapMap.get(b.asset_id) ?? 0) - (gapMap.get(a.asset_id) ?? 0);
             case 'days_stale': return b.days_stale - a.days_stale;
-            case 'symbol': return a.symbol.localeCompare(b.symbol);
+            case 'symbol': return displayName(a).localeCompare(displayName(b));
             default: return 0;
         }
     });
 }
 
-type StatusFilter = 'all' | 'healthy' | 'warning' | 'stale' | 'gaps';
+export type PriceHealthFilter = 'all' | 'healthy' | 'warning' | 'stale' | 'gaps';
 
 // ---------------------------------------------------------------------------
 // Pagination
@@ -119,17 +137,45 @@ const DEFAULT_PAGE_SIZE = 25;
 // Component
 // ---------------------------------------------------------------------------
 
-export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => void }> = ({ onViewTable }) => {
+export interface PriceHealthCardsProps {
+    onViewTable?: (assetId: number) => void;
+    /** Restrict to these assets; null/undefined = all assets */
+    assetIds?: number[] | null;
+    defaultFilter?: PriceHealthFilter;
+    /** Switch to gaps, expand this asset's card and scroll to it */
+    focusAssetId?: number | null;
+    quoteAssetId?: number | null;
+    onJobFinished?: (job: GapFixJobState) => void;
+    /** Rendered at the start of the gap-fix bar (e.g. a scope toggle) */
+    toolbarStart?: React.ReactNode;
+    /** Custom asset name renderer (defaults to label, falling back to symbol) */
+    renderName?: (row: PriceHealthRow) => React.ReactNode;
+}
+
+export const PriceHealthCards: React.FC<PriceHealthCardsProps> = ({
+    onViewTable, assetIds, defaultFilter = 'all', focusAssetId, quoteAssetId, onJobFinished, toolbarStart, renderName,
+}) => {
     const { data, isLoading, error, refetch } = usePriceHealth();
     const [search, setSearch] = useState('');
-    const [filter, setFilter] = useState<StatusFilter>('all');
-    const [sortKey, setSortKey] = useState<SortKey>('status');
+    const [filter, setFilter] = useState<PriceHealthFilter>(focusAssetId != null ? 'gaps' : defaultFilter);
+    const [sortKey, setSortKey] = useState<SortKey>(defaultFilter === 'gaps' ? 'gaps' : 'status');
     const [page, setPage] = useState(0);         // 0-indexed like PnL
     const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
-    const [expandedId, setExpandedId] = useState<number | null>(null);
+    const [expandedId, setExpandedId] = useState<number | null>(focusAssetId ?? null);
+    const pendingFocusRef = useRef<number | null>(focusAssetId ?? null);
+    const scrollTargetRef = useRef<number | null>(null);
 
     const { openAssetPanel } = useAssetDetailPanel();
     const qc = useQueryClient();
+
+    const fix = useGapFixJob((finished) => {
+        const msg = `${finished.fetched_count} fetched, ${finished.failed_count} failed`;
+        if (finished.status === 'complete') toaster.success({ title: 'Gap fix complete', description: msg });
+        else if (finished.status === 'cancelled') toaster.info({ title: 'Gap fix cancelled', description: msg });
+        else if (finished.status === 'error') toaster.error({ title: 'Gap fix failed', description: finished.error ?? msg });
+        onJobFinished?.(finished);
+    });
+    const { job, isActive, skip } = fix;
 
     const handleCardRefresh = () => {
         qc.invalidateQueries({ queryKey: PRICE_HEALTH_QUERY_KEY });
@@ -138,23 +184,45 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
         qc.invalidateQueries({ queryKey: PRICE_TIMESERIES_QUERY_KEY });
     };
 
+    const handleRefreshAll = () => {
+        handleCardRefresh();
+        qc.invalidateQueries({ queryKey: GAP_FIX_JOB_QUERY_KEY });
+    };
+
+    // Scope
+    const scopeSet = useMemo(() => (assetIds ? new Set(assetIds) : null), [assetIds]);
+    const scopedItems = useMemo(
+        () => (data?.items ?? []).filter(r => !scopeSet || scopeSet.has(r.asset_id)),
+        [data?.items, scopeSet],
+    );
+
     // Gap summary
-    const allAssetIds = useMemo(() => (data?.items ?? []).map(r => r.asset_id), [data?.items]);
-    const { data: gapSummary } = usePriceGapsSummary(allAssetIds);
+    const { data: gapSummary, isLoading: gapSummaryLoading } = usePriceGapsSummary(assetIds ?? null);
     const gapMap = useMemo(() => {
         const m = new Map<number, number>();
-        if (gapSummary?.items) {
-            for (const item of gapSummary.items) {
-                if (item.total_missing_days > 0) m.set(item.asset_id, item.total_missing_days);
-            }
+        for (const item of gapSummary?.items ?? []) {
+            if (item.total_missing_days > 0) m.set(item.asset_id, item.total_missing_days);
         }
         return m;
     }, [gapSummary]);
+    const recap = useMemo(() => {
+        const items = (gapSummary?.items ?? []).filter(i => i.total_missing_days > 0);
+        return {
+            assets: items.length,
+            ranges: items.reduce((s, i) => s + i.gap_count, 0),
+            days: items.reduce((s, i) => s + i.total_missing_days, 0),
+        };
+    }, [gapSummary]);
+
+    // Job assets stay under the Gaps filter after their gaps are fixed
+    const jobById = useMemo(
+        () => new Map<number, GapFixJobAsset>((job && job.status !== 'idle' ? job.assets : []).map(a => [a.asset_id, a])),
+        [job],
+    );
 
     // Filter + search + sort
     const processed = useMemo(() => {
-        if (!data?.items) return [];
-        let items = data.items;
+        let items = scopedItems;
         if (search) {
             const q = search.toLowerCase();
             items = items.filter(r =>
@@ -163,11 +231,11 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
         }
         if (filter !== 'all') {
             items = filter === 'gaps'
-                ? items.filter(r => gapMap.has(r.asset_id))
+                ? items.filter(r => gapMap.has(r.asset_id) || jobById.has(r.asset_id))
                 : items.filter(r => r.status === filter);
         }
         return sortRows(items, sortKey, gapMap);
-    }, [data?.items, search, filter, sortKey, gapMap]);
+    }, [scopedItems, search, filter, sortKey, gapMap, jobById]);
 
     // Pagination
     const totalRows = processed.length;
@@ -180,17 +248,42 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
 
     React.useEffect(() => { setPage(0); }, [search, filter, sortKey]);
 
+    // Focus: switch to gaps, expand, jump to page, scroll into view
+    useEffect(() => {
+        if (focusAssetId == null) return;
+        pendingFocusRef.current = focusAssetId;
+        setFilter('gaps');
+        setSearch('');
+        setExpandedId(focusAssetId);
+    }, [focusAssetId]);
+
+    useEffect(() => {
+        const id = pendingFocusRef.current;
+        if (id == null) return;
+        const idx = processed.findIndex(r => r.asset_id === id);
+        if (idx < 0) return;
+        pendingFocusRef.current = null;
+        scrollTargetRef.current = id;
+        setPage(Math.floor(idx / pageSize));
+    }, [processed, pageSize]);
+
+    useEffect(() => {
+        const id = scrollTargetRef.current;
+        if (id == null || !pageItems.some(r => r.asset_id === id)) return;
+        scrollTargetRef.current = null;
+        requestAnimationFrame(() => {
+            document.querySelector(`[data-asset-card="${id}"]`)?.scrollIntoView({ block: 'center' });
+        });
+    }, [pageItems]);
+
     // Counts
-    const counts = useMemo(() => {
-        if (!data?.items) return { all: 0, healthy: 0, warning: 0, stale: 0, gaps: 0 };
-        return {
-            all: data.items.length,
-            healthy: data.summary.healthy,
-            warning: data.summary.warning,
-            stale: data.summary.stale,
-            gaps: gapMap.size,
-        };
-    }, [data, gapMap]);
+    const counts = useMemo(() => ({
+        all: scopedItems.length,
+        healthy: scopedItems.filter(r => r.status === 'healthy').length,
+        warning: scopedItems.filter(r => r.status === 'warning').length,
+        stale: scopedItems.filter(r => r.status === 'stale').length,
+        gaps: scopedItems.filter(r => gapMap.has(r.asset_id) || jobById.has(r.asset_id)).length,
+    }), [scopedItems, gapMap, jobById]);
 
     // ── Loading / Error / Empty ──────────────────────────────────────────
     if (isLoading) {
@@ -260,7 +353,7 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
     ) : null;
 
     // ── Filter pills ────────────────────────────────────────────────────
-    const pills: Array<{ key: StatusFilter; label: string; count: number; color: BadgeColorScheme }> = [
+    const pills: Array<{ key: PriceHealthFilter; label: string; count: number; color: BadgeColorScheme }> = [
         { key: 'all', label: 'All', count: counts.all, color: 'gray' },
         { key: 'healthy', label: 'Healthy', count: counts.healthy, color: 'green' },
         { key: 'warning', label: 'Warning', count: counts.warning, color: 'yellow' },
@@ -270,6 +363,16 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
 
     return (
         <div>
+            {/* ── Bulk gap fix ── */}
+            <GapFixJobBar
+                fix={fix}
+                recap={recap}
+                recapLoading={gapSummaryLoading}
+                scopeAssetIds={assetIds ?? null}
+                quoteAssetId={quoteAssetId}
+                leading={toolbarStart}
+            />
+
             {/* ── Toolbar: pills + search + sort + refresh ── */}
             <div className="mb-2 flex flex-wrap items-center gap-2">
                 {pills.map(p => {
@@ -287,20 +390,21 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
                 })}
                 <div className="flex-1" />
                 <div className="relative w-[160px]">
-                    <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 pl-7 text-xs" />
+                    <Input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="h-7 pl-7 text-xs" aria-label="Search assets" />
                     <div className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"><FiSearch size={12} /></div>
                 </div>
                 <select
                     value={sortKey}
                     onChange={e => setSortKey(e.target.value as SortKey)}
                     className="h-7 w-[120px] border border-gray-200 px-1 text-xs"
+                    aria-label="Sort assets"
                 >
                     <option value="status">Sort: Status</option>
                     <option value="gaps">Sort: Gaps</option>
                     <option value="days_stale">Sort: Stale</option>
                     <option value="symbol">Sort: A-Z</option>
                 </select>
-                <Button variant="outline" className="px-2 text-xs" onClick={() => refetch()}><FiRefreshCw size={12} /></Button>
+                <Button variant="outline" className="px-2 text-xs" onClick={handleRefreshAll} aria-label="Refresh price health"><FiRefreshCw size={12} /></Button>
             </div>
 
             {/* ── Top pagination ── */}
@@ -313,22 +417,32 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
             {/* ── Card grid ── */}
             {pageItems.length === 0 ? (
                 <div className="bg-gray-50 py-10 text-center">
-                    <Text className="text-gray-400">No assets match your criteria.</Text>
+                    <Text className="text-gray-400">
+                        {filter === 'gaps' && !search ? 'No price gaps 🎉' : 'No assets match your criteria.'}
+                    </Text>
                 </div>
             ) : (
                 <div className="flex flex-wrap gap-2">
-                    {pageItems.map(row => (
-                        <HealthCard
-                            key={row.asset_id}
-                            row={row}
-                            gapDays={gapMap.get(row.asset_id)}
-                            expanded={expandedId === row.asset_id}
-                            onToggleExpand={() => setExpandedId(prev => prev === row.asset_id ? null : row.asset_id)}
-                            onOpenPanel={() => openAssetPanel(row.asset_id)}
-                            onRefresh={handleCardRefresh}
-                            onViewTable={onViewTable}
-                        />
-                    ))}
+                    {pageItems.map(row => {
+                        const jobAsset = jobById.get(row.asset_id);
+                        const canSkip = isActive && !!jobAsset && (jobAsset.status === 'pending' || jobAsset.status === 'running');
+                        return (
+                            <HealthCard
+                                key={row.asset_id}
+                                row={row}
+                                name={renderName ? renderName(row) : displayName(row)}
+                                gapDays={gapMap.get(row.asset_id)}
+                                expanded={expandedId === row.asset_id}
+                                focused={focusAssetId === row.asset_id}
+                                jobAsset={jobAsset}
+                                onSkip={canSkip ? () => skip.mutate(row.asset_id) : undefined}
+                                onToggleExpand={() => setExpandedId(prev => prev === row.asset_id ? null : row.asset_id)}
+                                onOpenPanel={() => openAssetPanel(row.asset_id)}
+                                onRefresh={handleCardRefresh}
+                                onViewTable={onViewTable}
+                            />
+                        );
+                    })}
                 </div>
             )}
 
@@ -348,36 +462,45 @@ export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => voi
 
 interface HealthCardProps {
     row: PriceHealthRow;
+    name: React.ReactNode;
     gapDays?: number;
     expanded: boolean;
+    focused: boolean;
+    jobAsset?: GapFixJobAsset;
+    onSkip?: () => void;
     onToggleExpand: () => void;
     onOpenPanel: () => void;
     onRefresh: () => void;
     onViewTable?: (assetId: number) => void;
 }
 
-const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggleExpand, onOpenPanel, onRefresh, onViewTable }) => {
+const HealthCard: React.FC<HealthCardProps> = ({
+    row, name, gapDays, expanded, focused, jobAsset, onSkip, onToggleExpand, onOpenPanel, onRefresh, onViewTable,
+}) => {
     const cfg = STATUS_CONFIG[row.status] ?? STATUS_CONFIG.healthy;
     const hasGaps = gapDays != null && gapDays > 0;
     const noTx = row.status === 'no_transactions';
     const [showPriceSetter, setShowPriceSetter] = useState(false);
+    const jobMeta = jobAsset ? JOB_STATUS_META[jobAsset.status] : null;
 
     return (
         <div
-            className={`relative border bg-white px-2.5 py-1.5 transition-all duration-150 ${noTx ? 'opacity-60' : 'opacity-100'} ${expanded
-                    ? 'min-w-[185px] max-w-[660px] flex-[1_0_570px] border-orange-300 hover:border-orange-400 hover:shadow-xs'
-                    : 'min-w-[185px] max-w-[220px] flex-[1_0_185px] hover:shadow-xs ' + (noTx ? 'border-gray-100 hover:border-blue-300' : 'border-gray-200 hover:border-blue-300')
+            data-asset-card={row.asset_id}
+            className={`relative border bg-white px-2.5 py-1.5 transition-all duration-150 ${noTx ? 'opacity-60' : 'opacity-100'} ${focused ? 'ring-2 ring-blue-300' : ''} ${expanded
+                ? 'min-w-[185px] max-w-[660px] flex-[1_0_570px] border-orange-300 hover:border-orange-400 hover:shadow-xs'
+                : 'min-w-[185px] max-w-[220px] flex-[1_0_185px] hover:shadow-xs ' + (noTx ? 'border-gray-100 hover:border-blue-300' : 'border-gray-200 hover:border-blue-300')
                 }`}
         >
             {/* Row 1: name + icons + tiny chart */}
             <div className="mb-1 flex items-center gap-1.5">
-                <Text className="flex-1 truncate text-xs font-bold">
-                    {row.symbol}
-                </Text>
+                <div className="min-w-0 flex-1 truncate text-xs font-bold" title={row.label ? `${row.label} (${row.symbol})` : row.symbol}>
+                    {name}
+                </div>
                 {onViewTable && (
                     <Tooltip content="View price table">
                         <button
                             type="button"
+                            aria-label="View price table"
                             className="shrink-0 cursor-pointer text-gray-400 hover:text-blue-500"
                             onClick={e => { e.stopPropagation(); onViewTable(row.asset_id); }}
                         >
@@ -388,6 +511,7 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                 <Tooltip content="Open details">
                     <button
                         type="button"
+                        aria-label="Open details"
                         className="shrink-0 cursor-pointer text-gray-400 hover:text-blue-500"
                         onClick={e => { e.stopPropagation(); onOpenPanel(); }}
                     >
@@ -397,6 +521,7 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                 <Tooltip content="Set prices">
                     <button
                         type="button"
+                        aria-label="Set prices"
                         className="shrink-0 cursor-pointer text-gray-400 hover:text-blue-500"
                         onClick={e => { e.stopPropagation(); setShowPriceSetter(true); }}
                     >
@@ -406,6 +531,7 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                 <Tooltip content="Refresh">
                     <button
                         type="button"
+                        aria-label="Refresh"
                         className="shrink-0 cursor-pointer text-gray-300 hover:text-blue-500"
                         onClick={e => { e.stopPropagation(); onRefresh(); }}
                     >
@@ -416,6 +542,7 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                     <Tooltip content="Collapse">
                         <button
                             type="button"
+                            aria-label="Collapse"
                             className="shrink-0 cursor-pointer text-gray-400 hover:text-red-500"
                             onClick={e => { e.stopPropagation(); onToggleExpand(); }}
                         >
@@ -426,6 +553,7 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                     <Tooltip content="Expand">
                         <button
                             type="button"
+                            aria-label="Expand"
                             className="shrink-0 cursor-pointer text-gray-300 hover:text-blue-500"
                             onClick={e => { e.stopPropagation(); onToggleExpand(); }}
                         >
@@ -483,6 +611,37 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                 </Text>
             </div>
 
+            {/* Row 4: gap-fix job status */}
+            {jobAsset && jobMeta && (
+                <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                    <Badge colorScheme={jobMeta.scheme} className="text-[9px]">
+                        {jobAsset.status === 'running' && <Spinner size="xs" className="mr-1" />}
+                        {jobMeta.label}
+                    </Badge>
+                    {(jobAsset.fetched > 0 || jobAsset.failed > 0) && (
+                        <span className="text-gray-500">
+                            <span className="text-green-700">{jobAsset.fetched}</span> / <span className="text-red-700">{jobAsset.failed}</span>
+                        </span>
+                    )}
+                    {(jobAsset.note || jobAsset.last_error) && (
+                        <span className="min-w-0 max-w-[140px] truncate text-orange-700" title={[jobAsset.note, jobAsset.last_error].filter(Boolean).join(' — ')}>
+                            {jobAsset.note ?? jobAsset.last_error}
+                        </span>
+                    )}
+                    {onSkip && (
+                        <button
+                            type="button"
+                            aria-label={`Skip ${displayName(row)}`}
+                            title="Skip this asset"
+                            onClick={e => { e.stopPropagation(); onSkip(); }}
+                            className="ml-auto p-0.5 text-gray-500 hover:bg-orange-50 hover:text-orange-600"
+                        >
+                            <FiSkipForward size={11} />
+                        </button>
+                    )}
+                </div>
+            )}
+
             {/* Expanded section: chart + gap CTAs */}
             {expanded && (
                 <ExpandedSection assetId={row.asset_id} symbol={row.symbol} onOpenPriceSetter={() => setShowPriceSetter(true)} />
@@ -495,7 +654,7 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                     onClose={() => setShowPriceSetter(false)}
                     onSave={() => { setShowPriceSetter(false); onRefresh(); }}
                     assetId={row.asset_id}
-                    assetName={row.symbol}
+                    assetName={displayName(row)}
                     defaultDate={new Date().toISOString()}
                 />
             )}

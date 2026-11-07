@@ -30,6 +30,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
 from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning, UnitPattern, RealizedPnl, ensure_utc, utc_now
+from backend.services.pnl.warning_status import annotate_warnings
 from backend.services.pnl.config import PnLConfig, WarningType
 from backend.services.pnl.models import (
     PnLResult,
@@ -324,6 +325,8 @@ class PnLEngine:
                             },
                         )
                     )
+
+        annotate_warnings(result.warnings, self.config.warning_dust_threshold)
 
         log.info(
             "calculation_completed",

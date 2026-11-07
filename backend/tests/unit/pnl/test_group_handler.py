@@ -2248,3 +2248,64 @@ class TestZeroPriceResolution:
         assert not _is_zero_price_resolution(self._leg(Decimal("0"), "sell", [{"side": "SELL"}]))
         assert not _is_zero_price_resolution(self._leg(Decimal("0.5")))
         assert not _is_zero_price_resolution(self._leg(None))
+
+
+class TestPricedResolution:
+    """Winning prediction-market shares are valued by the payout (counter leg), not a market price."""
+
+    @staticmethod
+    def _leg(asset_id, qty, price=None, source_type="synthetic-close"):
+        from types import SimpleNamespace
+
+        tx = SimpleNamespace(price=price, source_transaction_type=source_type, tags=None)
+        return SimpleNamespace(
+            is_fee=False, asset_id=asset_id, quantity=Decimal(qty), date_time=None,
+            origin_transaction=tx, transaction=tx,
+        )
+
+    @staticmethod
+    def _fmv(value_by_asset):
+        from unittest.mock import MagicMock
+        from backend.services.pnl.fmv_service import FMVResult
+
+        fmv = MagicMock()
+
+        def get(leg, skip_on_error=True):
+            if leg.asset_id in value_by_asset:
+                return FMVResult(value=value_by_asset[leg.asset_id], success=True, source="coingecko")
+            return FMVResult(value=Decimal(0), success=False, source="fallback", error="no price")
+
+        fmv.get_fmv_in_base.side_effect = get
+        return fmv
+
+    def test_winning_close_uses_payout_value(self, fifo_config):
+        from backend.services.pnl.group_handler import _compute_proceeds
+
+        share = self._leg(42, "100", Decimal("1"))
+        usdc_in = self._leg(7, "100")
+        fmv = self._fmv({7: Decimal("86")})
+
+        proceeds, error, meta = _compute_proceeds(share, [usdc_in], [share], fmv, fifo_config)
+
+        assert proceeds == Decimal("86")
+        assert error is None
+        assert meta["source"] == "counter_leg"
+        assert all(c.args[0] is usdc_in for c in fmv.get_fmv_in_base.call_args_list)
+
+    def test_swap_without_price_falls_back_to_counter_leg(self, fifo_config):
+        from backend.services.pnl.group_handler import _compute_proceeds
+
+        token = self._leg(42, "10", source_type="swap")
+        usdc_in = self._leg(7, "50")
+        proceeds, error, meta = _compute_proceeds(token, [usdc_in], [token], self._fmv({7: Decimal("43")}), fifo_config)
+
+        assert (proceeds, error, meta["source"]) == (Decimal("43"), None, "counter_leg")
+
+    def test_no_counter_leg_keeps_missing_price_error(self, fifo_config):
+        from backend.services.pnl.group_handler import _compute_proceeds
+
+        token = self._leg(42, "10", source_type="swap")
+        proceeds, error, _ = _compute_proceeds(token, [], [token], self._fmv({}), fifo_config)
+
+        assert proceeds == Decimal("0")
+        assert error

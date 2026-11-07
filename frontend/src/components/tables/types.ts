@@ -164,6 +164,9 @@ export interface RowAction<T extends Transaction = Transaction> {
      * Default: 'gray'
      */
     colorPalette?: string;
+
+    /** Where to render the action: the trailing actions column (default) or next to the TX id. */
+    placement?: 'actions' | 'id';
 }
 
 // ============================================================================

@@ -137,6 +137,27 @@ class DismissSuggestionRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class CompletionCandidateResponse(BaseModel):
+    transaction_id: int
+    date_time: Optional[str]
+    account_id: Optional[int]
+    account_name: Optional[str]
+    asset_symbol: str
+    quantity: float
+    confidence: float
+    reason: str
+
+
+class BrokenBundleResponse(BaseModel):
+    bundle_id: int
+    label: Optional[str]
+    pattern: Optional[str]
+    created_at: Optional[str]
+    issue: str = Field(..., description="empty | missing_inflow | missing_outflow")
+    transaction_ids: List[int]
+    candidates: List[CompletionCandidateResponse] = []
+
+
 class DismissedSuggestionResponse(BaseModel):
     """Response model for a dismissed suggestion."""
 
@@ -360,6 +381,38 @@ def list_dismissed_suggestions(
             dismissed_at=d.dismissed_at.isoformat() if d.dismissed_at else "",
         )
         for d in dismissed_list
+    ]
+
+
+@router.get("/broken", response_model=List[BrokenBundleResponse])
+def list_broken_bundles(session: Session = Depends(get_db)):
+    """Confirmed bundles that are empty or lost one side, with standalone transactions that could complete them."""
+    from backend.services.bundle_health import BundleHealthService
+
+    account_names = {a.id: a.name for a in session.exec(select(Account)).all()}
+    return [
+        BrokenBundleResponse(
+            bundle_id=b.bundle_id,
+            label=b.label,
+            pattern=b.pattern,
+            created_at=b.created_at.isoformat() if b.created_at else None,
+            issue=b.issue,
+            transaction_ids=b.transaction_ids,
+            candidates=[
+                CompletionCandidateResponse(
+                    transaction_id=c.transaction_id,
+                    date_time=c.date_time.isoformat() if c.date_time else None,
+                    account_id=c.account_id,
+                    account_name=account_names.get(c.account_id),
+                    asset_symbol=c.asset_symbol,
+                    quantity=c.quantity,
+                    confidence=c.confidence,
+                    reason=c.reason,
+                )
+                for c in b.candidates
+            ],
+        )
+        for b in BundleHealthService(session).find_broken()
     ]
 
 

@@ -18,6 +18,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { FiX, FiFileText } from 'react-icons/fi';
+import { LuLocateFixed } from 'react-icons/lu';
+import { useShowInAllTransactions } from '../hooks/useShowInAllTransactions';
 import { Transaction, Account, API_URL } from '../types';
 import { TransactionSidePanel } from './TransactionSidePanel';
 import { Button, Spinner } from './ui/primitives';
@@ -57,6 +59,7 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
     const [fetchedTransaction, setFetchedTransaction] = useState<Transaction | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const showInAllTransactions = useShowInAllTransactions();
 
     // Determine which transaction to display
     const transaction = propTransaction || fetchedTransaction;
@@ -118,9 +121,25 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
                             TX #{transaction?.id || transactionId || '...'}
                         </span>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={onClose} className="p-1">
-                        <FiX size={16} />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                        {transaction && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="gap-1 p-1 text-xs text-slate-600"
+                                title="Open in All transactions, with the transactions around it"
+                                onClick={() => {
+                                    onClose();
+                                    showInAllTransactions(transaction.id, transaction.date_time);
+                                }}
+                            >
+                                <LuLocateFixed size={14} /> Show in context
+                            </Button>
+                        )}
+                        <Button variant="ghost" size="sm" onClick={onClose} className="p-1">
+                            <FiX size={16} />
+                        </Button>
+                    </div>
                 </div>
 
                 {/* Content */}

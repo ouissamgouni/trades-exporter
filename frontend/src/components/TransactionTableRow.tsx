@@ -153,6 +153,8 @@ export interface TransactionRowProps {
     callbacks: TransactionRowCallbacks;
     /** 'time' when rendered under a day header */
     dateMode?: 'full' | 'time';
+    /** Highlight this row (e.g. opened via "Show in All transactions") */
+    isFocused?: boolean;
 }
 
 // ========== Memoized component ==========
@@ -182,6 +184,7 @@ function arePropsEqual(prev: TransactionRowProps, next: TransactionRowProps): bo
     if (prev.batchSuggestionsMap !== next.batchSuggestionsMap) return false;
     if (prev.showColumn !== next.showColumn) return false;
     if (prev.dateMode !== next.dateMode) return false;
+    if (prev.isFocused !== next.isFocused) return false;
 
     return true;
 }
@@ -200,7 +203,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
         openDuplicateTxId, hoveredDuplicateGroup,
         hoveredBundleId, openBundleTxId, bundleColorMap,
         editInputRef, escapePressedRef, editValuesRef,
-        callbacks, dateMode = 'full',
+        callbacks, dateMode = 'full', isFocused = false,
     } = props;
 
     const {
@@ -270,7 +273,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
     return (
         <React.Fragment key={tx.id}>
             <tr
-                className="group bg-[var(--row-bg)] transition-colors hover:bg-blue-50"
+                data-tx-id={tx.id}
+                className={cn('group bg-[var(--row-bg)] transition-colors hover:bg-blue-50', isFocused && 'outline outline-2 -outline-offset-2 outline-amber-400')}
                 style={{ ['--row-bg' as string]: rowBgColor } as React.CSSProperties}
                 onMouseEnter={() => {
                     if (suggestionEntry) setHoveredSuggestionGroup(suggestionEntry.groupIndex);
@@ -402,6 +406,25 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                         >
                             #{tx.id}
                         </span>
+                        {additionalRowActions.filter(a => a.placement === 'id').map(action => {
+                            if (action.isVisible && !action.isVisible(tx as Transaction)) return null;
+                            return (
+                                <button
+                                    key={action.id}
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); action.onClick(tx as Transaction); }}
+                                    disabled={action.isDisabled ? action.isDisabled(tx as Transaction) : false}
+                                    title={action.label}
+                                    aria-label={action.label}
+                                    className={cn(
+                                        'flex shrink-0 items-center p-0 disabled:cursor-not-allowed disabled:opacity-50',
+                                        PLUGIN_ACTION_COLORS[action.colorPalette || 'gray'] || PLUGIN_ACTION_COLORS.gray
+                                    )}
+                                >
+                                    {action.icon}
+                                </button>
+                            );
+                        })}
                     </div>
                 </td>
                 {showColumn('id') && (
@@ -1884,7 +1907,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 </>
                             )}
                             {/* Additional plugin row actions */}
-                            {additionalRowActions.map(action => {
+                            {additionalRowActions.filter(a => a.placement !== 'id').map(action => {
                                 const isVisible = action.isVisible ? action.isVisible(tx as Transaction) : true;
                                 const isDisabled = action.isDisabled ? action.isDisabled(tx as Transaction) : false;
                                 if (!isVisible) return null;

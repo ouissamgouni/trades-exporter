@@ -57,6 +57,52 @@ def _is_zero_price_resolution(disposal: CalculationUnitLeg) -> bool:
     return _flatten_tags(getattr(tx, "tags", None)).get("synthetic") is True
 
 
+def _is_priced_resolution(disposal: CalculationUnitLeg) -> bool:
+    """Synthetic close of a resolved outcome at a non-zero price (e.g. winning Polymarket share at 1 USDC)."""
+    tx = getattr(disposal, "origin_transaction", None) or getattr(disposal, "transaction", None)
+    price = getattr(tx, "price", None)
+    if not isinstance(price, (int, float, Decimal)) or price <= 0:
+        return False
+    if getattr(tx, "source_transaction_type", None) == "synthetic-close":
+        return True
+    return _flatten_tags(getattr(tx, "tags", None)).get("synthetic") is True
+
+
+def _counter_leg_proceeds(
+    disposal: CalculationUnitLeg,
+    inflows: List[CalculationUnitLeg],
+    all_non_fee_outflows: List[CalculationUnitLeg],
+    fmv_service: FMVService,
+) -> Optional[tuple[Decimal, dict]]:
+    """Value a disposal by what was received (FMV of the inflows), pro-rata by quantity.
+
+    Only applies when all non-fee outflows are the same asset, otherwise the
+    inflows cannot be attributed to this disposal.
+    """
+    if not inflows or len({o.asset_id for o in all_non_fee_outflows if o.asset_id}) != 1:
+        return None
+    total_value = Decimal(0)
+    last = None
+    for inflow in inflows:
+        result = fmv_service.get_fmv_in_base(inflow, skip_on_error=True)
+        if not result.success:
+            return None
+        total_value += result.value
+        last = result
+    qty = Decimal(disposal.quantity) if disposal.quantity else Decimal(0)
+    total_qty = sum((Decimal(o.quantity) for o in all_non_fee_outflows if o.quantity), Decimal(0))
+    if qty <= 0 or total_qty <= 0:
+        return None
+    proceeds = total_value * qty / total_qty
+    metadata = {
+        "source": "counter_leg",
+        "price": proceeds / qty,
+        "price_source": f"counter_leg:{last.source}" if last else "counter_leg",
+        "timestamp": disposal.date_time,
+    }
+    return proceeds, metadata
+
+
 def handle_unit(
     unit: CalculationUnit,
     lot_manager: LotManager,
@@ -1178,9 +1224,20 @@ def _compute_proceeds(
         }
         return Decimal("0"), None, metadata
 
+    # Resolved outcome tokens have no market price after resolution: value what was paid out.
+    if _is_priced_resolution(disposal):
+        counter = _counter_leg_proceeds(disposal, inflows, all_non_fee_outflows, fmv_service)
+        if counter:
+            return counter[0], None, counter[1]
+
     # Swap or payment: proceeds = FMV of disposed asset
     fmv_result = fmv_service.get_fmv_in_base(disposal, skip_on_error=True)
     error = fmv_result.error if not fmv_result.success else None
+
+    if error:
+        counter = _counter_leg_proceeds(disposal, inflows, all_non_fee_outflows, fmv_service)
+        if counter:
+            return counter[0], None, counter[1]
     
     metadata = {
         "source": "fmv_lookup",

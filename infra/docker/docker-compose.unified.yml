@@ -29,7 +29,7 @@ services:
       - app_network
 
   backend:
-    image: trades-exporter-backend:${IMAGE_TAG}
+    image: trades-exporter-backend:${RUN_TAG:-${IMAGE_TAG}}
     container_name: trades_backend_${ENV_NAME}
     env_file:
       - ../../config/base.env
@@ -59,7 +59,7 @@ services:
       - app_network
 
   frontend:
-    image: trades-exporter-frontend:${IMAGE_TAG}
+    image: trades-exporter-frontend:${RUN_TAG:-${IMAGE_TAG}}
     container_name: trades_frontend_${ENV_NAME}
     ports:
       - "${FRONTEND_PORT}:80"

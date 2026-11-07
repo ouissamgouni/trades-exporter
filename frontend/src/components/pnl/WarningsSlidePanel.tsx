@@ -20,9 +20,20 @@ interface WarningsFilterOptions {
     warning_types: FilterOption[];
     levels: FilterOption[];
     assets: FilterOption[];
+    statuses?: FilterOption[];
 }
 
+type WarningStatus = 'open' | 'acknowledged' | 'dust';
+
+const STATUS_HINT: Record<WarningStatus, string> = {
+    open: 'Warnings that may need action',
+    acknowledged: 'Reviewed and accepted — hidden from counts until the amount changes',
+    dust: 'Below the dust threshold (negligible amount) — hidden from counts',
+};
+
 interface WarningEntry {
+    id?: number;
+    status?: WarningStatus;
     warning_type: string;
     message: string;
     timestamp: string;
@@ -83,6 +94,8 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_warnings_slide' });
 
+    const [statusFilter, setStatusFilter] = useState<WarningStatus>('open');
+    const [ackBusy, setAckBusy] = useState(false);
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [levelFilter, setLevelFilter] = useState<string>('all');
     const [assetFilter, setAssetFilter] = useState<string>('all');
@@ -95,13 +108,13 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
     }, [searchInput]);
 
     const serverParams = useMemo(() => {
-        const params: Record<string, string | number | boolean | undefined> = { ...txFilterParams };
+        const params: Record<string, string | number | boolean | undefined> = { ...txFilterParams, status: statusFilter };
         if (typeFilter !== 'all') params.warning_type = typeFilter;
         if (levelFilter !== 'all') params.level = levelFilter;
         if (assetFilter !== 'all') params.asset_id = Number(assetFilter);
         if (debouncedSearch) params.search = debouncedSearch;
         return params;
-    }, [txFilterParams, typeFilter, levelFilter, assetFilter, debouncedSearch]);
+    }, [txFilterParams, statusFilter, typeFilter, levelFilter, assetFilter, debouncedSearch]);
 
     const prevRef = React.useRef(serverParams);
     useEffect(() => {
@@ -129,11 +142,31 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                 if (v !== undefined && v !== '') qs.set(k, String(v));
             });
         }
+        qs.set('status', statusFilter);
         fetch(`${API_URL}/pnl/versions/${versionId}/warnings/filter-options?${qs}`)
             .then(r => r.json())
             .then(setFilterOpts)
             .catch(() => { });
-    }, [versionId, txFilterParams, isOpen]);
+    }, [versionId, txFilterParams, isOpen, statusFilter, ackBusy]);
+
+    const setAcknowledged = useCallback(async (ids: number[], acknowledge: boolean) => {
+        if (ids.length === 0) return;
+        setAckBusy(true);
+        try {
+            const res = await fetch(`${API_URL}/pnl/warnings/${acknowledge ? 'acknowledge' : 'unacknowledge'}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ warning_ids: ids }),
+            });
+            if (!res.ok) throw new Error();
+            toaster.success({ title: acknowledge ? `Acknowledged ${ids.length} warning(s)` : `Reopened ${ids.length} warning(s)` });
+            refetch();
+        } catch {
+            toaster.error({ title: acknowledge ? 'Acknowledge failed' : 'Reopen failed' });
+        } finally {
+            setAckBusy(false);
+        }
+    }, [refetch]);
 
     const hasAnyFilter = typeFilter !== 'all' || levelFilter !== 'all' || assetFilter !== 'all' || !!debouncedSearch;
 
@@ -191,6 +224,41 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
 
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Warnings" width="900px">
+            <div className="mb-2 flex flex-wrap items-center gap-1" role="tablist" aria-label="Warning status">
+                {(['open', 'acknowledged', 'dust'] as WarningStatus[]).map(st => {
+                    const count = filterOpts?.statuses?.find(o => o.value === st)?.count;
+                    const active = statusFilter === st;
+                    return (
+                        <button
+                            key={st}
+                            type="button"
+                            role="tab"
+                            aria-selected={active}
+                            title={STATUS_HINT[st]}
+                            onClick={() => setStatusFilter(st)}
+                            className={`border px-2 py-0.5 text-xs ${active ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                        >
+                            {st === 'open' ? 'Open' : st === 'acknowledged' ? 'Acknowledged' : 'Dust'}
+                            {count !== undefined && ` (${count})`}
+                        </button>
+                    );
+                })}
+                {warnings.length > 0 && (
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        colorScheme="gray"
+                        className="ml-auto"
+                        loading={ackBusy}
+                        onClick={() => setAcknowledged(
+                            warnings.map((w: WarningEntry) => w.id).filter((id): id is number => id != null),
+                            statusFilter !== 'acknowledged',
+                        )}
+                    >
+                        {statusFilter === 'acknowledged' ? 'Reopen all shown' : 'Acknowledge all shown'}
+                    </Button>
+                )}
+            </div>
             <div className="mb-3 flex flex-wrap items-center gap-2">
                 <div className="flex items-center gap-1 bg-slate-50 px-2 py-0.5">
                     <FiSearch size={12} color="gray" />
@@ -355,6 +423,14 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                                                         loading={settling}
                                                                         onClick={() => settleOne(lotId)}>
                                                                         Settle
+                                                                    </Button>
+                                                                )}
+                                                                {w.id != null && (
+                                                                    <Button size="sm" variant="ghost" colorScheme="gray"
+                                                                        disabled={ackBusy}
+                                                                        title={w.status === 'acknowledged' ? 'Move back to open warnings' : 'Mark as reviewed; hidden from counts until the amount changes'}
+                                                                        onClick={() => setAcknowledged([w.id!], w.status !== 'acknowledged')}>
+                                                                        {w.status === 'acknowledged' ? 'Reopen' : 'Acknowledge'}
                                                                     </Button>
                                                                 )}
                                                             </div>

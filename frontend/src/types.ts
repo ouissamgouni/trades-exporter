@@ -1135,6 +1135,9 @@ export interface TransactionStatusResponse {
     linkage_issues_count: number;
     transfer_issues_count: number;
     duplicate_count: number;
+    broken_bundles_count?: number;
+    /** Dismissed transfer issues (not part of total_issues) */
+    dismissed_transfer_issues_count?: number;
 
     // Aggregated totals
     total_issues: number;

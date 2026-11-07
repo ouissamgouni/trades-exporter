@@ -21,8 +21,8 @@ Quote Currency Handling:
 """
 
 import os
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from datetime import date, datetime, timedelta
+from typing import List, Optional, Tuple
 
 import requests
 
@@ -62,12 +62,17 @@ class AlphaVantagePriceGetter(BasePriceGetter):
     name = "alphavantage"
 
     DEFAULT_NATIVE_QUOTE = "USD"
+    supports_range = True
 
     def __init__(self):
         """Initialize Alpha Vantage price getter."""
         super().__init__()
         self._api_key = os.environ.get("ALPHAVANTAGE_API_KEY", "demo")
         self._session = requests.Session()
+        # outputsize=full is premium-only; free keys get the last 100 trading days ("compact").
+        self._outputsize = os.environ.get("ALPHAVANTAGE_OUTPUTSIZE", "compact").lower()
+        if self._outputsize != "full":
+            self.max_history_days = 140
 
     def _get_api_key(self, config: Optional[PriceGetterConfig] = None) -> str:
         """Get API key from config or environment."""
@@ -132,11 +137,13 @@ class AlphaVantagePriceGetter(BasePriceGetter):
                 reason=PriceErrorReason.API_RATE_LIMITED,
             )
 
-        if "Information" in data and "API rate limit" in data.get("Information", ""):
+        info = data.get("Information")
+        if info:
+            rate_limited = "rate limit" in info.lower() or "sparingly" in info.lower()
             raise PriceGetterError(
-                message=f"[alphavantage] Rate limited: {data['Information']}",
+                message=f"[alphavantage] {info}",
                 getter_name=self.name,
-                reason=PriceErrorReason.API_RATE_LIMITED,
+                reason=PriceErrorReason.API_RATE_LIMITED if rate_limited else PriceErrorReason.API_ERROR,
             )
 
         return data
@@ -222,7 +229,7 @@ class AlphaVantagePriceGetter(BasePriceGetter):
                 data = self._fetch_api({
                     "function": "TIME_SERIES_DAILY",
                     "symbol": ticker,
-                    "outputsize": "full",  # Get full history
+                    "outputsize": self._outputsize,
                 }, api_key)
                 ts = data.get("Time Series (Daily)", {})
 
@@ -263,3 +270,47 @@ class AlphaVantagePriceGetter(BasePriceGetter):
             timestamp=dt,
             ticker_used=ticker,
         )
+
+    def get_historical_prices_range(
+        self,
+        asset: Asset,
+        start: date,
+        end: date,
+        config: Optional[PriceGetterConfig] = None,
+    ) -> List[PriceResult]:
+        """The daily endpoints return the full series anyway: one request covers the whole range."""
+        ticker, native_quote = self._resolve_ticker_with_quote(asset, config)
+        api_key = self._get_api_key(config)
+        is_crypto = self._is_crypto(asset)
+        if is_crypto:
+            data = self._fetch_api({
+                "function": "DIGITAL_CURRENCY_DAILY",
+                "symbol": ticker,
+                "market": native_quote,
+            }, api_key)
+            ts = data.get("Time Series (Digital Currency Daily)", {})
+        else:
+            data = self._fetch_api({
+                "function": "TIME_SERIES_DAILY",
+                "symbol": ticker,
+                "outputsize": self._outputsize,
+            }, api_key)
+            ts = data.get("Time Series (Daily)", {})
+
+        bars: List[PriceResult] = []
+        for day_str, day_data in ts.items():
+            d = date.fromisoformat(day_str)
+            if not start <= d <= end:
+                continue
+            price_str = day_data.get("4. close")
+            if is_crypto:
+                price_str = day_data.get(f"4a. close ({native_quote})") or price_str
+            if price_str:
+                bars.append(PriceResult(
+                    price=float(price_str),
+                    quote_currency=native_quote,
+                    source="alphavantage",
+                    timestamp=datetime.combine(d, datetime.min.time()),
+                    ticker_used=ticker,
+                ))
+        return sorted(bars, key=lambda b: b.timestamp)

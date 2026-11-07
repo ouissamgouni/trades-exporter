@@ -20,6 +20,7 @@ import { ColumnPlugin, TableConfig } from '../types';
 import { presetToVisibility } from '../useTransactionsTable';
 import { API_URL, Asset, Transaction, TransactionIssue } from '../../../types';
 import { Tooltip } from '../../ui/tooltip';
+import { useShowInContextRowAction } from '../rowActions';
 
 // ============================================================================
 // Types
@@ -93,6 +94,9 @@ export const AssetLinkageTable: React.FC<AssetLinkageTableProps> = ({
             } as LinkageIssuesResponse;
         },
     });
+
+    const showInContextAction = useShowInContextRowAction();
+    const rowActions = useMemo(() => [showInContextAction], [showInContextAction]);
 
     const issues = issuesData?.issues ?? [];
     const totalCount = issuesData?.pagination.total_count ?? 0;
@@ -199,6 +203,7 @@ export const AssetLinkageTable: React.FC<AssetLinkageTableProps> = ({
             showBundles={false}
             showSuggestions={false}
             additionalColumns={additionalColumns}
+            additionalRowActions={rowActions}
             config={tableConfig}
         />
     );

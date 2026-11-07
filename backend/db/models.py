@@ -2421,6 +2421,31 @@ class PnlWarning(SQLModel, table=True):
         return self.unit.version if self.unit else None
 
 
+class PnlWarningAck(SQLModel, table=True):
+    """User acknowledgement of a P&L warning, kept across recalculations.
+
+    Matched to regenerated warnings by (warning_type, transaction_id, asset_id,
+    fingerprint). The fingerprint encodes the warning's value, so an
+    acknowledged warning resurfaces when its amount changes. No FK on
+    transaction_id: acknowledgements must survive transaction re-creation.
+    """
+
+    __tablename__ = "pnl_warning_acks"
+    __table_args__ = (
+        UniqueConstraint(
+            "warning_type", "transaction_id", "asset_id", "fingerprint", name="uq_pnl_warning_ack"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    warning_type: str = Field(nullable=False)
+    transaction_id: Optional[int] = Field(default=None, index=True)
+    asset_id: Optional[int] = Field(default=None)
+    fingerprint: str = Field(default="", nullable=False)
+    note: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class CostLotEvent(SQLModel, table=True):
     """
     Event-sourced audit trail for cost lot lifecycle.

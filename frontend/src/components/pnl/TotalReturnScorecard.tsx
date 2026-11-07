@@ -443,6 +443,8 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
 
     const visibleTop = [...topItems].sort(sortFn).slice(0, performerCount);
     const visibleFlop = [...flopItems].sort(sortFn).slice(0, performerCount);
+    const topTotal = performerTotal(topItems, performerSort, baseCurrency, displayFormat);
+    const flopTotal = performerTotal(flopItems, performerSort, baseCurrency, displayFormat);
     const maxAbsReturn = Math.max(
         ...visibleTop.map(p => performerBarValue(p, performerSort)),
         ...visibleFlop.map(p => performerBarValue(p, performerSort)),
@@ -694,9 +696,16 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         <div className="grid grid-cols-2 gap-2">
                                             {/* Best */}
                                             <div>
-                                                <div className="mb-1 flex items-center gap-1">
-                                                    <FiTrendingUp size={11} color="#38A169" />
-                                                    <span className="text-[10px] font-semibold text-green-600">Best</span>
+                                                <div className="mb-1 flex items-center justify-between gap-1">
+                                                    <div className="flex items-center gap-1">
+                                                        <FiTrendingUp size={14} color="#38A169" />
+                                                        <span className="text-sm font-semibold text-green-600">Best</span>
+                                                    </div>
+                                                    {topTotal && (
+                                                        <span className="text-[10px] text-gray-500">
+                                                            Total <span className="font-semibold text-green-600">{topTotal}</span>
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {visibleTop.length === 0 ? (
                                                     <div className="text-[10px] text-gray-400">No positive returns</div>
@@ -724,9 +733,16 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
 
                                             {/* Worst */}
                                             <div>
-                                                <div className="mb-1 flex items-center gap-1">
-                                                    <FiTrendingDown size={11} color="#E53E3E" />
-                                                    <span className="text-[10px] font-semibold text-red-600">Worst</span>
+                                                <div className="mb-1 flex items-center justify-between gap-1">
+                                                    <div className="flex items-center gap-1">
+                                                        <FiTrendingDown size={14} color="#E53E3E" />
+                                                        <span className="text-sm font-semibold text-red-600">Worst</span>
+                                                    </div>
+                                                    {flopTotal && (
+                                                        <span className="text-[10px] text-gray-500">
+                                                            Total <span className="font-semibold text-red-600">{flopTotal}</span>
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {visibleFlop.length === 0 ? (
                                                     <div className="text-[10px] text-gray-400">No negative returns</div>
@@ -792,6 +808,22 @@ function performerPrimaryValue(item: PerformerItem, sortBy: PerformerSort, baseC
         case 'market_value': return fmtCurrency(item.marketValue, baseCurrency);
         case 'efficiency': return item.efficiency.toFixed(2) + 'x';
         default: return fmtCurrencySigned(item.totalReturn, baseCurrency);
+    }
+}
+
+/** Total across all listed performers (not only the visible slice); null when a sum is meaningless. */
+function performerTotal(items: PerformerItem[], sortBy: PerformerSort, baseCurrency: string, display: PerformerDisplay): string | null {
+    if (items.length === 0 || sortBy === 'efficiency') return null;
+    if (display === '%') {
+        const cost = items.reduce((acc, p) => acc + p.costBasis, 0);
+        if (cost <= 0) return null;
+        const pct = (items.reduce((acc, p) => acc + p.totalReturn, 0) / cost) * 100;
+        return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+    }
+    switch (sortBy) {
+        case 'unrealized': return fmtCurrencySigned(items.reduce((acc, p) => acc + p.unrealizedPnl, 0), baseCurrency);
+        case 'market_value': return fmtCurrency(items.reduce((acc, p) => acc + p.marketValue, 0), baseCurrency);
+        default: return fmtCurrencySigned(items.reduce((acc, p) => acc + p.totalReturn, 0), baseCurrency);
     }
 }
 

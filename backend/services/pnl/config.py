@@ -51,6 +51,8 @@ class PnLConfig:
 
     # Tolerance settings
     residual_tolerance_pct: Decimal = Decimal("0.05")  # 5% tolerance
+    # Warnings worth less than this (base currency) are classified as dust, not open issues
+    warning_dust_threshold: Decimal = Decimal("0.01")
     allow_negative_balances: bool = False
 
     # Taxability settings

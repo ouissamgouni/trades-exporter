@@ -4,14 +4,15 @@ import threading
 import time
 import copy
 from datetime import date, datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Collection, Dict, List, Optional, Set, Tuple
 
 from sqlmodel import Session, select
 
 from backend.config.loader import configure_logging, load_settings
 from backend.db.database import get_engine
 from backend.db.models import Asset, NormalizedTransaction
-from backend.services.price_getters.base import PriceResult
+from backend.services.price_getters import get_price_getter
+from backend.services.price_getters.base import PriceGetterConfig, PriceResult
 from backend.services.price_service import (
     GapRange,
     PriceService,
@@ -40,14 +41,87 @@ def missing_dates_for_gaps(gaps: List[GapRange], is_crypto: bool) -> List[date]:
     return sorted(dates)
 
 
-def fetch_day_price(svc: PriceService, asset_id: int, d: date) -> PriceResult:
+def fetch_day_price(
+    svc: PriceService,
+    asset_id: int,
+    d: date,
+    exclude_getters: Optional[Collection[str]] = None,
+) -> PriceResult:
     dt = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
     return svc.get_price_with_fallback(
         asset_id=asset_id,
         dt=dt,
         use_fallback=False,
         max_timeout_seconds=DAY_FETCH_TIMEOUT_SECONDS,
+        exclude_getters=exclude_getters,
     )
+
+
+def _range_plan(
+    session: Session, svc: PriceService, asset: Asset
+) -> List[Tuple[str, PriceGetterConfig]]:
+    """Leading getters (priority order) that support period requests; stops at the first that doesn't."""
+    plan: List[Tuple[str, PriceGetterConfig]] = []
+    for name, config in svc.resolver.resolve(session, asset):
+        try:
+            if not get_price_getter(name).supports_range:
+                break
+        except Exception:
+            break
+        plan.append((name, config))
+    return plan
+
+
+def prefill_with_ranges(
+    session: Session,
+    svc: PriceService,
+    missing: Dict[int, List[date]],
+    already_tried: Optional[Dict[int, Set[str]]] = None,
+) -> Tuple[Dict[int, Dict[date, PriceResult]], Dict[int, Set[str]]]:
+    """
+    Fill missing dates with period requests before any per-day fetch. Assets sharing
+    the same next getter are batched into one call (multi-symbol APIs such as
+    marketstack then cost one request for all of them).
+
+    Returns the filled prices and, per asset, the getters already asked, which the
+    per-day pass should skip to save request quota.
+    """
+    remaining = {aid: set(dates) for aid, dates in missing.items() if dates}
+    assets: Dict[int, Asset] = {}
+    plans: Dict[int, List[Tuple[str, PriceGetterConfig]]] = {}
+    for aid in remaining:
+        asset = session.get(Asset, aid)
+        if asset is not None:
+            assets[aid] = asset
+            skip = (already_tried or {}).get(aid, set())
+            plans[aid] = [p for p in _range_plan(session, svc, asset) if p[0] not in skip]
+
+    filled: Dict[int, Dict[date, PriceResult]] = {}
+    tried: Dict[int, Set[str]] = {}
+    step = 0
+    while True:
+        groups: Dict[str, List[Tuple[Asset, PriceGetterConfig, List[date]]]] = {}
+        for aid, plan in plans.items():
+            if step < len(plan) and remaining[aid]:
+                name, config = plan[step]
+                groups.setdefault(name, []).append(
+                    (assets[aid], config, sorted(remaining[aid]))
+                )
+        if not groups:
+            break
+        for name, group in groups.items():
+            for asset, _, _ in group:
+                tried.setdefault(asset.asset_id, set()).add(name)
+            try:
+                got = svc.fill_missing_range(name, group)
+            except Exception as e:
+                log.warning(f"Range fill via {name} failed: {str(e)[:200]}")
+                continue
+            for aid, by_date in got.items():
+                filled.setdefault(aid, {}).update(by_date)
+                remaining[aid] -= by_date.keys()
+        step += 1
+    return filled, tried
 
 
 def _now_iso() -> str:
@@ -199,6 +273,8 @@ class GapFixJobService:
         svc = PriceService(
             session=session, base_currency=load_settings().get("base_currency", "EUR")
         )
+        if not self._cancel.is_set():
+            self._prefill(session, svc, work)
         for index, item in enumerate(work):
             if self._cancel.is_set():
                 break
@@ -220,6 +296,29 @@ class GapFixJobService:
             )
             self._log("info", "Cancelled" if cancelled else "Complete")
 
+    def _prefill(self, session: Session, svc: PriceService, work: List[Dict[str, Any]]):
+        filled, tried = prefill_with_ranges(
+            session, svc, {w["asset_id"]: w["_dates"] for w in work}
+        )
+        with self._lock:
+            for index, item in enumerate(work):
+                aid = item["asset_id"]
+                item["_exclude"] = tried.get(aid, set())
+                got = filled.get(aid)
+                if not got:
+                    continue
+                item["_dates"] = [d for d in item["_dates"] if d not in got]
+                row = self._state["assets"][index]
+                row["fetched"] += len(got)
+                self._state["fetched_count"] += len(got)
+                self._state["processed_days"] += len(got)
+                sources = ", ".join(sorted({r.source for r in got.values()}))
+                self._log(
+                    "info",
+                    f"{item['label'] or item['symbol']}: {len(got)} day(s) filled by period request ({sources})",
+                    aid,
+                )
+
     def _process_asset(self, svc: PriceService, index: int, item: Dict[str, Any]):
         aid = item["asset_id"]
         name = item["label"] or item["symbol"]
@@ -227,7 +326,8 @@ class GapFixJobService:
             row = self._state["assets"][index]
             row["status"] = "running"
             self._state["current_asset_id"] = aid
-            self._log("info", f"{name}: fetching {item['missing_days']} day(s)", aid)
+            if item["_dates"]:
+                self._log("info", f"{name}: fetching {len(item['_dates'])} day(s)", aid)
 
         started = time.monotonic()
         consecutive_failures = 0
@@ -246,7 +346,7 @@ class GapFixJobService:
             with self._lock:
                 self._state["current_date"] = d.isoformat()
             try:
-                fetch_day_price(svc, aid, d)
+                fetch_day_price(svc, aid, d, exclude_getters=item.get("_exclude"))
                 ok, err = True, None
             except Exception as e:  # any getter failure counts as a failed day
                 ok, err = False, str(e)[:200]

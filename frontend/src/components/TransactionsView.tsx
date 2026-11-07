@@ -1,5 +1,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useInRouterContext, useSearchParams } from 'react-router-dom';
+import { LuLocateFixed, LuX } from 'react-icons/lu';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, TransactionFilterState } from './TransactionFilters';
 import { BundlesListPanel, BundleSuggestionsPanel } from './bundles';
@@ -103,9 +105,43 @@ export interface TransactionsViewProps {
  * bundle suggestions visibility, and display labels — ensuring consistent
  * behavior without per-view prop tuning.
  */
-export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
+export const TransactionsView: React.FC<TransactionsViewProps> = (props) => {
+    const inRouter = useInRouterContext();
+    return inRouter ? <RoutedTransactionsView {...props} /> : <TransactionsViewInner {...props} />;
+};
+
+/** Reads ?focus=&date_from=&date_to= (set by "Show in All transactions"). */
+const RoutedTransactionsView: React.FC<TransactionsViewProps> = (props) => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const focus = Number(searchParams.get('focus')) || undefined;
+    if (props.mode !== 'all' || !focus) return <TransactionsViewInner {...props} />;
+    return (
+        <TransactionsViewInner
+            {...props}
+            focus={{
+                txId: focus,
+                dateFrom: searchParams.get('date_from') || '',
+                dateTo: searchParams.get('date_to') || '',
+                onClear: () => setSearchParams({}),
+            }}
+        />
+    );
+};
+
+interface FocusContext {
+    txId: number;
+    dateFrom: string;
+    dateTo: string;
+    onClear: () => void;
+}
+
+const TransactionsViewInner: React.FC<TransactionsViewProps & { focus?: FocusContext }> = ({ mode, focus }) => {
     const preset = VIEW_PRESETS[mode];
     const [activeTab, setActiveTab] = React.useState('transactions');
+    const focusFilters = React.useMemo<TransactionFilterState | undefined>(
+        () => focus ? { ...preset.resetFilters, dateFrom: focus.dateFrom, dateTo: focus.dateTo } : undefined,
+        [focus, preset.resetFilters],
+    );
 
     // Read suggestion count from shared cache (App.tsx owns the query)
     const { data: suggestions = [] } = useQuery({
@@ -165,13 +201,31 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
                 </TabsList>
 
                 <TabsContent value="transactions">
+                    {focus && (
+                        <div className="mb-2 flex items-center gap-2 border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                            <LuLocateFixed size={12} />
+                            <span>
+                                Showing transactions around <b>#{focus.txId}</b>
+                                {focus.dateFrom && focus.dateTo && <> ({focus.dateFrom} → {focus.dateTo})</>}
+                            </span>
+                            <button
+                                type="button"
+                                className="ml-auto flex items-center gap-1 text-amber-700 hover:text-amber-900"
+                                onClick={focus.onClear}
+                            >
+                                <LuX size={12} /> Show all
+                            </button>
+                        </div>
+                    )}
                     <TransactionsTable
+                        key={focus ? `focus-${focus.txId}-${focus.dateFrom}-${focus.dateTo}` : 'all'}
                         tableId={preset.tableId}
                         title=""
                         subtitle=""
                         defaultWorkflowFilter={preset.defaultWorkflowFilter}
-                        resetFilters={preset.resetFilters}
+                        resetFilters={focusFilters ?? preset.resetFilters}
                         showSuggestions={preset.showSuggestions}
+                        focusTransactionId={focus?.txId}
                     />
                 </TabsContent>
 
