@@ -796,6 +796,7 @@ export interface ConnectorRunDetail {
     skipped_ids: string[];
     error_details: { source_transaction_id: string; error: string }[];
     logs: { timestamp: string; level: string; message: string }[];
+    invalid_count?: number;
 }
 
 export interface JobTransactionsResponse {

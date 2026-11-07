@@ -41,6 +41,7 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'duplicates'>('missing-data');
+    const [tabAutoSelected, setTabAutoSelected] = useState(false);
 
     // Transaction detail drawer state
     const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
@@ -80,6 +81,21 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
     useEffect(() => {
         fetchStatus();
     }, [activeTab, fetchStatus]);
+
+    // On first load, open the first tab that has issues
+    useEffect(() => {
+        if (!data || tabAutoSelected) return;
+        setTabAutoSelected(true);
+        const firstWithIssues = (
+            [
+                ['missing-data', data.missing_data_issues_count],
+                ['assets-linkage', data.linkage_issues_count],
+                ['accounts-linkage', data.transfer_issues_count],
+                ['duplicates', data.duplicate_count],
+            ] as const
+        ).find(([, count]) => (count || 0) > 0);
+        if (firstWithIssues) setActiveTab(firstWithIssues[0]);
+    }, [data, tabAutoSelected]);
 
     // Refresh after fix
     const handleFixComplete = useCallback(() => {

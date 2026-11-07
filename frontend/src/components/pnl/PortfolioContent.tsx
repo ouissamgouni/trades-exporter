@@ -180,7 +180,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
 
     const filteredTreemapAssets = useMemo(() => {
         return tableAssets.filter(a => {
-            if (search && (!a.asset.symbol || !a.asset.symbol.toLowerCase().includes(search.toLowerCase()))) return false;
+            if (search && ![a.asset.symbol, a.asset.label].some(v => v?.toLowerCase().includes(search.toLowerCase()))) return false;
             if (selectedAccountIds.length > 0) {
                 if (!a.account_ids || a.account_ids.length === 0) return false;
                 if (!a.account_ids.some((id: number) => selectedAccountIds.includes(id))) return false;

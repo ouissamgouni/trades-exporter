@@ -28,6 +28,7 @@ POLYMARKET_CONTRACTS = {
     "0x4d97dcd97ec945f40cf65f87097ace5ea0476045",  # Conditional Tokens Framework
     "0x3a3bd7bb9528e159577f7c2e685cc81a765002e2",  # Conditional Tokens Framework
     "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296",  # UMA CTF Adapter
+    "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb",  # pUSD wrapper (USDC.e -> pUSD 1:1 collateral migration)
     "0x0000000000000000000000000000000000000000",  # Zero / burn address
 }
 
@@ -35,6 +36,8 @@ POLYMARKET_CONTRACTS = {
 USDC_CONTRACTS = {
     "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": "USDC.E",  # Bridged USDC (Polymarket collateral)
     "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "USDC",  # Native USDC
+    # Polymarket USD: 1:1 USDC.e-backed collateral; same symbol so lots continue across the wrap.
+    "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb": "USDC.E",
 }
 
 

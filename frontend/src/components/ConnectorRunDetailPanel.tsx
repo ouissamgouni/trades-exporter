@@ -73,7 +73,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
     const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-    const [activeTab, setActiveTab] = useState<'logs' | 'synced' | 'updated' | 'skipped' | 'errors' | 'duplicates'>('logs');
+    const [activeTab, setActiveTab] = useState<'logs' | 'synced' | 'updated' | 'skipped' | 'invalid' | 'errors' | 'duplicates'>('logs');
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
     const fetchDetail = useCallback(async () => {
@@ -297,6 +297,9 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                     <TabsTrigger value="skipped">
                         Skipped ({detail.skipped_ids?.length || 0})
                     </TabsTrigger>
+                    <TabsTrigger value="invalid">
+                        Invalid ({detail.invalid_count ?? 0})
+                    </TabsTrigger>
                     {detail.error_details && detail.error_details.length > 0 && (
                         <TabsTrigger value="errors">
                             Errors ({detail.error_details.length})
@@ -387,6 +390,27 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                             ...defaultFilterState,
                             connectorRunIds: [String(detail.id)],
                             connectorRunOutcome: 'skipped',
+                        }}
+                        onDataChange={fetchDetail}
+                    />
+                </TabsContent>
+
+                <TabsContent value="invalid">
+                    <TransactionsTable
+                        tableId="connectorRun-invalid"
+                        title=""
+                        subtitle=""
+                        showFilters={false}
+                        showBundles={false}
+                        showSuggestions={false}
+                        compact={true}
+                        expandInvalidRows
+                        emptyMessage="No invalid transactions"
+                        filters={{
+                            ...defaultFilterState,
+                            reviewStatus: ['invalid'],
+                            connectorRunIds: [String(detail.id)],
+                            connectorRunOutcome: 'all',
                         }}
                         onDataChange={fetchDetail}
                     />

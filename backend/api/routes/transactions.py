@@ -1665,7 +1665,7 @@ def get_tx_list_query(
     ),
     connector_run_outcome: Optional[str] = Query(
         None,
-        description="Filter by outcome within connector run: synced, updated, or skipped. Requires connector_run_id.",
+        description="Filter by outcome within connector run: synced, updated, skipped, or all. Requires connector_run_id.",
     ),
     source_transaction_id: Optional[str] = Query(
         None,
@@ -1911,7 +1911,7 @@ def apply_tx_list_filters(session: Session, statement, q: TxListQuery):
     # so the frontend doesn't need to send potentially hundreds of IDs in the URL.
     if connector_run_outcome and connector_run_id:
         outcome = connector_run_outcome.strip().lower()
-        if outcome in ("synced", "updated", "skipped"):
+        if outcome in ("synced", "updated", "skipped", "all"):
             run_id_list = [
                 int(r.strip())
                 for r in connector_run_id.split(",")
@@ -1927,6 +1927,14 @@ def apply_tx_list_filters(session: Session, statement, q: TxListQuery):
                         outcome_ids = run.updated_ids or []
                     elif outcome == "skipped":
                         outcome_ids = run.skipped_ids or []
+                    elif outcome == "all":
+                        outcome_ids = list(
+                            dict.fromkeys(
+                                (run.synced_ids or [])
+                                + (run.updated_ids or [])
+                                + (run.skipped_ids or [])
+                            )
+                        )
 
                     if outcome_ids:
                         if len(outcome_ids) == 1:

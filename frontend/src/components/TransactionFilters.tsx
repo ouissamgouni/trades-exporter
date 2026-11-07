@@ -99,7 +99,7 @@ export interface TransactionFilterState {
     // Transaction ID filter (for issue-specific views)
     transactionIds?: number[];
     // Connector run outcome filter (synced/updated/skipped) — used in job detail drawer
-    connectorRunOutcome?: 'synced' | 'updated' | 'skipped';
+    connectorRunOutcome?: 'synced' | 'updated' | 'skipped' | 'all';
 }
 
 // Default filter state - includes all statuses; invalid rows are collapsed client-side

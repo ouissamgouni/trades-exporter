@@ -1280,3 +1280,25 @@ class TestSyntheticCloseNeverPrecedesTrades:
         c = _make_connector()
         synthetic = [r for r in c.yield_raws() if r.get("_synthetic")][0]
         assert synthetic["timestamp"] == 1762301363 + 1
+
+
+class TestPolygonPusdWrap:
+    """USDC.e -> pUSD collateral wrap (tx 0x85447c13...) is internal, not a withdrawal."""
+
+    PROXY = "0x6f5e6579cd9f9eab734674e33de4f41a33ae27de"
+    USDCE = "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+    PUSD = "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb"
+
+    def _check(self, frm, to, contract):
+        from backend.connectors.onchain.connector_polymarket_polygon import ConnectorPolymarketPolygon
+
+        return ConnectorPolymarketPolygon._is_external_usdc(
+            {"fromAddress": frm, "toAddress": to, "contractAddress": contract}
+        )
+
+    def test_wrap_legs_are_skipped(self):
+        assert not self._check(self.PROXY, self.PUSD, self.USDCE)
+        assert not self._check("0x" + "0" * 40, self.PROXY, self.PUSD)
+
+    def test_external_pusd_transfer_is_kept(self):
+        assert self._check(self.PROXY, "0x4cd00e387622c35bddb9b4c962c136462338bc31", self.PUSD)

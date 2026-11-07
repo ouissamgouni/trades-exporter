@@ -7,9 +7,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, ConfigDict
-from sqlmodel import Session
+from sqlalchemy import func
+from sqlmodel import Session, select
 
 from backend.db.database import get_session_dependency
+from backend.db.models import NormalizedTransaction
 from backend.services.sync_job_service import (
     get_sync_job_service,
     ConnectorOverride,
@@ -624,6 +626,7 @@ class ConnectorRunDetailResponse(BaseModel):
     error_details: Optional[List[Dict[str, Any]]] = None
     logs: Optional[List[Dict[str, Any]]] = None
     error_message: Optional[str] = None
+    invalid_count: int = 0
 
 
 class SyncJobDetailResponse(BaseModel):
@@ -876,6 +879,23 @@ def get_connector_run_detail(
                             "logs": [log.to_dict() for log in real_time.logs],
                         }
                     )
+
+        touched_ids = list(
+            dict.fromkeys(
+                (response_data["synced_ids"] or [])
+                + (response_data["updated_ids"] or [])
+                + (response_data["skipped_ids"] or [])
+            )
+        )
+        if touched_ids:
+            response_data["invalid_count"] = session.exec(
+                select(func.count())
+                .select_from(NormalizedTransaction)
+                .where(
+                    NormalizedTransaction.source_transaction_id.in_(touched_ids),
+                    NormalizedTransaction.review_status == "invalid",
+                )
+            ).one()
 
         return ConnectorRunDetailResponse(**response_data)
     except HTTPException:
