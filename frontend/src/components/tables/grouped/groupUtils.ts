@@ -1,7 +1,6 @@
 import { API_URL } from '../../../types';
 import {
     AUTO_EXPAND_DAYS_MAX,
-    FACET_BAR_MIN_TX,
     FacetKey,
     GroupFacetSelection,
     TransactionGroup,
@@ -54,27 +53,8 @@ export function facetDimensions(group: TransactionGroup): FacetKey[] {
     return FACET_ORDER.filter(k => group.facets[k].length >= 2);
 }
 
-export function shouldAutoShowFacetBar(group: TransactionGroup): boolean {
-    return groupRowCount(group) >= FACET_BAR_MIN_TX && facetDimensions(group).length > 0;
-}
-
 export function shouldAutoExpandDays(month: TransactionGroup): boolean {
     return groupRowCount(month) <= AUTO_EXPAND_DAYS_MAX;
-}
-
-export interface StatusChip {
-    key: 'pending' | 'valid' | 'invalid';
-    label: string;
-    count: number;
-}
-
-export function statusChips(group: TransactionGroup): StatusChip[] {
-    const chips: StatusChip[] = [
-        { key: 'pending', label: 'pending', count: group.pending_count },
-        { key: 'valid', label: 'valid', count: group.valid_count },
-        { key: 'invalid', label: 'invalid', count: group.invalid_count },
-    ];
-    return chips.filter(c => c.count > 0);
 }
 
 export function formatNetQty(value: number): string {
@@ -84,6 +64,10 @@ export function formatNetQty(value: number): string {
     if (value > 0) return `+${formatted}`;
     if (value < 0) return `−${formatted}`;
     return '0';
+}
+
+export function truncateSymbol(symbol: string, max = 8): string {
+    return symbol.length > max ? `${symbol.slice(0, max)}…` : symbol;
 }
 
 /** Server-side grouping endpoint for a table data source, or null when only page-local grouping is possible. */

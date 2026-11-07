@@ -35,7 +35,7 @@ export const PageDayGroupedRows: React.FC<PageDayGroupedRowsProps> = ({ transact
                 return (
                     <React.Fragment key={key}>
                         <tr className="bg-slate-50">
-                            <td colSpan={colSpan} className="border-b border-slate-200 px-2 py-0.5 text-[10px]">
+                            <td colSpan={colSpan} className="border-b border-l-4 border-slate-200 border-l-slate-300 px-2 py-1 text-xs">
                                 <span className="font-semibold text-slate-700">{label}</span>
                                 <span className="ml-2 tabular-nums text-slate-500">
                                     {valid.length} · <span className="text-green-700">↓{inflow}</span> <span className="text-red-700">↑{outflow}</span>
