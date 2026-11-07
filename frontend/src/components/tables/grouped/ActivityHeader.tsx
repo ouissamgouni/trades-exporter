@@ -85,7 +85,8 @@ export const ActivityHeader: React.FC<ActivityHeaderProps> = ({ groupsUrl, param
     }, [months.data, year]);
     const maxCount = Math.max(1, ...monthCells.map(c => c.group?.total_count ?? 0));
 
-    const dailyStats: DailyStats[] = useMemo(() => (days.data?.pages[0]?.groups ?? []).map(g => ({
+    // Days with only invalid transactions have total_count 0 and must not be painted.
+    const dailyStats: DailyStats[] = useMemo(() => (days.data?.pages[0]?.groups ?? []).filter(g => g.total_count > 0).map(g => ({
         date: g.period_start,
         count: g.total_count,
         volume: 0,
@@ -157,7 +158,7 @@ export const ActivityHeader: React.FC<ActivityHeaderProps> = ({ groupsUrl, param
                                 role="listitem"
                                 aria-label={label}
                                 title={label}
-                                disabled={count === 0 && !cell.group?.invalid_count}
+                                disabled={count === 0}
                                 className={cn(
                                     'flex flex-col items-stretch gap-0.5 text-left disabled:cursor-default',
                                     isSelected && 'outline outline-2 outline-offset-1 outline-blue-500',

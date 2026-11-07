@@ -14,7 +14,7 @@ import {
     GroupStatusCells,
 } from './GroupRecap';
 import { GroupFacetBar } from './GroupFacetBar';
-import { applyFacetSelection, facetDimensions, groupRowCount, shouldAutoExpandDays } from './groupUtils';
+import { applyFacetSelection, facetDimensions, groupRowCount, shouldAutoExpandDays, withoutInvalid } from './groupUtils';
 import { fetchGroupIds, PeriodBounds, useGroupRows, useTransactionGroups } from './useTransactionGroups';
 import type { GroupFacetSelection, TransactionGroup } from './types';
 
@@ -268,7 +268,7 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
             <tr>
                 <td colSpan={colSpan} className={MONTH_STICKY_TD}>
                     <div
-                        className={cn(VIEWPORT_BOX, grid, 'h-14 cursor-pointer border-l-4 border-t border-slate-700 border-t-slate-300 bg-slate-100 px-2 hover:bg-slate-200/70')}
+                        className={cn(VIEWPORT_BOX, grid, 'h-14 cursor-pointer border-l-4 border-t border-slate-700 border-t-slate-300 bg-slate-200 px-2 hover:bg-slate-300/70')}
                         role="button"
                         aria-expanded={expanded}
                         tabIndex={0}
@@ -339,13 +339,25 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
     } = props;
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [facets, setFacets] = useState<GroupFacetSelection>({});
+    const [showInvalid, setShowInvalid] = useState(false);
     const label = formatDayLabel(day.period_start);
     const bounds = boundsOf(day);
     const scopedParams = useMemo(() => applyFacetSelection(params, facets), [params, facets]);
+    const validOnlyParams = useMemo(() => withoutInvalid(scopedParams), [scopedParams]);
+    const canHideInvalid = day.invalid_count > 0 && validOnlyParams !== null;
+    const rowParams = canHideInvalid && !showInvalid ? validOnlyParams! : scopedParams;
     const grid = showPnl ? GROUP_GRID_PNL : GROUP_GRID;
     const toggle = () => setExpanded(e => !e);
+    const toggleInvalid = () => {
+        if (!expanded) {
+            setExpanded(true);
+            setShowInvalid(true);
+        } else {
+            setShowInvalid(v => !v);
+        }
+    };
 
-    const rowsQuery = useGroupRows({ listUrl, params: scopedParams, bounds, sortDir, enabled: expanded });
+    const rowsQuery = useGroupRows({ listUrl, params: rowParams, bounds, sortDir, enabled: expanded });
     const rows = useMemo(() => rowsQuery.data?.pages.flatMap(p => p.results) ?? [], [rowsQuery.data]);
     const remaining = (rowsQuery.data?.pages[0]?.metadata.filtered_count ?? 0) - rows.length;
 
@@ -373,7 +385,7 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
             <tr>
                 <td colSpan={colSpan} className={DAY_STICKY_TD}>
                     <div
-                        className={cn(VIEWPORT_BOX, grid, 'h-9 cursor-pointer border-b border-l-4 border-slate-200 border-l-slate-300 bg-white px-2 hover:bg-slate-50')}
+                        className={cn(VIEWPORT_BOX, grid, 'h-9 cursor-pointer border-b border-l-4 border-slate-200 border-l-slate-300 bg-slate-100 px-2 hover:bg-slate-200/70')}
                         role="button"
                         aria-expanded={expanded}
                         tabIndex={0}
@@ -385,7 +397,13 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
                             {expanded ? <LuChevronDown size={14} /> : <LuChevronRight size={14} />}
                             <span className="truncate text-sm font-semibold">{label}</span>
                         </span>
-                        <GroupStatusCells group={day} showPnl={showPnl} baseCurrency={props.baseCurrency} />
+                        <GroupStatusCells
+                            group={day}
+                            showPnl={showPnl}
+                            baseCurrency={props.baseCurrency}
+                            invalidShown={canHideInvalid ? expanded && showInvalid : undefined}
+                            onToggleInvalid={canHideInvalid ? toggleInvalid : undefined}
+                        />
                         <GroupAccountsInline group={day} />
                         <MarkReviewedAction {...props} group={day} params={scopedParams} scopeLabel={label} />
                     </div>

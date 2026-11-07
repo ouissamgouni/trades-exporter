@@ -20,6 +20,7 @@ const STATUS_CLASS: Record<'pending' | 'valid' | 'invalid', string> = {
     valid: 'border-green-200 bg-green-50 text-green-800',
     invalid: 'border-slate-200 bg-slate-50 text-slate-400 line-through decoration-slate-300',
 };
+const INVALID_TOGGLE = 'inline-flex items-center gap-1 border border-slate-300 bg-white px-1.5 py-px text-xs tabular-nums text-slate-500 hover:border-slate-400 hover:text-slate-800';
 
 const StatusCell: React.FC<{ kind: 'pending' | 'valid' | 'invalid'; count: number }> = ({ kind, count }) => (
     <span>
@@ -35,11 +36,18 @@ const StatusCell: React.FC<{ kind: 'pending' | 'valid' | 'invalid'; count: numbe
 );
 
 /** Grid cells: total, pending, valid, invalid, health and (P&L tables) realized P&L. */
-export const GroupStatusCells: React.FC<{ group: TransactionGroup; showPnl: boolean; baseCurrency?: string }> = ({ group, showPnl, baseCurrency }) => (
+export const GroupStatusCells: React.FC<{
+    group: TransactionGroup;
+    showPnl: boolean;
+    baseCurrency?: string;
+    /** When set, the invalid pill becomes a +/- toggle for the invalid rows. */
+    onToggleInvalid?: () => void;
+    invalidShown?: boolean;
+}> = ({ group, showPnl, baseCurrency, onToggleInvalid, invalidShown }) => (
     <>
         <span>
             <span
-                className="inline-block min-w-[28px] bg-slate-200 px-1.5 py-px text-center text-xs font-semibold tabular-nums text-slate-700"
+                className="inline-block min-w-[28px] border border-slate-300 bg-white px-1.5 py-px text-center text-xs font-semibold tabular-nums text-slate-700"
                 title="Transactions excluding invalid"
             >
                 {group.total_count}
@@ -47,7 +55,22 @@ export const GroupStatusCells: React.FC<{ group: TransactionGroup; showPnl: bool
         </span>
         <StatusCell kind="pending" count={group.pending_count} />
         <StatusCell kind="valid" count={group.valid_count} />
-        <StatusCell kind="invalid" count={group.invalid_count} />
+        {onToggleInvalid && group.invalid_count > 0 ? (
+            <span>
+                <button
+                    type="button"
+                    aria-pressed={!!invalidShown}
+                    className={INVALID_TOGGLE}
+                    title={invalidShown ? 'Hide invalid transactions' : 'Show invalid transactions'}
+                    onClick={e => { e.stopPropagation(); onToggleInvalid(); }}
+                >
+                    <span className="font-semibold">{invalidShown ? '−' : '+'}</span>
+                    <span className="line-through decoration-slate-300">{group.invalid_count} invalid</span>
+                </button>
+            </span>
+        ) : (
+            <StatusCell kind="invalid" count={group.invalid_count} />
+        )}
         <span>
             {group.health_issue_count > 0 && (
                 <span
