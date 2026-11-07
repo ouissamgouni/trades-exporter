@@ -4490,7 +4490,9 @@ def get_version_warnings(
     level: Optional[str] = None,  # "error", "warning", "info"
     asset_id: Optional[int] = None,
     search: Optional[str] = None,  # Search message text
-    status: str = Query(warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"),
+    status: str = Query(
+        warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"
+    ),
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
@@ -4578,10 +4580,14 @@ class WarningAckRequest(BaseModel):
 
 
 @router.post("/warnings/acknowledge")
-def acknowledge_warnings(request: WarningAckRequest, session: Session = Depends(get_session_dependency)):
+def acknowledge_warnings(
+    request: WarningAckRequest, session: Session = Depends(get_session_dependency)
+):
     """Acknowledge warnings. Kept across recalculations until the warning's amount changes."""
     created = 0
-    for w in session.exec(select(PnlWarning).where(PnlWarning.id.in_(request.warning_ids))).all():
+    for w in session.exec(
+        select(PnlWarning).where(PnlWarning.id.in_(request.warning_ids))
+    ).all():
         fingerprint = (w.details or {}).get("fingerprint", "")
         exists_q = select(PnlWarningAck).where(
             PnlWarningAck.warning_type == w.warning_type,
@@ -4591,29 +4597,38 @@ def acknowledge_warnings(request: WarningAckRequest, session: Session = Depends(
         )
         if session.exec(exists_q).first():
             continue
-        session.add(PnlWarningAck(
-            warning_type=w.warning_type,
-            transaction_id=w.transaction_id,
-            asset_id=w.asset_id,
-            fingerprint=fingerprint,
-            note=request.note,
-        ))
+        session.add(
+            PnlWarningAck(
+                warning_type=w.warning_type,
+                transaction_id=w.transaction_id,
+                asset_id=w.asset_id,
+                fingerprint=fingerprint,
+                note=request.note,
+            )
+        )
         created += 1
     session.commit()
     return {"acknowledged": created}
 
 
 @router.post("/warnings/unacknowledge")
-def unacknowledge_warnings(request: WarningAckRequest, session: Session = Depends(get_session_dependency)):
+def unacknowledge_warnings(
+    request: WarningAckRequest, session: Session = Depends(get_session_dependency)
+):
     """Remove acknowledgements so the warnings are open again."""
     removed = 0
-    for w in session.exec(select(PnlWarning).where(PnlWarning.id.in_(request.warning_ids))).all():
-        acks = session.exec(select(PnlWarningAck).where(
-            PnlWarningAck.warning_type == w.warning_type,
-            func.coalesce(PnlWarningAck.transaction_id, 0) == (w.transaction_id or 0),
-            func.coalesce(PnlWarningAck.asset_id, 0) == (w.asset_id or 0),
-            PnlWarningAck.fingerprint == (w.details or {}).get("fingerprint", ""),
-        )).all()
+    for w in session.exec(
+        select(PnlWarning).where(PnlWarning.id.in_(request.warning_ids))
+    ).all():
+        acks = session.exec(
+            select(PnlWarningAck).where(
+                PnlWarningAck.warning_type == w.warning_type,
+                func.coalesce(PnlWarningAck.transaction_id, 0)
+                == (w.transaction_id or 0),
+                func.coalesce(PnlWarningAck.asset_id, 0) == (w.asset_id or 0),
+                PnlWarningAck.fingerprint == (w.details or {}).get("fingerprint", ""),
+            )
+        ).all()
         for ack in acks:
             session.delete(ack)
             removed += 1
@@ -4624,7 +4639,9 @@ def unacknowledge_warnings(request: WarningAckRequest, session: Session = Depend
 @router.get("/versions/{version_id}/warnings/type-counts")
 def get_version_warning_type_counts(
     version_id: int,
-    status: str = Query(warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"),
+    status: str = Query(
+        warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"
+    ),
     session: Session = Depends(get_session_dependency),
 ):
     """
@@ -4654,7 +4671,9 @@ def get_version_warning_type_counts(
 )
 def get_warnings_filter_options(
     version_id: int,
-    status: str = Query(warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"),
+    status: str = Query(
+        warning_status.STATUS_OPEN, description="open | acknowledged | dust | all"
+    ),
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     session: Session = Depends(get_session_dependency),
 ):
@@ -4673,9 +4692,15 @@ def get_warnings_filter_options(
     )
     # Status counts are computed before narrowing to the requested status
     status_counts = {}
-    for st in (warning_status.STATUS_OPEN, warning_status.STATUS_ACKNOWLEDGED, warning_status.STATUS_DUST):
+    for st in (
+        warning_status.STATUS_OPEN,
+        warning_status.STATUS_ACKNOWLEDGED,
+        warning_status.STATUS_DUST,
+    ):
         status_counts[st] = session.exec(
-            select(func.count()).select_from(warning_status.apply_status(base_q, st).subquery())
+            select(func.count()).select_from(
+                warning_status.apply_status(base_q, st).subquery()
+            )
         ).one()
     base_q = warning_status.apply_status(base_q, status)
     scoped_sq = base_q.subquery()
@@ -5738,9 +5763,11 @@ def get_units_filter_options(
     # Counts for boolean toggles
     total_scoped = sum(c for _, c in pattern_rows)
 
-    has_warnings_q = select(func.count(func.distinct(PnlWarning.unit_id))).where(
-        PnlWarning.unit_id.in_(select(scoped_ids_sq))
-    ).where(warning_status.status_clause(warning_status.STATUS_OPEN))
+    has_warnings_q = (
+        select(func.count(func.distinct(PnlWarning.unit_id)))
+        .where(PnlWarning.unit_id.in_(select(scoped_ids_sq)))
+        .where(warning_status.status_clause(warning_status.STATUS_OPEN))
+    )
     has_warnings_count = session.exec(has_warnings_q).one() or 0
 
     has_realized_q = select(
@@ -6042,12 +6069,12 @@ def get_audit_summary(
                     else_=0,
                 )
             ).label("long_term"),
-            func.sum(
-                case((ECONOMIC_PNL > 0, ECONOMIC_PNL), else_=0)
-            ).label("total_gain_val"),
-            func.sum(
-                case((ECONOMIC_PNL < 0, ECONOMIC_PNL), else_=0)
-            ).label("total_loss_val"),
+            func.sum(case((ECONOMIC_PNL > 0, ECONOMIC_PNL), else_=0)).label(
+                "total_gain_val"
+            ),
+            func.sum(case((ECONOMIC_PNL < 0, ECONOMIC_PNL), else_=0)).label(
+                "total_loss_val"
+            ),
         )
         .join(RealizedPnl.origin_unit)
         .where(CalculationUnit.version_id == version_id)

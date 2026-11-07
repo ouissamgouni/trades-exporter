@@ -6,9 +6,9 @@ prices:
   - asset_symbol: BTC
     quote_currency: EUR
     entries:
-      - at: "2024-01-10T10:00:00"   # A1: buy BTC
+      - at: "2024-01-10T10:00:00" # A1: buy BTC
         price: "30000"
-      - at: "2024-03-01T10:00:00"   # A2: swap BTC → ETH
+      - at: "2024-03-01T10:00:00" # A2: swap BTC → ETH
         price: "40000"
       - at: current
         price: "40000"
@@ -16,11 +16,11 @@ prices:
   - asset_symbol: ETH
     quote_currency: EUR
     entries:
-      - at: "2024-03-01T10:00:00"   # A2: swap BTC → ETH
+      - at: "2024-03-01T10:00:00" # A2: swap BTC → ETH
         price: "2500"
-      - at: "2024-04-15T10:00:00"   # A3: transfer to Cold Wallet
+      - at: "2024-04-15T10:00:00" # A3: transfer to Cold Wallet
         price: "2800"
-      - at: "2024-05-01T10:00:00"   # A4: swap ETH → USDC
+      - at: "2024-05-01T10:00:00" # A4: swap ETH → USDC
         price: "3000"
       - at: current
         price: "3000"
@@ -28,9 +28,9 @@ prices:
   - asset_symbol: USDC
     quote_currency: EUR
     entries:
-      - at: "2024-05-01T10:00:00"   # A4: swap ETH → USDC
+      - at: "2024-05-01T10:00:00" # A4: swap ETH → USDC
         price: "1.00"
-      - at: "2024-07-01T10:00:00"   # A5: sell USDC
+      - at: "2024-07-01T10:00:00" # A5: sell USDC
         price: "1.00"
       - at: current
         price: "1.00"
@@ -38,9 +38,9 @@ prices:
   - asset_symbol: SOL
     quote_currency: EUR
     entries:
-      - at: "2024-02-01T10:00:00"   # B1: buy SOL
+      - at: "2024-02-01T10:00:00" # B1: buy SOL
         price: "100"
-      - at: "2024-04-01T10:00:00"   # B2: sell SOL
+      - at: "2024-04-01T10:00:00" # B2: sell SOL
         price: "150"
       - at: current
         price: "150"
