@@ -9,7 +9,13 @@ from backend.services.pnl import warning_status as ws
 
 
 def _warning(wtype="provisional_cost_lot", details=None, tx_id=9839, asset_id=7):
-    return PnlWarning(warning_type=wtype, message="m", transaction_id=tx_id, asset_id=asset_id, details=details)
+    return PnlWarning(
+        warning_type=wtype,
+        message="m",
+        transaction_id=tx_id,
+        asset_id=asset_id,
+        details=details,
+    )
 
 
 class TestWarningAnnotation:
@@ -20,7 +26,9 @@ class TestWarningAnnotation:
         assert w.details["fingerprint"] == "0.00"
 
     def test_unsettled_negative_lot_value_from_qty_and_cost(self):
-        w = _warning("unsettled_negative_lot", {"negative_lot_qty": -10.0, "unit_cost": 0.9})
+        w = _warning(
+            "unsettled_negative_lot", {"negative_lot_qty": -10.0, "unit_cost": 0.9}
+        )
         ws.annotate_warnings([w], Decimal("0.01"))
         assert "severity" not in w.details
         assert w.details["value_in_base"] == 9.0
@@ -50,7 +58,10 @@ class TestWarningAnnotation:
 
 class TestTransferDismissalTags:
     def test_strip_removes_new_and_legacy_formats_for_field(self):
-        from backend.api.routes.transactions import _strip_transfer_dismissal, _transfer_dismissal_tag
+        from backend.api.routes.transactions import (
+            _strip_transfer_dismissal,
+            _transfer_dismissal_tag,
+        )
 
         tags = [
             {"note": "keep"},
@@ -63,7 +74,9 @@ class TestTransferDismissalTags:
             {"note": "keep"},
             {"sys_transfer_dismissed": "source_to_account"},
         ]
-        assert _strip_transfer_dismissal(tags, "source_to_account")[0] == {"note": "keep"}
+        assert _strip_transfer_dismissal(tags, "source_to_account")[0] == {
+            "note": "keep"
+        }
 
         tag = _transfer_dismissal_tag("source_to_account", "bank")
         assert tag["sys_transfer_dismissed"] == "source_to_account"
@@ -83,13 +96,28 @@ class TestBundleHealthHelpers:
         from backend.services.bundle_health import BundleHealthService as S
 
         assert S._issue_for(self._bundle("internal_transfer"), []) == "empty"
-        assert S._issue_for(self._bundle("internal_transfer"), [self._tx("outflow")]) == "missing_inflow"
-        assert S._issue_for(self._bundle("internal_transfer"), [self._tx("inflow")]) == "missing_outflow"
-        assert S._issue_for(self._bundle("internal_transfer"), [self._tx("inflow"), self._tx("outflow")]) is None
+        assert (
+            S._issue_for(self._bundle("internal_transfer"), [self._tx("outflow")])
+            == "missing_inflow"
+        )
+        assert (
+            S._issue_for(self._bundle("internal_transfer"), [self._tx("inflow")])
+            == "missing_outflow"
+        )
+        assert (
+            S._issue_for(
+                self._bundle("internal_transfer"),
+                [self._tx("inflow"), self._tx("outflow")],
+            )
+            is None
+        )
         assert S._issue_for(self._bundle("flow"), [self._tx("outflow")]) is None
 
     def test_reason_formatting(self):
         from backend.services.bundle_health import _format_reason
 
-        assert _format_reason(61, Decimal("0.032177"), "USDC") == "61s apart, fee 0.032177 USDC"
+        assert (
+            _format_reason(61, Decimal("0.032177"), "USDC")
+            == "61s apart, fee 0.032177 USDC"
+        )
         assert _format_reason(5400, Decimal("0"), "USDC").startswith("90min apart")

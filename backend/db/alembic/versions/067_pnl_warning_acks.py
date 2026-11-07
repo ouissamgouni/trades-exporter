@@ -28,10 +28,16 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "warning_type", "transaction_id", "asset_id", "fingerprint", name="uq_pnl_warning_ack"
+            "warning_type",
+            "transaction_id",
+            "asset_id",
+            "fingerprint",
+            name="uq_pnl_warning_ack",
         ),
     )
-    op.create_index("ix_pnl_warning_acks_transaction_id", "pnl_warning_acks", ["transaction_id"])
+    op.create_index(
+        "ix_pnl_warning_acks_transaction_id", "pnl_warning_acks", ["transaction_id"]
+    )
 
 
 def downgrade():

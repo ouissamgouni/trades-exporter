@@ -67,7 +67,11 @@ class BundleHealthService:
 
         txs = self.session.exec(
             select(NormalizedTransaction)
-            .where(NormalizedTransaction.user_calculation_unit_id.in_([b.id for b in bundles]))
+            .where(
+                NormalizedTransaction.user_calculation_unit_id.in_(
+                    [b.id for b in bundles]
+                )
+            )
             .order_by(NormalizedTransaction.date_time)
         ).all()
         by_bundle: Dict[int, List[NormalizedTransaction]] = {}
@@ -88,7 +92,11 @@ class BundleHealthService:
                 issue=issue,
                 transaction_ids=[t.id for t in members],
             )
-            if with_candidates and bundle.pattern == UnitPattern.INTERNAL_TRANSFER.value and members:
+            if (
+                with_candidates
+                and bundle.pattern == UnitPattern.INTERNAL_TRANSFER.value
+                and members
+            ):
                 item.candidates = self.find_completion_candidates(members, issue)
             broken.append(item)
         return broken
@@ -97,7 +105,9 @@ class BundleHealthService:
         return len(self.find_broken(with_candidates=False))
 
     @staticmethod
-    def _issue_for(bundle: UserCalculationBundle, members: List[NormalizedTransaction]) -> Optional[str]:
+    def _issue_for(
+        bundle: UserCalculationBundle, members: List[NormalizedTransaction]
+    ) -> Optional[str]:
         if not members:
             return ISSUE_EMPTY
         if bundle.pattern not in _TWO_SIDED_PATTERNS:
@@ -113,7 +123,10 @@ class BundleHealthService:
         self, members: List[NormalizedTransaction], issue: str
     ) -> List[CompletionCandidate]:
         anchor_dirs = {t.direction for t in members}
-        if len(anchor_dirs) != 1 or issue not in (ISSUE_MISSING_INFLOW, ISSUE_MISSING_OUTFLOW):
+        if len(anchor_dirs) != 1 or issue not in (
+            ISSUE_MISSING_INFLOW,
+            ISSUE_MISSING_OUTFLOW,
+        ):
             return []
         asset_ids = {t.asset_id for t in members if t.asset_id}
         symbols = {(t.source_asset_symbol or "").upper() for t in members}
@@ -126,16 +139,25 @@ class BundleHealthService:
         want_inflow = issue == ISSUE_MISSING_INFLOW
         if want_inflow:
             anchor_dt = max(dated)
-            start, end = anchor_dt - COMPLETION_EARLY_SLACK, anchor_dt + COMPLETION_TIME_WINDOW
+            start, end = (
+                anchor_dt - COMPLETION_EARLY_SLACK,
+                anchor_dt + COMPLETION_TIME_WINDOW,
+            )
         else:
             anchor_dt = min(dated)
-            start, end = anchor_dt - COMPLETION_TIME_WINDOW, anchor_dt + COMPLETION_EARLY_SLACK
+            start, end = (
+                anchor_dt - COMPLETION_TIME_WINDOW,
+                anchor_dt + COMPLETION_EARLY_SLACK,
+            )
 
         query = (
             select(NormalizedTransaction)
             .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
             .where(NormalizedTransaction.transaction_type == "transfer")
-            .where(NormalizedTransaction.direction == (Direction.INFLOW.value if want_inflow else Direction.OUTFLOW.value))
+            .where(
+                NormalizedTransaction.direction
+                == (Direction.INFLOW.value if want_inflow else Direction.OUTFLOW.value)
+            )
             .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
             .where(NormalizedTransaction.date_time >= start.replace(tzinfo=None))
             .where(NormalizedTransaction.date_time <= end.replace(tzinfo=None))
@@ -144,8 +166,10 @@ class BundleHealthService:
         for tx in self.session.exec(query).all():
             if tx.account_id in anchor_accounts:
                 continue
-            same_asset = (tx.asset_id in asset_ids) if (tx.asset_id and asset_ids) else (
-                (tx.source_asset_symbol or "").upper() in symbols
+            same_asset = (
+                (tx.asset_id in asset_ids)
+                if (tx.asset_id and asset_ids)
+                else ((tx.source_asset_symbol or "").upper() in symbols)
             )
             if not same_asset:
                 continue
@@ -154,11 +178,18 @@ class BundleHealthService:
                 continue
             # The received side is the sent side minus fees: received <= sent, within tolerance.
             sent, received = (anchor_qty, qty) if want_inflow else (qty, anchor_qty)
-            if received > sent * Decimal("1.001") or received < sent * (1 - COMPLETION_QTY_TOLERANCE):
+            if received > sent * Decimal("1.001") or received < sent * (
+                1 - COMPLETION_QTY_TOLERANCE
+            ):
                 continue
             qty_gap = float(abs(sent - received) / sent)
             dt_gap = abs((ensure_utc(tx.date_time) - anchor_dt).total_seconds())
-            confidence = max(0.0, 1.0 - min(dt_gap / COMPLETION_TIME_WINDOW.total_seconds(), 1.0) * 0.3 - qty_gap * 2)
+            confidence = max(
+                0.0,
+                1.0
+                - min(dt_gap / COMPLETION_TIME_WINDOW.total_seconds(), 1.0) * 0.3
+                - qty_gap * 2,
+            )
             candidates.append(
                 CompletionCandidate(
                     transaction_id=tx.id,
@@ -167,7 +198,9 @@ class BundleHealthService:
                     asset_symbol=tx.source_asset_symbol or "",
                     quantity=float(qty),
                     confidence=round(confidence, 3),
-                    reason=_format_reason(dt_gap, sent - received, tx.source_asset_symbol or ""),
+                    reason=_format_reason(
+                        dt_gap, sent - received, tx.source_asset_symbol or ""
+                    ),
                 )
             )
         candidates.sort(key=lambda c: c.confidence, reverse=True)

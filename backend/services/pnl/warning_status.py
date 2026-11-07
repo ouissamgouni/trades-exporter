@@ -59,8 +59,10 @@ def is_acknowledged_clause():
     return exists().where(
         and_(
             PnlWarningAck.warning_type == PnlWarning.warning_type,
-            func.coalesce(PnlWarningAck.transaction_id, 0) == func.coalesce(PnlWarning.transaction_id, 0),
-            func.coalesce(PnlWarningAck.asset_id, 0) == func.coalesce(PnlWarning.asset_id, 0),
+            func.coalesce(PnlWarningAck.transaction_id, 0)
+            == func.coalesce(PnlWarning.transaction_id, 0),
+            func.coalesce(PnlWarningAck.asset_id, 0)
+            == func.coalesce(PnlWarning.asset_id, 0),
             PnlWarningAck.fingerprint == _fingerprint_expr(),
         )
     )
@@ -87,14 +89,27 @@ def apply_status(query, status: Optional[str]):
 
 
 def warning_status(w: PnlWarning, acked_keys: set) -> str:
-    if ack_key(w.warning_type, w.transaction_id, w.asset_id, (w.details or {}).get("fingerprint", "")) in acked_keys:
+    if (
+        ack_key(
+            w.warning_type,
+            w.transaction_id,
+            w.asset_id,
+            (w.details or {}).get("fingerprint", ""),
+        )
+        in acked_keys
+    ):
         return STATUS_ACKNOWLEDGED
     if (w.details or {}).get("severity") == STATUS_DUST:
         return STATUS_DUST
     return STATUS_OPEN
 
 
-def ack_key(warning_type: str, transaction_id: Optional[int], asset_id: Optional[int], fingerprint: Optional[str]):
+def ack_key(
+    warning_type: str,
+    transaction_id: Optional[int],
+    asset_id: Optional[int],
+    fingerprint: Optional[str],
+):
     return (warning_type, transaction_id or 0, asset_id or 0, fingerprint or "")
 
 
@@ -102,6 +117,14 @@ def load_ack_keys(session, warnings: Iterable[PnlWarning]) -> set:
     tx_ids = {w.transaction_id for w in warnings if w.transaction_id}
     query = PnlWarningAck.__table__.select()
     if tx_ids:
-        query = query.where(or_(PnlWarningAck.transaction_id.in_(tx_ids), PnlWarningAck.transaction_id.is_(None)))
+        query = query.where(
+            or_(
+                PnlWarningAck.transaction_id.in_(tx_ids),
+                PnlWarningAck.transaction_id.is_(None),
+            )
+        )
     rows = session.exec(query).all()
-    return {ack_key(r.warning_type, r.transaction_id, r.asset_id, r.fingerprint) for r in rows}
+    return {
+        ack_key(r.warning_type, r.transaction_id, r.asset_id, r.fingerprint)
+        for r in rows
+    }
