@@ -81,3 +81,13 @@ export function groupsUrlFor(customApiUrl?: string): string | null {
 export function idsUrlFor(customApiUrl?: string): string | null {
     return customApiUrl ? null : `${API_URL}/transactions/ids`;
 }
+
+/** Same params without invalid rows, or null when the status filter only keeps invalid ones. */
+export function withoutInvalid(params: URLSearchParams): URLSearchParams | null {
+    const current = params.get('review_status');
+    const statuses = (current ? current.split(',') : ['pending', 'valid', 'invalid']).filter(s => s && s !== 'invalid');
+    if (statuses.length === 0) return null;
+    const next = new URLSearchParams(params);
+    next.set('review_status', statuses.join(','));
+    return next;
+}

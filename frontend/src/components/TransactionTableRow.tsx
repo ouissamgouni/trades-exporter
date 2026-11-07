@@ -222,7 +222,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
     const spamBadge = spamLevel && (
         <Badge
             colorScheme="orange"
-            className="shrink-0 px-1 text-[7px]"
+            className="shrink-0 px-1 text-[10px]"
             title={spamLevel === 'suspected' ? 'Suspected spam — review in Inbox › Suspected spam' : 'Flagged as spam'}
         >
             {spamLevel === 'suspected' ? 'Spam?' : 'Spam'}
@@ -252,11 +252,11 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                         >
                             <LuPlus size={11} />
                         </button>
-                        <Badge colorScheme="red" className="px-1 text-[7px]">
+                        <Badge colorScheme="red" className="px-1 text-[10px]">
                             <LuX size={8} /> Invalid
                         </Badge>
                         {spamBadge}
-                        <span className="max-w-[200px] truncate text-[7px] text-slate-400">
+                        <span className="max-w-[200px] truncate text-[10px] text-slate-400">
                             {formatDateTimeCompact(tx.date_time)} · {tx.source_asset_symbol || tx.linked_asset?.symbol || '—'}
                             {tx.source ? ` · ${tx.source}` : ''}
                         </span>
@@ -359,7 +359,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             >
                                 <Badge
                                     colorScheme="purple"
-                                    className="cursor-pointer text-[7px] hover:opacity-70"
+                                    className="cursor-pointer text-[10px] hover:opacity-70"
                                     title={`Bundle #${tx.user_calculation_unit_id}`}
                                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 >
@@ -393,7 +393,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                         )}
                         {/* TX ID - clickable to open drawer */}
                         <span
-                            className="cursor-pointer font-mono text-[8px] text-slate-400 hover:text-blue-500 hover:underline"
+                            className="cursor-pointer font-mono text-[11px] text-slate-400 hover:text-blue-500 hover:underline"
                             onClick={() => {
                                 setDrawerTransactionId(tx.id);
                                 setIsDrawerOpen(true);
@@ -406,7 +406,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 </td>
                 {showColumn('id') && (
                     <td className="py-1">
-                        <span className="font-mono text-[8px] text-slate-500">{tx.id}</span>
+                        <span className="font-mono text-[11px] text-slate-500">{tx.id}</span>
                     </td>
                 )}
                 {/* Date/Time - click to edit */}
@@ -420,10 +420,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 onChange={e => updateEditValues({ date_time: e.target.value })}
                                 onKeyDown={handleEditKeyDown}
                                 onBlur={saveAndClose}
-                                className="w-[130px] px-1 text-[8px]"
+                                className="w-[130px] px-1 text-[11px]"
                             />
                         ) : (
-                            <span className="whitespace-nowrap text-[11px] tabular-nums text-slate-700" title={formatDateTimeCompact(tx.date_time)}>
+                            <span className="whitespace-nowrap text-xs tabular-nums text-slate-700" title={formatDateTimeCompact(tx.date_time)}>
                                 {formatTxDateTime(tx.date_time, dateMode)}
                             </span>
                         )}
@@ -465,7 +465,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     />
                                 )}
                                 {/* Secondary info shown when editing */}
-                                <span className="text-[7px] text-slate-400">
+                                <span className="text-[10px] text-slate-400">
                                     {[tx.source, tx.source_transaction_type].filter(Boolean).join(' · ')}
                                 </span>
                             </div>
@@ -570,7 +570,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             label={tx.source_from_account}
                                             source={tx.source}
                                             network={tx.network}
-                                            fontSize="6px"
+                                            fontSize="9px"
                                             suggestions={batchSuggestionsMap.get(tx.source_from_account!) ?? []}
                                             onAccept={async (s) => {
                                                 try {
@@ -603,7 +603,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         >
                                             <Badge
                                                 colorScheme={tx.from_account_id ? 'blue' : 'orange'}
-                                                className="cursor-pointer text-[8px] px-1 py-0"
+                                                className="cursor-pointer text-[11px] px-1 py-0"
                                                 onClick={() => startCellEdit(tx, 'from_account_id')}
                                             >
                                                 {tx.from_account_id ? (
@@ -670,7 +670,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             source={tx.source}
                                             network={tx.network}
                                             maxResults={2}
-                                            fontSize="6px"
+                                            fontSize="9px"
                                             suggestions={batchSuggestionsMap.get(tx.source_from_account!) ?? []}
                                             onAccept={async (s) => {
                                                 try {
@@ -697,7 +697,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             ) : (
                                 <Badge
                                     colorScheme="gray"
-                                    className="cursor-pointer border border-slate-300 bg-white text-[8px] px-1 py-0 text-slate-500"
+                                    className="cursor-pointer border border-slate-300 bg-white text-[11px] px-1 py-0 text-slate-500"
                                     onClick={() => startCellEdit(tx, 'from_account_id')}
                                 >
                                     + From
@@ -742,7 +742,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             label={tx.source_to_account}
                                             source={tx.source}
                                             network={tx.network}
-                                            fontSize="6px"
+                                            fontSize="9px"
                                             suggestions={batchSuggestionsMap.get(tx.source_to_account!) ?? []}
                                             onAccept={async (s) => {
                                                 try {
@@ -775,7 +775,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         >
                                             <Badge
                                                 colorScheme={tx.to_account_id ? 'blue' : 'orange'}
-                                                className="cursor-pointer text-[8px] px-1 py-0"
+                                                className="cursor-pointer text-[11px] px-1 py-0"
                                                 onClick={() => startCellEdit(tx, 'to_account_id')}
                                             >
                                                 {tx.to_account_id ? (
@@ -842,7 +842,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             source={tx.source}
                                             network={tx.network}
                                             maxResults={2}
-                                            fontSize="6px"
+                                            fontSize="9px"
                                             suggestions={batchSuggestionsMap.get(tx.source_to_account!) ?? []}
                                             onAccept={async (s) => {
                                                 try {
@@ -869,7 +869,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             ) : (
                                 <Badge
                                     colorScheme="gray"
-                                    className="cursor-pointer border border-slate-300 bg-white text-[8px] px-1 py-0 text-slate-500"
+                                    className="cursor-pointer border border-slate-300 bg-white text-[11px] px-1 py-0 text-slate-500"
                                     onClick={() => startCellEdit(tx, 'to_account_id')}
                                 >
                                     + To
@@ -884,7 +884,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                         {isEditingCell(tx.id, 'direction') ? (
                             <select
                                 title="Direction"
-                                className="w-[45px] border border-slate-300 text-[8px]"
+                                className="w-[45px] border border-slate-300 text-[11px]"
                                 value={editValues.direction || tx.direction}
                                 onChange={async e => {
                                     const newDir = e.target.value;
@@ -909,7 +909,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         setEditValues({});
                                     }
                                 }}
-                                style={{ fontSize: '8px', padding: '2px' }}
+                                style={{ fontSize: '11px', padding: '2px' }}
                                 autoFocus
                             >
                                 {DIRECTION_OPTIONS.map(opt => (
@@ -929,7 +929,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                         {isEditingCell(tx.id, 'transaction_type') ? (
                             <select
                                 title="Transaction type"
-                                className="w-[80px] border border-slate-300 text-[8px]"
+                                className="w-[80px] border border-slate-300 text-[11px]"
                                 value={editValues.transaction_type || tx.transaction_type}
                                 onChange={async e => {
                                     const newType = e.target.value;
@@ -953,7 +953,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         setEditValues({});
                                     }
                                 }}
-                                style={{ fontSize: '8px', padding: '2px' }}
+                                style={{ fontSize: '11px', padding: '2px' }}
                                 autoFocus
                             >
                                 {TRANSACTION_TYPE_OPTIONS.map(opt => (
@@ -1006,7 +1006,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 3);
                                         return suggestions.length > 0 ? (
                                             <div className="flex flex-wrap gap-1">
-                                                <span className="text-[7px] text-slate-500">Suggestions:</span>
+                                                <span className="text-[10px] text-slate-500">Suggestions:</span>
                                                 {suggestions.map((s, idx) => (
                                                     <Tooltip
                                                         key={idx}
@@ -1015,7 +1015,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                     >
                                                         <Badge
                                                             colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                            className={cn('cursor-pointer text-[7px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                            className={cn('cursor-pointer text-[10px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 updateEditValues({ asset_id: s.item.asset_id });
@@ -1044,7 +1044,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     <div className="flex flex-col items-start gap-0.5">
                                         <div className="flex items-center gap-0.5">
                                             <Tooltip content={`${tx.source_asset_symbol} - Click to link`} openDelay={200}>
-                                                <span className="cursor-pointer text-[8px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
+                                                <span className="cursor-pointer text-[11px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
                                                     ⚠ {tx.source_asset_symbol.slice(0, 8)}{tx.source_asset_symbol.length > 8 && '…'}
                                                 </span>
                                             </Tooltip>
@@ -1076,7 +1076,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                             <Badge
                                                                 colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                                className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                                className={cn('cursor-pointer text-[9px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                                 onClick={async (e) => {
                                                                     e.stopPropagation();
                                                                     try {
@@ -1111,14 +1111,14 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         })()}
                                     </div>
                                 ) : (
-                                    <span className="text-[8px] text-slate-400">-</span>
+                                    <span className="text-[11px] text-slate-400">-</span>
                                 )
                             )}
                             {/* Attributed asset badge with inline editing */}
                             {(tx.source_attributed_asset_symbol || tx.attributed_asset_id) && (
                                 isEditingCell(tx.id, 'attributed_asset_id') ? (
                                     <div className="flex min-w-[90px] flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
-                                        <span className="text-[7px] text-slate-500">Attr. asset:</span>
+                                        <span className="text-[10px] text-slate-500">Attr. asset:</span>
                                         <AssetSelector
                                             value={editValues.attributed_asset_id ?? null}
                                             onChange={(assetId) => {
@@ -1138,7 +1138,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                             const suggestions = getAssetSuggestions(tx.source_attributed_asset_symbol, assets, 0.5, 3);
                                             return suggestions.length > 0 ? (
                                                 <div className="flex flex-wrap gap-1">
-                                                    <span className="text-[7px] text-slate-500">Suggestions:</span>
+                                                    <span className="text-[10px] text-slate-500">Suggestions:</span>
                                                     {suggestions.map((s, idx) => (
                                                         <Tooltip
                                                             key={idx}
@@ -1147,7 +1147,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                         >
                                                             <Badge
                                                                 colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                                className={cn('cursor-pointer text-[7px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                                className={cn('cursor-pointer text-[10px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     updateEditValues({ attributed_asset_id: s.item.asset_id });
@@ -1166,7 +1166,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 ) : (
                                     tx.attributed_asset_id && tx.attributed_asset ? (
                                         <div className="flex cursor-pointer items-center gap-0.5" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }}>
-                                            <span className="text-[7px] text-slate-500">→</span>
+                                            <span className="text-[10px] text-slate-500">→</span>
                                             <AssetBadge
                                                 asset={tx.attributed_asset}
                                                 size="xs"
@@ -1177,9 +1177,9 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     ) : tx.source_attributed_asset_symbol ? (
                                         <div className="flex flex-col items-start gap-0.5" onClick={(e) => e.stopPropagation()}>
                                             <div className="flex items-center gap-0.5">
-                                                <span className="text-[7px] text-slate-500">→</span>
+                                                <span className="text-[10px] text-slate-500">→</span>
                                                 <Tooltip content={`${tx.source_attributed_asset_symbol} - Click to link attributed asset`} openDelay={200}>
-                                                    <span className="cursor-pointer text-[7px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }}>
+                                                    <span className="cursor-pointer text-[10px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }}>
                                                         ⚠ {tx.source_attributed_asset_symbol.slice(0, 6)}{tx.source_attributed_asset_symbol.length > 6 && '…'}
                                                     </span>
                                                 </Tooltip>
@@ -1210,7 +1210,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                                 <Badge
                                                                     colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                                    className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                                    className={cn('cursor-pointer text-[9px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                                     onClick={async (e) => {
                                                                         e.stopPropagation();
                                                                         try {
@@ -1264,10 +1264,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity); }
                                 }}
                                 onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity)}
-                                className="w-[60px] px-1 text-[8px]"
+                                className="w-[60px] px-1 text-[11px]"
                             />
                         ) : (
-                            <span className="text-[8px]"><ValueDisplay value={tx.quantity} /></span>
+                            <span className="text-[11px]"><ValueDisplay value={tx.quantity} /></span>
                         )}
                     </td>
                 )}
@@ -1287,10 +1287,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'price', editValuesRef.current.price); }
                                     }}
                                     onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'price', editValuesRef.current.price)}
-                                    className="w-[60px] px-1 text-[8px]"
+                                    className="w-[60px] px-1 text-[11px]"
                                 />
                             ) : (
-                                <span className="text-[8px]">
+                                <span className="text-[11px]">
                                     {tx.price ? <ValueDisplay value={tx.price} /> : '-'}
                                 </span>
                             )}
@@ -1324,7 +1324,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                     >
                                                         <Badge
                                                             colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                            className={cn('cursor-pointer text-[9px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 updateEditValues({ price_quote_asset_id: s.item.asset_id });
@@ -1350,7 +1350,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             ) : tx.source_price_quote_asset_symbol ? (
                                 <div className="flex flex-col items-start gap-0.5">
                                     <div className="flex items-center gap-0.5">
-                                        <span className="cursor-pointer text-[8px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</span>
+                                        <span className="cursor-pointer text-[11px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</span>
                                         <Tooltip content="Create new asset" openDelay={100}>
                                             <button
                                                 type="button"
@@ -1379,7 +1379,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                     <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                         <Badge
                                                             colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                            className={cn('cursor-pointer text-[9px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={async (e) => {
                                                                 e.stopPropagation();
                                                                 try {
@@ -1419,7 +1419,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 )}
                 {showColumn('total') && (
                     <td className="py-1">
-                        <span className="text-[8px]">
+                        <span className="text-[11px]">
                             {tx.total ? <ValueDisplay value={tx.total} /> : '-'}
                         </span>
                     </td>
@@ -1440,10 +1440,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee); }
                                     }}
                                     onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee)}
-                                    className="w-[60px] px-1 text-[8px]"
+                                    className="w-[60px] px-1 text-[11px]"
                                 />
                             ) : (
-                                <span className="text-[8px]">
+                                <span className="text-[11px]">
                                     {tx.fee ? <ValueDisplay value={tx.fee} /> : '-'}
                                 </span>
                             )}
@@ -1477,7 +1477,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                     >
                                                         <Badge
                                                             colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                            className={cn('cursor-pointer text-[9px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 updateEditValues({ fee_quote_asset_id: s.item.asset_id });
@@ -1503,7 +1503,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             ) : tx.source_fee_quote_asset_symbol ? (
                                 <div className="flex flex-col items-start gap-0.5">
                                     <div className="flex items-center gap-0.5">
-                                        <span className="cursor-pointer text-[8px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</span>
+                                        <span className="cursor-pointer text-[11px] font-bold text-orange-500" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</span>
                                         <Tooltip content="Create new asset" openDelay={100}>
                                             <button
                                                 type="button"
@@ -1532,7 +1532,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                     <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
                                                         <Badge
                                                             colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                            className={cn('cursor-pointer text-[6px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
+                                                            className={cn('cursor-pointer text-[9px]', s.confidence < 0.9 && 'border border-slate-300 bg-white')}
                                                             onClick={async (e) => {
                                                                 e.stopPropagation();
                                                                 try {
@@ -1619,7 +1619,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     </Tooltip>
                                     {tx.has_fr_tax_override && (
                                         <Tooltip content="FR Tax override active" openDelay={200}>
-                                            <Badge colorScheme="blue" className="text-[7px]">
+                                            <Badge colorScheme="blue" className="text-[10px]">
                                                 FR
                                             </Badge>
                                         </Tooltip>
@@ -1649,7 +1649,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 {/* Bundle - read only */}
                 {showColumn('bundle') && (
                     <td className="py-1">
-                        {tx.user_calculation_unit_id ? <Badge colorScheme="purple">📦 #{tx.user_calculation_unit_id}</Badge> : <span className="text-[8px] text-slate-400">-</span>}
+                        {tx.user_calculation_unit_id ? <Badge colorScheme="purple">📦 #{tx.user_calculation_unit_id}</Badge> : <span className="text-[11px] text-slate-400">-</span>}
                     </td>
                 )}
                 {/* Tags - display only */}
@@ -1675,12 +1675,12 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         </Badge>
                                     ))}
                                     {Object.keys(tx.tags).length > 2 && (
-                                        <span className="text-[7px] text-slate-500">+{Object.keys(tx.tags).length - 2}</span>
+                                        <span className="text-[10px] text-slate-500">+{Object.keys(tx.tags).length - 2}</span>
                                     )}
                                 </div>
                             </Tooltip>
                         ) : (
-                            <span className="text-[8px] text-slate-400">-</span>
+                            <span className="text-[11px] text-slate-400">-</span>
                         )}
                     </td>
                 )}
@@ -1689,12 +1689,12 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                     <td className="py-1">
                         {tx.source_transaction_id ? (
                             <Tooltip content={tx.source_transaction_id} openDelay={200}>
-                                <span className="cursor-pointer text-[8px] text-slate-600">
+                                <span className="cursor-pointer text-[11px] text-slate-600">
                                     {tx.source_transaction_id.slice(0, 12)}{tx.source_transaction_id.length > 12 && '…'}
                                 </span>
                             </Tooltip>
                         ) : (
-                            <span className="text-[8px] text-slate-400">-</span>
+                            <span className="text-[11px] text-slate-400">-</span>
                         )}
                     </td>
                 )}
@@ -1715,7 +1715,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 onChange={e => updateEditValues({ review_status: e.target.value as TransactionStatus })}
                                 onKeyDown={handleEditKeyDown}
                                 onBlur={saveAndClose}
-                                style={{ fontSize: '7px', padding: '1px' }}
+                                style={{ fontSize: '10px', padding: '1px' }}
                             >
                                 <option value="valid">Valid</option>
                                 <option value="pending">Pending</option>
@@ -1723,7 +1723,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             </select>
                         ) : (
                             <div className="flex flex-col gap-0">
-                                <Badge colorScheme={statusBadgeColors[tx.review_status] || 'gray'} className="text-[6px]">
+                                <Badge colorScheme={statusBadgeColors[tx.review_status] || 'gray'} className="text-[9px]">
                                     {tx.review_status}
                                 </Badge>
                                 {/* Quick set valid button */}
@@ -1763,7 +1763,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         if (resolution === 'kept' || resolution === 'keep_selected') {
                                             return (
                                                 <Tooltip content={`Kept (${status || 'resolved'})`}>
-                                                    <Badge colorScheme="green" className="border border-slate-300 bg-white text-[7px]">
+                                                    <Badge colorScheme="green" className="border border-slate-300 bg-white text-[10px]">
                                                         <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                         Kept
                                                     </Badge>
@@ -1772,7 +1772,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         } else if (resolution === 'dismissed' || resolution === 'dismiss_selected') {
                                             return (
                                                 <Tooltip content={`Dismissed (${status || 'resolved'})`}>
-                                                    <Badge colorScheme="gray" className="border border-slate-300 bg-white text-[7px]">
+                                                    <Badge colorScheme="gray" className="border border-slate-300 bg-white text-[10px]">
                                                         <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                         Dismissed
                                                     </Badge>
@@ -1781,7 +1781,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         } else if (resolution === 'merged') {
                                             return (
                                                 <Tooltip content={`Merged (${status || 'resolved'})`}>
-                                                    <Badge colorScheme="purple" className="border border-slate-300 bg-white text-[7px]">
+                                                    <Badge colorScheme="purple" className="border border-slate-300 bg-white text-[10px]">
                                                         <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                         Merged
                                                     </Badge>
@@ -1793,7 +1793,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     // Show pending duplicate indicator
                                     return (
                                         <Tooltip content={`Potential duplicate (group: ${groupHash?.slice(0, 8)}...)`}>
-                                            <Badge colorScheme="orange" className="text-[7px]">
+                                            <Badge colorScheme="orange" className="text-[10px]">
                                                 <FiCopy size={8} style={{ marginRight: '2px' }} />
                                                 Duplicate?
                                             </Badge>

@@ -92,7 +92,7 @@ interface TradesImportResult {
 }
 
 // Small pill-style bulk-action button classes (replaces Chakra Button size="2xs" variant="outline"/"solid")
-const BULK_ACTION_BASE = 'inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed';
+const BULK_ACTION_BASE = 'inline-flex items-center gap-1 px-2 py-1 text-[13px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed';
 const BULK_ACTION_OUTLINE: Record<string, string> = {
     gray: 'border border-slate-300 text-slate-700 hover:bg-slate-50',
     green: 'border border-green-300 text-green-700 hover:bg-green-50',
@@ -1406,7 +1406,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (dupEntry && dupEntry.groupIndex === hoveredDuplicateGroup) return '#fef2f2'; // red-50
         }
         // Status is carried by the left band and direction by the Dir column; only de-emphasize invalid rows.
-        if (tx.review_status === 'invalid') return '#f1f5f9'; // slate-100
+        if (tx.review_status === 'invalid') return '#f8fafc'; // slate-50, lighter than day headers (slate-100)
         return '#ffffff';
     };
 
@@ -1754,9 +1754,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 <div
                     className="fixed inset-x-0 bottom-0 z-[1000] animate-slide-up border-t border-slate-200 bg-white/85 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] backdrop-blur-sm"
                 >
-                    <div className="mx-auto max-w-[1400px] px-4 py-1.5">
+                    <div className="mx-auto max-w-[1400px] px-4 py-2">
                         <div className="flex flex-wrap items-center justify-between gap-1.5">
-                            <span className="text-xs font-semibold text-blue-700">
+                            <span className="text-sm font-semibold text-blue-700">
                                 {selectedIds.size} selected
                             </span>
                             <div className="flex flex-wrap items-center gap-1">
@@ -2063,7 +2063,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
                 {/* Transaction table - only show when not loading or erroring */}
                 {!loading && !error && (
-                    <StickyScrollContainer className={cn('relative overflow-x-auto border border-slate-200 bg-white text-[11px] shadow-sm', !embeddedMode && 'max-h-[75vh] overflow-y-auto')}>
+                    <StickyScrollContainer className={cn('relative overflow-x-auto border border-slate-200 bg-white text-xs shadow-sm', !embeddedMode && 'max-h-[75vh] overflow-y-auto')}>
                         <table className="w-full">
                             <thead className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-slate-100 [&_th]:py-1.5">
                                 <tr>

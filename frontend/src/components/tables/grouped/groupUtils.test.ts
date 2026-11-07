@@ -6,7 +6,18 @@ import {
     groupsUrlFor,
     shouldAutoExpandDays,
     truncateSymbol,
+    withoutInvalid,
 } from './groupUtils'
+
+describe('withoutInvalid', () => {
+    it('drops invalid from the status filter', () => {
+        expect(withoutInvalid(new URLSearchParams())?.get('review_status')).toBe('pending,valid')
+        expect(withoutInvalid(new URLSearchParams({ review_status: 'valid,invalid' }))?.get('review_status')).toBe('valid')
+    })
+    it('returns null when only invalid is filtered', () => {
+        expect(withoutInvalid(new URLSearchParams({ review_status: 'invalid' }))).toBeNull()
+    })
+})
 import { intersectBounds } from './useTransactionGroups'
 import type { TransactionGroup } from './types'
 

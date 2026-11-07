@@ -519,9 +519,9 @@ interface QuickFilterBarProps {
 }
 
 const QUICK_STATUSES = [
-    { value: 'pending', label: 'Pending' },
-    { value: 'valid', label: 'Valid' },
-    { value: 'invalid', label: 'Invalid' },
+    { value: 'pending', label: 'Pending', on: 'border-amber-300 bg-amber-50 text-amber-800', off: 'border-slate-200 bg-white text-amber-700/60 hover:bg-amber-50/50' },
+    { value: 'valid', label: 'Valid', on: 'border-green-300 bg-green-50 text-green-800', off: 'border-slate-200 bg-white text-green-700/60 hover:bg-green-50/50' },
+    { value: 'invalid', label: 'Invalid', on: 'border-red-200 bg-red-50 text-red-700', off: 'border-slate-200 bg-white text-red-700/60 hover:bg-red-50/50' },
 ];
 
 const QUICK_PILL = 'shrink-0 whitespace-nowrap border px-2 py-0.5 text-xs transition-colors';
@@ -544,6 +544,10 @@ const QuickFilterBar: React.FC<QuickFilterBarProps> = ({ filters, onChange, acco
     };
 
     const selectedAccounts = filters.accountIds;
+    const [accountSearch, setAccountSearch] = useState('');
+    const visibleAccounts = accountSearch
+        ? accountOptions.filter(o => o.label.toLowerCase().includes(accountSearch.toLowerCase()))
+        : accountOptions;
     const toggleAccount = (value: string) => {
         const next = selectedAccounts.includes(value)
             ? selectedAccounts.filter(v => v !== value)
@@ -607,7 +611,7 @@ const QuickFilterBar: React.FC<QuickFilterBarProps> = ({ filters, onChange, acco
                                     key={s.value}
                                     type="button"
                                     aria-pressed={isOn}
-                                    className={`${QUICK_PILL} ${isOn ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
+                                    className={`${QUICK_PILL} ${isOn ? `${s.on} font-medium` : s.off}`}
                                     onClick={() => toggleStatus(s.value)}
                                 >
                                     {s.label}{count !== undefined ? ` ${count}` : ''}
@@ -619,31 +623,52 @@ const QuickFilterBar: React.FC<QuickFilterBarProps> = ({ filters, onChange, acco
             </div>
 
             {!hiddenSet.has('accountIds') && accountOptions.length > 0 && (
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5" role="group" aria-label="Accounts">
-                    <span className="shrink-0 pr-1 text-xs text-slate-500">👤 Accounts</span>
-                    <button
-                        type="button"
-                        aria-pressed={selectedAccounts.length === 0}
-                        className={`${QUICK_PILL} ${selectedAccounts.length === 0 ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
-                        onClick={() => onChange({ ...filters, accountIds: [] })}
-                    >
-                        All
-                    </button>
-                    {accountOptions.map(o => {
-                        const isOn = selectedAccounts.includes(o.value);
-                        return (
+                <div className={`border bg-white p-2 ${selectedAccounts.length > 0 ? 'border-blue-200' : 'border-slate-200'}`}>
+                    <div className="flex items-start gap-2">
+                        <div className="flex shrink-0 items-center gap-2">
+                            <span className="text-[10px] font-semibold uppercase text-slate-600">👤 Accounts</span>
+                            {selectedAccounts.length > 0 && (
+                                <Badge colorScheme="blue" className="rounded-full">{selectedAccounts.length}</Badge>
+                            )}
+                            <label className="flex w-40 items-center gap-1 border border-slate-200 bg-slate-50 px-1.5 py-0.5">
+                                <LuSearch size={12} className="text-slate-400" />
+                                <input
+                                    type="text"
+                                    aria-label="Search accounts"
+                                    placeholder="Search…"
+                                    value={accountSearch}
+                                    onChange={e => setAccountSearch(e.target.value)}
+                                    className="w-full bg-transparent text-xs text-slate-700 outline-none"
+                                />
+                            </label>
                             <button
-                                key={o.value}
                                 type="button"
-                                aria-pressed={isOn}
-                                className={`${QUICK_PILL} ${isOn ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
-                                onClick={() => toggleAccount(o.value)}
+                                aria-pressed={selectedAccounts.length === 0}
+                                className={`${QUICK_PILL} ${selectedAccounts.length === 0 ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
+                                onClick={() => onChange({ ...filters, accountIds: [] })}
                             >
-                                {o.label}
-                                {o.count !== undefined && <span className={isOn ? 'ml-1 text-blue-100' : 'ml-1 text-slate-400'}>{o.count}</span>}
+                                All
                             </button>
-                        );
-                    })}
+                        </div>
+                        <div className="flex max-h-[52px] min-w-0 flex-1 flex-wrap gap-1 overflow-y-auto" role="group" aria-label="Accounts">
+                            {visibleAccounts.map(o => {
+                                const isOn = selectedAccounts.includes(o.value);
+                                return (
+                                    <button
+                                        key={o.value}
+                                        type="button"
+                                        aria-pressed={isOn}
+                                        className={`${QUICK_PILL} ${isOn ? QUICK_PILL_ON : QUICK_PILL_OFF}`}
+                                        onClick={() => toggleAccount(o.value)}
+                                    >
+                                        {o.label}
+                                        {o.count !== undefined && <span className={isOn ? 'ml-1 text-blue-100' : 'ml-1 text-slate-400'}>{o.count}</span>}
+                                    </button>
+                                );
+                            })}
+                            {visibleAccounts.length === 0 && <span className="py-0.5 text-xs text-slate-400">No matching accounts</span>}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
