@@ -33,6 +33,7 @@ from backend.db.models import (
     CalculationUnitLeg,
     CalculationVersion,
     Category,
+    ConsumedLotSlice,
     CostLot,
     CostLotEvent,
     FeeEntry,
@@ -93,6 +94,7 @@ class BookSummary:
     fee_entry_count: int
     total_invested: float = 0.0
     deferred_gain: float = 0.0
+    net_deposits: float = 0.0
     total_income: float = 0.0
     total_withholding: float = 0.0
     income_event_count: int = 0
@@ -109,6 +111,7 @@ class BookRangeMetrics:
     fees_in_period: float
     total_invested: float = 0.0
     deferred_gain: float = 0.0
+    net_deposits: float = 0.0
     income_in_period: float = 0.0
     withholding_in_period: float = 0.0
 
@@ -247,9 +250,9 @@ def _get_current_from_cost_lots(
     invested_expr = func.sum(
         case(
             (CalculationUnit.pattern.in_(_INVESTMENT_PATTERNS),
-             CostLot.qty * CostLot.unit_cost_in_base),
+             CostLot.qty * ECONOMIC_UNIT_COST),
             (CalculationUnit.pattern.is_(None),
-             CostLot.qty * CostLot.unit_cost_in_base),
+             CostLot.qty * ECONOMIC_UNIT_COST),
             else_=0,
         )
     ).label("total_invested")
@@ -321,6 +324,95 @@ def _get_deferred_gain(
     if account_ids:
         query = query.where(CostLot.account_id.in_(account_ids))
     return float(session.exec(query).one() or 0)
+
+
+def _get_net_deposits(
+    session: Session,
+    version_id: int,
+    base_currency_id: Optional[int],
+    account_ids: Optional[List[int]] = None,
+    since: Optional[datetime] = None,
+) -> float:
+    """Money brought in from outside minus money taken out, valued when it moved.
+
+    External flows (deposits, withdrawals, payments, airdrops) are FLOW units;
+    income events are excluded. For an account scope, internal transfers in/out
+    of the scope also count, at the economic cost they carry.
+    """
+    income_units = select(IncomeEvent.unit_id).where(IncomeEvent.unit_id.isnot(None))
+    since_naive = _ensure_naive(since) if since else None
+
+    def lots_in(pattern: str) -> float:
+        q = (
+            select(func.coalesce(func.sum(CostLot.qty * ECONOMIC_UNIT_COST), 0))
+            .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+            .where(CalculationUnit.version_id == version_id)
+            .where(CalculationUnit.pattern == pattern)
+            .where(CalculationUnit.id.notin_(income_units))
+            .where(CostLot.is_negative == False)  # noqa: E712
+        )
+        if account_ids:
+            q = q.where(CostLot.account_id.in_(account_ids))
+        if since_naive:
+            q = q.where(CalculationUnit.timestamp >= since_naive)
+        return float(session.exec(q).one() or 0)
+
+    deposits = lots_in("flow")
+
+    base_out = 0.0
+    if base_currency_id:
+        q = (
+            select(func.coalesce(func.sum(CalculationUnitLeg.quantity), 0))
+            .join(CalculationUnit, CalculationUnitLeg.unit_id == CalculationUnit.id)
+            .join(NormalizedTransaction, NormalizedTransaction.id == CalculationUnitLeg.transaction_id)
+            .where(CalculationUnit.version_id == version_id)
+            .where(CalculationUnit.pattern == "flow")
+            .where(CalculationUnitLeg.leg_type == "outflow")
+            .where(CalculationUnitLeg.asset_id == base_currency_id)
+        )
+        if account_ids:
+            q = q.where(NormalizedTransaction.account_id.in_(account_ids))
+        if since_naive:
+            q = q.where(CalculationUnit.timestamp >= since_naive)
+        base_out = float(session.exec(q).one() or 0)
+
+    q = (
+        select(func.coalesce(func.sum(RealizedPnl.proceeds_in_base), 0))
+        .join(CalculationUnit, RealizedPnl.origin_unit_id == CalculationUnit.id)
+        .join(NormalizedTransaction, NormalizedTransaction.id == RealizedPnl.transaction_id)
+        .where(CalculationUnit.version_id == version_id)
+        .where(CalculationUnit.pattern == "flow")
+        .where(RealizedPnl.pnl_id.notin_(
+            select(FeeEntry.realized_pnl_id).where(FeeEntry.realized_pnl_id.isnot(None))
+        ))
+    )
+    if base_currency_id:
+        q = q.where(RealizedPnl.asset_id != base_currency_id)
+    if account_ids:
+        q = q.where(NormalizedTransaction.account_id.in_(account_ids))
+    if since_naive:
+        q = q.where(CalculationUnit.timestamp >= since_naive)
+    other_out = float(session.exec(q).one() or 0)
+
+    net = deposits - base_out - other_out
+
+    if account_ids:
+        transfers_in = lots_in("internal_transfer")
+        q = (
+            select(func.coalesce(func.sum(
+                func.coalesce(ConsumedLotSlice.economic_total_cost_in_base, ConsumedLotSlice.total_cost_in_base)
+            ), 0))
+            .join(CalculationUnit, ConsumedLotSlice.unit_id == CalculationUnit.id)
+            .join(CostLot, CostLot.cost_lot_id == ConsumedLotSlice.cost_lot_id)
+            .where(CalculationUnit.version_id == version_id)
+            .where(CalculationUnit.pattern == "internal_transfer")
+            .where(CostLot.account_id.in_(account_ids))
+        )
+        if since_naive:
+            q = q.where(CalculationUnit.timestamp >= since_naive)
+        net += transfers_in - float(session.exec(q).one() or 0)
+
+    return net
 
 
 def _get_current_from_cost_lots_by_account(
@@ -531,7 +623,7 @@ def _get_invested_snapshots_at_dates(
         select(
             CostLot.acquired_at,
             CostLot.asset_id,
-            (CostLot.qty * CostLot.unit_cost_in_base).label("invested"),
+            (CostLot.qty * ECONOMIC_UNIT_COST).label("invested"),
         )
         .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
         .where(CalculationUnit.version_id == version_id)
@@ -1579,6 +1671,10 @@ def _compute_book_core(
     now_rpnl_total = cumulative_rpnl.get(snap.now_ds, (0.0, {}))[0]
     taxable_rpnl_total = cumulative_rpnl_taxable.get(snap.now_ds, (0.0, {}))[0]
     deferred_gain = _get_deferred_gain(session, version_id, asset_ids, account_ids)
+    # Money isn't attached to an asset: net deposits only make sense unscoped by asset.
+    net_deposits = 0.0 if asset_ids else _get_net_deposits(
+        session, version_id, snap.base_currency_id, account_ids,
+    )
 
     # Income summary
     total_income, total_withholding, income_count = _compute_income_summary(session, version_id)
@@ -1591,6 +1687,7 @@ def _compute_book_core(
         fee_entry_count=fee_count,
         total_invested=round(total_invested, 2),
         deferred_gain=round(deferred_gain, 2),
+        net_deposits=round(net_deposits, 2),
         total_income=round(total_income, 2),
         total_withholding=round(total_withholding, 2),
         income_event_count=income_count,
@@ -1608,6 +1705,7 @@ def _compute_book_core(
             cost_basis_in_period = cost_basis
             fees_in_period = total_fees
             invested_in_period = total_invested
+            deposits_in_period = net_deposits
             income_in_period = total_income
             withholding_in_period = total_withholding
         else:
@@ -1621,6 +1719,9 @@ def _compute_book_core(
             income_in_period, withholding_in_period = _compute_income_in_period(
                 session, version_id, start_dt, snap.now
             )
+            deposits_in_period = 0.0 if asset_ids else _get_net_deposits(
+                session, version_id, snap.base_currency_id, account_ids, since=start_dt,
+            )
 
         ranges[range_key] = BookRangeMetrics(
             cost_basis=round(cost_basis, 2),
@@ -1631,6 +1732,7 @@ def _compute_book_core(
             fees_in_period=round(fees_in_period, 2),
             total_invested=round(invested_in_period, 2),
             deferred_gain=round(deferred_gain, 2),
+            net_deposits=round(deposits_in_period, 2),
             income_in_period=round(income_in_period, 2),
             withholding_in_period=round(withholding_in_period, 2),
         )

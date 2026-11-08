@@ -23,6 +23,7 @@ import type { AssetPeriodDelta } from '../../hooks/useChartData';
 import { Tooltip } from '../ui/tooltip';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { ValueDisplay } from '../ValueDisplay';
+import { InfoTip, TERM_HELP } from './pnlTerms';
 import { getAccountColor } from '../../utils/accountColors';
 import { DeltaBar } from './DeltaBar';
 import { PnLBreakdownBar } from './PnLBreakdownBar';
@@ -258,8 +259,8 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                     <ValueDisplay value={row.cost_basis} currency={baseCurrency} options={compact} />
                                 </div>
                                 {row.total_invested != null && Math.abs(row.total_invested - row.cost_basis) > 0.01 && (
-                                    <div className="text-[10px] leading-none text-gray-400">
-                                        invested <ValueDisplay value={row.total_invested} currency={baseCurrency} options={compact} />
+                                    <div className="text-[10px] leading-none text-gray-400" title={TERM_HELP.totalBought}>
+                                        bought <ValueDisplay value={row.total_invested} currency={baseCurrency} options={compact} />
                                     </div>
                                 )}
                             </div>
@@ -343,6 +344,12 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                     <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
                                 </div>
                                 <div className="text-[10px] text-gray-500">{`${row.unrealized_pnl_pct >= 0 ? '+' : ''}${Math.round(row.unrealized_pnl_pct * 100)}%`}</div>
+                                {row.tax_cost_basis != null && Math.abs(row.tax_cost_basis - row.cost_basis) >= 0.01 && (
+                                    <div className="inline-flex items-center gap-0.5 text-[10px] text-gray-500">
+                                        Taxable if sold: <ValueDisplay value={row.market_value - row.tax_cost_basis} currency={baseCurrency} options={compact} />
+                                        <InfoTip text={TERM_HELP.taxableIfSold} size={9} />
+                                    </div>
+                                )}
                                 {periodDelta && periodLabel && (
                                     <div className={`text-[10px] ${periodDelta.unrealized_change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                                         {periodLabel}: <ValueDisplay value={periodDelta.unrealized_change} currency={baseCurrency} options={compact} />
@@ -363,7 +370,7 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                         </div>
                         {row.taxable_realized_pnl !== 0 && (
                             <div className="text-[10px] text-gray-500">
-                                Tax: <ValueDisplay value={row.taxable_realized_pnl} currency={baseCurrency} options={compact} />
+                                Taxable: <ValueDisplay value={row.taxable_realized_pnl} currency={baseCurrency} options={compact} />
                             </div>
                         )}
                         {periodDelta && periodLabel && (

@@ -16,6 +16,7 @@ import { FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import { LuReceipt, LuInfo, LuBanknote } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { Tooltip } from '../ui/tooltip';
+import { InfoTip, TERM_HELP } from './pnlTerms';
 import { HeroMetricsBar } from './HeroMetricsBar';
 import { PeriodChartPanel } from './PeriodChartPanel';
 import type { TimelinePoint, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy } from '../../hooks/useChartData';
@@ -79,6 +80,25 @@ function tokenToClass(token: string | undefined, prefix: 'text' | 'bg', fallback
     return fallback;
 }
 
+export interface MetricSubLine {
+    label: string;
+    value: string;
+    info?: string;
+}
+
+/** Taxable and (when non-zero) Deferred lines under Realized. */
+export function realizedSubLines(
+    m: { taxableRealizedPnl: number; deferredGain?: number },
+    currency: string,
+    fmt: (val: number, currency: string) => string,
+): MetricSubLine[] {
+    const lines: MetricSubLine[] = [{ label: 'Taxable', value: fmt(m.taxableRealizedPnl, currency), info: TERM_HELP.taxable }];
+    if (m.deferredGain && Math.abs(m.deferredGain) >= 0.01) {
+        lines.push({ label: 'Deferred', value: fmt(m.deferredGain, currency), info: TERM_HELP.deferred });
+    }
+    return lines;
+}
+
 /** "Taxable: X", plus the tax-deferred part of Realized when there is one */
 export function realizedSubValue(
     m: { taxableRealizedPnl: number; deferredGain?: number },
@@ -108,6 +128,7 @@ export interface RangeMetrics {
     currentValue: number;
     costBasis: number;
     totalInvested: number;
+    netDeposits?: number;
     unrealizedPnl: number;
     realizedPnl: number;
     taxableRealizedPnl: number;
@@ -384,6 +405,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 currentValue: live?.current_value ?? 0,
                 costBasis: book.cost_basis,
                 totalInvested: book.total_invested ?? book.cost_basis,
+                netDeposits: book.net_deposits ?? 0,
                 unrealizedPnl: live?.unrealized_pnl ?? 0,
                 realizedPnl: book.realized_pnl,
                 taxableRealizedPnl: book.taxable_realized_pnl ?? 0,
@@ -545,7 +567,8 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         icon={<LuReceipt size={14} />}
                                         bg="gray.100"
                                         onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined}
-                                        subValue={Math.abs(metrics.totalInvested - metrics.costBasisInPeriod) > 0.01 ? `invested ${fmtCurrencySigned(metrics.totalInvested, baseCurrency)}` : undefined}
+                                        info={TERM_HELP.cost}
+                                        subLines={metrics.netDeposits ? [{ label: 'Net deposits', value: fmtCurrencySigned(metrics.netDeposits, baseCurrency), info: TERM_HELP.netDeposits }] : undefined}
                                     />
                                     <MetricItem
                                         label="Unrealized Δ"
@@ -561,7 +584,8 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         color={color(metrics.realizedInPeriod)}
                                         icon={metrics.realizedInPeriod >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />}
                                         bg={metrics.realizedInPeriod >= 0 ? 'green.50' : 'red.50'}
-                                        subValue={`Taxable: ${fmtCurrencySigned(metrics.taxableRealizedInPeriod, baseCurrency)}`}
+                                        info={TERM_HELP.realized}
+                                        subLines={[{ label: 'Taxable', value: fmtCurrencySigned(metrics.taxableRealizedInPeriod, baseCurrency), info: TERM_HELP.taxable }]}
                                         onClick={onMetricClick ? () => onMetricClick('realized') : undefined}
                                     />
                                     <MetricItem
@@ -583,7 +607,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         bg="blue.50"
                                         onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
                                     />
-                                    <MetricItem label="Cost" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined} subValue={Math.abs(metrics.totalInvested - metrics.costBasis) > 0.01 ? `invested ${fmtCurrency(metrics.totalInvested, baseCurrency)}` : undefined} />
+                                    <MetricItem label="Cost" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined} info={TERM_HELP.cost} subLines={metrics.netDeposits ? [{ label: 'Net deposits', value: fmtCurrency(metrics.netDeposits, baseCurrency), info: TERM_HELP.netDeposits }] : undefined} />
                                     <MetricItem
                                         label="Unrealized"
                                         value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedPnl, baseCurrency)}
@@ -592,7 +616,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         bg={metrics.unrealizedPnl >= 0 ? 'green.50' : 'red.50'}
                                         onClick={onMetricClick ? () => onMetricClick('unrealized') : undefined}
                                     />
-                                    <MetricItem label="Realized" value={fmtCurrencySigned(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} icon={metrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={metrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} subValue={realizedSubValue(metrics, baseCurrency, fmtCurrencySigned)} onClick={onMetricClick ? () => onMetricClick('realized') : undefined} />
+                                    <MetricItem label="Realized" value={fmtCurrencySigned(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} icon={metrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={metrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} info={TERM_HELP.realized} subLines={realizedSubLines(metrics, baseCurrency, fmtCurrencySigned)} onClick={onMetricClick ? () => onMetricClick('realized') : undefined} />
                                     <MetricItem label="Fees" value={fmtCurrency(metrics.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" subValue={`${metrics.feeEntryCount} events`} onClick={onFeesClick} />
                                     {metrics.incomeEventCount > 0 && (
                                         <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />
@@ -978,7 +1002,7 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
                         <MetricItem label="Portfolio Value" value={fmtCurrency(metrics.currentValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} />
                         <MetricItem label="Cost Basis" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.600" />
                         <MetricItem label="Unrealized P&L" value={fmtCurrency(metrics.unrealizedPnl, baseCurrency)} color={color(metrics.unrealizedPnl)} />
-                        <MetricItem label="Realized P&L" value={fmtCurrency(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} subValue={realizedSubValue(metrics, baseCurrency, fmtCurrency)} />
+                        <MetricItem label="Realized P&L" value={fmtCurrency(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} info={TERM_HELP.realized} subLines={realizedSubLines(metrics, baseCurrency, fmtCurrency)} />
                         <MetricItem label="Total Fees" value={fmtCurrency(metrics.totalFees, baseCurrency)} subValue={`${metrics.feeEntryCount} fee events`} color="gray.600" onClick={onFeesClick} />
                         {metrics.incomeEventCount > 0 && (
                             <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />
@@ -999,11 +1023,13 @@ export const MetricItem: React.FC<{
     value: string;
     color: string;
     subValue?: string;
+    subLines?: MetricSubLine[];
+    info?: string;
     icon?: React.ReactNode;
     bg?: string;
     onClick?: () => void;
     compact?: boolean;
-}> = ({ label, value, color, subValue, icon, bg, onClick, compact }) => (
+}> = ({ label, value, color, subValue, subLines, info, icon, bg, onClick, compact }) => (
     <div
         className={`flex min-w-[130px] flex-1 flex-col ${onClick ? 'cursor-pointer hover:opacity-85' : 'cursor-default'} ${compact ? 'px-1.5 py-0.5' : 'px-2 py-2'} ${tokenToClass(bg, 'bg', 'bg-transparent')}`}
         onClick={onClick}
@@ -1011,8 +1037,15 @@ export const MetricItem: React.FC<{
         <div className="flex items-center gap-1">
             {icon && <span className={`shrink-0 ${tokenToClass(color, 'text', 'text-gray-700')}`}>{icon}</span>}
             <span className={`whitespace-nowrap font-medium text-gray-500 ${compact ? 'text-[10px]' : 'text-xs'}`}>{label}</span>
+            {info && <InfoTip text={info} />}
             <span className={`whitespace-nowrap font-bold ${compact ? 'text-xs' : 'text-sm'} ${tokenToClass(color, 'text', 'text-gray-700')}`}>{value}</span>
         </div>
         {subValue && <span className="mt-0.5 whitespace-nowrap text-[10px] text-gray-400">{subValue}</span>}
+        {subLines?.map(line => (
+            <span key={line.label} className="mt-0.5 inline-flex items-center gap-1 whitespace-nowrap text-[10px] text-gray-500">
+                {line.label}: {line.value}
+                {line.info && <InfoTip text={line.info} size={9} />}
+            </span>
+        ))}
     </div>
 );

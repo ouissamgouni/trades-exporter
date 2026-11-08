@@ -120,6 +120,21 @@ export interface ColumnPlugin<T extends Transaction = Transaction> {
     /** Background color for each cell in the column (overrides row bg). */
     cellBg?: string;
 
+    /** Pin to the right edge on horizontal scroll (needs a px `width`). */
+    sticky?: 'right';
+
+    /** Hidden until the user enables it in the column picker. */
+    defaultHidden?: boolean;
+
+    /** Explanation shown as an info icon in the header. */
+    info?: string;
+
+    /** Computed by the table: right offset (px) when sticky. */
+    stickyOffset?: number;
+
+    /** Computed by the table: first (leftmost) sticky column, draws the divider. */
+    stickyEdge?: boolean;
+
     /**
      * Render function for cell content.
      * Receives the transaction row data.

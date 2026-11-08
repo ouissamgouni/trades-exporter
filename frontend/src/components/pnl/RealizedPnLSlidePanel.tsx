@@ -22,6 +22,10 @@ import { ValueDisplay } from '../ValueDisplay';
 import { TabLoadingState, TabErrorState, TabEmptyState } from './AuditTabWrappers';
 import { API_URL } from '../../types';
 import { CostBasisChainTooltip } from './CostBasisChainTooltip';
+import { RealizedEntrySlidePanel } from './RealizedEntrySlidePanel';
+import {
+    InfoTip, TaxabilityPill, TaxableGainValue, DeferredInValue, TERM_HELP, realizedOf, realizedCostOf,
+} from './pnlTerms';
 import { Tooltip } from '../ui/tooltip';
 import { PriceGetterTester } from '../PriceGetterTester';
 import {
@@ -66,16 +70,6 @@ export interface RealizedPnLSlidePanelProps {
     onUnitClick?: (unitId: number) => void;
 }
 
-/** Shows the tax-view value under the economic one when they differ (tax-deferred swaps). */
-const TaxViewLine: React.FC<{ economic?: number; tax: number; currency: string }> = ({ economic, tax, currency }) => {
-    if (economic == null || Math.abs(economic - tax) < 0.005) return null;
-    return (
-        <div className="text-[9px] text-gray-500" title="Tax view: cost carried over from the asset given up">
-            Tax: <ValueDisplay value={tax} currency={currency} />
-        </div>
-    );
-};
-
 /* ─── Constants ─── */
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
@@ -114,6 +108,8 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
 
     // Filter accordion
     const [filtersExpanded, setFiltersExpanded] = useState(false);
+
+    const [entryPanelId, setEntryPanelId] = useState<number | null>(null);
 
     // Absolute P&L threshold (default: hide dust entries < 1€)
     const [minAbsPnl, setMinAbsPnl] = useState(1);
@@ -442,9 +438,11 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                             <th style={{ ...TH, textAlign: 'right' }}>FMV Price</th>
                                             <th style={{ ...TH, textAlign: 'center' }}>Source</th>
                                             <th style={{ ...TH, textAlign: 'left' }}>FMV Time</th>
-                                            <th style={{ ...TH, textAlign: 'right' }}>Cost Basis</th>
+                                            <th style={{ ...TH, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Cost <InfoTip text={TERM_HELP.cost} /></span></th>
                                             <th style={{ ...TH, textAlign: 'center' }}>Chain</th>
-                                            <SortHeader label="P&L" field="pnl" current={sortBy} order={sortOrder} align="right" onSort={handleSort} />
+                                            <SortHeader label="Realized" field="pnl" current={sortBy} order={sortOrder} align="right" onSort={handleSort} />
+                                            <th style={{ ...TH, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Taxable gain <InfoTip text={TERM_HELP.taxable} /></span></th>
+                                            <th style={{ ...TH, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Deferred in <InfoTip text={TERM_HELP.deferredIn} /></span></th>
                                             <th style={{ ...TH, textAlign: 'center' }}>Taxability</th>
                                             <th style={{ ...TH, textAlign: 'center' }}>Origin</th>
                                             <SortHeader label="Days" field="holding_period" current={sortBy} order={sortOrder} align="right" onSort={handleSort} />
@@ -456,7 +454,10 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                         {entries.map((e: RealizedPnLEntry, idx: number) => (
                                             <tr key={e.pnl_id ?? idx} style={{ borderBottom: '1px solid #f1f3f5' }}>
                                                 <td style={{ ...TD }}>
-                                                    <span className="font-mono text-[9px] text-gray-400">#{e.pnl_id}</span>
+                                                    <button type="button" className="font-mono text-[9px] text-blue-500 hover:underline"
+                                                        title="Explain this entry" onClick={() => setEntryPanelId(e.pnl_id)}>
+                                                        #{e.pnl_id}
+                                                    </button>
                                                 </td>
                                                 <td style={{ ...TD }}>
                                                     <span className="whitespace-nowrap text-[10px] text-gray-600">
@@ -537,8 +538,7 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                                     </span>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
-                                                    <ValueDisplay value={e.economic_cost_basis_in_base ?? e.cost_basis_in_base} currency={baseCurrency} />
-                                                    <TaxViewLine economic={e.economic_cost_basis_in_base} tax={e.cost_basis_in_base} currency={baseCurrency} />
+                                                    <ValueDisplay value={realizedCostOf(e)} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
                                                     <CostBasisChainTooltip
@@ -548,19 +548,18 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                                                     </CostBasisChainTooltip>
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'right' }}>
-                                                    <span className={`text-[10px] font-medium ${(e.economic_pnl_in_base ?? e.pnl_in_base) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                        <ValueDisplay value={e.economic_pnl_in_base ?? e.pnl_in_base} currency={baseCurrency} />
+                                                    <span className={`text-[10px] font-medium ${realizedOf(e) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                        <ValueDisplay value={realizedOf(e)} currency={baseCurrency} />
                                                     </span>
-                                                    <TaxViewLine economic={e.economic_pnl_in_base} tax={e.pnl_in_base} currency={baseCurrency} />
+                                                </td>
+                                                <td style={{ ...TD, textAlign: 'right' }}>
+                                                    <TaxableGainValue entry={e} taxable={e.taxable} currency={baseCurrency} />
+                                                </td>
+                                                <td style={{ ...TD, textAlign: 'right' }}>
+                                                    <DeferredInValue entry={e} taxable={e.taxable} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
-                                                    <Tooltip content={e.taxable ? 'Taxable' : 'Non-Taxable'}>
-                                                        <div className="flex items-center justify-center">
-                                                            <div className={`inline-flex h-[18px] w-[18px] items-center justify-center rounded-full ${e.taxable ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                                                                {e.taxable ? <LuCircleAlert size={11} /> : <LuCircleCheck size={11} />}
-                                                            </div>
-                                                        </div>
-                                                    </Tooltip>
+                                                    <TaxabilityPill taxable={e.taxable} isFee={e.is_fee} />
                                                 </td>
                                                 <td style={{ ...TD, textAlign: 'center' }}>
                                                     <Badge colorScheme={e.is_fee ? 'orange' : 'blue'}>
@@ -596,6 +595,16 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                             {paginationBar}
                         </div>
                     )}
+
+            <RealizedEntrySlidePanel
+                isOpen={entryPanelId !== null}
+                onClose={() => setEntryPanelId(null)}
+                versionId={versionId}
+                pnlId={entryPanelId}
+                baseCurrency={baseCurrency}
+                onTransactionClick={onTransactionClick}
+                onUnitClick={onUnitClick}
+            />
 
             {/* FMV Override Dialog */}
             <RadixDialog.Root

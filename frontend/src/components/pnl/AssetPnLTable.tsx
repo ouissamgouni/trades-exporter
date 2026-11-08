@@ -33,7 +33,8 @@ import { getAccountColor } from '../../utils/accountColors';
 import { DeltaBar } from './DeltaBar';
 import { PnLBreakdownBar } from './PnLBreakdownBar';
 import { HeroMetricsBar } from './HeroMetricsBar';
-import { MetricItem, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
+import { MetricItem, fmtCurrency, fmtCurrencySigned, realizedSubLines } from './TotalReturnScorecard';
+import { TERM_HELP } from './pnlTerms';
 import { computeDelta, formatPct } from './deltaUtils';
 import { PRICE_STATE_LABELS } from './priceState';
 
@@ -201,8 +202,8 @@ const renderCost = (
                     <ValueDisplay value={costBasis} currency={baseCurrency} />
                 </span>
                 {showInvested && (
-                    <div className="text-[10px] leading-none text-gray-400">
-                        invested <ValueDisplay value={totalInvested} currency={baseCurrency} />
+                    <div className="text-[10px] leading-none text-gray-400" title={TERM_HELP.totalBought}>
+                        bought <ValueDisplay value={totalInvested} currency={baseCurrency} />
                     </div>
                 )}
             </div>
@@ -571,6 +572,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         let totalCost = 0;
         let totalUnrealized = 0;
         let totalRealized = 0;
+        let totalTaxable = 0;
+        let totalDeferred = 0;
         let totalFees = 0;
         let totalValue = 0;
         for (const row of filtered) {
@@ -578,10 +581,12 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
             totalCost += row.cost_basis;
             totalUnrealized += row.unrealized_pnl;
             totalRealized += row.realized_pnl;
+            totalTaxable += row.taxable_realized_pnl;
+            totalDeferred += row.tax_cost_basis != null ? row.cost_basis - row.tax_cost_basis : 0;
             totalFees += row.total_fees;
             totalValue += row.market_value;
         }
-        return { totalCost, totalUnrealized, totalRealized, totalFees, totalValue };
+        return { totalCost, totalUnrealized, totalRealized, totalTaxable, totalDeferred, totalFees, totalValue };
     }, [filtered]);
 
     // Compute unrealized PnL range for heatmap coloring across all visible cards
@@ -1246,9 +1251,9 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 color={colorFn}
                             >
                                 <MetricItem label="Value" value={fmtCurrency(totals.totalValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} bg="blue.50" />
-                                <MetricItem label="Cost" value={fmtCurrency(totals.totalCost, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" />
+                                <MetricItem label="Cost" value={fmtCurrency(totals.totalCost, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" info={TERM_HELP.cost} />
                                 <MetricItem label="Unrealized" value={fmtCurrencySigned(totals.totalUnrealized, baseCurrency)} color={colorFn(totals.totalUnrealized)} icon={totals.totalUnrealized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.totalUnrealized >= 0 ? 'green.50' : 'red.50'} />
-                                <MetricItem label="Realized" value={fmtCurrencySigned(totals.totalRealized, baseCurrency)} color={colorFn(totals.totalRealized)} icon={totals.totalRealized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.totalRealized >= 0 ? 'green.50' : 'red.50'} />
+                                <MetricItem label="Realized" value={fmtCurrencySigned(totals.totalRealized, baseCurrency)} color={colorFn(totals.totalRealized)} icon={totals.totalRealized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.totalRealized >= 0 ? 'green.50' : 'red.50'} info={TERM_HELP.realized} subLines={realizedSubLines({ taxableRealizedPnl: totals.totalTaxable, deferredGain: totals.totalDeferred }, baseCurrency, fmtCurrencySigned)} />
                                 <MetricItem label="Fees" value={fmtCurrency(totals.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />
                             </HeroMetricsBar>
                             {showDustNote && (

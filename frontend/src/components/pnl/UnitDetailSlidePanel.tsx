@@ -19,6 +19,7 @@ export interface UnitDetailSlidePanelProps {
     unitId: number | null;
     baseCurrency: string;
     onTransactionClick?: (txId: number) => void;
+    zIndex?: number;
 }
 
 const PATTERN_COLORS: Record<string, BadgeColorScheme> = {
@@ -36,6 +37,7 @@ export const UnitDetailSlidePanel: React.FC<UnitDetailSlidePanelProps> = ({
     unitId,
     baseCurrency,
     onTransactionClick,
+    zIndex = 200,
 }) => {
     const [unit, setUnit] = useState<PnLCalculationUnit | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -112,7 +114,7 @@ export const UnitDetailSlidePanel: React.FC<UnitDetailSlidePanelProps> = ({
     ) : undefined;
 
     return (
-        <SlidePanel isOpen={isOpen} onClose={onClose} title={title} titleIcon={titleIcon} width="1000px" zIndex={200}>
+        <SlidePanel isOpen={isOpen} onClose={onClose} title={title} titleIcon={titleIcon} width="1000px" zIndex={zIndex}>
             {isLoading ? (
                 <div className="flex items-center justify-center gap-2 py-12">
                     <Spinner size="sm" />

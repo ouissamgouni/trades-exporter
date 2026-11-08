@@ -24,14 +24,23 @@ import {
 } from 'react-icons/fi';
 import { TransactionsTable } from '../TransactionsTable';
 import { UnitDetailSlidePanel } from './UnitDetailSlidePanel';
+import { RealizedEntrySlidePanel } from './RealizedEntrySlidePanel';
 import { SlidePanel } from './SlidePanel';
 import { CostLotEventsTable, EVENT_TABLE_PRESETS } from './CostLotEventsTable';
 import { Tooltip } from '../ui/tooltip';
 import { ValueDisplay } from '../ValueDisplay';
 import { API_URL, Transaction } from '../../types';
 import { UnitPattern, getUnitPatternLabel } from '../../enums';
-import type { ColumnPlugin } from '../tables/types';
+import type { ColumnPlugin, RowAction } from '../tables/types';
+import { LuLocateFixed } from 'react-icons/lu';
+import { contextDateWindow } from '../../hooks/useShowInAllTransactions';
+import { consumePendingLocate } from '../../utils/pnlLocate';
 import type { EnrichedTransaction, EnrichedTransactionsFilterOptions } from './types';
+import { realizedOf, realizedCostOf, deferredInOf, TERM_HELP } from './pnlTerms';
+
+// Non-sticky columns first; the pinned Unit / Realized pair sits against the right edge.
+const COLUMN_ORDER = ['pnl-fees', 'pnl-events', 'pnl-unit', 'pnl-realized'];
+const byColumnOrder = (a: { id: string }, b: { id: string }) => COLUMN_ORDER.indexOf(a.id) - COLUMN_ORDER.indexOf(b.id);
 
 // ─── Pattern icon mapping (shared with ActivityFeed) ─────────────────────────
 
@@ -57,6 +66,24 @@ const PATTERN_BORDER_COLORS: Record<string, string> = {
 
 const getPatternIcon = (pattern: string | null | undefined) =>
     PATTERN_ICONS[pattern || 'unknown'] || PATTERN_ICONS[UnitPattern.UNKNOWN];
+
+interface PnlFilterSnapshot {
+    typeFilter: string | null;
+    hasRealizedPnl: boolean | null;
+    hasFees: boolean | null;
+    search: string;
+}
+
+const EMPTY_PNL_FILTERS: PnlFilterSnapshot = { typeFilter: null, hasRealizedPnl: null, hasFees: null, search: '' };
+
+interface LocateState {
+    txId: number;
+    dateTime?: string;
+    dateFrom: string;
+    dateTo: string;
+    /** P&L chips to restore on "Back" */
+    previous: PnlFilterSnapshot;
+}
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -89,6 +116,47 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
     // Events slide panel
     const [eventsPanelUnitId, setEventsPanelUnitId] = useState<number | null>(null);
 
+    const [entryPanelId, setEntryPanelId] = useState<number | null>(null);
+
+    // Locate: every transaction ±3 days around one, ignoring all filters (table only).
+    const [locate, setLocate] = useState<LocateState | null>(() => {
+        const pending = consumePendingLocate();
+        const dateWindow = pending ? contextDateWindow(pending.dateTime) : null;
+        return pending && dateWindow
+            ? { txId: pending.txId, dateTime: pending.dateTime ?? undefined, ...dateWindow, previous: EMPTY_PNL_FILTERS }
+            : null;
+    });
+
+    const startLocate = useCallback((tx: Transaction) => {
+        const dateWindow = contextDateWindow(tx.date_time);
+        if (!dateWindow) return;
+        setSlidePanelUnitId(null);
+        setEventsPanelUnitId(null);
+        setEntryPanelId(null);
+        setLocate(prev => ({
+            txId: tx.id,
+            dateTime: String(tx.date_time),
+            ...dateWindow,
+            previous: prev?.previous ?? { typeFilter, hasRealizedPnl, hasFees, search: searchInput },
+        }));
+        setTypeFilter(null);
+        setHasRealizedPnl(null);
+        setHasFees(null);
+        setSearchInput('');
+        setDebouncedSearch('');
+    }, [typeFilter, hasRealizedPnl, hasFees, searchInput]);
+
+    const backFromLocate = useCallback(() => {
+        if (!locate) return;
+        const p = locate.previous;
+        setTypeFilter(p.typeFilter);
+        setHasRealizedPnl(p.hasRealizedPnl);
+        setHasFees(p.hasFees);
+        setSearchInput(p.search);
+        setDebouncedSearch(p.search);
+        setLocate(null);
+    }, [locate]);
+
     // ── Debounce search ─────────────────────────────────────────────────────
     useEffect(() => {
         const timer = setTimeout(() => setDebouncedSearch(searchInput), 300);
@@ -116,6 +184,12 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
     const customApiUrl = useMemo(() => {
         const params = new URLSearchParams();
 
+        if (locate) {
+            params.set('date_from', locate.dateFrom);
+            params.set('date_to', locate.dateTo);
+            return `${API_URL}/pnl/versions/${versionId}/enriched-transactions?${params.toString()}`;
+        }
+
         // PnL-specific filters
         if (typeFilter) params.set('unit_pattern', typeFilter);
         if (hasRealizedPnl !== null) params.set('has_realized_pnl', String(hasRealizedPnl));
@@ -131,14 +205,15 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
 
         const qs = params.toString();
         return `${API_URL}/pnl/versions/${versionId}/enriched-transactions${qs ? `?${qs}` : ''}`;
-    }, [versionId, typeFilter, hasRealizedPnl, hasFees, debouncedSearch, txFilterParams]);
+    }, [versionId, typeFilter, hasRealizedPnl, hasFees, debouncedSearch, txFilterParams, locate]);
 
     // ── Additional columns (plugin architecture) ────────────────────────────
-    const additionalColumns: ColumnPlugin<Transaction>[] = useMemo(() => [
+    const additionalColumns: ColumnPlugin<Transaction>[] = useMemo(() => ([
         {
             id: 'pnl-unit',
             header: 'Unit',
             width: '80px',
+            sticky: 'right',
             headerBg: 'white',
             cellBg: 'white',
             render: (tx: Transaction) => {
@@ -160,8 +235,10 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
         },
         {
             id: 'pnl-realized',
-            header: 'P&L (R)',
-            width: '100px',
+            header: 'Realized',
+            width: '110px',
+            sticky: 'right',
+            info: `${TERM_HELP.realized} Per transaction; the day/month header shows the period total (Realized Σ). Click a value to explain it.`,
             headerBg: 'white',
             cellBg: 'white',
             render: (tx: Transaction) => {
@@ -169,9 +246,12 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 if (etx.realized_pnl_in_base == null) return <span className="text-xs text-gray-400">-</span>;
                 const isPositive = etx.realized_pnl_in_base >= 0;
                 const entries = etx.realized_entries || [];
+                const fmt = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)} ${baseCurrency}`;
+                const taxableGain = entries.filter(e => e.disposal_taxable).reduce((sum, e) => sum + e.pnl_in_base, 0);
+                const hasTaxable = entries.some(e => e.disposal_taxable);
                 const tooltipLines: string[] = [];
                 entries.forEach(e => {
-                    tooltipLines.push(`── ${e.asset?.symbol || '?'} (${e.is_fee ? 'Fee' : e.disposal_taxable ? 'Taxable Disposal' : 'Non-Taxable'}) ──`);
+                    tooltipLines.push(`── ${e.asset?.symbol || '?'} (${e.is_fee ? 'Fee' : e.disposal_taxable ? 'Taxable' : 'Deferred'}) ──`);
                     tooltipLines.push(`Proceeds: ${e.proceeds_in_base >= 0 ? '+' : ''}${e.proceeds_in_base.toFixed(2)} ${baseCurrency}`);
                     if (e.proceeds_price != null) {
                         const fmvParts = [`FMV: ${e.proceeds_price.toFixed(6)}`];
@@ -182,18 +262,30 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                         }
                         tooltipLines.push(fmvParts.join(' '));
                     }
-                    tooltipLines.push(`Cost: ${e.cost_basis_in_base.toFixed(2)} ${baseCurrency}`);
-                    tooltipLines.push(`P&L: ${e.pnl_in_base >= 0 ? '+' : ''}${e.pnl_in_base.toFixed(2)} ${baseCurrency}`);
+                    tooltipLines.push(`Cost: ${realizedCostOf(e).toFixed(2)} ${baseCurrency}`);
+                    tooltipLines.push(`Realized: ${fmt(realizedOf(e))}`);
+                    if (e.disposal_taxable) tooltipLines.push(`Taxable gain: ${fmt(e.pnl_in_base)} (tax cost ${e.cost_basis_in_base.toFixed(2)})`);
+                    const deferredIn = deferredInOf(e);
+                    if (deferredIn !== 0) tooltipLines.push(`Deferred in: ${fmt(deferredIn)} (${e.disposal_taxable ? 'released' : 'rolled over'})`);
                 });
                 const tooltipContent = tooltipLines.length > 0
                     ? tooltipLines.join('\n')
                     : `${etx.realized_pnl_in_base >= 0 ? '+' : ''}${etx.realized_pnl_in_base.toFixed(2)} ${baseCurrency}`;
+                const firstPnlId = entries.find(e => e.pnl_id != null)?.pnl_id;
                 return (
                     <Tooltip content={tooltipContent}>
-                        <div className="text-right">
+                        <div
+                            className={firstPnlId != null ? 'cursor-pointer text-right hover:underline' : 'text-right'}
+                            onClick={firstPnlId != null ? (ev) => { ev.stopPropagation(); setEntryPanelId(firstPnlId); } : undefined}
+                        >
                             <span className={`text-xs font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
                                 {isPositive ? '+' : ''}<ValueDisplay value={etx.realized_pnl_in_base} currency={baseCurrency} />
                             </span>
+                            {hasTaxable && Math.abs(taxableGain - etx.realized_pnl_in_base) >= 0.005 && (
+                                <div className="text-[9px] text-gray-500">
+                                    Taxable: <ValueDisplay value={taxableGain} currency={baseCurrency} />
+                                </div>
+                            )}
                         </div>
                     </Tooltip>
                 );
@@ -221,6 +313,7 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
             id: 'pnl-events',
             header: 'Events',
             width: '60px',
+            defaultHidden: true,
             headerBg: 'white',
             cellBg: 'white',
             render: (tx: Transaction) => {
@@ -248,8 +341,19 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 );
             },
         },
-    ], [baseCurrency]);
+    ] as ColumnPlugin<Transaction>[]).sort(byColumnOrder), [baseCurrency]);
 
+
+    const hasScope = !!txFilterParams && Object.values(txFilterParams).some(v => v !== undefined && v !== null && v !== '');
+
+    const rowActions: RowAction<Transaction>[] = useMemo(() => [{
+        id: 'pnl-locate',
+        icon: <LuLocateFixed size={11} />,
+        label: 'Locate: show all transactions ±3 days around this one (no filters)',
+        colorPalette: 'blue',
+        isVisible: () => !locate && (hasScope || !!typeFilter || hasRealizedPnl !== null || hasFees !== null || !!debouncedSearch),
+        onClick: startLocate,
+    }], [locate, hasScope, typeFilter, hasRealizedPnl, hasFees, debouncedSearch, startLocate]);
 
     // ── Clear PnL filters ───────────────────────────────────────────────────
     const hasAnyFilter = typeFilter || hasRealizedPnl !== null || hasFees !== null || debouncedSearch;
@@ -263,8 +367,21 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
 
     return (
         <div>
+            {locate && (
+                <div className="mb-2 flex flex-wrap items-center gap-2 border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs text-blue-900">
+                    <LuLocateFixed size={12} />
+                    <span>
+                        Around <strong>TX #{locate.txId}</strong> ({locate.dateFrom} → {locate.dateTo}) · all accounts and assets, no filters
+                    </span>
+                    {hasScope && <span className="text-blue-700">· cards above keep their scope</span>}
+                    <Button size="xs" variant="outline" className="ml-auto" onClick={backFromLocate}>
+                        ← Back to previous view
+                    </Button>
+                </div>
+            )}
+
             {/* PnL Filter Bar */}
-            <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className={`mb-3 flex flex-wrap items-center gap-2 ${locate ? 'pointer-events-none opacity-40' : ''}`}>
                 {/* Search */}
                 <div className="flex max-w-[200px] items-center gap-1 border border-slate-200 bg-slate-50 px-2 py-1">
                     <FiSearch size={12} color="gray" />
@@ -336,6 +453,11 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 defaultFiltersCollapsed={true}
                 showBundles={false}
                 hideLegend
+                showColumnPicker
+                pinDateColumn
+                focusTransactionId={locate?.txId}
+                focusDateTime={locate?.dateTime}
+                additionalRowActions={rowActions}
                 customApiUrl={customApiUrl}
                 baseCurrency={baseCurrency}
                 tableId="pnl-enriched-transactions"
@@ -355,6 +477,16 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
                 unitId={slidePanelUnitId}
                 baseCurrency={baseCurrency}
                 onTransactionClick={onTransactionClick}
+            />
+
+            <RealizedEntrySlidePanel
+                isOpen={entryPanelId !== null}
+                onClose={() => setEntryPanelId(null)}
+                versionId={versionId}
+                pnlId={entryPanelId}
+                baseCurrency={baseCurrency}
+                onTransactionClick={onTransactionClick}
+                onUnitClick={(uid) => { setEntryPanelId(null); setSlidePanelUnitId(uid); }}
             />
 
             {/* Cost Lot Events Slide Panel */}

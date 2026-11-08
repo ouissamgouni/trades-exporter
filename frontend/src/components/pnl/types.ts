@@ -164,7 +164,8 @@ export interface AggregatedBalanceItem {
     account_ids: number[];  // All account IDs holding this asset (for filtering)
     qty: number;
     cost_basis_in_base: number;
-    total_invested_in_base?: number;  // Cash actually spent (excludes spinoffs/transfers)
+    tax_cost_basis_in_base?: number;
+    total_invested_in_base?: number;  // Total bought: acquisitions at value received
     avg_unit_cost_in_base: number;
     lot_count: number;
     realized_pnl_in_base: number;
@@ -220,7 +221,8 @@ export interface AssetPnLRow {
     quantity: number;
     market_value: number;
     cost_basis: number;
-    total_invested?: number;  // Cash actually spent (excludes spinoffs/transfers)
+    tax_cost_basis?: number;
+    total_invested?: number;  // Total bought: acquisitions at value received
 
     // P&L
     unrealized_pnl: number;
@@ -276,6 +278,8 @@ export interface CostLot {
 
     // Cost basis
     unit_cost_in_base: number;
+    economic_unit_cost_in_base?: number | null;
+    economic_remaining_cost_in_base?: number | null;
     total_cost_in_base: number;
     remaining_cost_in_base: number;
 
@@ -332,6 +336,7 @@ export interface CostBasisChainNode {
     account_id?: number;
     qty: number;
     unit_cost: number;
+    economic_unit_cost?: number | null;
     cost_source?: string;             // "fmv", "inherited", "proceeds", "provisional", "base_currency"
     unit_pattern?: string;            // "transfer", "swap", "split", "flow"
     children: CostBasisChainNode[];   // Source lots (backward, toward origin)
@@ -377,6 +382,8 @@ export interface RealizedPnLRow {
     proceeds_in_base: number;
     cost_basis_in_base: number;
     pnl_in_base: number;
+    economic_cost_basis_in_base?: number | null;
+    economic_pnl_in_base?: number | null;
     pnl_pct: number;
 
     // Price used for P&L calculation
@@ -601,11 +608,14 @@ export interface CostLotEventEntry {
 // ============================================================================
 
 export interface RealizedEntryDetail {
+    pnl_id?: number | null;
     asset: AssetRef;
     qty: number;
     proceeds_in_base: number;
     cost_basis_in_base: number;
     pnl_in_base: number;
+    economic_cost_basis_in_base?: number | null;
+    economic_pnl_in_base?: number | null;
     disposal_taxable: boolean;
     is_fee?: boolean;  // True if this entry is from a fee disposal
 
@@ -1208,7 +1218,8 @@ export interface PerAccountBalanceItem {
     account_name: string;
     qty: number;
     cost_basis_in_base: number;
-    total_invested_in_base?: number;  // Cash actually spent (excludes spinoffs/transfers)
+    tax_cost_basis_in_base?: number;
+    total_invested_in_base?: number;  // Total bought: acquisitions at value received
     avg_unit_cost_in_base: number;
     lot_count: number;
     realized_pnl_in_base: number;

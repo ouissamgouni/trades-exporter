@@ -16,6 +16,7 @@ import { LuReceipt, LuInfo } from 'react-icons/lu';
 import { usePnL } from './PnLContext';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { MetricItem, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
+import { TERM_HELP } from './pnlTerms';
 import { HeroMetricsBar } from './HeroMetricsBar';
 import { AssetPnLTable } from './AssetPnLTable';
 import { AllocationTreemap } from './AllocationTreemap';
@@ -194,6 +195,8 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                     costBasis: rangeData.cost_basis,
                     unrealizedPnl: rangeData.unrealized_pnl,
                     realizedPnl: rangeData.realized_pnl,
+                    taxableRealizedPnl: rangeData.taxable_realized_pnl ?? 0,
+                    netDeposits: rangeData.net_deposits ?? 0,
                     realizedInPeriod: rangeData.realized_in_period,
                     costBasisInPeriod: rangeData.cost_basis_in_period ?? 0,
                     unrealizedInPeriod: rangeData.unrealized_in_period ?? 0,
@@ -215,6 +218,7 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                     unrealizedPnl: rangeData.unrealized_pnl,
                     realizedPnl: rangeData.realized_pnl,
                     taxableRealizedPnl: rangeData.taxable_realized_pnl ?? 0,
+                    netDeposits: rangeData.net_deposits ?? 0,
                     realizedInPeriod: rangeData.realized_in_period,
                     taxableRealizedInPeriod: (rangeData as any).taxable_realized_in_period ?? 0,
                     costBasisInPeriod: rangeData.cost_basis_in_period ?? 0,
@@ -241,6 +245,7 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
             unrealizedPnl: ur,
             realizedPnl: rp,
             taxableRealizedPnl: 0,
+            netDeposits: 0,
             realizedInPeriod: rp,
             taxableRealizedInPeriod: 0,
             costBasisInPeriod: cb,
@@ -438,9 +443,9 @@ export const PnLDetailPanel: React.FC<PnLDetailPanelProps> = ({
                                     ) : (
                                         <>
                                             <MetricItem label="Value" value={fmtCurrency(scopedMetrics.currentValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} bg="blue.50" />
-                                            <MetricItem label="Cost" value={fmtCurrency(scopedMetrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" />
+                                            <MetricItem label="Cost" value={fmtCurrency(scopedMetrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" info={TERM_HELP.cost} subLines={scopedMetrics.netDeposits ? [{ label: 'Net deposits', value: fmtCurrency(scopedMetrics.netDeposits, baseCurrency), info: TERM_HELP.netDeposits }] : undefined} />
                                             <MetricItem label="Unrealized" value={fmtCurrencySigned(scopedMetrics.unrealizedPnl, baseCurrency)} color={color(scopedMetrics.unrealizedPnl)} icon={scopedMetrics.unrealizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.unrealizedPnl >= 0 ? 'green.50' : 'red.50'} />
-                                            <MetricItem label="Realized" value={fmtCurrencySigned(scopedMetrics.realizedPnl, baseCurrency)} color={color(scopedMetrics.realizedPnl)} icon={scopedMetrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} />
+                                            <MetricItem label="Realized" value={fmtCurrencySigned(scopedMetrics.realizedPnl, baseCurrency)} color={color(scopedMetrics.realizedPnl)} icon={scopedMetrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} info={TERM_HELP.realized} subLines={[{ label: 'Taxable', value: fmtCurrencySigned(scopedMetrics.taxableRealizedPnl, baseCurrency), info: TERM_HELP.taxable }]} />
                                             <MetricItem label="Fees" value={fmtCurrency(scopedMetrics.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />
                                         </>
                                     )}
