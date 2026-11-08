@@ -27,8 +27,9 @@ MOCK_PREFIX = "backend.services.pnl.metrics_service"
 
 @pytest.fixture(autouse=True)
 def _no_deferred_gain_query():
-    # Sessions are mocked here; the deferred-gain DB aggregate is covered elsewhere.
-    with patch(f"{MOCK_PREFIX}._get_deferred_gain", return_value=0.0):
+    # Sessions are mocked here; these DB aggregates are covered elsewhere.
+    with patch(f"{MOCK_PREFIX}._get_deferred_gain", return_value=0.0), \
+            patch(f"{MOCK_PREFIX}._get_net_deposits", return_value=0.0):
         yield
 
 

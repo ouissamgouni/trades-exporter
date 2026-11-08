@@ -1,159 +1,196 @@
 # Economic vs Tax Cost Basis — QA Test Plan
 # ==========================================
-# Verifies the two cost tracks kept for every lot:
-#   - Tax cost: carried over through tax-deferred (non-taxable) swaps.
-#   - Economic cost: market value at the swap, so each gain is counted once.
-# "Realized" everywhere = economic view. "Taxable" = tax view. "Deferred" =
-# gain already in Realized but not yet taxed (economic − tax cost of open lots).
+# Each lot carries two costs:
+#   - Cost (economic): market value when the asset was received.
+#   - Tax cost: original purchase cost carried through tax-deferred swaps.
+# Vocabulary used in the UI:
+#   Realized     = proceeds − cost (each gain counted once)
+#   Taxable      = proceeds − tax cost, on taxable disposals only
+#   Deferred     = gain already in Realized but not taxed yet (cost − tax cost of open lots)
+#   Deferred in  = per entry: Taxable gain − Realized (released when taxable, rolled over otherwise)
+#   Net deposits = money brought in from outside − money taken out
+# Identity (whole portfolio): Realized = Taxable + Deferred → 14 200 = 9 200 + 5 000.
 #
-# Applies to any tax-deferred exchange (crypto-to-crypto swaps under French
-# rules, prediction-market payouts into stablecoins, etc.), not one connector.
+# Transactions: A0 deposit 31 000 EUR · A1 buy 1 BTC @ 30 000 · A2 swap BTC → 16 ETH (FMV 40 000)
+# · A3 transfer 8 ETH Exchange → Cold Wallet · A4 swap 8 ETH → 24 000 USDC · A5 sell USDC → EUR
+# · B1 buy 10 SOL @ 100 · B2 sell 4 SOL @ 150. Prices now: ETH 3 000, SOL 150.
 
 test_plan:
   name: "Economic vs Tax Cost Basis — Tax-Deferred Swaps"
   description: >
     A chain of non-taxable swaps (BTC → ETH → USDC) with a transfer in between,
-    then a taxable sale to EUR, plus a plain buy/sell control case. Checks
-    realized/taxable/deferred totals, per-entry and per-lot costs in both views,
-    that both costs travel with transfers, that the views reconcile, and that
-    nothing diverges when swaps are configured as taxable.
+    then a taxable sale to EUR, plus a plain buy/sell control case. Checks the
+    Realized / Taxable / Deferred totals, per-entry explanations, lots in both
+    views, net deposits, the P&L audit table and the transaction P&L section.
+
+  preconditions:
+    - "Frontend http://localhost:3790, API http://localhost:8790 (scenario ports)."
+    - "Default settings: crypto-to-crypto swaps are not taxable."
+
+  commands:
+    - "task start:scenario SCENARIO=economic-vs-tax-basis RESET=1"
 
   steps:
     # ── Setup ──────────────────────────────────────────────────
     - id: 1
-      title: "Seed scenario"
-      description: >
-        task start:scenario SCENARIO=economic-vs-tax-basis RESET=1
-        (or start:scenario:backend for API-only checks).
-      expected: >
-        9 transactions, 5 assets (EUR, BTC, ETH, USDC, SOL), 2 accounts
-        (Exchange, Cold Wallet), 1 bundle (A3 internal transfer).
-        Migration head 068_economic_cost_basis; alembic check reports no drift.
+      title: "Seed and calculate"
+      actions:
+        - do: "Open Setup and check the seeded data."
+          expect: "9 transactions, 5 assets (EUR, BTC, ETH, USDC, SOL), 2 accounts (Exchange, Cold Wallet)."
+        - do: "Open P&L and run Calculate (or call the API)."
+          run: "curl -s -X POST localhost:8790/pnl/calculate -H 'Content-Type: application/json' -d '{\"base_currency_symbol\": \"EUR\"}'"
+          expect: "A version is created with 0 warnings and 4 realized entries (A2, A4, A5, B2)."
 
+    # ── Overview totals ────────────────────────────────────────
     - id: 2
-      title: "Run P&L with default settings (swaps non-taxable)"
-      description: >
-        POST /pnl/calculate {"base_currency_symbol": "EUR"} (or Calculate in the UI).
-      expected: >
-        Version created, 0 warnings. Realized entries: 4 (A2, A4, A5, B2).
+      title: "Overview totals: Realized, Taxable, Deferred"
+      actions:
+        - do: "P&L page, range All, Overview section: read the Realized card."
+          expect: "Realized +14.2K € with two lines: Taxable +9.2K € and Deferred +5.0K €."
+        - do: "Hover the info icons next to Realized, Taxable and Deferred."
+          expect: "Each shows a short explanation; tooltips appear above any open panel."
+        - do: "Read the Cost and Unrealized cards."
+          expect: "Cost 45.2K € with 'Net deposits: 31.0K €' (info icon). Unrealized +4.3K €. Total return +18.5K € = Value 49.5K − Net deposits 31K."
+        - run: "curl -s localhost:8790/pnl/versions/1/metrics/book | python3 -m json.tool | head -20"
+          expect: "realized_pnl 14200, taxable_realized_pnl 9200, deferred_gain 5000, net_deposits 31000."
 
-    # ── Case A: tax-deferred chain ─────────────────────────────
     - id: 3
-      title: "A2 — first swap BTC → ETH"
-      description: >
-        GET /pnl/versions/{id}/realized-pnl, entry for BTC on 2024-03-01.
-        GET /pnl/versions/{id}/lots for the ETH lot created by A2.
-      expected: >
-        Entry: proceeds 40 000, tax cost 30 000, tax P&L +10 000, economic
-        cost 30 000, economic P&L +10 000, taxable=false (the source lot had
-        a single cost, so both views agree on this disposal).
-        ETH lot (16): tax cost 30 000 (1 875/ETH), economic cost 40 000 (2 500/ETH).
+      title: "Assets section"
+      actions:
+        - do: "Assets section: read the totals bar above the cards."
+          expect: "Realized +14.2K € with Taxable +9.2K € and Deferred +5.0K €."
+        - do: "Read the Ethereum card."
+          expect: "Cost €20.0K, 'bought €40.0K'. Unrealized €4.0K and 'Taxable if sold: €9.0K' (= 4K unrealized + 5K deferred). Realized €4.0K, no Taxable line."
+        - do: "Read the Bitcoin, USD Coin and Solana cards."
+          expect: "BTC Realized €10.0K (not taxable). USDC Realized €0, Taxable €9.0K. SOL Realized €200, Taxable €200, no 'Taxable if sold' line (both costs equal)."
 
+    # ── Realized entries ───────────────────────────────────────
     - id: 4
-      title: "A3 — transfer keeps both costs"
-      description: >
-        Lots for ETH in the Cold Wallet after the A3 bundle.
-      expected: >
-        No realized entry for A3. Cold Wallet ETH lot: qty 8, tax cost 15 000,
-        economic cost 20 000, acquired_at = 2024-03-01 (holding period kept).
+      title: "Realized P&L panel"
+      actions:
+        - do: "Audit section → click the Realized P&L stat card."
+          expect: "Columns: Cost, Chain, Realized, Taxable gain, Deferred in, Taxability (text pill), Origin, Days, TX, Unit."
+        - do: "Check each row."
+          expect: >
+            A2 BTC: Realized +10 000, Taxable gain —, Deferred in —, pill 'Deferred'.
+            A4 ETH: Cost 20 000, Realized +4 000, Taxable gain —, Deferred in 5 000 'rolled over', pill 'Deferred'.
+            A5 USDC: Cost 24 000, Realized 0, Taxable gain 9 000, Deferred in 9 000 'released', pill 'Taxable'.
+            B2 SOL: Realized +200, Taxable gain 200, Deferred in —, pill 'Taxable'.
+        - do: "Keep the default '|P&L| ≥ €1' filter."
+          expect: "A5 is still listed (its taxable gain is 9 000)."
 
     - id: 5
-      title: "A4 — second swap ETH → USDC counts only the new gain"
-      description: >
-        Realized entry for ETH on 2024-05-01, and the USDC lot it creates.
-      expected: >
-        Entry: proceeds 24 000, tax cost 15 000, tax P&L +9 000 (cumulative
-        deferred gain), economic cost 20 000, economic P&L +4 000, taxable=false.
-        USDC lot (24 000): tax cost 15 000, economic cost 24 000.
+      title: "Explain an entry (A4 and A5)"
+      actions:
+        - do: "In the Realized panel, click the ID of the A4 (ETH) row."
+          expect: >
+            'Realized entry' panel: Realized block 24 000 − 20 000 = 4 000; tax block
+            24 000 − 15 000 = 9 000 'Tax view (not taxed now)'; 'Deferred in: 5 000 (rolled over)'
+            with the explanation sentence; 1 lot consumed (cost 20 000, tax cost 15 000).
+        - do: "Read the cost chain at the bottom."
+          expect: "ETH lot (2 500, tax 1 875) → BTC lot (30 000) → EUR deposit (origin)."
+        - do: "Open the A5 (USDC) entry the same way."
+          expect: "Taxable gain 9 000 = Realized 0 + Deferred in 9 000 (released). Chain: USDC → ETH → BTC → EUR."
 
     - id: 6
-      title: "A5 — taxable sale realizes the deferred gain for tax only"
-      description: >
-        Realized entry for USDC on 2024-07-01.
-      expected: >
-        Entry: proceeds 24 000, tax cost 15 000, tax P&L +9 000, taxable=true,
-        economic cost 24 000, economic P&L 0.
+      title: "Chain popover"
+      actions:
+        - do: "In the Realized panel, click the 🔗 cell of any row."
+          expect: "The Cost Basis Chain popover opens above the panel and shows each step with cost (and tax cost when different)."
 
-    # ── Case B: control ────────────────────────────────────────
+    # ── Lots ───────────────────────────────────────────────────
     - id: 7
-      title: "B2 — plain sell to EUR is identical in both views"
-      description: >
-        Realized entry for SOL on 2024-04-01 and the remaining SOL lot.
-      expected: >
-        Entry: proceeds 600, cost 400, P&L +200 in both views, taxable=true.
-        Remaining SOL lot: 6 @ 100, tax cost = economic cost = 600.
+      title: "Cost lots in both views"
+      actions:
+        - do: "Audit section → click the Cost Lots stat card."
+          expect: "Columns include Rem Cost, Tax Cost and Deferred."
+        - do: "Find the Cold Wallet ETH lot (8 ETH, acquired 2024-03-01)."
+          expect: "Unit cost 2 500, Rem Cost 20 000, Tax Cost 15 000, Deferred 5 000. The transfer kept the acquisition date."
+        - do: "Find the SOL lot."
+          expect: "6 SOL, Rem Cost 600 = Tax Cost 600, Deferred —."
 
-    # ── Totals ─────────────────────────────────────────────────
+    # ── Units ──────────────────────────────────────────────────
     - id: 8
-      title: "Book metrics totals"
-      description: >
-        GET /pnl/versions/{id}/metrics/book (summary and ranges.all).
-      expected: >
-        realized_pnl 14 200 (10 000 + 4 000 + 0 + 200),
-        taxable_realized_pnl 9 200 (9 000 + 200),
-        deferred_gain 5 000 (Cold Wallet ETH: 20 000 − 15 000).
-        The old behaviour (summing tax P&L of every entry) would show 28 200.
+      title: "Unit panel"
+      actions:
+        - do: "In the Realized panel, click the Unit of the A4 row."
+          expect: "Unit panel realized table: Cost 20 000, Realized 4 000, Taxable gain —, Deferred in 5 000 rolled over, pill 'Deferred'."
+        - do: "Click the realized row in the Unit panel."
+          expect: "The Realized entry panel opens on top of the Unit panel."
 
+    # ── Audit transactions table ───────────────────────────────
     - id: 9
-      title: "Balances per asset"
-      description: >
-        GET /pnl/versions/{id}/balances?group_by_asset=true
-      expected: >
-        ETH: qty 8, cost_basis_in_base 20 000 (economic), tax_cost_basis_in_base
-        15 000, realized 4 000, taxable 0.
-        BTC: realized 10 000, taxable 0. USDC: realized 0, taxable 9 000.
-        SOL: cost 600 / tax 600, realized 200, taxable 200.
+      title: "Audit transactions table layout"
+      actions:
+        - do: "Audit section, Transactions table. Scroll horizontally."
+          expect: "Unit and Realized stay pinned on the right with a divider; Date/Time stays pinned on the left; month/day header rows span the full width."
+        - do: "Open 'Columns' in the table header."
+          expect: "A 'P&L' group lists Fees, Events (hidden by default), Unit, Realized."
+        - do: "Hover the Realized header info icon and the day header 'Realized Σ'."
+          expect: "Header: per-transaction value; day/month header: sum of the period."
+        - do: "Read the A4 (2024-05-01) and A5 (2024-07-01) rows."
+          expect: "A4 Realized +4 000 (tooltip lists Deferred in 5 000 rolled over). A5 Realized 0 with a 'Taxable: 9 000' line underneath."
+        - do: "Click the A4 Realized value."
+          expect: "The Realized entry panel opens for that entry."
 
     - id: 10
-      title: "Views reconcile (no double count)"
-      description: >
-        Fetch live prices (ETH 3 000, SOL 150), then GET
-        /pnl/versions/{id}/metrics/live. Compare
-        economic realized + economic unrealized with
-        taxable realized + (market value − tax cost of open lots).
-      expected: >
-        Economic unrealized 4 300 (ETH 24 000 − 20 000, SOL 900 − 600).
-        Tax unrealized 9 300 (ETH 24 000 − 15 000, SOL 900 − 600).
-        14 200 + 4 300 = 9 200 + 9 300 = 18 500 = total_return (all).
-        Equals value now (24 000 ETH + 900 SOL + 24 600 EUR) − 31 000 EUR deposited.
+      title: "Locate a transaction (audit table)"
+      actions:
+        - do: "In the audit table, click 'Has P&L' to filter."
+          expect: "Only A2, A4, A5, B2 remain; each row has a Locate action."
+        - do: "Click Locate on the A4 row."
+          expect: >
+            Context bar 'Around TX #… (2024-04-28 → 2024-05-04) · all accounts and assets';
+            the filter chips are greyed out; the May 2024 month and the 1 May day are expanded;
+            the A4 row is highlighted and scrolled into view.
+        - do: "Click '← Back to previous view'."
+          expect: "The 'Has P&L' filter is restored and the full filtered list is back."
 
-    # ── UI ─────────────────────────────────────────────────────
+    # ── Transaction side panel ─────────────────────────────────
     - id: 11
-      title: "Scorecard shows Realized, Taxable and Deferred"
-      description: >
-        Open the P&L page, range "All".
-      expected: >
-        Realized +14.2K € with sub-line "Taxable: +9.2K € · Deferred: +5.0K €".
-        Unrealized +4.3K €. The Deferred part is hidden when it is 0.
+      title: "Transaction P&L section"
+      actions:
+        - do: "Open the A4 transaction (click its row) and expand the P&L section."
+          expect: >
+            Calculation picker shows the latest version '(latest)'. Unit #… swap, role inflow/outflow.
+            Realized: ETH +4 000, Deferred in 5 000 rolled over, pill 'Deferred'.
+            Lots created: USDC 24 000, cost 24 000, tax cost 15 000. Lots consumed: 8 ETH, cost 20 000, tax cost 15 000.
+        - do: "Click the realized row, then close it; click 'Locate in P&L audit'."
+          expect: "The entry panel opens above the drawer. Locate opens the P&L page with the audit section open and the A4 row highlighted."
+        - do: "Edit the transaction notes, reopen the P&L section."
+          expect: "An 'Edited after this calculation' banner with a Recalculate button."
+        - run: "curl -s localhost:8790/pnl/versions/1/transactions/6/impact | python3 -m json.tool | head -30"
+          expect: "included true, unit_pattern swap, one realized entry (pnl 9000, economic 4000)."
 
+    # ── Accounts ───────────────────────────────────────────────
     - id: 12
-      title: "Realized P&L panel shows the tax view when it differs"
-      description: >
-        Open the Realized P&L slide panel.
+      title: "Account scope: net deposits"
+      actions:
+        - run: "curl -s 'localhost:8790/pnl/versions/1/metrics/book?account_ids=2' | python3 -m json.tool | grep net_deposits"
+          expect: "Cold Wallet net_deposits 20000 (8 ETH received by transfer, at cost)."
+        - do: "Drill into the Cold Wallet account on the P&L page."
+          expect: "Cost card shows 'Net deposits: 20.0K €'."
+
+    # ── Reconciliation ─────────────────────────────────────────
+    - id: 13
+      title: "Views reconcile"
       expected: >
-        Cost basis and P&L columns show the economic values. A4 and A5 rows have
-        a grey "Tax: …" line under them (A4: cost 15 000 / P&L 9 000;
-        A5: cost 15 000 / P&L 9 000). A2 and B2 have no extra line.
-        Sorting and the gain/loss filter use the economic P&L (A5 = 0 is neither).
-        The default "|P&L| ≥ €1" filter still lists A5 (its tax P&L is 9 000).
+        Realized 14 200 + Unrealized 4 300 = Taxable 9 200 + Taxable if sold now 9 300
+        (ETH 24 000 − 15 000, SOL 900 − 600) = Total return 18 500.
 
     # ── Configuration variant ──────────────────────────────────
-    - id: 13
-      title: "Swaps configured as taxable: no divergence"
-      description: >
-        POST /pnl/calculate {"base_currency_symbol": "EUR",
-        "crypto_swap_taxable_by_default": true}.
-      expected: >
-        All 4 entries taxable; tax and economic values are equal on every entry
-        and lot (A2 +10 000, A4 +4 000, A5 0, B2 +200).
-        realized_pnl = taxable_realized_pnl = 14 200, deferred_gain 0.
-        Cold Wallet ETH lot cost 20 000 in both views. Unrealized still 4 300.
-
     - id: 14
+      title: "Swaps configured as taxable: no divergence"
+      actions:
+        - run: "curl -s -X POST localhost:8790/pnl/calculate -H 'Content-Type: application/json' -d '{\"base_currency_symbol\": \"EUR\", \"crypto_swap_taxable_by_default\": true}'"
+          expect: "New version created."
+        - do: "Reload the P&L page."
+          expect: >
+            Realized 14 200 with Taxable 14 200 and no Deferred line. All four entries show the
+            'Taxable' pill, Deferred in '—'. No 'Taxable if sold' line on any asset card.
+
+    - id: 15
       title: "Tax reports unaffected"
-      description: >
-        With default settings, compare the French crypto tax report and the
-        "Taxable" totals with the previous release.
       expected: >
-        Identical: tax reports read only the tax columns
-        (cost_basis_in_base / pnl_in_base), which keep their previous meaning.
+        With default settings, the French crypto tax report and the Taxable totals match the
+        previous release: tax reports read only the tax columns.

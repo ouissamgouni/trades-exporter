@@ -34,19 +34,47 @@ const QaPinCtx = createContext<QaPinContext>({
 export const useQaPinnedWidth = () => useContext(QaPinCtx).pinnedWidth;
 export const useQaContext = () => useContext(QaPinCtx);
 
+/** Sub-step: something to do in the UI, a command to run, and what to check. */
+interface TestAction {
+    do?: string;
+    run?: string;
+    expect?: string;
+}
+
 interface TestStep {
     id: number;
     title: string;
-    description: string;
-    expected: string;
-    verification: string;
+    description?: string;
+    commands?: string[];
+    actions?: TestAction[];
+    /** A single expectation, or one per variant (e.g. "default", "taxable swaps"). */
+    expected?: string | Record<string, string>;
+    verification?: string;
 }
 
 interface TestPlan {
     name: string;
     description: string;
+    preconditions?: string[];
+    commands?: string[];
     steps: TestStep[];
 }
+
+const CommandBlock: React.FC<{ code: string }> = ({ code }) => {
+    const [copied, setCopied] = useState(false);
+    return (
+        <div className="relative mb-1" onClick={e => e.stopPropagation()}>
+            <pre className="cursor-text overflow-x-auto whitespace-pre bg-slate-900 p-2 pr-14 text-[11px] leading-snug text-slate-100">{code}</pre>
+            <button
+                type="button"
+                className="absolute right-1 top-1 bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-100 hover:bg-slate-600"
+                onClick={() => { void navigator.clipboard?.writeText(code).then(() => setCopied(true)); }}
+            >
+                {copied ? 'Copied' : 'Copy'}
+            </button>
+        </div>
+    );
+};
 
 export const QaTestPlanProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [pinnedWidth, setPinnedWidth] = useState(0);
@@ -252,6 +280,15 @@ const QaTestPlanPanelInner: React.FC<PanelInnerProps> = ({ onPinnedWidthChange, 
                     <div>
                         <Heading className="mb-1 text-xs">{testPlan.name}</Heading>
                         <span className="mb-4 block text-xs text-slate-500">{testPlan.description}</span>
+                        {testPlan.preconditions && testPlan.preconditions.length > 0 && (
+                            <div className="mb-3">
+                                <span className="mb-1 block text-xs font-semibold">Preconditions</span>
+                                <ul className="list-disc space-y-0.5 pl-4 text-xs text-slate-600">
+                                    {testPlan.preconditions.map(item => <li key={item}>{item}</li>)}
+                                </ul>
+                            </div>
+                        )}
+                        {testPlan.commands?.map(code => <CommandBlock key={code} code={code} />)}
 
                         <Badge
                             colorScheme={doneCount === totalSteps ? 'green' : 'purple'}
@@ -276,17 +313,47 @@ const QaTestPlanPanelInner: React.FC<PanelInnerProps> = ({ onPinnedWidthChange, 
                                             <span className="mb-0.5 block text-xs font-bold">
                                                 {step.id}. {step.title}
                                             </span>
-                                            <span className="mb-1 block text-xs text-slate-600">
-                                                {step.description}
-                                            </span>
-                                            <div className="mb-1 bg-blue-50 px-2 py-1">
-                                                <span className="text-xs text-blue-700">
-                                                    <strong>Expected:</strong> {step.expected}
-                                                </span>
-                                            </div>
-                                            <span className="block text-xs italic text-slate-500">
-                                                ✓ {step.verification}
-                                            </span>
+                                            {step.description && (
+                                                <span className="mb-1 block text-xs text-slate-600">{step.description}</span>
+                                            )}
+                                            {step.commands?.map(code => <CommandBlock key={code} code={code} />)}
+                                            {step.actions && step.actions.length > 0 && (
+                                                <ol className="mb-1 space-y-2">
+                                                    {step.actions.map((action, i) => (
+                                                        <li key={i} className="flex gap-1.5">
+                                                            <span className="mt-px flex h-4 w-4 shrink-0 items-center justify-center bg-purple-100 text-[10px] font-semibold text-purple-700">
+                                                                {String.fromCharCode(97 + i)}
+                                                            </span>
+                                                            <div className="min-w-0 flex-1">
+                                                                {action.do && <p className="mb-1 text-xs text-slate-800">{action.do}</p>}
+                                                                {action.run && <CommandBlock code={action.run} />}
+                                                                {action.expect && (
+                                                                    <p className="bg-blue-50 px-2 py-1 text-xs text-blue-700">
+                                                                        <strong>Expect:</strong> {action.expect}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        </li>
+                                                    ))}
+                                                </ol>
+                                            )}
+                                            {step.expected && (
+                                                <div className="mb-1 bg-blue-50 px-2 py-1 text-xs text-blue-700">
+                                                    {typeof step.expected === 'string' ? (
+                                                        <span><strong>Expected:</strong> {step.expected}</span>
+                                                    ) : (
+                                                        <div className="space-y-1">
+                                                            <strong>Expected:</strong>
+                                                            {Object.entries(step.expected).map(([variant, text]) => (
+                                                                <p key={variant}><strong className="font-semibold">{variant}:</strong> {String(text)}</p>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {step.verification && (
+                                                <span className="block text-xs italic text-slate-500">✓ {step.verification}</span>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

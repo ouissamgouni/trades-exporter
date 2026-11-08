@@ -32,3 +32,8 @@ export function consumePendingLocate(): PendingLocate | null {
     pending = null;
     return value;
 }
+
+/** True while the current URL carries a locate request (keeps the audit section open). */
+export function hasLocateInUrl(): boolean {
+    return new URLSearchParams(window.location.search).has('locate');
+}

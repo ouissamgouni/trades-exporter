@@ -13,7 +13,7 @@
  * Clicking best/worst item or asset name updates scope for the whole view.
  */
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { peekPendingLocate } from '../../utils/pnlLocate';
+import { hasLocateInUrl } from '../../utils/pnlLocate';
 import { Badge } from '../ui/primitives';
 import { FiChevronDown, FiChevronRight, FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import { LuInfo, LuReceipt } from 'react-icons/lu';
@@ -140,7 +140,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
     // ── Section open state ──
     const [overviewOpen, setOverviewOpen] = useState(true);
     const [assetsOpen, setAssetsOpen] = useState(true);
-    const [auditOpen, setAuditOpen] = useState(() => !!peekPendingLocate());
+    const [auditOpen, setAuditOpen] = useState(() => hasLocateInUrl());
 
     // ── Section refs for scroll-to-section ──
     const overviewRef = useRef<HTMLDivElement>(null);
@@ -151,7 +151,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
     useEffect(() => {
         setOverviewOpen(true);
         setAssetsOpen(true);
-        setAuditOpen(!!peekPendingLocate());
+        setAuditOpen(hasLocateInUrl());
     }, [scope.level, scope.entityId]);
 
     // Reset best/worst groupBy to 'asset' on scope change
