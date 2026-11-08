@@ -8,19 +8,31 @@ function toLocalDateString(d: Date): string {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** Local-date window of ± N days around a transaction datetime, or null if unparseable. */
+export function contextDateWindow(
+    dateTime: string | number | null | undefined,
+    windowDays = SHOW_IN_CONTEXT_WINDOW_DAYS,
+): { dateFrom: string; dateTo: string } | null {
+    if (!dateTime) return null;
+    // Backend datetimes are naive UTC strings; numbers are epoch seconds or ms.
+    const d = typeof dateTime === 'number'
+        ? new Date(dateTime < 1e12 ? dateTime * 1000 : dateTime)
+        : new Date(/[zZ]|[+-]\d\d:\d\d$/.test(dateTime) ? dateTime : `${dateTime}Z`);
+    if (Number.isNaN(d.getTime())) return null;
+    const day = 24 * 3600 * 1000;
+    return {
+        dateFrom: toLocalDateString(new Date(d.getTime() - windowDays * day)),
+        dateTo: toLocalDateString(new Date(d.getTime() + windowDays * day)),
+    };
+}
+
 /** URL of the All transactions page centred on a transaction (date window ± N days, row highlighted). */
 export function showInAllTransactionsPath(txId: number, dateTime?: string | number | null, windowDays = SHOW_IN_CONTEXT_WINDOW_DAYS): string {
     const params = new URLSearchParams({ focus: String(txId) });
-    if (dateTime) {
-        // Backend datetimes are naive UTC strings; numbers are epoch seconds or ms.
-        const d = typeof dateTime === 'number'
-            ? new Date(dateTime < 1e12 ? dateTime * 1000 : dateTime)
-            : new Date(/[zZ]|[+-]\d\d:\d\d$/.test(dateTime) ? dateTime : `${dateTime}Z`);
-        if (!Number.isNaN(d.getTime())) {
-            const day = 24 * 3600 * 1000;
-            params.set('date_from', toLocalDateString(new Date(d.getTime() - windowDays * day)));
-            params.set('date_to', toLocalDateString(new Date(d.getTime() + windowDays * day)));
-        }
+    const dateWindow = contextDateWindow(dateTime, windowDays);
+    if (dateWindow) {
+        params.set('date_from', dateWindow.dateFrom);
+        params.set('date_to', dateWindow.dateTo);
     }
     return `/all-transactions?${params.toString()}`;
 }

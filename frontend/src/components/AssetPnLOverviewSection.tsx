@@ -14,6 +14,7 @@ import { useLatestPnLVersion } from '../hooks/useLatestPnLVersion';
 import { useVersionMetrics, usePortfolioTimeline } from '../hooks/useChartData';
 import { usePriceGapsSummary } from '../hooks/usePriceGaps';
 import { MetricItem, fmtCurrency, fmtCurrencySigned } from './pnl/TotalReturnScorecard';
+import { TERM_HELP } from './pnl/pnlTerms';
 import { HeroMetricsBar } from './pnl/HeroMetricsBar';
 import { PeriodChartPanel } from './pnl/PeriodChartPanel';
 import { GapFixPanel } from './GapFixPanel';
@@ -99,6 +100,7 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
             totalInvested: rangeData.total_invested ?? rangeData.cost_basis,
             unrealizedPnl: rangeData.unrealized_pnl,
             realizedPnl: rangeData.realized_pnl,
+            taxableRealizedPnl: rangeData.taxable_realized_pnl ?? 0,
             feesInPeriod: rangeData.fees_in_period ?? 0,
             totalFees: metrics.data?.summary?.total_fees ?? 0,
         };
@@ -171,9 +173,9 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
                 color={color}
             >
                 <MetricItem label="Value" value={fmtCurrency(scopedMetrics.currentValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} bg="blue.50" />
-                <MetricItem label="Cost" value={fmtCurrency(scopedMetrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" subValue={Math.abs(scopedMetrics.totalInvested - scopedMetrics.costBasis) > 0.01 ? `invested ${fmtCurrency(scopedMetrics.totalInvested, baseCurrency)}` : undefined} />
+                <MetricItem label="Cost" value={fmtCurrency(scopedMetrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" info={TERM_HELP.cost} subLines={Math.abs(scopedMetrics.totalInvested - scopedMetrics.costBasis) > 0.01 ? [{ label: 'Total bought', value: fmtCurrency(scopedMetrics.totalInvested, baseCurrency), info: TERM_HELP.totalBought }] : undefined} />
                 <MetricItem label="Unrealized" value={fmtCurrencySigned(scopedMetrics.unrealizedPnl, baseCurrency)} color={color(scopedMetrics.unrealizedPnl)} icon={scopedMetrics.unrealizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.unrealizedPnl >= 0 ? 'green.50' : 'red.50'} />
-                <MetricItem label="Realized" value={fmtCurrencySigned(scopedMetrics.realizedPnl, baseCurrency)} color={color(scopedMetrics.realizedPnl)} icon={scopedMetrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} />
+                <MetricItem label="Realized" value={fmtCurrencySigned(scopedMetrics.realizedPnl, baseCurrency)} color={color(scopedMetrics.realizedPnl)} icon={scopedMetrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} info={TERM_HELP.realized} subLines={[{ label: 'Taxable', value: fmtCurrencySigned(scopedMetrics.taxableRealizedPnl, baseCurrency), info: TERM_HELP.taxable }]} />
                 <MetricItem label="Fees" value={fmtCurrency(scopedMetrics.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />
             </HeroMetricsBar>
 

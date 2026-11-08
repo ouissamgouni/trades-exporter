@@ -35,6 +35,7 @@ import { usePagination, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
 import { useBundleSuggestionMap } from '../hooks/useBundleSuggestionMap';
 import { useBundleColorMap } from '../hooks/useBundleColorMap';
 import { TablePagination } from './TablePagination';
+import { InfoTip } from './pnl/pnlTerms';
 import { TableConfig, ColumnPlugin, RowAction, BulkAction, TransactionColumnKey, resolveTableConfig, presetToVisibility, ColumnVisibilityPopover } from './tables';
 import { useDuplicateMap } from '../hooks/useDuplicateMap';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
@@ -163,6 +164,10 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     customApiUrl?: string;
     /** Hide the direction/review legend bar */
     hideLegend?: boolean;
+    /** Keep the column picker available when the legend/actions bar is hidden */
+    showColumnPicker?: boolean;
+    /** Pin the Date/Time column next to the checkbox on horizontal scroll */
+    pinDateColumn?: boolean;
     /** Initial date grouping when the user has no saved preference (default: month-day) */
     defaultGrouping?: GroupingMode;
     /** Base currency symbol shown next to realized P&L in group recaps */
@@ -171,6 +176,8 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     expandInvalidRows?: boolean;
     /** Highlight this transaction and scroll it into view once rendered */
     focusTransactionId?: number;
+    /** Datetime of the focused transaction, so its month/day groups open */
+    focusDateTime?: string;
 
     // ============== Plugin Architecture Props ==============
 
@@ -234,10 +241,13 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     onDataChange,
     customApiUrl,
     hideLegend = false,
+    showColumnPicker = false,
+    pinDateColumn = false,
     defaultGrouping = 'month-day',
     baseCurrency,
     expandInvalidRows = false,
     focusTransactionId,
+    focusDateTime,
     // Plugin architecture props
     tableId = 'default',
     initialColumnVisibility: initialVisibilityProp,
@@ -267,6 +277,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const visibilityStorageKey = `txTable:${tableId}:visibility`;
     const sortingStorageKey = `txTable:${tableId}:sorting`;
 
+    const withPluginDefaults = (v: VisibilityState): VisibilityState => {
+        const next = { ...v };
+        for (const col of additionalColumns) {
+            if (col.defaultHidden && next[col.id] === undefined) next[col.id] = false;
+        }
+        return next;
+    };
+
     // Load initial column visibility from prop, localStorage, or preset
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
         // Priority: prop > localStorage > preset
@@ -276,15 +294,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         try {
             const stored = localStorage.getItem(visibilityStorageKey);
             if (stored) {
-                return JSON.parse(stored);
+                return withPluginDefaults(JSON.parse(stored));
             }
         } catch { }
         // Fall back to preset-based visibility
-        return presetToVisibility(
+        return withPluginDefaults(presetToVisibility(
             tableConfig.columnPreset,
             tableConfig.hiddenColumns,
             tableConfig.shownColumns
-        );
+        ));
     });
 
     // Sorting state - default to date_time descending
@@ -341,9 +359,28 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             'id', 'date', 'source', 'accounts', 'direction', 'type', 'asset', 'qty',
             'price', 'total', 'fee', 'taxability', 'feeInBase', 'bundle', 'tags', 'sourceTransactionId', 'status'
         ];
+        const plugins = additionalColumns.filter(c => columnVisibility[c.id] !== false).length;
         // +2 for checkbox column and actions column (always visible)
-        return keys.filter(k => columnVisibility[k] !== false).length + 2;
-    }, [columnVisibility]);
+        return keys.filter(k => columnVisibility[k] !== false).length + plugins + 2;
+    }, [columnVisibility, additionalColumns]);
+
+    // Visible plugin columns, with right offsets for the sticky ones (rightmost first).
+    const visiblePlugins = useMemo(() => {
+        const visible = additionalColumns.filter(c => columnVisibility[c.id] !== false);
+        const statusShown = columnVisibility.status !== false && (!embeddedMode || showSelectionInEmbedded);
+        let offset = (embeddedMode ? 0 : 50) + (statusShown ? 70 : 0);
+        const offsets = new Map<string, number>();
+        for (let i = visible.length - 1; i >= 0; i--) {
+            const col = visible[i];
+            if (col.sticky !== 'right') continue;
+            offsets.set(col.id, offset);
+            offset += parseInt(col.width || '80', 10);
+        }
+        const firstSticky = visible.find(c => offsets.has(c.id))?.id;
+        return visible.map(c => offsets.has(c.id)
+            ? { ...c, stickyOffset: offsets.get(c.id), stickyEdge: c.id === firstSticky }
+            : c);
+    }, [additionalColumns, columnVisibility, embeddedMode, showSelectionInEmbedded]);
 
     const { assets, refetchAssets } = useAssets();
     const { accounts, refetchAccounts } = useAccounts();
@@ -683,7 +720,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         { id: 'tags', accessorKey: 'tags', enableSorting: false },
         { id: 'sourceTransactionId', accessorKey: 'source_transaction_id' },
         { id: 'status', accessorKey: 'review_status' },
-    ], []);
+        ...additionalColumns.map(col => ({ id: col.id, accessorFn: () => null, enableSorting: false })),
+    ], [additionalColumns]);
 
     const tanstackTable = useReactTable({
         data: transactions,
@@ -1662,7 +1700,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             embeddedMode={embeddedMode}
             showSuggestions={showSuggestions}
             showSelectionInEmbedded={showSelectionInEmbedded}
-            additionalColumns={additionalColumns as ColumnPlugin[]}
+            additionalColumns={visiblePlugins as ColumnPlugin[]}
+            pinDate={pinDateColumn}
             additionalRowActions={additionalRowActions as RowAction[]}
             editingCell={editingCell}
             editValues={editValues}
@@ -1748,6 +1787,22 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         />
     );
 
+    const columnPicker = (
+        <ColumnVisibilityPopover
+            table={tanstackTable}
+            onReset={() => {
+                setColumnVisibility(withPluginDefaults(presetToVisibility(
+                    tableConfig.columnPreset,
+                    tableConfig.hiddenColumns,
+                    tableConfig.shownColumns
+                )));
+            }}
+            size="xs"
+            extraColumns={additionalColumns.map(c => ({ id: c.id, label: c.header }))}
+            extraGroupLabel="P&L"
+        />
+    );
+
     const tableActions = (
         <>
             {groupingMode !== 'off' && sortBy !== 'date' && (
@@ -1779,17 +1834,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     </button>
                 ))}
             </div>
-            <ColumnVisibilityPopover
-                table={tanstackTable}
-                onReset={() => {
-                    setColumnVisibility(presetToVisibility(
-                        tableConfig.columnPreset,
-                        tableConfig.hiddenColumns,
-                        tableConfig.shownColumns
-                    ));
-                }}
-                size="xs"
-            />
+            {columnPicker}
             <Button
                 onClick={error ? handleRetry : handleReset}
                 variant="outline"
@@ -1903,7 +1948,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                     )}
                                 </th>
                                 {showColumn('id') && renderSortableHeader('id', 'ID')}
-                                {showColumn('date') && renderSortableHeader('date', 'Date/Time', undefined, 'pr-1')}
+                                {showColumn('date') && renderSortableHeader('date', 'Date/Time', undefined, pinDateColumn ? 'pr-1 sticky left-[50px] z-30 border-r border-slate-300' : 'pr-1')}
                                 {showColumn('source') && renderSortableHeader('source', 'Source Info', 'min-w-[180px]', 'pr-1')}
                                 {showColumn('accounts') && <th className="w-[130px]">From / To</th>}
                                 {showColumn('direction') && renderSortableHeader('direction', 'Dir')}
@@ -1919,8 +1964,22 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                 {showColumn('tags') && <th>Tags</th>}
                                 {showColumn('sourceTransactionId') && <th>Source Tx ID</th>}
                                 {/* Additional plugin columns */}
-                                {additionalColumns.map(col => (
-                                    <th key={col.id} style={{ width: col.width, ...(col.headerBg ? { backgroundColor: col.headerBg } : {}) }}>{col.header}</th>
+                                {visiblePlugins.map(col => (
+                                    <th
+                                        key={col.id}
+                                        className={cn(col.stickyOffset != null && 'z-30', col.stickyEdge && 'border-l-2 border-slate-300')}
+                                        style={{
+                                            width: col.width,
+                                            minWidth: col.stickyOffset != null ? col.width : undefined,
+                                            ...(col.stickyOffset != null ? { position: 'sticky', right: col.stickyOffset } : {}),
+                                            ...(col.headerBg ? { backgroundColor: col.headerBg } : {}),
+                                        }}
+                                    >
+                                        <span className="inline-flex items-center gap-0.5">
+                                            {col.header}
+                                            {col.info && <InfoTip text={col.info} />}
+                                        </span>
+                                    </th>
                                 ))}
                                 {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, 'sticky right-[50px] z-10 w-[1%] whitespace-nowrap border-l-2 border-slate-300 bg-slate-100 px-1')}
                                 {!embeddedMode && <th className="sticky right-0 z-10 min-w-[50px] bg-slate-100 px-0" />}
@@ -1929,6 +1988,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                         <tbody>
                             {serverGrouping && groupsUrl ? (
                                 <GroupedTransactionsBody
+                                    key={focusTransactionId ?? 'no-focus'}
+                                    focusDate={focusDateTime}
                                     groupsUrl={groupsUrl}
                                     listUrl={(customApiUrl || `${API_URL}/transactions`)}
                                     idsUrl={idsUrlFor(customApiUrl)}
@@ -2205,7 +2266,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                         icon={<LuList size={14} />}
                         title="Transactions"
                         meta={invalidControl}
-                        actions={!hideLegend && tableActions}
+                        actions={hideLegend ? (showColumnPicker ? columnPicker : undefined) : tableActions}
                     >
                         {tableContent}
                     </PageSection>

@@ -31,6 +31,8 @@ import { TablePagination } from '../TablePagination';
 import { usePagination } from '../../hooks/usePagination';
 import { getWarningTypeConfig } from './warningStyles';
 import { CostLotEventsTable, EVENT_TABLE_PRESETS } from './CostLotEventsTable';
+import { InfoTip, TaxabilityPill, TaxableGainValue, DeferredInValue, TERM_HELP, realizedOf, realizedCostOf } from './pnlTerms';
+import { RealizedEntrySlidePanel } from './RealizedEntrySlidePanel';
 import {
     UnitsTabWrapper,
     LotsTabWrapper,
@@ -421,6 +423,7 @@ interface UnitDetailRowProps {
 }
 
 export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costLots, versionId, onTransactionClick }) => {
+    const [entryPanelId, setEntryPanelId] = useState<number | null>(null);
     // Get all transaction IDs for this unit
     const allTxIds = useMemo(() => {
         return unit.transactions.map(tx => tx.id);
@@ -482,15 +485,21 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                             <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>FMV Price</th>
                                             <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'center' }}>Source</th>
                                             <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'left' }}>FMV Time</th>
-                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>Cost Basis</th>
-                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>P&L</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Cost <InfoTip text={TERM_HELP.cost} /></span></th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Realized <InfoTip text={TERM_HELP.realized} /></span></th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Taxable gain <InfoTip text={TERM_HELP.taxable} /></span></th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Deferred in <InfoTip text={TERM_HELP.deferredIn} /></span></th>
                                             <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'center' }}>Taxability</th>
                                             <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'center' }}>Origin</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {unit.realized_entries.map((entry, i) => (
-                                            <tr key={i} style={{ borderBottom: '1px solid #f1f3f5', background: entry.is_fee ? '#FFFAF0' : undefined }}>
+                                            <tr key={i}
+                                                className={entry.pnl_id != null ? 'cursor-pointer hover:bg-blue-50' : undefined}
+                                                title={entry.pnl_id != null ? 'Explain this entry' : undefined}
+                                                onClick={entry.pnl_id != null ? () => setEntryPanelId(entry.pnl_id!) : undefined}
+                                                style={{ borderBottom: '1px solid #f1f3f5', background: entry.is_fee ? '#FFFAF0' : undefined }}>
                                                 <td style={{ padding: '3px 6px' }}>
                                                     <Badge className="text-[10px]">{entry.asset.symbol || `#${entry.asset.id}`}</Badge>
                                                 </td>
@@ -523,18 +532,21 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                                     </span>
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'right' }}>
-                                                    <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
+                                                    <ValueDisplay value={realizedCostOf(entry)} currency={baseCurrency} />
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'right' }}>
-                                                    <span className={`text-[10px] font-medium ${entry.pnl_in_base >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                        <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
+                                                    <span className={`text-[10px] font-medium ${realizedOf(entry) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                        <ValueDisplay value={realizedOf(entry)} currency={baseCurrency} />
                                                     </span>
                                                 </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right' }}>
+                                                    <TaxableGainValue entry={entry} taxable={entry.disposal_taxable} currency={baseCurrency} />
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right' }}>
+                                                    <DeferredInValue entry={entry} taxable={entry.disposal_taxable} currency={baseCurrency} />
+                                                </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'center' }}>
-                                                    <Badge className="text-[10px]"
-                                                        colorScheme={entry.disposal_taxable ? 'red' : 'green'}>
-                                                        {entry.disposal_taxable ? 'Taxable' : 'Non-Taxable'}
-                                                    </Badge>
+                                                    <TaxabilityPill taxable={entry.disposal_taxable} isFee={entry.is_fee} />
                                                 </td>
                                                 <td style={{ padding: '3px 6px', textAlign: 'center' }}>
                                                     <Badge colorScheme={entry.is_fee ? 'orange' : 'blue'} className="text-[10px]">
@@ -551,6 +563,17 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                         )}
                     </div>
                 </div>
+
+                {versionId != null && (
+                    <RealizedEntrySlidePanel
+                        isOpen={entryPanelId !== null}
+                        onClose={() => setEntryPanelId(null)}
+                        versionId={versionId}
+                        pnlId={entryPanelId}
+                        baseCurrency={baseCurrency}
+                        onTransactionClick={onTransactionClick}
+                    />
+                )}
 
                 {/* Cost Lot Events - Full Width */}
                 <div className="overflow-hidden border border-gray-200 bg-white">
@@ -1335,9 +1358,9 @@ const RealizedPnLTab: React.FC<{
     }, [filtered]);
 
     const stats = useMemo(() => {
-        const totalPnL = entries.reduce((sum, e) => sum + e.pnl_in_base, 0);
+        const totalPnL = entries.reduce((sum, e) => sum + realizedOf(e), 0);
         const taxablePnL = entries.filter(e => e.disposal_taxable).reduce((sum, e) => sum + e.pnl_in_base, 0);
-        const nonTaxablePnL = entries.filter(e => !e.disposal_taxable).reduce((sum, e) => sum + e.pnl_in_base, 0);
+        const nonTaxablePnL = entries.filter(e => !e.disposal_taxable).reduce((sum, e) => sum + realizedOf(e), 0);
         const taxableCount = entries.filter(e => e.disposal_taxable).length;
         const nonTaxableCount = entries.filter(e => !e.disposal_taxable).length;
         const withWarnings = entries.filter(e => e.warnings && e.warnings.length > 0).length;
@@ -1466,12 +1489,12 @@ const RealizedPnLTab: React.FC<{
                                         <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
                                     </td>
                                     <td className="text-right text-sm">
-                                        <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
+                                        <ValueDisplay value={realizedCostOf(entry)} currency={baseCurrency} />
                                     </td>
                                     <td
-                                        className={`text-right font-bold ${entry.pnl_in_base >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                                        className={`text-right font-bold ${realizedOf(entry) >= 0 ? 'text-green-600' : 'text-red-600'}`}
                                     >
-                                        <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
+                                        <ValueDisplay value={realizedOf(entry)} currency={baseCurrency} />
                                     </td>
                                     <td>
                                         <Badge colorScheme={entry.disposal_taxable ? 'red' : 'green'}>

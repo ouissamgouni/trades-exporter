@@ -20,6 +20,7 @@ export function balancesToAssetRows(balances: AggregatedBalanceItem[]): AssetPnL
         quantity: balance.qty,
         market_value: 0,
         cost_basis: balance.cost_basis_in_base,
+        tax_cost_basis: balance.tax_cost_basis_in_base,
         total_invested: balance.total_invested_in_base,
         unit_cost: balance.avg_unit_cost_in_base,
         unrealized_pnl: 0,

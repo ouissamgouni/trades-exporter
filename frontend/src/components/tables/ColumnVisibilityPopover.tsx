@@ -61,6 +61,12 @@ interface ColumnVisibilityPopoverProps<T extends Transaction = Transaction> {
      * Button size
      */
     size?: NonNullable<ButtonProps['size']>;
+
+    /** Plugin columns listed in their own group. */
+    extraColumns?: { id: string; label: string }[];
+
+    /** Title of the plugin columns group. */
+    extraGroupLabel?: string;
 }
 
 // ============================================================================
@@ -71,10 +77,23 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
     table,
     onReset,
     size = 'sm',
+    extraColumns = [],
+    extraGroupLabel = 'Additional',
 }: ColumnVisibilityPopoverProps<T>) => {
     const [isOpen, setIsOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
     const allColumns = table.getAllLeafColumns();
+
+    const groups: { label: string; columns: string[]; labels?: Record<string, string> }[] = [
+        ...COLUMN_GROUPS,
+        ...(extraColumns.length > 0
+            ? [{
+                label: extraGroupLabel,
+                columns: extraColumns.map(c => c.id),
+                labels: Object.fromEntries(extraColumns.map(c => [c.id, c.label])),
+            }]
+            : []),
+    ];
 
     // Count visible columns
     const visibleCount = allColumns.filter(col => col.getIsVisible()).length;
@@ -154,9 +173,9 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
 
                     {/* Grouped Columns */}
                     <div className="flex flex-col items-stretch gap-3">
-                        {COLUMN_GROUPS.map(group => {
+                        {groups.map(group => {
                             const groupColumns = allColumns.filter(col =>
-                                group.columns.includes(col.id as TransactionColumnKey)
+                                group.columns.includes(col.id)
                             );
 
                             if (groupColumns.length === 0) return null;
@@ -187,7 +206,7 @@ export const ColumnVisibilityPopover = <T extends Transaction = Transaction>({
                                                             disabled={!canHide}
                                                         />
                                                         <span className="text-xs">
-                                                            {meta?.header || column.id}
+                                                            {group.labels?.[column.id] || meta?.header || column.id}
                                                         </span>
                                                     </label>
                                                 </div>

@@ -45,6 +45,8 @@ export interface GroupedTransactionsBodyProps {
     /** Hide invalid rows and periods that only contain invalid transactions. */
     hideInvalid?: boolean;
     onExcludedInvalidCount?: (count: number | null) => void;
+    /** Datetime of the focused transaction: its month and day open by default. */
+    focusDate?: string;
 }
 
 type SharedProps = Omit<GroupedTransactionsBodyProps, 'groupsUrl' | 'params' | 'sortDir' | 'colSpan' | 'emptyMessage' | 'hideInvalid' | 'onExcludedInvalidCount'> & {
@@ -70,6 +72,14 @@ function inBounds(tx: Transaction, bounds: PeriodBounds): boolean {
     if (!d) return false;
     const key = d.toISOString().replace('Z', '');
     return key >= bounds.from && key <= bounds.to;
+}
+
+function containsFocus(focusDate: string | undefined, group: TransactionGroup): boolean {
+    if (!focusDate) return false;
+    const d = parseApiDate(focusDate);
+    if (!d) return false;
+    const key = d.toISOString().replace('Z', '');
+    return key >= group.date_from && key <= group.date_to;
 }
 
 export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = ({
@@ -106,7 +116,7 @@ export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = (
     return (
         <>
             {groups.map((month, i) => (
-                <MonthSection key={month.period_start} month={month} defaultExpanded={i === 0} params={params} showPnl={showPnl} hideInvalid={hideInvalid} {...shared} />
+                <MonthSection key={month.period_start} month={month} defaultExpanded={i === 0 || containsFocus(shared.focusDate, month)} params={params} showPnl={showPnl} hideInvalid={hideInvalid} {...shared} />
             ))}
             {months.hasNextPage && (
                 <tr>
@@ -330,7 +340,7 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
                     {...props}
                     day={day}
                     params={scopedParams}
-                    defaultExpanded={expandAllDays}
+                    defaultExpanded={expandAllDays || containsFocus(props.focusDate, day)}
                     monthFiltered={filtered}
                 />
             ))}

@@ -155,6 +155,8 @@ export interface TransactionRowProps {
     dateMode?: 'full' | 'time';
     /** Highlight this row (e.g. opened via "Show in All transactions") */
     isFocused?: boolean;
+    /** Date/Time cell pinned next to the checkbox */
+    pinDate?: boolean;
 }
 
 // ========== Memoized component ==========
@@ -203,7 +205,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
         openDuplicateTxId, hoveredDuplicateGroup,
         hoveredBundleId, openBundleTxId, bundleColorMap,
         editInputRef, escapePressedRef, editValuesRef,
-        callbacks, dateMode = 'full', isFocused = false,
+        callbacks, dateMode = 'full', isFocused = false, pinDate = false,
     } = props;
 
     const {
@@ -434,7 +436,12 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 )}
                 {/* Date/Time - click to edit */}
                 {showColumn('date') && (
-                    <td className="cursor-pointer py-1 pr-1" onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')}>
+                    <td
+                        className={pinDate
+                            ? 'sticky left-[50px] z-[5] cursor-pointer border-r border-slate-200 bg-[var(--row-bg)] py-1 pr-1 group-hover:bg-blue-50'
+                            : 'cursor-pointer py-1 pr-1'}
+                        onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')}
+                    >
                         {isEditingCell(tx.id, 'date_time') ? (
                             <Input
                                 ref={editInputRef as React.RefObject<HTMLInputElement>}
@@ -1723,7 +1730,16 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 )}
                 {/* Additional plugin columns */}
                 {additionalColumns.map(col => (
-                    <td key={col.id} className="py-1" style={col.cellBg ? { backgroundColor: col.cellBg } : undefined}>
+                    <td
+                        key={col.id}
+                        className={col.stickyEdge ? 'border-l-2 border-slate-300 py-1' : 'py-1'}
+                        style={{
+                            ...(col.cellBg ? { backgroundColor: col.cellBg } : {}),
+                            ...(col.stickyOffset != null
+                                ? { position: 'sticky', right: col.stickyOffset, zIndex: 5, minWidth: col.width, backgroundColor: col.cellBg ?? rowBgColor }
+                                : {}),
+                        }}
+                    >
                         {col.render(tx as Transaction)}
                     </td>
                 ))}

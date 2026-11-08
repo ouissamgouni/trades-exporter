@@ -39,7 +39,7 @@ export const Tooltip = React.forwardRef<HTMLDivElement, TooltipProps>(
         sideOffset={4}
         {...contentProps}
         className={cn(
-          "z-50 max-w-xs whitespace-pre-line bg-slate-900 px-2 py-1 text-xs text-white shadow-md",
+          "z-[3000] max-w-xs whitespace-pre-line bg-slate-900 px-2 py-1 text-xs text-white shadow-md",
           contentProps?.className,
         )}
       >

@@ -48,7 +48,7 @@ const COST_SOURCE_PALETTE: Record<string, BadgeColorScheme> = {
 // Flatten tree into rows
 // ============================================================================
 
-function flattenChain(chain: CostBasisChainNode[]): CostBasisChainNode[] {
+export function flattenChain(chain: CostBasisChainNode[]): CostBasisChainNode[] {
     const rows: CostBasisChainNode[] = [];
     const walk = (nodes: CostBasisChainNode[]) => {
         for (const n of nodes) {
@@ -75,7 +75,7 @@ interface FlatRowProps {
     onTransactionClick?: (txId: number) => void;
 }
 
-const FlatRow: React.FC<FlatRowProps> = ({ node, isOrigin, baseCurrency, onTransactionClick }) => {
+export const FlatRow: React.FC<FlatRowProps> = ({ node, isOrigin, baseCurrency, onTransactionClick }) => {
     const icon = TX_TYPE_ICON[node.transaction_type ?? ''] || TX_TYPE_ICON[node.unit_pattern ?? ''] || '📦';
     const date = node.timestamp ? new Date(node.timestamp).toLocaleDateString() : '—';
 
@@ -91,8 +91,13 @@ const FlatRow: React.FC<FlatRowProps> = ({ node, isOrigin, baseCurrency, onTrans
             </span>
             <span className="mx-0.5 text-[10px] text-slate-400">@</span>
             <span className="min-w-[48px] text-right text-[10px] text-slate-700">
-                <ValueDisplay value={node.unit_cost} currency={baseCurrency} />
+                <ValueDisplay value={node.economic_unit_cost ?? node.unit_cost} currency={baseCurrency} />
             </span>
+            {node.economic_unit_cost != null && Math.abs(node.economic_unit_cost - node.unit_cost) >= 0.005 && (
+                <span className="text-[9px] text-slate-400" title="Tax cost per unit (carried over from the asset given up)">
+                    tax <ValueDisplay value={node.unit_cost} currency={baseCurrency} />
+                </span>
+            )}
             {node.account_name && (
                 <span className="ml-1 max-w-[80px] truncate text-[10px] text-slate-500">
                     {node.account_name}
@@ -189,7 +194,7 @@ export const CostBasisChainTooltip: React.FC<CostBasisChainTooltipProps> = ({
             <RadixPopover.Portal>
                 <RadixPopover.Content
                     sideOffset={4}
-                    className="z-50 w-[580px] max-h-[420px] overflow-hidden border border-slate-200 bg-white shadow-xl"
+                    className="z-[3000] w-[580px] max-h-[420px] overflow-hidden border border-slate-200 bg-white shadow-xl"
                 >
                     {/* Header */}
                     <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-2">

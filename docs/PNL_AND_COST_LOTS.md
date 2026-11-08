@@ -53,16 +53,28 @@ Review realized P&L by asset, account, date, and calculation version. Surprising
 
 Every lot carries two costs:
 
+- **Cost** (economic) — the market value when the asset was received: the purchase price, or the value at a swap. Each gain is counted once, when it happens.
 - **Tax cost** — follows the tax rules. On a tax-deferred (non-taxable) swap, such as a crypto-to-crypto swap under French rules, the asset received keeps the cost of the asset given up.
-- **Economic cost** — the market value at the time of the swap. Each gain is counted once, when it happens.
 
 The two costs are the same unless a non-taxable swap happened earlier in the lot's history.
 
-- **Realized** (and Unrealized, Cost, Total return) uses the economic view.
-- **Taxable** uses the tax view. Tax reports only read the tax view.
-- **Deferred** is the gain already included in Realized but not yet taxed: the economic cost minus the tax cost of the lots you still hold. It is shown next to Taxable when it is not zero.
+| Term | Where it is shown | Meaning |
+|---|---|---|
+| **Realized** | Everywhere (headline) | Proceeds − cost. Unrealized, Cost and Total return use the same view. |
+| **Taxable** | Totals; "Taxable gain" per entry | Proceeds − tax cost, on taxable disposals only. Tax reports only read this view. |
+| **Deferred** | Portfolio totals, Lots table | Gain already counted in Realized but not taxed yet: cost − tax cost of the lots you still hold. |
+| **Deferred in** | Each realized entry | Taxable gain − Realized: the gain from earlier swaps that the consumed lots carried. *Released* (taxed now) on taxable disposals, *rolled over* into the new asset otherwise. |
+| **Taxable if sold now** | Asset cards | Market value − tax cost = Unrealized + Deferred held in that asset. |
+| **Net deposits** | Cost card (portfolio, account) | Money brought in from outside minus money taken out, valued when it moved. Value − Net deposits = Total return. For an account, transfers in and out of it also count, at cost. |
+| **Total bought** | Asset cards ("bought") | Everything ever acquired for the asset, purchases and swaps, at the value received. |
 
-Example: BTC bought for 30 000 is swapped for ETH worth 40 000, and the ETH is later sold for 40 000 EUR. Realized shows +10 000 at the swap and 0 at the sale. Taxable shows 0 at the swap and +10 000 at the sale. In the Realized P&L list, rows where the two views differ show the tax figures in a grey "Tax: …" line.
+For the whole portfolio, **Realized = Taxable + Deferred**. This does not hold per asset or account, because a deferred gain moves with swaps and transfers: it is counted in Realized where it was earned, and in Deferred where it is held now.
+
+Deferred is not a forecast of tax: later price moves add to or offset it. The gain that would be taxed if you sold everything now is Unrealized + Deferred.
+
+Example: BTC bought for 30 000 is swapped for 16 ETH worth 40 000 (Realized +10 000, Deferred 10 000). Eight ETH are then swapped for 24 000 USDC (Realized +4 000, Deferred in 5 000 rolled over), and the USDC is sold for 24 000 EUR (Realized 0, Taxable gain 9 000 = Deferred in released). Totals: Realized 14 000, Taxable 9 000, Deferred 5 000 still held in the other 8 ETH.
+
+To see how one entry was computed, click its ID in the Realized P&L panel (or its value in the audit table): the entry panel shows both calculations, the lots consumed and the cost chain back to the original purchase. The P&L section of a transaction's side panel shows the same for one transaction, for the latest or any earlier calculation.
 
 ## Fees
 

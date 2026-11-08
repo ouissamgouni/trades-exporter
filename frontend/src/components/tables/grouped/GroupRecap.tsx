@@ -71,9 +71,9 @@ export const GroupStatusCells: React.FC<{
                 {group.realized_pnl_in_base != null && group.realized_pnl_in_base !== 0 && (
                     <span
                         className={cn('text-xs font-semibold tabular-nums', group.realized_pnl_in_base > 0 ? 'text-green-700' : 'text-red-700')}
-                        title="Realized P&L in this period"
+                        title="Realized Σ: sum of Realized P&L of the transactions in this period"
                     >
-                        P&L {formatNetQty(group.realized_pnl_in_base)}{baseCurrency ? ` ${baseCurrency}` : ''}
+                        Realized Σ {formatNetQty(group.realized_pnl_in_base)}{baseCurrency ? ` ${baseCurrency}` : ''}
                     </span>
                 )}
             </span>

@@ -52,6 +52,7 @@ import { usePositions } from '../hooks/usePositions';
 import { getAssetSuggestions, getConfidenceColor, formatConfidence } from '../utils/similarity';
 import { Tooltip } from './ui/tooltip';
 import { ConnectorRunDetailDrawer } from './ConnectorRunDetailDrawer';
+import { TransactionPnlImpact } from './pnl/TransactionPnlImpact';
 import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from './ui/toaster';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
@@ -1114,6 +1115,11 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         <div className="flex items-center gap-2 bg-blue-50 px-2 py-1">
                             <Badge colorScheme="blue" className="text-[7px]">FR</Badge>
                             <span className="text-[9px] text-blue-600">French Tax override active — managed from the FR Tax tab</span>
+                        </div>
+                    )}
+                    {tx.id != null && (
+                        <div className="mt-2 border-t border-slate-200 pt-2">
+                            <TransactionPnlImpact txId={tx.id} txDateTime={tx.date_time ? String(tx.date_time) : undefined} />
                         </div>
                     )}
                 </Section>

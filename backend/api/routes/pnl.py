@@ -650,6 +650,7 @@ class ConsumedSliceResponse(BaseModel):
 class RealizedEntryDetailResponse(BaseModel):
     """Realized P&L entry detail for unit audit."""
 
+    pnl_id: Optional[int] = None
     asset: AssetRef
     qty: float
     proceeds_in_base: float
@@ -800,7 +801,8 @@ class CostBasisChainNode(BaseModel):
     account_name: Optional[str] = None
     account_id: Optional[int] = None
     qty: float = 0
-    unit_cost: float = 0
+    unit_cost: float = 0  # tax view
+    economic_unit_cost: Optional[float] = None
     cost_source: Optional[str] = (
         None  # "fmv", "inherited", "proceeds", "provisional", "base_currency"
     )
@@ -1080,6 +1082,7 @@ def build_realized_entry_response(
 ) -> RealizedEntryDetailResponse:
     """Build RealizedEntryDetailResponse from RealizedPnl model."""
     return RealizedEntryDetailResponse(
+        pnl_id=entry.pnl_id,
         asset=AssetRef(
             id=entry.asset.asset_id, symbol=entry.asset.symbol, label=entry.asset.label
         ),
@@ -2594,6 +2597,7 @@ def _walk_lot_chain(
         account_id=lot.account_id,
         qty=float(lot.qty),
         unit_cost=float(lot.unit_cost_in_base),
+        economic_unit_cost=float(lot.economic_unit_cost),
         cost_source=lot.cost_source,
         unit_pattern=unit.pattern if unit else None,
         children=[],
@@ -2636,7 +2640,34 @@ def _walk_lot_chain(
                     )
                 )
 
-    # Case 3: Inherited but no source_lot_id (old data without backfill)
+    # Case 3: Tax-deferred swap — cost carried over from the lots given up in the same unit
+    elif (
+        lot.cost_source == "inherited"
+        and not lot.source_lot_id
+        and unit is not None
+        and unit.pattern == "swap"
+    ):
+        slices = session.exec(
+            select(ConsumedLotSlice)
+            .where(ConsumedLotSlice.unit_id == unit.id)
+            .options(
+                selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.asset),
+                selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.account),
+            )
+        ).all()
+        for s in slices:
+            if (
+                s.cost_lot
+                and s.cost_lot.asset_id != lot.asset_id
+                and s.cost_lot.cost_lot_id not in visited
+            ):
+                node.children.append(
+                    _walk_lot_chain(
+                        s.cost_lot, session, visited, max_depth, current_depth + 1
+                    )
+                )
+
+    # Case 4: Inherited but no source_lot_id (old data without backfill)
     # Try to parse notes: "Transfer (from lot 123)"
     elif lot.cost_source == "inherited" and not lot.source_lot_id and lot.notes:
         import re
@@ -4202,7 +4233,7 @@ def get_version_balances(
             balance_map[key]["cost"] += lot.economic_remaining_cost_in_base
             balance_map[key]["tax_cost"] += lot.qty_remaining * lot.unit_cost
             if _is_investment_lot(lot):
-                balance_map[key]["total_invested"] += lot.qty * lot.unit_cost
+                balance_map[key]["total_invested"] += lot.qty * lot.economic_unit_cost
             balance_map[key]["lots"] += 1
             if lot.account_id:
                 balance_map[key]["account_ids"].add(lot.account_id)
@@ -4433,7 +4464,7 @@ def get_version_balances(
             balance_map[key]["cost"] += lot.economic_remaining_cost_in_base
             balance_map[key]["tax_cost"] += lot.qty_remaining * lot.unit_cost
             if _is_investment_lot(lot):
-                balance_map[key]["total_invested"] += lot.qty * lot.unit_cost
+                balance_map[key]["total_invested"] += lot.qty * lot.economic_unit_cost
             balance_map[key]["lots"] += 1
             if balance_map[key]["asset"] is None:
                 balance_map[key]["asset"] = lot.asset
@@ -6864,6 +6895,7 @@ def get_book_metrics(
             "realized_pnl": metrics.summary.realized_pnl,
             "taxable_realized_pnl": metrics.summary.taxable_realized_pnl,
             "deferred_gain": metrics.summary.deferred_gain,
+            "net_deposits": metrics.summary.net_deposits,
             "total_fees": metrics.summary.total_fees,
             "fee_entry_count": metrics.summary.fee_entry_count,
             "total_invested": metrics.summary.total_invested,
@@ -6881,6 +6913,7 @@ def get_book_metrics(
                 "cost_basis_in_period": m.cost_basis_in_period,
                 "fees_in_period": m.fees_in_period,
                 "total_invested": m.total_invested,
+                "net_deposits": m.net_deposits,
                 "income_in_period": m.income_in_period,
                 "withholding_in_period": m.withholding_in_period,
             }
@@ -7167,6 +7200,7 @@ def get_version_metrics(
             "realized_pnl": metrics.summary.realized_pnl,
             "taxable_realized_pnl": metrics.summary.taxable_realized_pnl,
             "deferred_gain": metrics.summary.deferred_gain,
+            "net_deposits": metrics.summary.net_deposits,
             "total_fees": metrics.summary.total_fees,
             "fee_entry_count": metrics.summary.fee_entry_count,
         },
@@ -7185,6 +7219,7 @@ def get_version_metrics(
                 "unrealized_in_period": m.unrealized_in_period,
                 "fees_in_period": m.fees_in_period,
                 "total_invested": m.total_invested,
+                "net_deposits": m.net_deposits,
                 "top_performers": [_serialize_performer(p) for p in m.top_performers],
                 "flop_performers": [_serialize_performer(p) for p in m.flop_performers],
             }
@@ -7960,6 +7995,157 @@ def get_enriched_transactions(
             "offset": offset,
         },
     }
+
+
+class TransactionImpactFee(BaseModel):
+    fee_in_base: float
+    asset: Optional[AssetRef] = None
+
+
+class TransactionImpactResponse(BaseModel):
+    """What one transaction did in one P&L calculation."""
+
+    version_id: int
+    transaction_id: int
+    included: bool
+    excluded_reason: Optional[str] = None  # pending | invalid | after_calculation | not_processed
+    stale: bool = False  # transaction edited after the calculation ran
+    unit_id: Optional[int] = None
+    unit_pattern: Optional[str] = None
+    unit_label: Optional[str] = None
+    leg_types: List[str] = Field(default_factory=list)
+    realized_entries: List[RealizedEntryDetailResponse] = Field(default_factory=list)
+    lots_created: List[CostLotResponse] = Field(default_factory=list)
+    consumed_slices: List[ConsumedSliceResponse] = Field(default_factory=list)
+    consumed_lots: List[CostLotResponse] = Field(default_factory=list)
+    fees: List[TransactionImpactFee] = Field(default_factory=list)
+    warnings: List[WarningResponse] = Field(default_factory=list)
+
+
+@router.get(
+    "/versions/{version_id}/transactions/{tx_id}/impact",
+    response_model=TransactionImpactResponse,
+)
+def get_transaction_impact(
+    version_id: int,
+    tx_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """Unit, realized entries, lots created/consumed, fees and warnings of one transaction."""
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+    tx = session.get(NormalizedTransaction, tx_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail=f"Transaction {tx_id} not found")
+
+    version_units = select(CalculationUnit.id).where(CalculationUnit.version_id == version_id)
+    legs = session.exec(
+        select(CalculationUnitLeg)
+        .where(CalculationUnitLeg.transaction_id == tx_id)
+        .where(CalculationUnitLeg.unit_id.in_(version_units))
+    ).all()
+
+    stale = bool(
+        tx.updated_at and version.created_at
+        and _strip_tz(tx.updated_at) > _strip_tz(version.created_at)
+    )
+
+    if not legs:
+        status = (tx.review_status or "pending").lower()
+        if status in ("pending", "invalid"):
+            reason = status
+        elif tx.date_time and version.created_at and _strip_tz(tx.date_time) > _strip_tz(version.created_at):
+            reason = "after_calculation"
+        else:
+            reason = "not_processed"
+        return TransactionImpactResponse(
+            version_id=version_id, transaction_id=tx_id, included=False,
+            excluded_reason=reason, stale=stale,
+        )
+
+    unit = session.get(CalculationUnit, legs[0].unit_id)
+    leg_ids = [leg.id for leg in legs]
+
+    rpnl_rows = session.exec(
+        select(RealizedPnl)
+        .options(selectinload(RealizedPnl.asset))
+        .where(RealizedPnl.transaction_id == tx_id)
+        .where(RealizedPnl.origin_unit_id.in_(version_units))
+        .order_by(RealizedPnl.pnl_id)
+    ).all()
+    fee_pnl_ids = set(
+        session.exec(
+            select(FeeEntry.realized_pnl_id)
+            .where(FeeEntry.fee_leg_id.in_(leg_ids))
+            .where(FeeEntry.realized_pnl_id.isnot(None))
+        ).all()
+    )
+
+    lots_created = session.exec(
+        select(CostLot)
+        .options(selectinload(CostLot.asset), selectinload(CostLot.account), selectinload(CostLot.unit))
+        .where(CostLot.origin_transaction_id == tx_id)
+        .where(CostLot.unit_id.in_(version_units))
+        .order_by(CostLot.cost_lot_id)
+    ).all()
+
+    slices = session.exec(
+        select(ConsumedLotSlice)
+        .options(
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.asset),
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.account),
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.unit),
+        )
+        .where(ConsumedLotSlice.consumed_by_leg_id.in_(leg_ids))
+        .order_by(ConsumedLotSlice.slice_id)
+    ).all()
+    consumed_lots: Dict[int, CostLot] = {}
+    for sl in slices:
+        if sl.cost_lot and sl.cost_lot.cost_lot_id not in consumed_lots:
+            consumed_lots[sl.cost_lot.cost_lot_id] = sl.cost_lot
+
+    fee_rows = session.exec(
+        select(FeeEntry.fee_value_in_base, CalculationUnitLeg.asset_id)
+        .join(CalculationUnitLeg, CalculationUnitLeg.id == FeeEntry.fee_leg_id)
+        .where(FeeEntry.fee_leg_id.in_(leg_ids))
+    ).all()
+    fees = []
+    for value, asset_id in fee_rows:
+        asset = session.get(Asset, asset_id) if asset_id else None
+        fees.append(TransactionImpactFee(
+            fee_in_base=float(value or 0),
+            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol, label=asset.label) if asset else None,
+        ))
+
+    warnings = session.exec(
+        select(PnlWarning)
+        .where(PnlWarning.transaction_id == tx_id)
+        .where(PnlWarning.unit_id.in_(version_units))
+    ).all()
+
+    return TransactionImpactResponse(
+        version_id=version_id,
+        transaction_id=tx_id,
+        included=True,
+        stale=stale,
+        unit_id=unit.id if unit else None,
+        unit_pattern=unit.pattern if unit else None,
+        unit_label=unit.unit_label if unit else None,
+        leg_types=sorted({str(getattr(leg.leg_type, "value", leg.leg_type)) for leg in legs}),
+        realized_entries=[
+            build_realized_entry_response(e, is_fee=(e.pnl_id in fee_pnl_ids)) for e in rpnl_rows
+        ],
+        lots_created=[build_cost_lot_response(lot) for lot in lots_created],
+        consumed_slices=[build_consumed_slice_response(sl) for sl in slices],
+        consumed_lots=[build_cost_lot_response(lot) for lot in consumed_lots.values()],
+        fees=fees,
+        warnings=[build_warning_response(w, unit.unit_label if unit else None) for w in warnings],
+    )
+
+
+def _strip_tz(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
 @router.get("/versions/{version_id}/enriched-transactions/groups")

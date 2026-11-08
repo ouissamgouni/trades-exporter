@@ -198,6 +198,7 @@ export interface MetricsRangeData {
     unrealized_in_period: number;
     fees_in_period: number;
     total_invested?: number;
+    net_deposits?: number;
     top_performers: PerformerItem[];
     flop_performers: PerformerItem[];
 }
@@ -209,6 +210,7 @@ export interface MetricsSummary {
     realized_pnl: number;
     taxable_realized_pnl: number;
     deferred_gain?: number;
+    net_deposits?: number;
     total_fees: number;
     fee_entry_count: number;
     total_invested?: number;
@@ -234,6 +236,7 @@ export interface BookSummary {
     total_fees: number;
     fee_entry_count: number;
     total_invested: number;
+    net_deposits?: number;
     total_income: number;
     total_withholding: number;
     income_event_count: number;
@@ -248,6 +251,7 @@ export interface BookRangeData {
     cost_basis_in_period: number;
     fees_in_period: number;
     total_invested: number;
+    net_deposits?: number;
     income_in_period: number;
     withholding_in_period: number;
 }

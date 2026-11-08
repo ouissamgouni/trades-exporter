@@ -20,6 +20,7 @@ import { API_URL } from '../../types';
 import { CostLot } from './types';
 import { CostLotLineageTooltip, costSourceColor } from './LineageTooltips';
 import { CostBasisChainTooltip } from './CostBasisChainTooltip';
+import { InfoTip, TERM_HELP } from './pnlTerms';
 
 interface FilterOption { value: string; label?: string; count: number }
 interface LotsFilterOptions {
@@ -313,7 +314,9 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                                             <th style={{ ...TH, textAlign: 'right' }}>Initial Qty</th>
                                             <th style={{ ...TH_HL, textAlign: 'right' }}>Rem Qty</th>
                                             <th style={{ ...TH_HL, textAlign: 'right' }}>Unit Cost</th>
-                                            <th style={{ ...TH_HL, textAlign: 'right' }}>Rem Cost</th>
+                                            <th style={{ ...TH_HL, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Rem Cost <InfoTip text={TERM_HELP.cost} /></span></th>
+                                            <th style={{ ...TH, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Tax Cost <InfoTip text={TERM_HELP.taxCost} /></span></th>
+                                            <th style={{ ...TH, textAlign: 'right' }}><span className="inline-flex items-center gap-0.5">Deferred <InfoTip text={TERM_HELP.deferred} /></span></th>
                                             <th style={{ ...TH, textAlign: 'right' }}>Initial Cost</th>
                                             <th style={{ ...TH, textAlign: 'left' }}>Created By</th>
                                             <th style={{ ...TH, textAlign: 'left' }}>Updated By</th>
@@ -406,12 +409,23 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                                                                 </Badge>
                                                             </Tooltip>
                                                         ) : (
-                                                            <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
+                                                            <ValueDisplay value={lot.economic_unit_cost_in_base ?? lot.unit_cost_in_base} currency={baseCurrency} />
                                                         )}
                                                     </td>
                                                     {/* Rem Cost (highlighted) */}
                                                     <td style={{ ...TD_HL, textAlign: 'right' }}>
+                                                        <ValueDisplay value={lot.economic_remaining_cost_in_base ?? lot.remaining_cost_in_base} currency={baseCurrency} />
+                                                    </td>
+                                                    <td style={{ ...TD, textAlign: 'right' }}>
                                                         <ValueDisplay value={lot.remaining_cost_in_base} currency={baseCurrency} />
+                                                    </td>
+                                                    <td style={{ ...TD, textAlign: 'right' }}>
+                                                        {(() => {
+                                                            const d = (lot.economic_remaining_cost_in_base ?? lot.remaining_cost_in_base) - lot.remaining_cost_in_base;
+                                                            return Math.abs(d) >= 0.005
+                                                                ? <ValueDisplay value={d} currency={baseCurrency} />
+                                                                : <span className="text-[10px] text-gray-400">—</span>;
+                                                        })()}
                                                     </td>
                                                     {/* Initial Cost */}
                                                     <td style={{ ...TD, textAlign: 'right' }}>
