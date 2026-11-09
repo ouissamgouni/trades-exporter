@@ -57,6 +57,7 @@ from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl import warning_status
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.services.pnl.models import PnLResult
+from backend.services.price_getters.base import PriceResult
 from backend.services.price_service import PriceService
 from backend.services.pnl.filter_utils import resolve_filtered_unit_ids
 from backend.services.pnl.portfolio_timeline import clear_portfolio_timeline_cache
@@ -1864,7 +1865,10 @@ class PriceRequest(BaseModel):
     )
     max_timeout_seconds: int = Field(
         default=10,
-        description="Max seconds before giving up live fetch and returning fallback",
+        description="Per-asset seconds before giving up a one-by-one live fetch and returning fallback",
+    )
+    force_live: bool = Field(
+        default=False, description="Skip the recent-snapshot cache and fetch live"
     )
 
 
@@ -1899,6 +1903,24 @@ def get_current_prices(
     asset_map = {a.asset_id: a for a in assets}
     enabled_getters_by_asset = _get_enabled_price_getters_by_asset(
         session, request.asset_ids
+    )
+
+    eligible_ids = [
+        aid
+        for aid in request.asset_ids
+        if aid in asset_map
+        and _classify_asset_price_policy(
+            asset_map[aid], enabled_getters_by_asset.get(aid, set())
+        )["price_fetch_eligible"]
+    ]
+    # One request per price source (e.g. a single CoinGecko call for all coins) instead of one per asset
+    batch_results = price_service.refresh_current_prices(
+        eligible_ids,
+        price_quote=request.base_currency,
+        staleness_window_days=request.staleness_window_days,
+        use_fallback=request.use_fallback,
+        max_timeout_seconds=request.max_timeout_seconds,
+        force_live=request.force_live,
     )
 
     prices = []
@@ -1939,14 +1961,17 @@ def get_current_prices(
             continue
 
         try:
-            result = price_service.get_price_with_fallback(
-                asset_id=asset_id,
-                dt=fetched_at,
-                price_quote=request.base_currency,
-                use_fallback=request.use_fallback,
-                staleness_window_days=request.staleness_window_days,
-                max_timeout_seconds=request.max_timeout_seconds,
-            )
+            if asset.symbol and asset.symbol.upper() == request.base_currency.upper():
+                result = PriceResult(
+                    price=1.0,
+                    quote_currency=request.base_currency.upper(),
+                    source="same_currency",
+                    timestamp=fetched_at,
+                )
+            elif asset_id in batch_results:
+                result = batch_results[asset_id]
+            else:
+                raise ValueError("No price available from any source")
 
             warning_msg = None
             if result.is_stale:

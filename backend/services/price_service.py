@@ -1177,6 +1177,9 @@ class PriceService:
         price_quote: Optional[str] = None,
         history_dates: Optional[List[date]] = None,
         staleness_window_days: int = 7,
+        use_fallback: bool = True,
+        max_timeout_seconds: Optional[int] = None,
+        force_live: bool = False,
     ) -> Dict[int, PriceResult]:
         """
         Live price for many assets with as few requests as possible: multi-symbol APIs
@@ -1204,7 +1207,7 @@ class PriceService:
                 if asset is None or asset.symbol.upper() == requested_quote:
                     continue
                 assets[aid] = asset
-                cached = self.cache.get_with_source(
+                cached = None if force_live else self.cache.get_with_source(
                     session, aid, quote_asset_id, now, exclude_sources=exclude
                 )
                 if cached is not None:
@@ -1284,8 +1287,10 @@ class PriceService:
                         asset_id=aid,
                         dt=now,
                         price_quote=requested_quote,
-                        use_fallback=True,
+                        use_fallback=use_fallback,
                         staleness_window_days=staleness_window_days,
+                        max_timeout_seconds=max_timeout_seconds,
+                        force_live=force_live,
                         exclude_getters={name} if name else None,
                     )
                 except Exception as e:
