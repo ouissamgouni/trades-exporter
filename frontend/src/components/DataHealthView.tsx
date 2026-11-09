@@ -26,6 +26,7 @@ import { MissingDataTable } from './tables/wrappers/MissingDataTable';
 import { AccountsLinkageTable } from './tables/wrappers/AccountsLinkageTable';
 import { DuplicateResolutionPanel } from './DuplicateResolutionPanel';
 import { BrokenBundlesPanel } from './BrokenBundlesPanel';
+import { BundlesListPanel } from './bundles/BundlesListPanel';
 import { useAssets } from '../hooks/useAssets';
 import { useDataHealth } from '../contexts/DataHealthContext';
 
@@ -41,7 +42,7 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
     const [data, setData] = useState<TransactionStatusResponse | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'broken-bundles' | 'duplicates' | 'dismissed'>('missing-data');
+    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'broken-bundles' | 'bundles' | 'duplicates' | 'dismissed'>('missing-data');
     const [tabAutoSelected, setTabAutoSelected] = useState(false);
 
     // Transaction detail drawer state
@@ -204,6 +205,7 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                                             </Badge>
                                         )}
                                     </TabsTrigger>
+                                    <TabsTrigger value="bundles">Bundles</TabsTrigger>
                                     <TabsTrigger value="duplicates">
                                         Duplicates
                                         {(data.duplicate_count || 0) > 0 && (
@@ -284,6 +286,10 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
 
                             {activeTab === 'broken-bundles' && (
                                 <BrokenBundlesPanel onFixed={handleFixComplete} />
+                            )}
+
+                            {activeTab === 'bundles' && (
+                                <BundlesListPanel title="" />
                             )}
 
                             {activeTab === 'dismissed' && (

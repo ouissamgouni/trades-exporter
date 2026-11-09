@@ -237,6 +237,7 @@ export interface BookSummary {
     fee_entry_count: number;
     total_invested: number;
     net_deposits?: number;
+    unfunded_spend?: number;
     total_income: number;
     total_withholding: number;
     income_event_count: number;

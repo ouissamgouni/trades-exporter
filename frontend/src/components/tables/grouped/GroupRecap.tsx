@@ -3,7 +3,7 @@ import type { IconType } from 'react-icons';
 import { LuArrowDown, LuArrowUp, LuArrowLeftRight, LuBan, LuCircleCheck, LuClock, LuTriangleAlert } from 'react-icons/lu';
 import { cn } from '../../../lib/cn';
 import { AccountBadge } from '../../AccountBadge';
-import { formatNetQty, truncateSymbol } from './groupUtils';
+import { formatGroupAmount, formatGroupAmountExact, formatNetQty, truncateSymbol } from './groupUtils';
 import type { FacetKey, GroupAccountRecap, GroupFacetSelection, TransactionGroup } from './types';
 
 /**
@@ -12,7 +12,7 @@ import type { FacetKey, GroupAccountRecap, GroupFacetSelection, TransactionGroup
  * Columns: select | label | valid | pending | invalid | health | [P&L] | accounts | actions
  */
 export const GROUP_GRID = 'grid grid-cols-[20px_150px_56px_56px_56px_44px_minmax(0,1fr)_auto] items-center gap-x-2';
-export const GROUP_GRID_PNL = 'grid grid-cols-[20px_150px_56px_56px_56px_44px_120px_minmax(0,1fr)_auto] items-center gap-x-2';
+export const GROUP_GRID_PNL = 'grid grid-cols-[20px_150px_56px_56px_56px_44px_150px_minmax(0,1fr)_auto] items-center gap-x-2';
 
 type StatusKind = 'valid' | 'pending' | 'invalid';
 
@@ -46,16 +46,17 @@ const StatusCell: React.FC<{ kind: StatusKind; count: number; title?: string }> 
     );
 };
 
-/** Grid cells: valid, pending, invalid, health and (P&L tables) realized P&L. */
+/** Grid cells: valid, pending, invalid, health and (P&L tables) realized P&L. Invalid pill only when invalid rows are shown. */
 export const GroupStatusCells: React.FC<{
     group: TransactionGroup;
     showPnl: boolean;
     baseCurrency?: string;
-}> = ({ group, showPnl, baseCurrency }) => (
+    showInvalid?: boolean;
+}> = ({ group, showPnl, baseCurrency, showInvalid = true }) => (
     <>
         <StatusCell kind="valid" count={group.valid_count} title={`${group.valid_count} valid · ${group.total_count} total excluding invalid`} />
         <StatusCell kind="pending" count={group.pending_count} />
-        <StatusCell kind="invalid" count={group.invalid_count} />
+        {showInvalid ? <StatusCell kind="invalid" count={group.invalid_count} /> : <span />}
         <span>
             {group.health_issue_count > 0 && (
                 <span
@@ -67,13 +68,13 @@ export const GroupStatusCells: React.FC<{
             )}
         </span>
         {showPnl && (
-            <span className="truncate">
+            <span className="whitespace-nowrap">
                 {group.realized_pnl_in_base != null && group.realized_pnl_in_base !== 0 && (
                     <span
                         className={cn('text-xs font-semibold tabular-nums', group.realized_pnl_in_base > 0 ? 'text-green-700' : 'text-red-700')}
-                        title="Realized Σ: sum of Realized P&L of the transactions in this period"
+                        title={`Realized P&L of the transactions in this period: ${formatGroupAmountExact(group.realized_pnl_in_base)}${baseCurrency ? ` ${baseCurrency}` : ''}`}
                     >
-                        Realized Σ {formatNetQty(group.realized_pnl_in_base)}{baseCurrency ? ` ${baseCurrency}` : ''}
+                        Realized {formatGroupAmount(group.realized_pnl_in_base)}{baseCurrency ? ` ${baseCurrency}` : ''}
                     </span>
                 )}
             </span>

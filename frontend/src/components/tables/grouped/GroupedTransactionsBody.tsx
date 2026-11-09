@@ -314,7 +314,7 @@ const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExp
                                     </button>
                                 )}
                             </span>
-                            <GroupStatusCells group={month} showPnl={showPnl} baseCurrency={props.baseCurrency} />
+                            <GroupStatusCells group={month} showPnl={showPnl} baseCurrency={props.baseCurrency} showInvalid={!hideInvalid} />
                             <GroupAccountsStrip group={month} selection={facets} onToggleFacet={toggleFacet} />
                             <MarkReviewedAction {...props} group={month} params={rowParams} scopeLabel={label} />
                         </div>
@@ -411,7 +411,7 @@ const DaySection: React.FC<SharedProps & { day: TransactionGroup; params: URLSea
                                 {expanded ? <LuChevronDown size={14} /> : <LuChevronRight size={14} />}
                                 <span className="truncate text-sm font-semibold">{label}</span>
                             </span>
-                            <GroupStatusCells group={day} showPnl={showPnl} baseCurrency={props.baseCurrency} />
+                            <GroupStatusCells group={day} showPnl={showPnl} baseCurrency={props.baseCurrency} showInvalid={!hideInvalid} />
                             <GroupAccountsInline group={day} selection={facets} onToggleFacet={toggleFacet} />
                             <MarkReviewedAction {...props} group={day} params={rowParams} scopeLabel={label} />
                         </div>

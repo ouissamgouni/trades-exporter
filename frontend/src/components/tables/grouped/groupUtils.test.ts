@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
     applyFacetSelection,
     facetDimensions,
+    formatGroupAmount,
+    formatGroupAmountExact,
     formatNetQty,
     groupsUrlFor,
     shouldAutoExpandDays,
@@ -60,6 +62,15 @@ describe('group recap rules (major)', () => {
         expect(formatNetQty(0.5)).toBe('+0.5')
         expect(formatNetQty(-1200)).toBe('−1,200')
         expect(formatNetQty(0)).toBe('0')
+    })
+
+    it('formats group amounts with 2 decimals and dust as <0.01', () => {
+        expect(formatGroupAmount(1234.5)).toBe('1,234.50')
+        expect(formatGroupAmount(-3.456)).toBe('−3.46')
+        expect(formatGroupAmount(0)).toBe('0.00')
+        expect(formatGroupAmount(0.0000199)).toBe('<0.01')
+        expect(formatGroupAmount(-0.0000199)).toBe('>−0.01')
+        expect(formatGroupAmountExact(0.0000199)).toBe('0.0000199')
     })
 })
 

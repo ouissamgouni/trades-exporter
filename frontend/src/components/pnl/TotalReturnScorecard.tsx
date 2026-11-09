@@ -129,6 +129,7 @@ export interface RangeMetrics {
     costBasis: number;
     totalInvested: number;
     netDeposits?: number;
+    unfundedSpend?: number;
     unrealizedPnl: number;
     realizedPnl: number;
     taxableRealizedPnl: number;
@@ -406,6 +407,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 costBasis: book.cost_basis,
                 totalInvested: book.total_invested ?? book.cost_basis,
                 netDeposits: book.net_deposits ?? 0,
+                unfundedSpend: range === 'all' ? (bookData?.summary?.unfunded_spend ?? 0) : 0,
                 unrealizedPnl: live?.unrealized_pnl ?? 0,
                 realizedPnl: book.realized_pnl,
                 taxableRealizedPnl: book.taxable_realized_pnl ?? 0,
@@ -607,7 +609,10 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         bg="blue.50"
                                         onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
                                     />
-                                    <MetricItem label="Cost" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined} info={TERM_HELP.cost} subLines={metrics.netDeposits ? [{ label: 'Net deposits', value: fmtCurrency(metrics.netDeposits, baseCurrency), info: TERM_HELP.netDeposits }] : undefined} />
+                                    <MetricItem label="Cost" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined} info={TERM_HELP.cost} subLines={[
+                                        ...(metrics.netDeposits ? [{ label: 'Net deposits', value: fmtCurrency(metrics.netDeposits, baseCurrency), info: TERM_HELP.netDeposits }] : []),
+                                        ...(metrics.unfundedSpend ? [{ label: 'Incl. unfunded spend', value: fmtCurrency((metrics.netDeposits ?? 0) + metrics.unfundedSpend, baseCurrency) }] : []),
+                                    ]} />
                                     <MetricItem
                                         label="Unrealized"
                                         value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedPnl, baseCurrency)}
