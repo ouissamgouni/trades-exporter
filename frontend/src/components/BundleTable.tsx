@@ -895,7 +895,7 @@ interface PaginationBarProps {
     className?: string;
 }
 
-const PaginationBar: React.FC<PaginationBarProps> = ({
+export const PaginationBar: React.FC<PaginationBarProps> = ({
     page, setPage, pageSize, setPageSize, pageSizeOptions,
     totalItems, totalPages, rangeStart, rangeEnd, className,
 }) => (
