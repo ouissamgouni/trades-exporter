@@ -293,6 +293,7 @@ class TestAsDictComposition:
             "total_invested",
             "deferred_gain",
             "net_deposits",
+            "unfunded_spend",
             "total_income",
             "total_withholding",
             "income_event_count",

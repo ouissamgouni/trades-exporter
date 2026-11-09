@@ -66,6 +66,23 @@ export function formatNetQty(value: number): string {
     return '0';
 }
 
+/**
+ * Group-level money amount: 2 decimals, no leading sign for positives (colour carries direction),
+ * dust below 0.01 shown as `<0.01`. Pair with {@link formatGroupAmountExact} as the tooltip.
+ */
+export function formatGroupAmount(value: number): string {
+    const abs = Math.abs(value);
+    if (abs === 0) return '0.00';
+    if (abs < 0.01) return value > 0 ? '<0.01' : '>−0.01';
+    const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return value < 0 ? `−${formatted}` : formatted;
+}
+
+/** Exact value (up to 6 significant digits, never exponent notation) for tooltips. */
+export function formatGroupAmountExact(value: number): string {
+    return value.toLocaleString('en-US', { maximumSignificantDigits: 6 });
+}
+
 export function truncateSymbol(symbol: string, max = 8): string {
     return symbol.length > max ? `${symbol.slice(0, max)}…` : symbol;
 }

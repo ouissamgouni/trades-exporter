@@ -57,6 +57,7 @@ from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl import warning_status
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.services.pnl.models import PnLResult
+from backend.services.price_getters.base import PriceResult
 from backend.services.price_service import PriceService
 from backend.services.pnl.filter_utils import resolve_filtered_unit_ids
 from backend.services.pnl.portfolio_timeline import clear_portfolio_timeline_cache
@@ -1864,7 +1865,10 @@ class PriceRequest(BaseModel):
     )
     max_timeout_seconds: int = Field(
         default=10,
-        description="Max seconds before giving up live fetch and returning fallback",
+        description="Per-asset seconds before giving up a one-by-one live fetch and returning fallback",
+    )
+    force_live: bool = Field(
+        default=False, description="Skip the recent-snapshot cache and fetch live"
     )
 
 
@@ -1899,6 +1903,24 @@ def get_current_prices(
     asset_map = {a.asset_id: a for a in assets}
     enabled_getters_by_asset = _get_enabled_price_getters_by_asset(
         session, request.asset_ids
+    )
+
+    eligible_ids = [
+        aid
+        for aid in request.asset_ids
+        if aid in asset_map
+        and _classify_asset_price_policy(
+            asset_map[aid], enabled_getters_by_asset.get(aid, set())
+        )["price_fetch_eligible"]
+    ]
+    # One request per price source (e.g. a single CoinGecko call for all coins) instead of one per asset
+    batch_results = price_service.refresh_current_prices(
+        eligible_ids,
+        price_quote=request.base_currency,
+        staleness_window_days=request.staleness_window_days,
+        use_fallback=request.use_fallback,
+        max_timeout_seconds=request.max_timeout_seconds,
+        force_live=request.force_live,
     )
 
     prices = []
@@ -1939,14 +1961,17 @@ def get_current_prices(
             continue
 
         try:
-            result = price_service.get_price_with_fallback(
-                asset_id=asset_id,
-                dt=fetched_at,
-                price_quote=request.base_currency,
-                use_fallback=request.use_fallback,
-                staleness_window_days=request.staleness_window_days,
-                max_timeout_seconds=request.max_timeout_seconds,
-            )
+            if asset.symbol and asset.symbol.upper() == request.base_currency.upper():
+                result = PriceResult(
+                    price=1.0,
+                    quote_currency=request.base_currency.upper(),
+                    source="same_currency",
+                    timestamp=fetched_at,
+                )
+            elif asset_id in batch_results:
+                result = batch_results[asset_id]
+            else:
+                raise ValueError("No price available from any source")
 
             warning_msg = None
             if result.is_stale:
@@ -6896,6 +6921,7 @@ def get_book_metrics(
             "taxable_realized_pnl": metrics.summary.taxable_realized_pnl,
             "deferred_gain": metrics.summary.deferred_gain,
             "net_deposits": metrics.summary.net_deposits,
+            "unfunded_spend": metrics.summary.unfunded_spend,
             "total_fees": metrics.summary.total_fees,
             "fee_entry_count": metrics.summary.fee_entry_count,
             "total_invested": metrics.summary.total_invested,
@@ -8008,7 +8034,9 @@ class TransactionImpactResponse(BaseModel):
     version_id: int
     transaction_id: int
     included: bool
-    excluded_reason: Optional[str] = None  # pending | invalid | after_calculation | not_processed
+    excluded_reason: Optional[str] = (
+        None  # pending | invalid | after_calculation | not_processed
+    )
     stale: bool = False  # transaction edited after the calculation ran
     unit_id: Optional[int] = None
     unit_pattern: Optional[str] = None
@@ -8039,7 +8067,9 @@ def get_transaction_impact(
     if not tx:
         raise HTTPException(status_code=404, detail=f"Transaction {tx_id} not found")
 
-    version_units = select(CalculationUnit.id).where(CalculationUnit.version_id == version_id)
+    version_units = select(CalculationUnit.id).where(
+        CalculationUnit.version_id == version_id
+    )
     legs = session.exec(
         select(CalculationUnitLeg)
         .where(CalculationUnitLeg.transaction_id == tx_id)
@@ -8047,7 +8077,8 @@ def get_transaction_impact(
     ).all()
 
     stale = bool(
-        tx.updated_at and version.created_at
+        tx.updated_at
+        and version.created_at
         and _strip_tz(tx.updated_at) > _strip_tz(version.created_at)
     )
 
@@ -8055,13 +8086,20 @@ def get_transaction_impact(
         status = (tx.review_status or "pending").lower()
         if status in ("pending", "invalid"):
             reason = status
-        elif tx.date_time and version.created_at and _strip_tz(tx.date_time) > _strip_tz(version.created_at):
+        elif (
+            tx.date_time
+            and version.created_at
+            and _strip_tz(tx.date_time) > _strip_tz(version.created_at)
+        ):
             reason = "after_calculation"
         else:
             reason = "not_processed"
         return TransactionImpactResponse(
-            version_id=version_id, transaction_id=tx_id, included=False,
-            excluded_reason=reason, stale=stale,
+            version_id=version_id,
+            transaction_id=tx_id,
+            included=False,
+            excluded_reason=reason,
+            stale=stale,
         )
 
     unit = session.get(CalculationUnit, legs[0].unit_id)
@@ -8084,7 +8122,11 @@ def get_transaction_impact(
 
     lots_created = session.exec(
         select(CostLot)
-        .options(selectinload(CostLot.asset), selectinload(CostLot.account), selectinload(CostLot.unit))
+        .options(
+            selectinload(CostLot.asset),
+            selectinload(CostLot.account),
+            selectinload(CostLot.unit),
+        )
         .where(CostLot.origin_transaction_id == tx_id)
         .where(CostLot.unit_id.in_(version_units))
         .order_by(CostLot.cost_lot_id)
@@ -8113,10 +8155,16 @@ def get_transaction_impact(
     fees = []
     for value, asset_id in fee_rows:
         asset = session.get(Asset, asset_id) if asset_id else None
-        fees.append(TransactionImpactFee(
-            fee_in_base=float(value or 0),
-            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol, label=asset.label) if asset else None,
-        ))
+        fees.append(
+            TransactionImpactFee(
+                fee_in_base=float(value or 0),
+                asset=AssetRef(
+                    id=asset.asset_id, symbol=asset.symbol, label=asset.label
+                )
+                if asset
+                else None,
+            )
+        )
 
     warnings = session.exec(
         select(PnlWarning)
@@ -8132,15 +8180,21 @@ def get_transaction_impact(
         unit_id=unit.id if unit else None,
         unit_pattern=unit.pattern if unit else None,
         unit_label=unit.unit_label if unit else None,
-        leg_types=sorted({str(getattr(leg.leg_type, "value", leg.leg_type)) for leg in legs}),
+        leg_types=sorted(
+            {str(getattr(leg.leg_type, "value", leg.leg_type)) for leg in legs}
+        ),
         realized_entries=[
-            build_realized_entry_response(e, is_fee=(e.pnl_id in fee_pnl_ids)) for e in rpnl_rows
+            build_realized_entry_response(e, is_fee=(e.pnl_id in fee_pnl_ids))
+            for e in rpnl_rows
         ],
         lots_created=[build_cost_lot_response(lot) for lot in lots_created],
         consumed_slices=[build_consumed_slice_response(sl) for sl in slices],
         consumed_lots=[build_cost_lot_response(lot) for lot in consumed_lots.values()],
         fees=fees,
-        warnings=[build_warning_response(w, unit.unit_label if unit else None) for w in warnings],
+        warnings=[
+            build_warning_response(w, unit.unit_label if unit else None)
+            for w in warnings
+        ],
     )
 
 

@@ -72,7 +72,7 @@ export const PricesDrawer: React.FC<PricesDrawerProps> = ({
                 <TabsList className="px-4">
                     <TabsTrigger value="prices">Prices</TabsTrigger>
                     <TabsTrigger value="gaps">
-                        Price health{gapMap.size > 0 ? ` (${gapMap.size} assets · ${gapDays} d gaps)` : ''}
+                        Health{gapMap.size > 0 ? ` (${gapMap.size} assets · ${gapDays} d gaps)` : ''}
                     </TabsTrigger>
                 </TabsList>
             </Tabs>

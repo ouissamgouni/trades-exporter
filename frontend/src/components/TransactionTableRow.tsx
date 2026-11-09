@@ -36,8 +36,31 @@ import { hasPotentialDuplicateTag, getDuplicateResolutionTag, getDuplicateGroupH
 import type { AccountSuggestion } from '../hooks/useAccountSuggestions';
 import type { SuggestionEntry } from '../hooks/useBundleSuggestionMap';
 import type { DuplicateEntry } from '../hooks/useDuplicateMap';
-import { getSpamLevel } from '../hooks/useSpamReview';
+import { getSpamLevel, useSpamVerdict } from '../hooks/useSpamReview';
 import type { TransactionColumnKey, ColumnPlugin, RowAction } from './tables';
+
+/** Row-level spam toggle; applies the verdict to the whole token. */
+const SpamToggle: React.FC<{ tx: Transaction; level: 'suspected' | 'confirmed' }> = ({ tx, level }) => {
+    const { applyVerdict, isApplying } = useSpamVerdict();
+    const confirmed = level === 'confirmed';
+    return (
+        <button
+            type="button"
+            disabled={isApplying}
+            title={confirmed ? 'Spam confirmed for whole token — click to mark not spam' : 'Suspected spam — click to confirm spam for whole token'}
+            className={cn(
+                'shrink-0 border px-1 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-50',
+                confirmed ? 'border-slate-400 bg-slate-100 text-slate-700 hover:bg-slate-200' : 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100',
+            )}
+            onClick={(e: React.MouseEvent) => {
+                e.stopPropagation();
+                applyVerdict([tx], confirmed ? 'allow' : 'block');
+            }}
+        >
+            {confirmed ? 'Spam ✕' : 'Spam?'}
+        </button>
+    );
+};
 
 // Direction options (mirrored from TransactionsTable)
 const DIRECTION_OPTIONS = [
@@ -224,15 +247,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
     } = callbacks;
 
     const spamLevel = getSpamLevel(tx);
-    const spamBadge = spamLevel && (
-        <Badge
-            colorScheme="orange"
-            className="shrink-0 px-1 text-[10px]"
-            title={spamLevel === 'suspected' ? 'Suspected spam — review in Inbox › Suspected spam' : 'Flagged as spam'}
-        >
-            {spamLevel === 'suspected' ? 'Spam?' : 'Spam'}
-        </Badge>
-    );
+    const spamBadge = spamLevel && <SpamToggle tx={tx} level={spamLevel} />;
 
     // ============== Collapsed Invalid Row ==============
     if (isInvalidCollapsed) {
@@ -276,7 +291,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
         <React.Fragment key={tx.id}>
             <tr
                 data-tx-id={tx.id}
-                className={cn('group bg-[var(--row-bg)] transition-colors hover:bg-blue-50', isFocused && 'outline outline-2 -outline-offset-2 outline-amber-400')}
+                className={cn('group bg-[var(--row-bg)] transition-colors hover:bg-slate-100', isFocused && 'outline outline-2 -outline-offset-2 outline-amber-400')}
                 style={{ ['--row-bg' as string]: rowBgColor } as React.CSSProperties}
                 onMouseEnter={() => {
                     if (suggestionEntry) setHoveredSuggestionGroup(suggestionEntry.groupIndex);
@@ -289,7 +304,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                     if (duplicateEntry) setHoveredDuplicateGroup(null);
                 }}
             >
-                <td className="sticky left-0 z-[5] border-r-2 border-slate-300 bg-[var(--row-bg)] p-0 group-hover:bg-blue-50">
+                <td className="sticky left-0 z-[5] border-r-2 border-slate-300 bg-[var(--row-bg)] p-0 group-hover:bg-slate-100">
                     {/* Review status band — full cell height */}
                     <div className="absolute bottom-0 left-0 top-0 w-1" style={{ backgroundColor: rowBorderColor }} />
                     {/* Suggestion / Bundle color band — right next to review status (mutually exclusive) */}
@@ -438,7 +453,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 {showColumn('date') && (
                     <td
                         className={pinDate
-                            ? 'sticky left-[50px] z-[5] cursor-pointer border-r border-slate-200 bg-[var(--row-bg)] py-1 pr-1 group-hover:bg-blue-50'
+                            ? 'sticky left-[50px] z-[5] cursor-pointer border-r border-slate-200 bg-[var(--row-bg)] py-1 pr-1 group-hover:bg-slate-100'
                             : 'cursor-pointer py-1 pr-1'}
                         onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')}
                     >

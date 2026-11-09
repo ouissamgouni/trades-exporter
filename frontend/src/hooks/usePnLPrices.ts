@@ -19,7 +19,8 @@ import { parseApiDate } from '../utils/dateUtils';
 
 /** Higher than the backend max_timeout_seconds (10 s) so the server can fall back to its DB cache first. */
 const PRICE_FETCH_TIMEOUT_MS = 15_000;
-const CONCURRENCY = 5;
+/** The batch call groups assets per price source; slow sources still go one by one server-side. */
+const BATCH_PRICE_FETCH_TIMEOUT_MS = 120_000;
 
 export interface FetchPricesOptions {
     /** Bypass the cached-first step and the recent-snapshot cache; refresh every asset live. */
@@ -89,6 +90,50 @@ export function usePnLPrices() {
         }
     }, [dispatch, priceUrl]);
 
+    // One request for many assets so the backend can batch per price source (avoids CoinGecko 429s)
+    const fetchLivePricesBatch = useCallback(async (entries: BalanceEntry[], baseCurrency: string, force: boolean) => {
+        const assetIds = entries.map(b => b.asset.id!);
+        try {
+            const response = await fetch(`${API_URL}/pnl/prices`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    asset_ids: assetIds,
+                    base_currency: baseCurrency,
+                    use_fallback: config.use_price_fallback,
+                    staleness_window_days: config.price_staleness_window_days,
+                    max_timeout_seconds: 10,
+                    force_live: force,
+                }),
+                signal: AbortSignal.timeout(BATCH_PRICE_FETCH_TIMEOUT_MS),
+            });
+            if (!response.ok) throw new Error(`Price request failed (${response.status})`);
+            const data: { prices: PriceResponse[] } = await response.json();
+            for (const p of data.prices) {
+                if (p.asset.id != null) dispatch({ type: 'UPSERT_PRICE', assetId: p.asset.id, price: p });
+            }
+        } catch (err) {
+            console.error('Batch price fetch failed', err);
+            const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+            for (const b of entries) {
+                dispatch({
+                    type: 'UPSERT_PRICE',
+                    assetId: b.asset.id!,
+                    price: {
+                        asset: { id: b.asset.id!, symbol: b.asset.symbol, label: b.asset.label },
+                        price: null,
+                        price_quote: baseCurrency,
+                        error: isTimeout ? 'Request timed out' : (err instanceof Error ? err.message : 'Unknown error'),
+                        fetched_at: new Date().toISOString(),
+                        price_state: 'failed',
+                    },
+                });
+            }
+        } finally {
+            for (const id of assetIds) dispatch({ type: 'REMOVE_LOADING_PRICE_ASSET_ID', id });
+        }
+    }, [dispatch, config.use_price_fallback, config.price_staleness_window_days]);
+
     const loadCachedPrices = useCallback(async (assetIds: number[], baseCurrency: string): Promise<PriceResponse[]> => {
         try {
             const response = await fetch(`${API_URL}/pnl/prices/cached`, {
@@ -134,17 +179,11 @@ export function usePnLPrices() {
                 ids: new Set([...loadingIdsRef.current, ...toRefresh.map(b => b.asset.id!)]),
             });
 
-            const queue = [...toRefresh];
-            const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-                for (let next = queue.shift(); next; next = queue.shift()) {
-                    await fetchLivePrice(next.asset, baseCurrency, force);
-                }
-            });
-            await Promise.all(workers);
+            if (toRefresh.length > 0) await fetchLivePricesBatch(toRefresh, baseCurrency, force);
         } finally {
             dispatch({ type: 'SET_IS_REFRESHING_PRICES', value: false });
         }
-    }, [dispatch, loadCachedPrices, fetchLivePrice]);
+    }, [dispatch, loadCachedPrices, fetchLivePricesBatch]);
 
     // Refresh a single asset price (after manual price entry, or from a row's refresh button)
     const refreshSinglePrice = useCallback(async (assetId: number, options: FetchPricesOptions = {}) => {
