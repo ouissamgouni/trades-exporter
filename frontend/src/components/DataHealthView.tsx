@@ -6,6 +6,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Heading, Spinner, Tabs, TabsList, TabsTrigger, Text } from './ui/primitives';
 import {
     FiActivity,
@@ -26,8 +27,15 @@ import { MissingDataTable } from './tables/wrappers/MissingDataTable';
 import { AccountsLinkageTable } from './tables/wrappers/AccountsLinkageTable';
 import { DuplicateResolutionPanel } from './DuplicateResolutionPanel';
 import { BrokenBundlesPanel } from './BrokenBundlesPanel';
+import { TransactionsTable } from './TransactionsTable';
+import { defaultFilterState } from './TransactionFilters';
+import { SuspectedSpamTable } from './SuspectedSpamTable';
 import { useAssets } from '../hooks/useAssets';
+import { useSuspectedSpamCount } from '../hooks/useSpamReview';
+import { useHealthAutoRefresh } from '../hooks/useHealthAutoRefresh';
 import { useDataHealth } from '../contexts/DataHealthContext';
+
+type HealthTab = 'pending' | 'spam' | 'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'broken-bundles' | 'duplicates' | 'dismissed';
 
 // =============================================================================
 // Main Component
@@ -37,11 +45,11 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
     const navigate = useNavigate();
     const { refreshHealthData } = useDataHealth();
     const { assets, refetchAssets: onAssetsUpdated } = useAssets();
+    const queryClient = useQueryClient();
     const [accounts, setAccounts] = useState<Account[]>([]);
-    const [data, setData] = useState<TransactionStatusResponse | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'broken-bundles' | 'duplicates' | 'dismissed'>('missing-data');
+    const [activeTab, setActiveTab] = useState<HealthTab>('missing-data');
+    const spamCount = useSuspectedSpamCount();
+    useHealthAutoRefresh();
     const [tabAutoSelected, setTabAutoSelected] = useState(false);
 
     // Transaction detail drawer state
@@ -59,29 +67,26 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
     useEffect(() => { onAccountsUpdated(); }, [onAccountsUpdated]);
 
     const onIssueFixed = refreshHealthData;
-    const onNavigateToPendingTransactions = () => navigate('/inbox');
     const onNavigateToBundleSuggestions = () => navigate('/inbox');
 
-    // Fetch status data
-    const fetchStatus = useCallback(async () => {
-        try {
+    const statusQuery = useQuery({
+        queryKey: ['dataHealthStatus', accountIds?.join(',') ?? ''],
+        queryFn: async (): Promise<TransactionStatusResponse> => {
             const params = new URLSearchParams();
             if (accountIds?.length) {
                 params.set('account_ids', accountIds.join(','));
             }
-
             const response = await fetch(`${API_URL}/transactions/data-health-check/status?${params}`);
             if (!response.ok) throw new Error('Failed to fetch status');
-
-            setData(await response.json());
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unknown error');
-        }
-    }, [accountIds]);
-
-    useEffect(() => {
-        fetchStatus();
-    }, [activeTab, fetchStatus]);
+            return response.json();
+        },
+    });
+    const data = statusQuery.data ?? null;
+    const isLoading = statusQuery.isFetching;
+    const error = statusQuery.error ? (statusQuery.error instanceof Error ? statusQuery.error.message : 'Unknown error') : null;
+    const fetchStatus = useCallback(() => {
+        queryClient.invalidateQueries({ queryKey: ['dataHealthStatus'] });
+    }, [queryClient]);
 
     // On first load, open the first tab that has issues
     useEffect(() => {
@@ -94,10 +99,12 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                 ['accounts-linkage', data.transfer_issues_count],
                 ['broken-bundles', data.broken_bundles_count],
                 ['duplicates', data.duplicate_count],
+                ['pending', data.pending_count],
+                ['spam', spamCount],
             ] as const
         ).find(([, count]) => (count || 0) > 0);
         if (firstWithIssues) setActiveTab(firstWithIssues[0]);
-    }, [data, tabAutoSelected]);
+    }, [data, tabAutoSelected, spamCount]);
 
     // Refresh after fix
     const handleFixComplete = useCallback(() => {
@@ -165,13 +172,29 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                                     <span><b>{data.total_count}</b> total</span>
                                     <span><b style={{ color: '#2F855A' }}>{data.valid_count}</b> valid</span>
                                     <span><b style={{ color: '#B7791F' }}>{data.pending_count}</b> pending</span>
-                                    <span><b style={{ color: '#C53030' }}>{data.invalid_count}</b> invalid</span>
+                                    <span><b style={{ color: '#C53030' }}>{data.invalid_count}</b> rejected</span>
                                 </div>
                             </div>
 
                             {/* Tabs for different issue types */}
                             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
                                 <TabsList>
+                                    <TabsTrigger value="pending">
+                                        Pending
+                                        {data.pending_count > 0 && (
+                                            <Badge colorScheme="blue" className="ml-1 text-[10px]">
+                                                {data.pending_count}
+                                            </Badge>
+                                        )}
+                                    </TabsTrigger>
+                                    <TabsTrigger value="spam">
+                                        Suspected Spam
+                                        {spamCount > 0 && (
+                                            <Badge colorScheme="orange" className="ml-1 text-[10px]">
+                                                {spamCount}
+                                            </Badge>
+                                        )}
+                                    </TabsTrigger>
                                     <TabsTrigger value="missing-data">
                                         Missing Data
                                         {data.missing_data_issues_count > 0 && (
@@ -233,15 +256,9 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                             )}
 
                             {/* Quick Actions */}
-                            {!allClear && (
+                            {!allClear && data.bundle_suggestions_count > 0 && (
                                 <div className="flex flex-wrap gap-2">
-                                    {data.pending_count > 0 && onNavigateToPendingTransactions && (
-                                        <Button colorScheme="blue" variant="outline" className="h-6 px-2 text-xs" onClick={onNavigateToPendingTransactions}>
-                                            <Badge colorScheme="blue" className="mr-1 text-[10px]">{data.pending_count}</Badge>
-                                            Pending Review
-                                        </Button>
-                                    )}
-                                    {data.bundle_suggestions_count > 0 && onNavigateToBundleSuggestions && (
+                                    {onNavigateToBundleSuggestions && (
                                         <Button
                                             colorScheme="gray"
                                             variant="outline"
@@ -254,6 +271,21 @@ export const DataHealthView: React.FC<{ accountIds?: number[] }> = ({ accountIds
                                     )}
                                 </div>
                             )}
+
+                            {activeTab === 'pending' && (
+                                <TransactionsTable
+                                    tableId="health-pending"
+                                    title=""
+                                    subtitle=""
+                                    defaultWorkflowFilter="pending"
+                                    resetFilters={defaultFilterState}
+                                    emptyMessage="Nothing pending review 🎉"
+                                    defaultExpandAllDays
+                                    onDataChange={handleFixComplete}
+                                />
+                            )}
+
+                            {activeTab === 'spam' && <SuspectedSpamTable tableId="health-spam" />}
 
                             {/* Missing Data tab content */}
                             {activeTab === 'missing-data' && (

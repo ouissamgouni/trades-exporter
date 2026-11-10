@@ -446,6 +446,7 @@ export const PnLAuditTransactionsView: React.FC<PnLAuditTransactionsViewProps> =
 
             {/* TransactionsTable with enriched data */}
             <TransactionsTable
+                defaultExpandAllDays
                 title=""
                 subtitle=""
                 compact

@@ -664,6 +664,8 @@ export interface ConnectorProgress {
     new_count: number;
     updated_count: number;
     skipped_count: number;
+    /** Transactions of this run currently rejected (auto-flagged spam etc.) */
+    rejected_count?: number;
     error_count: number;  // Track error count for real-time display
     error?: string;
     started_at?: string;
@@ -701,6 +703,7 @@ export interface SyncJobProgress {
     new_entries_added: number;
     entries_updated: number;
     duplicates_skipped: number;
+    entries_rejected?: number;
     errors: string[];
     error_count: number;
     current_connector?: string;
@@ -728,6 +731,7 @@ export interface SyncJobSummary {
     total_new: number;
     total_updated: number;
     total_skipped: number;
+    total_rejected?: number;
     total_errors: number;
     error_message?: string;
     renormalize?: boolean;
@@ -748,6 +752,7 @@ export interface ConnectorRunSummary {
     synced_count: number;
     updated_count: number;
     skipped_count: number;
+    rejected_count?: number;
     error_count: number;
 }
 
@@ -761,6 +766,7 @@ export interface SyncJobDetail {
     total_new: number;
     total_updated: number;
     total_skipped: number;
+    total_rejected?: number;
     total_errors: number;
     error_message?: string;
     renormalize?: boolean;
@@ -797,6 +803,7 @@ export interface ConnectorRunDetail {
     error_details: { source_transaction_id: string; error: string }[];
     logs: { timestamp: string; level: string; message: string }[];
     invalid_count?: number;
+    rejected_count?: number;
 }
 
 export interface JobTransactionsResponse {

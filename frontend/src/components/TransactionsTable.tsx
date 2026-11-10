@@ -1,6 +1,6 @@
 import { Badge, Button, Spinner, type BadgeColorScheme } from './ui/primitives';
 import { cn } from '../lib/cn';
-import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuBan, LuFilter, LuList, LuPlus, LuMinus, LuX } from 'react-icons/lu';
+import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuBan, LuCalendarDays, LuFilter, LuList, LuPlus, LuMinus, LuX } from 'react-icons/lu';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import * as RadixDialog from '@radix-ui/react-dialog';
@@ -124,6 +124,11 @@ const getBulkActionClass = (color: string | undefined, variant: string | undefin
     return BULK_ACTION_OUTLINE[color || 'gray'] || BULK_ACTION_OUTLINE.gray;
 };
 
+const GROUPING_OPTIONS = [
+    { mode: 'month-day', label: 'By month & day', Icon: LuCalendarDays, hint: 'Group transactions by month, then day' },
+    { mode: 'off', label: 'Flat list', Icon: LuList, hint: 'Paginated list without date groups' },
+] as const;
+
 // Props interface for configurable behavior
 export interface TransactionsTableProps<T extends Transaction = Transaction> {
     /** Title displayed in the header */
@@ -178,6 +183,8 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     focusTransactionId?: number;
     /** Datetime of the focused transaction, so its month/day groups open */
     focusDateTime?: string;
+    /** Open every month and day group on mount (review tables) */
+    defaultExpandAllDays?: boolean;
 
     // ============== Plugin Architecture Props ==============
 
@@ -248,6 +255,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     expandInvalidRows = false,
     focusTransactionId,
     focusDateTime,
+    defaultExpandAllDays = false,
     // Plugin architecture props
     tableId = 'default',
     initialColumnVisibility: initialVisibilityProp,
@@ -1742,7 +1750,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (!response.ok) throw new Error('Failed to update transactions');
             const idSet = new Set(ids);
             addReviewedOverlay(transactions.filter(tx => idSet.has(tx.id) && tx.review_status === 'pending'), 'valid');
-            toaster.success({ title: 'Marked as reviewed', description: `${ids.length} transaction(s) marked valid` });
+            toaster.success({ title: 'Marked as valid', description: `${ids.length} transaction(s) marked valid` });
             invalidateTransactionData();
             refreshHealthData();
             onDataChange?.();
@@ -1803,37 +1811,42 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         />
     );
 
-    const tableActions = (
-        <>
+    const groupingBar = (
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-3 py-2">
+            <div className="inline-flex border border-slate-300 bg-slate-100 p-0.5" role="group" aria-label="Transactions layout">
+                {GROUPING_OPTIONS.map(({ mode, label, Icon, hint }) => (
+                    <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={groupingMode === mode}
+                        title={hint}
+                        onClick={() => setGroupingMode(mode)}
+                        className={cn(
+                            'inline-flex items-center gap-1.5 px-3 py-1 text-sm transition-colors',
+                            groupingMode === mode
+                                ? 'bg-white font-medium text-blue-700 shadow-sm'
+                                : 'text-slate-600 hover:text-slate-900',
+                        )}
+                    >
+                        <Icon size={15} /> {label}
+                    </button>
+                ))}
+            </div>
             {groupingMode !== 'off' && sortBy !== 'date' && (
                 <button
                     type="button"
-                    className="text-[10px] text-slate-500 hover:text-blue-600"
+                    className="text-xs text-amber-700 hover:text-blue-600"
                     title="Date grouping needs date sorting"
                     onClick={() => setSorting([{ id: 'date', desc: true }])}
                 >
                     Grouping paused (sorted by {sortBy}) · sort by date
                 </button>
             )}
-            <div className="inline-flex items-center text-[10px]" role="group" aria-label="Group transactions">
-                <span className="mr-1 text-slate-500">Group:</span>
-                {(['month-day', 'off'] as const).map(mode => (
-                    <button
-                        key={mode}
-                        type="button"
-                        aria-pressed={groupingMode === mode}
-                        onClick={() => setGroupingMode(mode)}
-                        className={cn(
-                            'border px-1.5 py-0.5',
-                            groupingMode === mode
-                                ? 'border-blue-500 bg-blue-500 text-white'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-                        )}
-                    >
-                        {mode === 'month-day' ? 'Month·Day' : 'Off'}
-                    </button>
-                ))}
-            </div>
+        </div>
+    );
+
+    const tableActions = (
+        <>
             {columnPicker}
             <Button
                 onClick={error ? handleRetry : handleReset}
@@ -1857,7 +1870,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         canHideInvalidGroups && (showInvalidGroups || !!excludedInvalidCount) && (
             <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
                 <LuBan size={12} className="text-slate-400" />
-                {showInvalidGroups ? 'Invalid shown' : `${excludedInvalidCount} invalid hidden`}
+                {showInvalidGroups ? 'Rejected shown' : `${excludedInvalidCount} rejected hidden`}
                 <button
                     type="button"
                     className="inline-flex items-center gap-0.5 border border-slate-200 bg-white px-1.5 py-px text-slate-700 hover:bg-slate-50"
@@ -1872,13 +1885,13 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             <div className="flex items-center gap-2 text-xs text-slate-500">
                 <Badge colorScheme="red">
                     <LuX size={10} />
-                    {totalInvalidCount} invalid
+                    {totalInvalidCount} rejected
                 </Badge>
                 {collapsedInvalidCount > 0 ? (
                     <button
                         type="button"
                         onClick={expandAllInvalid}
-                        title="Expand all invalid rows"
+                        title="Expand all rejected rows"
                         className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
                     >
                         <LuPlus size={12} /> Show
@@ -1887,7 +1900,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     <button
                         type="button"
                         onClick={collapseAllInvalid}
-                        title="Collapse all invalid rows"
+                        title="Collapse all rejected rows"
                         className="flex items-center gap-1 text-xs text-slate-500 hover:text-red-600"
                     >
                         <LuMinus size={12} /> Hide
@@ -1899,6 +1912,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     const tableContent = (
         <>
+            {!embeddedMode && !hideLegend && groupingBar}
+
             {/* Top Pagination - show when more than 15 transactions */}
             {!loading && !error && !embeddedMode && !serverGrouping && (filterMetadata?.filtered_count ?? 0) > 15 && (
                 <div className="mb-2">
@@ -1990,6 +2005,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                 <GroupedTransactionsBody
                                     key={focusTransactionId ?? 'no-focus'}
                                     focusDate={focusDateTime}
+                                    defaultExpandAll={defaultExpandAllDays}
                                     groupsUrl={groupsUrl}
                                     listUrl={(customApiUrl || `${API_URL}/transactions`)}
                                     idsUrl={idsUrlFor(customApiUrl)}
@@ -2103,7 +2119,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                     onClick={() => bulkUpdateStatus('invalid')}
                                     disabled={bulkActionLoading}
                                 >
-                                    ✗ Invalid
+                                    ✗ Rejected
                                 </button>
 
                                 <div className="mx-0.5 h-4 border-l border-slate-300" />

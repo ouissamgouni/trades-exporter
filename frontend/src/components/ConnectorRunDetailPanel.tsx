@@ -262,6 +262,12 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         <Text className="font-medium">{detail.skipped_count}</Text>
                     </div>
                     <div className="flex flex-col items-start gap-0">
+                        <Text className="text-xs text-gray-500">Rejected</Text>
+                        <Text className={`font-medium ${(detail.rejected_count ?? 0) > 0 ? 'text-red-600' : ''}`} title="Transactions of this run auto-rejected (e.g. spam) or rejected later">
+                            {detail.rejected_count ?? detail.invalid_count ?? 0}
+                        </Text>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
                         <Text className="text-xs text-gray-500">Errors</Text>
                         <Text className={`font-medium ${detail.error_count > 0 ? 'text-red-600' : ''}`}>
                             {detail.error_count}
@@ -298,7 +304,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         Skipped ({detail.skipped_ids?.length || 0})
                     </TabsTrigger>
                     <TabsTrigger value="invalid">
-                        Invalid ({detail.invalid_count ?? 0})
+                        Rejected ({detail.rejected_count ?? detail.invalid_count ?? 0})
                     </TabsTrigger>
                     {detail.error_details && detail.error_details.length > 0 && (
                         <TabsTrigger value="errors">
@@ -340,7 +346,9 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="synced">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId="connectorRun-synced"
+                        expandInvalidRows
                         title=""
                         subtitle=""
                         showFilters={false}
@@ -359,7 +367,9 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="updated">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId="connectorRun-updated"
+                        expandInvalidRows
                         title=""
                         subtitle=""
                         showFilters={false}
@@ -378,7 +388,9 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="skipped">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId="connectorRun-skipped"
+                        expandInvalidRows
                         title=""
                         subtitle=""
                         showFilters={false}
@@ -397,6 +409,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="invalid">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId="connectorRun-invalid"
                         title=""
                         subtitle=""
@@ -405,7 +418,7 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
                         showSuggestions={false}
                         compact={true}
                         expandInvalidRows
-                        emptyMessage="No invalid transactions"
+                        emptyMessage="No rejected transactions"
                         filters={{
                             ...defaultFilterState,
                             reviewStatus: ['invalid'],

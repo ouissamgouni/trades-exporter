@@ -74,7 +74,7 @@ interface Impact {
 
 const EXCLUDED_TEXT: Record<string, string> = {
     pending: 'Not in this calculation: the transaction is pending review. Mark it valid and recalculate.',
-    invalid: 'Not in this calculation: the transaction is marked invalid.',
+    invalid: 'Not in this calculation: the transaction is rejected.',
     after_calculation: 'Not in this calculation: it is dated after the calculation ran. Recalculate to include it.',
     not_processed: 'Not in this calculation (it was added or changed after the run). Recalculate to include it.',
 };

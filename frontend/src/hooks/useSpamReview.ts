@@ -29,10 +29,38 @@ export function useSuspectedSpamCount() {
     return data?.suspected_count ?? 0;
 }
 
-/** Applies a per-token verdict; one call per distinct token among the given transactions. */
+/** Applies spam verdicts: per transaction, or per token (one call per distinct token, also covers future syncs). */
 export function useSpamVerdict() {
     const queryClient = useQueryClient();
     const [isApplying, setIsApplying] = useState(false);
+
+    const refresh = useCallback(() => {
+        queryClient.invalidateQueries({ queryKey: ['transactions'], refetchType: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['spamSummary'] });
+    }, [queryClient]);
+
+    const applyTransactionVerdict = useCallback(async (ids: number[], verdict: SpamVerdict) => {
+        if (ids.length === 0) return;
+        setIsApplying(true);
+        try {
+            const response = await fetch(`${API_URL}/spam/verdict`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transaction_ids: ids, verdict, scope: 'transaction' }),
+            });
+            if (!response.ok) throw new Error('Verdict failed');
+            const updated = (await response.json()).updated_count as number;
+            toaster.success({
+                title: verdict === 'allow' ? 'Marked as not spam' : 'Confirmed as spam',
+                description: `${updated} transaction(s) updated`,
+            });
+        } catch (err) {
+            toaster.error({ title: err instanceof Error ? err.message : 'Verdict failed' });
+        } finally {
+            setIsApplying(false);
+            refresh();
+        }
+    }, [refresh]);
 
     const applyVerdict = useCallback(async (txs: Transaction[], verdict: SpamVerdict) => {
         const byToken = new Map<string, Transaction>();
@@ -66,10 +94,9 @@ export function useSpamVerdict() {
             toaster.error({ title: err instanceof Error ? err.message : 'Verdict failed' });
         } finally {
             setIsApplying(false);
-            queryClient.invalidateQueries({ queryKey: ['transactions'], refetchType: 'active' });
-            queryClient.invalidateQueries({ queryKey: ['spamSummary'] });
+            refresh();
         }
-    }, [queryClient]);
+    }, [refresh]);
 
-    return { applyVerdict, isApplying };
+    return { applyVerdict, applyTransactionVerdict, isApplying };
 }

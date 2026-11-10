@@ -36,6 +36,7 @@ class ConnectorProgressResponse(BaseModel):
     new_count: int = 0
     updated_count: int = 0
     skipped_count: int = 0
+    rejected_count: int = 0
     error_count: int = 0
     error: Optional[str] = None
     current_operation: Optional[str] = None
@@ -70,6 +71,7 @@ class JobStatusResponse(BaseModel):
     new_entries_added: int = 0
     entries_updated: int = 0
     duplicates_skipped: int = 0
+    entries_rejected: int = 0
     errors: list = []
     error_count: int = 0
     current_connector: Optional[str] = None
@@ -104,6 +106,19 @@ class ConnectorDefaultInfo(BaseModel):
     )
 
 
+def _rejected_counts(session: Session, run_ids: List[int]) -> Dict[int, int]:
+    """Rejected (invalid) transactions per connector run, e.g. auto-flagged spam."""
+    if not run_ids:
+        return {}
+    rows = session.exec(
+        select(NormalizedTransaction.sync_connector_run_id, func.count())
+        .where(NormalizedTransaction.sync_connector_run_id.in_(run_ids))
+        .where(NormalizedTransaction.review_status == "invalid")
+        .group_by(NormalizedTransaction.sync_connector_run_id)
+    ).all()
+    return {run_id: count for run_id, count in rows}
+
+
 @router.get("/status", response_model=JobStatusResponse)
 def get_job_status(session: Session = Depends(get_session_dependency)):
     """
@@ -123,6 +138,13 @@ def get_job_status(session: Session = Depends(get_session_dependency)):
     if not service.is_running():
         active = SyncJobRepository(session).get_active_job()
         status["blocking_job"] = service.describe_job(active) if active else None
+    statuses = (status.get("connector_statuses") or {}).values()
+    rejected = _rejected_counts(
+        session, [c["connector_run_id"] for c in statuses if c.get("connector_run_id")]
+    )
+    for c in statuses:
+        c["rejected_count"] = rejected.get(c.get("connector_run_id"), 0)
+    status["entries_rejected"] = sum(rejected.values())
     return status
 
 
@@ -572,6 +594,7 @@ class ConnectorRunResponse(BaseModel):
     synced_count: int = 0
     updated_count: int = 0
     skipped_count: int = 0
+    rejected_count: int = 0
     error_count: int = 0
 
 
@@ -587,6 +610,7 @@ class SyncJobSummaryResponse(BaseModel):
     total_new: int = 0
     total_updated: int = 0
     total_skipped: int = 0
+    total_rejected: int = 0
     total_errors: int = 0
     error_message: Optional[str] = None
     renormalize: bool = False
@@ -627,6 +651,7 @@ class ConnectorRunDetailResponse(BaseModel):
     logs: Optional[List[Dict[str, Any]]] = None
     error_message: Optional[str] = None
     invalid_count: int = 0
+    rejected_count: int = 0
 
 
 class SyncJobDetailResponse(BaseModel):
@@ -641,6 +666,7 @@ class SyncJobDetailResponse(BaseModel):
     total_new: int = 0
     total_updated: int = 0
     total_skipped: int = 0
+    total_rejected: int = 0
     total_errors: int = 0
     error_message: Optional[str] = None
     renormalize: bool = False
@@ -678,6 +704,8 @@ def get_job_detail(
         if not job:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
+        runs = job.connector_runs or []
+        rejected = _rejected_counts(session, [r.id for r in runs])
         connector_runs = [
             ConnectorRunResponse(
                 id=run.id,
@@ -692,9 +720,10 @@ def get_job_detail(
                 synced_count=run.synced_count,
                 updated_count=run.updated_count,
                 skipped_count=run.skipped_count,
+                rejected_count=rejected.get(run.id, 0),
                 error_count=run.error_count,
             )
-            for run in (job.connector_runs or [])
+            for run in runs
         ]
 
         return SyncJobDetailResponse(
@@ -707,6 +736,7 @@ def get_job_detail(
             total_new=job.total_new,
             total_updated=job.total_updated,
             total_skipped=job.total_skipped,
+            total_rejected=sum(rejected.values()),
             total_errors=job.total_errors,
             error_message=job.error_message,
             renormalize=(job.config_snapshot or {}).get("renormalize", False),
@@ -749,6 +779,7 @@ def get_job_history(
         for job in jobs:
             # Get connector runs for this job
             connector_runs = repo.get_connector_runs_for_job(job.id)
+            rejected = _rejected_counts(session, [r.id for r in connector_runs])
             connector_run_responses = [
                 ConnectorRunResponse(
                     id=run.id,
@@ -765,6 +796,7 @@ def get_job_history(
                     synced_count=run.synced_count,
                     updated_count=run.updated_count,
                     skipped_count=run.skipped_count,
+                    rejected_count=rejected.get(run.id, 0),
                     error_count=run.error_count,
                 )
                 for run in connector_runs
@@ -783,6 +815,7 @@ def get_job_history(
                     total_new=job.total_new,
                     total_updated=job.total_updated,
                     total_skipped=job.total_skipped,
+                    total_rejected=sum(rejected.values()),
                     total_errors=job.total_errors,
                     error_message=job.error_message,
                     renormalize=(job.config_snapshot or {}).get("renormalize", False),
@@ -879,6 +912,10 @@ def get_connector_run_detail(
                             "logs": [log.to_dict() for log in real_time.logs],
                         }
                     )
+
+        response_data["rejected_count"] = _rejected_counts(session, [run.id]).get(
+            run.id, 0
+        )
 
         touched_ids = list(
             dict.fromkeys(

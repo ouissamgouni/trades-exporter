@@ -5,10 +5,12 @@ import { LuLocateFixed, LuX } from 'react-icons/lu';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, TransactionFilterState } from './TransactionFilters';
 import { BundlesListPanel, BundleSuggestionsPanel } from './bundles';
-import { API_URL, BundleSuggestion, Transaction } from '../types';
+import { API_URL, BundleSuggestion } from '../types';
 import { Badge, Tabs, TabsList, TabsTrigger, TabsContent } from './ui/primitives';
-import { BulkAction } from './tables/types';
-import { SUSPECTED_SPAM_TAG, useSpamVerdict, useSuspectedSpamCount } from '../hooks/useSpamReview';
+import { useSuspectedSpamCount } from '../hooks/useSpamReview';
+import { SuspectedSpamTable } from './SuspectedSpamTable';
+import { BrokenBundlesPanel, useCompletableBundleCount } from './BrokenBundlesPanel';
+import { useDataHealth } from '../contexts/DataHealthContext';
 
 // ============================================================================
 // View Presets
@@ -40,12 +42,6 @@ const EMPTY_FILTERS: TransactionFilterState = {
     bundlePatterns: [],
 };
 
-const SPAM_FILTERS: TransactionFilterState = {
-    ...EMPTY_FILTERS,
-    reviewStatus: ['invalid'],
-    tagKeys: [SUSPECTED_SPAM_TAG],
-};
-
 interface ViewPreset {
     /** Tab label shown to the user */
     heading: string;
@@ -63,18 +59,21 @@ interface ViewPreset {
     bundlesTitle: string;
     /** Show the suspected-spam review tab */
     showSpam?: boolean;
+    /** Open every month/day group of the main table on mount */
+    expandAllDays?: boolean;
 }
 
 const VIEW_PRESETS: Record<string, ViewPreset> = {
     inbox: {
         heading: '📥 Inbox',
-        description: 'Review pending transactions and accept bundle suggestions. Mark as reviewed or excluded.',
+        description: 'Review pending transactions and accept bundle suggestions. Mark as valid or rejected.',
         tableId: 'inbox-pending',
         defaultWorkflowFilter: 'pending',
         resetFilters: defaultFilterState,
         showSuggestions: true,
         bundlesTitle: '📦 Your Bundles',
         showSpam: true,
+        expandAllDays: true,
     },
     all: {
         heading: '',
@@ -157,25 +156,10 @@ const TransactionsViewInner: React.FC<TransactionsViewProps & { focus?: FocusCon
     });
 
     const spamCount = useSuspectedSpamCount();
-    const { applyVerdict, isApplying } = useSpamVerdict();
-    const spamBulkActions = React.useMemo<BulkAction<Transaction>[]>(() => [
-        {
-            id: 'spam-allow',
-            label: 'Not spam (whole token)',
-            icon: '✓',
-            colorPalette: 'green',
-            onClick: (_ids, txs) => applyVerdict(txs, 'allow'),
-            isDisabled: () => isApplying,
-        },
-        {
-            id: 'spam-block',
-            label: 'Confirm spam (whole token)',
-            icon: '🚫',
-            colorPalette: 'gray',
-            onClick: (_ids, txs) => applyVerdict(txs, 'block'),
-            isDisabled: () => isApplying,
-        },
-    ], [applyVerdict, isApplying]);
+    const completableCount = useCompletableBundleCount();
+    const bundleHintCount = suggestions.length + (preset.showSuggestions ? completableCount : 0);
+    const { validationSummary } = useDataHealth();
+    const pendingCount = preset.defaultWorkflowFilter === 'pending' ? validationSummary?.pending_count ?? 0 : 0;
 
     return (
         <div className="flex flex-col gap-1 p-2 pt-0">
@@ -183,11 +167,14 @@ const TransactionsViewInner: React.FC<TransactionsViewProps & { focus?: FocusCon
                 <TabsList className="mb-2">
                     <TabsTrigger value="transactions">
                         {preset.heading ? `${preset.heading}` : '📋 Transactions'}
+                        {pendingCount > 0 && (
+                            <Badge colorScheme="blue" className="ml-2" title="Pending review">{pendingCount}</Badge>
+                        )}
                     </TabsTrigger>
                     <TabsTrigger value="bundles">
                         📦 Bundles
-                        {suggestions.length > 0 && (
-                            <Badge colorScheme="green" className="ml-2">{suggestions.length} 💡</Badge>
+                        {bundleHintCount > 0 && (
+                            <Badge colorScheme="green" className="ml-2" title="Bundle suggestions and bundles that can be completed">{bundleHintCount} 💡</Badge>
                         )}
                     </TabsTrigger>
                     {preset.showSpam && (
@@ -226,29 +213,23 @@ const TransactionsViewInner: React.FC<TransactionsViewProps & { focus?: FocusCon
                         resetFilters={focusFilters ?? preset.resetFilters}
                         showSuggestions={preset.showSuggestions}
                         focusTransactionId={focus?.txId}
+                        defaultExpandAllDays={preset.expandAllDays}
                     />
                 </TabsContent>
 
                 <TabsContent value="bundles">
                     {preset.showSuggestions && <BundleSuggestionsPanel mb={2} />}
+                    {preset.showSuggestions && (
+                        <div className="mb-2">
+                            <BrokenBundlesPanel onlyCompletable />
+                        </div>
+                    )}
                     <BundlesListPanel title="" />
                 </TabsContent>
 
                 {preset.showSpam && (
                     <TabsContent value="spam">
-                        <p className="mb-2 text-xs text-slate-600">
-                            Incoming transfers your wallet did not initiate, of tokens with no price source.
-                            They are excluded from P&amp;L and Data Health. A verdict applies to every transaction of the token, including future syncs.
-                        </p>
-                        <TransactionsTable
-                            tableId="inbox-spam"
-                            title=""
-                            subtitle=""
-                            resetFilters={SPAM_FILTERS}
-                            emptyMessage="No suspected spam 🎉"
-                            expandInvalidRows
-                            additionalBulkActions={spamBulkActions}
-                        />
+                        <SuspectedSpamTable tableId="inbox-spam" />
                     </TabsContent>
                 )}
             </Tabs>

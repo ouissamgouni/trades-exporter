@@ -320,7 +320,7 @@ export const EditableField: React.FC<EditableFieldProps> = ({
                             }}
                             onBlur={handleCancel}
                             onKeyDown={handleKeyDown}
-                            className={`w-full border bg-white px-1 py-0.5 text-[10px] outline-none focus:border-blue-500 ${inputBorderClass}`}
+                            className={`w-full border bg-white px-1 py-0.5 text-[13px] outline-none focus:border-blue-500 ${inputBorderClass}`}
                         >
                             {options.map(opt => (
                                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -350,7 +350,7 @@ export const EditableField: React.FC<EditableFieldProps> = ({
                         onChange={(e) => setLocalValue(e.target.value)}
                         onBlur={handleSave}
                         onKeyDown={handleKeyDown}
-                        className={`w-full border bg-white px-1 py-0.5 font-mono text-[10px] outline-none focus:border-blue-500 ${inputBorderClass}`}
+                        className={`w-full border bg-white px-1 py-0.5 font-mono text-[13px] outline-none focus:border-blue-500 ${inputBorderClass}`}
                     />
                 )}
             </div>

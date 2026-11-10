@@ -377,7 +377,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
             const d = computeDelta(row.quantity, liveQty);
             if (!d) continue;
             totalCompared++;
-            if (!d.matched && Math.abs(d.pct) > state.deltaThreshold) {
+            if (!d.matched && Math.abs(d.pct) > state.deltaThreshold / 100) {
                 issues.push({ symbol: sym, delta: d.delta, pct: d.pct });
             }
         }
@@ -416,7 +416,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
             const liveQty = liveBalanceMap.get(sym);
             if (liveQty === undefined) return false;
             const d = computeDelta(row.quantity, liveQty);
-            return d !== null && !d.matched && Math.abs(d.pct) > state.deltaThreshold;
+            return d !== null && !d.matched && Math.abs(d.pct) > state.deltaThreshold / 100;
         });
     }, [assets, state.showMismatchedOnly, liveBalanceMap, state.deltaThreshold]);
 

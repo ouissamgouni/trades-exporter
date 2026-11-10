@@ -18,6 +18,7 @@ from backend.db.models import (
 )
 from backend.services.spam_heuristic_service import (
     apply_token_verdict,
+    apply_transaction_verdict,
     count_suspected,
     scan_suspected_spam,
     spam_tag,
@@ -127,3 +128,26 @@ class TestSpamHeuristicSQL:
         assert spam_tag(suspected.tags).get("spam_level") is None
         assert suspected.review_status == "invalid"
         assert validated.review_status == "valid"
+
+    def test_transaction_verdict_only_touches_given_rows(self, pg_session):
+        acct = _add(
+            pg_session,
+            Account(name="Spam Test Wallet 4", account_type="wallet", owned=True),
+        )
+        a = _transfer(pg_session, acct, "0xpertx", "0xc1")
+        b = _transfer(pg_session, acct, "0xpertx", "0xc2", dt=T1)
+        scan_suspected_spam(pg_session)
+
+        result = apply_transaction_verdict(pg_session, [a.id], "block")
+
+        assert result["updated_count"] == 1
+        pg_session.refresh(a)
+        pg_session.refresh(b)
+        assert spam_tag(a.tags).get("spam_level") is None
+        assert spam_tag(b.tags)["spam_level"] == "suspected"
+        assert (
+            pg_session.exec(
+                select(SpamTokenRule).where(SpamTokenRule.contract_address == "0xpertx")
+            ).first()
+            is None
+        )

@@ -212,22 +212,9 @@ def apply_token_verdict(
     ).all()
     updated = 0
     for row in rows:
-        tag = spam_tag(row.tags)
-        if verdict == ALLOW:
-            if tag is None or row.review_status != ReviewStatus.INVALID.value:
-                continue
-            row.tags = [t for t in _tag_list(row.tags) if t is not tag]
-            row.review_status = ReviewStatus.PENDING.value
-            row.taxability_status = "unknown"
-            row.review_notes = None
-        else:
-            is_suspected = bool(tag and tag.get("spam_level") == "suspected")
-            if row.review_status != ReviewStatus.PENDING.value and not is_suspected:
-                continue
-            _mark(row, BLOCKLISTED_REASON)
-        row.updated_at = utc_now()
-        session.add(row)
-        updated += 1
+        if _apply_row_verdict(row, verdict):
+            session.add(row)
+            updated += 1
 
     session.commit()
     log.info(
@@ -240,6 +227,54 @@ def apply_token_verdict(
     return {
         "network": network,
         "contract_address": contract,
+        "verdict": verdict,
+        "updated_count": updated,
+    }
+
+
+def _apply_row_verdict(row: NormalizedTransaction, verdict: str) -> bool:
+    tag = spam_tag(row.tags)
+    if verdict == ALLOW:
+        if tag is None or row.review_status != ReviewStatus.INVALID.value:
+            return False
+        row.tags = [t for t in _tag_list(row.tags) if t is not tag]
+        row.review_status = ReviewStatus.PENDING.value
+        row.taxability_status = "unknown"
+        row.review_notes = None
+    else:
+        is_suspected = bool(tag and tag.get("spam_level") == "suspected")
+        if row.review_status != ReviewStatus.PENDING.value and not is_suspected:
+            return False
+        _mark(row, BLOCKLISTED_REASON)
+    row.updated_at = utc_now()
+    return True
+
+
+def apply_transaction_verdict(
+    session: Session, transaction_ids: List[int], verdict: str
+) -> Dict[str, Any]:
+    """Apply an allow/block verdict to the given transactions only (no token rule recorded)."""
+    if verdict not in (ALLOW, BLOCK):
+        raise ValueError(f"Unknown verdict '{verdict}'")
+    if not transaction_ids:
+        raise ValueError("No transactions given")
+    rows = session.exec(
+        select(NormalizedTransaction).where(
+            NormalizedTransaction.id.in_(transaction_ids)
+        )
+    ).all()
+    if not rows:
+        raise LookupError("Transactions not found")
+    updated = 0
+    for row in rows:
+        if _apply_row_verdict(row, verdict):
+            session.add(row)
+            updated += 1
+    session.commit()
+    log.info("spam_tx_verdict_applied", verdict=verdict, updated=updated)
+    return {
+        "network": None,
+        "contract_address": None,
         "verdict": verdict,
         "updated_count": updated,
     }

@@ -17,7 +17,7 @@ import { FiCopy, FiPlusCircle } from 'react-icons/fi';
 import { LuPackage2 } from 'react-icons/lu';
 
 import { API_URL, Account, Asset, Transaction, TransactionStatus } from '../types';
-import { Direction, ReviewStatus, TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../enums';
+import { Direction, ReviewStatus, TaxabilityStatus as TaxabilityStatusEnum, UnitPattern, getReviewStatusLabel } from '../enums';
 import { TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
 import { AccountSelector } from './AccountSelector';
 import { AccountSuggestionBadges } from './AccountSuggestionBadges';
@@ -263,7 +263,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                     <div className="flex min-h-[20px] items-center gap-2 py-0 pl-[10px] pr-2">
                         <button
                             type="button"
-                            title="Expand invalid row"
+                            title="Expand rejected row"
                             className="flex shrink-0 items-center text-slate-400 hover:text-red-500"
                             onClick={(e: React.MouseEvent) => {
                                 e.stopPropagation();
@@ -273,7 +273,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             <LuPlus size={11} />
                         </button>
                         <Badge colorScheme="red" className="px-1 text-[10px]">
-                            <LuX size={8} /> Invalid
+                            <LuX size={8} /> Rejected
                         </Badge>
                         {spamBadge}
                         <span className="max-w-[200px] truncate text-[10px] text-slate-400">
@@ -397,7 +397,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     e.stopPropagation();
                                     toggleInvalidRow(tx.id);
                                 }}
-                                title="Collapse invalid row"
+                                title="Collapse rejected row"
                             >
                                 <LuMinus size={11} />
                             </button>
@@ -1773,12 +1773,12 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             >
                                 <option value="valid">Valid</option>
                                 <option value="pending">Pending</option>
-                                <option value="invalid">Invalid</option>
+                                <option value="invalid">Rejected</option>
                             </select>
                         ) : (
                             <div className="flex flex-col gap-0">
                                 <Badge colorScheme={statusBadgeColors[tx.review_status] || 'gray'} className="text-[9px]">
-                                    {tx.review_status}
+                                    {getReviewStatusLabel(tx.review_status || '')}
                                 </Badge>
                                 {/* Quick set valid button */}
                                 {tx.review_status !== 'valid' && (

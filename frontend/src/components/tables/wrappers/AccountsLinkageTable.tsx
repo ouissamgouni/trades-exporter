@@ -347,6 +347,7 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
     return (
         <div className="relative">
             <TransactionsTable
+                defaultExpandAllDays
                 title={isDismissedMode ? 'Dismissed Account Issues' : 'Account Linkage Issues'}
                 subtitle={isDismissedMode
                     ? `${transactionIds.length} dismissed transaction${transactionIds.length !== 1 ? 's' : ''} — restore to put them back in the issue list`

@@ -102,6 +102,7 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
     const newCount = progress.new_count ?? progress.new_entries ?? 0;
     const updatedCount = progress.updated_count ?? progress.updated ?? 0;
     const skippedCount = progress.skipped_count ?? progress.duplicates ?? 0;
+    const rejectedCount = progress.rejected_count ?? 0;
     const errorCount = progress.errors ?? 0;
     const connectorName = progress.connector_type ?? progress.connector_name ?? 'Unknown';
     const params = progress.params;
@@ -221,6 +222,11 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                         <span className="text-green-400">+{newCount} new</span>
                         <span className="text-blue-400">{updatedCount} updated</span>
                         <span className="text-slate-500">{skippedCount} dups</span>
+                        {rejectedCount > 0 && (
+                            <span className="text-red-500" title="Auto-rejected (e.g. spam) or rejected transactions of this run">
+                                {rejectedCount} rejected
+                            </span>
+                        )}
                         {(errorCount > 0 || progress.error) && (
                             <span className="text-red-400">
                                 {errorCount || 1} error{errorCount !== 1 ? 's' : ''}
@@ -282,6 +288,14 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                             </span>
                             <span className="block text-lg font-bold text-slate-500">
                                 {skippedCount}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="block text-xs text-slate-500">
+                                Rejected
+                            </span>
+                            <span className={`block text-lg font-bold ${rejectedCount > 0 ? 'text-red-500' : 'text-slate-500'}`}>
+                                {rejectedCount}
                             </span>
                         </div>
                     </div>

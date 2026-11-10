@@ -4,13 +4,13 @@
  * Displays a searchable table of all assets with expected qty, live qty, delta, and status.
  * Includes a tolerance slider to control the mismatch threshold.
  * Assets are shown per-account with expandable drill-down (inspired by BalanceDrawer).
- * Mapped assets use AssetBadge (with info icon), unmapped use a package icon.
+ * Mapped assets use AssetBadge (with info icon), unmapped use an unlinked icon.
  */
 
 import React, { useMemo, useState } from 'react';
 import { Badge, BadgeColorScheme, Input } from '../ui/primitives';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
-import { LuPackage } from 'react-icons/lu';
+import { LuLink2Off } from 'react-icons/lu';
 import { SlidePanel } from './SlidePanel';
 import { computeDelta, deltaColor, formatPct } from './deltaUtils';
 import { AssetBadge } from '../AssetBadge';
@@ -193,7 +193,7 @@ const UnmappedRowItem: React.FC<{
                     )}
                     <Badge colorScheme="purple">
                         <span className="flex items-center gap-0.5">
-                            <LuPackage size={10} />
+                            <LuLink2Off size={10} />
                             <span className="truncate">{asset.symbol}</span>
                         </span>
                     </Badge>
@@ -209,7 +209,7 @@ const UnmappedRowItem: React.FC<{
                 </div>
                 <div className="flex justify-end">
                     <Badge colorScheme="purple">
-                        <LuPackage size={10} />
+                        <LuLink2Off size={10} />
                     </Badge>
                 </div>
             </div>
@@ -370,7 +370,7 @@ export const BalanceSlidePanel: React.FC<BalanceSlidePanelProps> = ({
                         colorScheme={filter === key ? color : 'gray'}
                         onClick={() => setFilter(key)}
                     >
-                        {key === 'unmapped' && <LuPackage size={10} style={{ marginRight: 2 }} />}
+                        {key === 'unmapped' && <LuLink2Off size={10} style={{ marginRight: 2 }} />}
                         {label}
                     </Badge>
                 ))}
@@ -412,7 +412,7 @@ export const BalanceSlidePanel: React.FC<BalanceSlidePanelProps> = ({
                         {filteredUnmapped.length > 0 && filtered.length > 0 && (
                             <div className="border-b border-purple-100 bg-purple-50 px-2 py-1.5">
                                 <div className="flex items-center gap-1">
-                                    <LuPackage size={12} className="text-purple-600" />
+                                    <LuLink2Off size={12} className="text-purple-600" />
                                     <span className="text-[10px] font-bold text-purple-600">
                                         Unmapped — in live balance but no P&L record
                                     </span>
