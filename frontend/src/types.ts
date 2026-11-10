@@ -250,6 +250,8 @@ export interface GroupingSuggestion {
     asset_symbol?: string;
     date_range?: string;
     transactions: TransactionSummary[];
+    /** Broken bundle this suggestion completes; accepting adds the missing legs to it. */
+    existing_bundle_id?: number | null;
 }
 
 // Backward compatibility alias
@@ -388,6 +390,8 @@ export interface Asset {
     denomination_currency?: { asset_id: number; symbol: string; label?: string | null } | null;
     price_getters?: AssetPriceGetter[];
     categories?: Category[];  // Categories assigned to this asset
+    /** (network, token contract) pairs seen in the asset's non-rejected transactions (single-asset GET only) */
+    contracts?: { network: string; contract_address: string; tx_count: number }[];
 }
 
 export interface PriceSnapshot {
@@ -1332,7 +1336,17 @@ export interface LiveBalanceEntry {
     available: string;
     locked: string;
     chain: string | null;
+    contract_address?: string | null;
+    asset_id?: number | null;
+    /** Distinct key when this contract is not the ticker's real asset (spoofed/spam token) */
+    match_symbol?: string | null;
+    spam_reason?: 'spam_rule' | 'rejected_transactions' | null;
     raw: Record<string, unknown>;
+}
+
+/** Key used to aggregate live balances: other contracts reusing a ticker stay separate. */
+export function liveEntryKey(entry: LiveBalanceEntry): string {
+    return (entry.match_symbol || entry.asset_symbol).toUpperCase();
 }
 
 export interface ConnectorBalance {

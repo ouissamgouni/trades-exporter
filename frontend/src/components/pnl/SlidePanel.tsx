@@ -15,6 +15,8 @@ interface SlidePanelProps {
     onClose: () => void;
     title: string;
     titleIcon?: React.ReactNode;
+    /** Extra controls rendered left of the close button */
+    headerActions?: React.ReactNode;
     width?: string;
     zIndex?: number;
     children: React.ReactNode;
@@ -25,6 +27,7 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
     onClose,
     title,
     titleIcon,
+    headerActions,
     width = '600px',
     zIndex = 100,
     children,
@@ -60,9 +63,12 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
                         {titleIcon}
                         <span className="truncate text-base font-semibold">{title}</span>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={onClose}>
-                        <FiX size={20} />
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-1">
+                        {headerActions}
+                        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close panel">
+                            <FiX size={20} />
+                        </Button>
+                    </div>
                 </div>
 
                 {/* Content */}

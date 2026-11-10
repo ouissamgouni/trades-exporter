@@ -1249,6 +1249,9 @@ export interface UnmappedLiveAsset {
     marketValue: number | null;
     /** Per-account/connector breakdown of this unmapped asset's live balance */
     accounts?: { accountName: string; connectorType: string; chain: string | null; qty: number }[];
+    assetId?: number | null;
+    contractAddress?: string | null;
+    spamReason?: string | null;
 }
 
 

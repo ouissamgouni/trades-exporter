@@ -135,6 +135,10 @@ class ConnectorEtherscanHub(BaseHubConnector):
         registry = get_connector_registry()
         chain_config = registry.get_chain_config("etherscan", self.chain_name)
         chain_id = chain_config.chain_id if chain_config else 1
+        native_symbol = (
+            chain_config.native_currency if chain_config else None
+        ) or "ETH"
+        decimals = (chain_config.native_token_decimals if chain_config else None) or 18
         entries = []
 
         # Native balance
@@ -154,10 +158,10 @@ class ConnectorEtherscanHub(BaseHubConnector):
             data = resp.json()
             result = data.get("result", "0")
             if result and int(result) > 0:
-                total = Decimal(result) / Decimal(10**18)
+                total = Decimal(result) / Decimal(10**decimals)
                 entries.append(
                     BalanceEntry(
-                        asset_symbol="ETH",
+                        asset_symbol=native_symbol,
                         total=total,
                         available=total,
                         chain=self.chain_name,

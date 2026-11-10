@@ -12,5 +12,6 @@ export { BundlesListPanel } from './BundlesListPanel';
 export { BundleSuggestionIcon } from './BundleSuggestionIcon';
 
 export { SuggestionPopover } from './SuggestionPopover';
+export { BundleCompletionSuggestion } from './BundleCompletionSuggestion';
 
 export { BundleMembershipPopover } from './BundleMembershipPopover';

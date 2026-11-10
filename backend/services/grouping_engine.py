@@ -75,22 +75,22 @@ class GroupingConfig:
 class GroupingSuggestion:
     """
     Grouping suggestion result.
-    
+
     Can be converted to CalculationUnit (DB model) for persistence.
     """
-    
+
     pattern: str  # transfer, swap, unknown (uses UnitPattern values)
     label: str
     reason: str
     confidence: float
     transactions: List[Dict[str, Any]] = field(default_factory=list)
-    
+    # Broken bundle this suggestion would complete (some legs already belong to it)
+    existing_bundle_id: Optional[int] = None
+
     @property
     def transaction_ids(self) -> List[int]:
         """Get transaction IDs from transactions list."""
         return [tx["id"] for tx in self.transactions]
-    
-
 
 
 class GroupingEngine:
@@ -138,8 +138,8 @@ class GroupingEngine:
         self._owned_account_ids: Set[int] = set()
         for tx in transactions:
             if tx.account_id is not None:
-                acct = getattr(tx, 'account_rel', None)
-                if acct is not None and hasattr(acct, 'owned') and not acct.owned:
+                acct = getattr(tx, "account_rel", None)
+                if acct is not None and hasattr(acct, "owned") and not acct.owned:
                     continue  # Explicitly non-owned — exclude
                 self._owned_account_ids.add(tx.account_id)
 
@@ -191,7 +191,9 @@ class GroupingEngine:
         return suggestions
 
     def _rule1_network_tx_match(
-        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+        self,
+        outflows: List[NormalizedTransaction],
+        inflows: List[NormalizedTransaction],
     ) -> List[GroupingSuggestion]:
         """
         Rule 1: Match outflow/inflow by on-chain transaction hash.
@@ -254,7 +256,9 @@ class GroupingEngine:
                 )
                 pattern = PATTERN_INTERNAL_TRANSFER if both_owned else PATTERN_UNKNOWN
 
-                symbol = outflow.source_asset_symbol or matched_inflow.source_asset_symbol
+                symbol = (
+                    outflow.source_asset_symbol or matched_inflow.source_asset_symbol
+                )
                 label = self._append_fee_suffix(f"{symbol} Transfer", seed, group)
                 suggestions.append(
                     GroupingSuggestion(
@@ -262,16 +266,16 @@ class GroupingEngine:
                         label=label,
                         reason=f"Exact network TX hash match: {match_reason}",
                         confidence=self.config.exact_match_confidence,
-                        transactions=[
-                            self._make_tx_summary(tx) for tx in group
-                        ],
+                        transactions=[self._make_tx_summary(tx) for tx in group],
                     )
                 )
 
         return suggestions
 
     def _rule2_same_asset_transfer(
-        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+        self,
+        outflows: List[NormalizedTransaction],
+        inflows: List[NormalizedTransaction],
     ) -> List[GroupingSuggestion]:
         """
         Rule 2: Same asset transfer between owned accounts.
@@ -345,9 +349,7 @@ class GroupingEngine:
                         label=label,
                         reason=f"Same asset transfer between owned accounts (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
-                        transactions=[
-                            self._make_tx_summary(tx) for tx in group
-                        ],
+                        transactions=[self._make_tx_summary(tx) for tx in group],
                     )
                 )
                 break
@@ -452,14 +454,15 @@ class GroupingEngine:
         # cover Blockscout / EVM connectors where DEX swaps appear as
         # a normal tx + multiple token transfers sharing the same on-chain hash.
         swap_types = {
-            "SWAP",           # Helius (Solana)
-            "NORMAL-TX",      # Blockscout normal transactions
-            "TOKEN-TRANSFER", # Blockscout token transfers
-            "TRANSFER",       # Helius bridge/transfer legs
+            "SWAP",  # Helius (Solana)
+            "NORMAL-TX",  # Blockscout normal transactions
+            "TOKEN-TRANSFER",  # Blockscout token transfers
+            "TRANSFER",  # Helius bridge/transfer legs
         }
 
         eligible = [
-            tx for tx in transactions
+            tx
+            for tx in transactions
             if tx.id not in self._used_tx_ids
             and tx.network_transaction_id
             and (tx.source_transaction_type or "").upper() in swap_types
@@ -492,9 +495,7 @@ class GroupingEngine:
 
             # At least one pair must have different assets
             has_different_assets = any(
-                not self._assets_match(out, inf)
-                for out in outflows
-                for inf in inflows
+                not self._assets_match(out, inf) for out in outflows for inf in inflows
             )
             if not has_different_assets:
                 continue
@@ -532,7 +533,9 @@ class GroupingEngine:
         return suggestions
 
     def _rule4_swap_detection(
-        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+        self,
+        outflows: List[NormalizedTransaction],
+        inflows: List[NormalizedTransaction],
     ) -> List[GroupingSuggestion]:
         """
         Rule 4: Swap detection for different assets on same account.
@@ -581,7 +584,8 @@ class GroupingEngine:
 
                 label = self._append_fee_suffix(
                     f"{outflow.source_asset_symbol} → {inflow.source_asset_symbol} Swap",
-                    seed, group,
+                    seed,
+                    group,
                 )
                 suggestions.append(
                     GroupingSuggestion(
@@ -589,9 +593,7 @@ class GroupingEngine:
                         label=label,
                         reason=f"Different assets exchanged on same account within {time_diff:.0f}s",
                         confidence=confidence,
-                        transactions=[
-                            self._make_tx_summary(tx) for tx in group
-                        ],
+                        transactions=[self._make_tx_summary(tx) for tx in group],
                     )
                 )
                 break
@@ -599,7 +601,9 @@ class GroupingEngine:
         return suggestions
 
     def _rule4c_multi_leg_swap(
-        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+        self,
+        outflows: List[NormalizedTransaction],
+        inflows: List[NormalizedTransaction],
     ) -> List[GroupingSuggestion]:
         """
         Rule 4c: Multi-leg swap / rebalance detection.
@@ -656,7 +660,9 @@ class GroupingEngine:
                 if not current_cluster:
                     current_cluster = [tx]
                 else:
-                    gap = abs((tx.date_time - current_cluster[-1].date_time).total_seconds())
+                    gap = abs(
+                        (tx.date_time - current_cluster[-1].date_time).total_seconds()
+                    )
                     if gap <= self.config.swap_time_window:
                         current_cluster.append(tx)
                     else:
@@ -681,7 +687,11 @@ class GroupingEngine:
                 # Require at least two different assets across the whole cluster
                 asset_keys = set()
                 for tx in cluster:
-                    key = tx.asset_id if tx.asset_id is not None else (tx.source_asset_symbol or "").upper()
+                    key = (
+                        tx.asset_id
+                        if tx.asset_id is not None
+                        else (tx.source_asset_symbol or "").upper()
+                    )
                     asset_keys.add(key)
                 if len(asset_keys) < 2:
                     continue
@@ -736,7 +746,9 @@ class GroupingEngine:
         return suggestions
 
     def _rule4b_split_detection(
-        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+        self,
+        outflows: List[NormalizedTransaction],
+        inflows: List[NormalizedTransaction],
     ) -> List[GroupingSuggestion]:
         """
         Rule 4b: Split detection - same asset with different quantities but same total value.
@@ -827,9 +839,7 @@ class GroupingEngine:
                         label=label,
                         reason=f"Same asset with different quantities but same total value (qty: {out_qty:.4g} → {in_qty:.4g}, value diff: {value_diff:.2%})",
                         confidence=confidence,
-                        transactions=[
-                            self._make_tx_summary(tx) for tx in group
-                        ],
+                        transactions=[self._make_tx_summary(tx) for tx in group],
                     )
                 )
                 break
@@ -837,11 +847,13 @@ class GroupingEngine:
         return suggestions
 
     def _rule5_bridge_detection(
-        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+        self,
+        outflows: List[NormalizedTransaction],
+        inflows: List[NormalizedTransaction],
     ) -> List[GroupingSuggestion]:
         """
         Rule 5: Bridge detection for same asset across different chains/accounts.
-        
+
         Bridges are treated as TRANSFERS (same asset, non-taxable).
 
         Conditions:
@@ -909,7 +921,10 @@ class GroupingEngine:
                 networks = []
                 if outflow.network:
                     networks.append(outflow.network)
-                if inflow.network and (not outflow.network or inflow.network.lower() != outflow.network.lower()):
+                if inflow.network and (
+                    not outflow.network
+                    or inflow.network.lower() != outflow.network.lower()
+                ):
                     networks.append(inflow.network)
 
                 if len(networks) >= 2:
@@ -938,9 +953,7 @@ class GroupingEngine:
                         label=label,
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
-                        transactions=[
-                            self._make_tx_summary(tx) for tx in group
-                        ],
+                        transactions=[self._make_tx_summary(tx) for tx in group],
                     )
                 )
                 break
@@ -948,7 +961,9 @@ class GroupingEngine:
         return suggestions
 
     def _rule5b_same_account_bridge(
-        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+        self,
+        outflows: List[NormalizedTransaction],
+        inflows: List[NormalizedTransaction],
     ) -> List[GroupingSuggestion]:
         """
         Rule 5b: Same-account cross-chain bridge.
@@ -1027,9 +1042,7 @@ class GroupingEngine:
                         label=label,
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
-                        transactions=[
-                            self._make_tx_summary(tx) for tx in group
-                        ],
+                        transactions=[self._make_tx_summary(tx) for tx in group],
                     )
                 )
                 break
@@ -1081,9 +1094,7 @@ class GroupingEngine:
 
         # Collect network_transaction_ids from seeds
         net_tx_ids = {
-            tx.network_transaction_id
-            for tx in seed_txs
-            if tx.network_transaction_id
+            tx.network_transaction_id for tx in seed_txs if tx.network_transaction_id
         }
 
         # Find all unused transactions sharing those network_transaction_ids
@@ -1098,7 +1109,12 @@ class GroupingEngine:
 
         return sorted(related.values(), key=lambda t: t.id)
 
-    def _append_fee_suffix(self, label: str, seed_txs: List[NormalizedTransaction], all_txs: List[NormalizedTransaction]) -> str:
+    def _append_fee_suffix(
+        self,
+        label: str,
+        seed_txs: List[NormalizedTransaction],
+        all_txs: List[NormalizedTransaction],
+    ) -> str:
         """
         Append a fee count suffix to a label if the expanded group contains
         more transactions than the seed (i.e. collected related fees/legs).
@@ -1116,7 +1132,9 @@ class GroupingEngine:
                 label = f"{label} (+{', '.join(parts)})"
         return label
 
-    def _assets_match(self, tx1: NormalizedTransaction, tx2: NormalizedTransaction) -> bool:
+    def _assets_match(
+        self, tx1: NormalizedTransaction, tx2: NormalizedTransaction
+    ) -> bool:
         """Check if two transactions have matching assets."""
         # First check by asset_id if both have it
         if tx1.asset_id is not None and tx2.asset_id is not None:

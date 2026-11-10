@@ -23,6 +23,7 @@ from backend.api.schemas import (
     TransactionListResponse,
     TransactionGroupsResponse,
     TransactionIdsResponse,
+    TransactionLocateResponse,
     FilterMetadata,
     AppliedFilters,
     ValidationWarning,
@@ -2137,6 +2138,53 @@ def list_transaction_ids(
     ).all()
     return TransactionIdsResponse(
         ids=list(ids), total=total, truncated=total > len(ids)
+    )
+
+
+@router.get("/locate/{transaction_id}", response_model=TransactionLocateResponse)
+def locate_transaction(
+    transaction_id: int,
+    q: TxListQuery = Depends(get_tx_list_query),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    session: Session = Depends(get_db),
+):
+    """Whether a transaction matches the current list filters, and its rank in date order."""
+    tx = session.get(NormalizedTransaction, transaction_id)
+    if tx is None:
+        raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found")
+    T = NormalizedTransaction
+    ids_statement, _, _ = apply_tx_list_filters(session, select(T.id), q)
+    total = session.exec(select(func.count()).select_from(ids_statement.subquery())).one()
+    matches = (
+        session.exec(
+            select(func.count()).select_from(
+                ids_statement.where(T.id == transaction_id).subquery()
+            )
+        ).one()
+        > 0
+    )
+    index = None
+    if matches:
+        if sort_dir == "desc":
+            before = or_(
+                T.date_time > tx.date_time,
+                (T.date_time == tx.date_time) & (T.id > tx.id),
+            )
+        else:
+            before = or_(
+                T.date_time < tx.date_time,
+                (T.date_time == tx.date_time) & (T.id < tx.id),
+            )
+        index = session.exec(
+            select(func.count()).select_from(ids_statement.where(before).subquery())
+        ).one()
+    return TransactionLocateResponse(
+        id=tx.id,
+        date_time=tx.date_time,
+        review_status=tx.review_status,
+        matches_filters=matches,
+        index=index,
+        total=total,
     )
 
 

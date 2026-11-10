@@ -367,7 +367,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                             </SuggestionPopover>
                         )}
                         {/* Bundle membership badge — clickable, opens popover */}
-                        {!suggestionEntry && tx.user_calculation_unit_id && (
+                        {tx.user_calculation_unit_id && (
                             <BundleMembershipPopover
                                 bundleId={tx.user_calculation_unit_id}
                                 color={bundleColorMap.get(tx.user_calculation_unit_id) || '#c084fc'}

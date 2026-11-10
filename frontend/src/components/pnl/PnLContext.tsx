@@ -14,12 +14,13 @@
 import React, { createContext, useContext, useReducer, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQueryClient, useQuery, type UseQueryResult, type RefetchOptions, type QueryObserverResult } from '@tanstack/react-query';
 import { useBaseCurrency } from '../BaseCurrencySelector';
-import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
+import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance, liveEntryKey } from '../../types';
 import { useBalance } from '../../hooks/useBalance';
 import { useAssets } from '../../hooks/useAssets';
 import { usePortfolioTimeline, useVersionMetrics, useBookMetrics, useLiveMetrics, useVersionPerformers } from '../../hooks/useChartData';
 import type { PortfolioTimelineResponse, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse } from '../../hooks/useChartData';
 import { computeDelta } from './deltaUtils';
+import { publishLiveBalanceSnapshot } from '../../hooks/useLiveBalanceSnapshot';
 import type { BalanceHealthData } from './SummaryCards';
 import type { VersionListItem, AssetPnLRow, AccountBalanceBreakdown, UnmappedLiveAsset } from './types';
 import {
@@ -253,7 +254,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
         for (const ab of liveAccountBalancesRaw) {
             for (const cb of ab.connector_balances) {
                 for (const entry of cb.entries) {
-                    const sym = entry.asset_symbol.toUpperCase();
+                    const sym = liveEntryKey(entry);
                     map.set(sym, (map.get(sym) ?? 0) + (parseFloat(entry.total) || 0));
                 }
             }
@@ -261,13 +262,17 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
         return map;
     }, [liveAccountBalancesRaw]);
 
+    useEffect(() => {
+        if (liveBalanceMap.size > 0) publishLiveBalanceSnapshot(liveBalanceMap);
+    }, [liveBalanceMap]);
+
     const liveAccountBalanceMap = useMemo(() => {
         if (liveAccountBalancesRaw.length === 0) return new Map<string, Map<number, number>>();
         const map = new Map<string, Map<number, number>>();
         for (const ab of liveAccountBalancesRaw) {
             for (const cb of ab.connector_balances) {
                 for (const entry of cb.entries) {
-                    const sym = entry.asset_symbol.toUpperCase();
+                    const sym = liveEntryKey(entry);
                     if (!map.has(sym)) map.set(sym, new Map());
                     const acctMap = map.get(sym)!;
                     acctMap.set(ab.account_id, (acctMap.get(ab.account_id) ?? 0) + (parseFloat(entry.total) || 0));
@@ -429,10 +434,16 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
             if (!pnlSymbols.has(sym)) {
                 // Build per-account breakdown from raw account balances
                 const accounts: { accountName: string; connectorType: string; chain: string | null; qty: number }[] = [];
+                let assetId: number | null = null;
+                let contractAddress: string | null = null;
+                let spamReason: string | null = null;
                 for (const ab of liveAccountBalancesRaw) {
                     for (const cb of ab.connector_balances) {
                         for (const entry of cb.entries) {
-                            if (entry.asset_symbol.toUpperCase() === sym) {
+                            if (liveEntryKey(entry) === sym) {
+                                assetId = assetId ?? entry.asset_id ?? null;
+                                contractAddress = contractAddress ?? entry.contract_address ?? null;
+                                spamReason = spamReason ?? entry.spam_reason ?? null;
                                 accounts.push({
                                     accountName: ab.account_name,
                                     connectorType: cb.connector_type,
@@ -443,7 +454,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
                         }
                     }
                 }
-                unmapped.push({ symbol: sym, totalQty: qty, marketValue: null, accounts });
+                unmapped.push({ symbol: sym, totalQty: qty, marketValue: null, accounts, assetId, contractAddress, spamReason });
             }
         }
         return unmapped.sort((a, b) => b.totalQty - a.totalQty);

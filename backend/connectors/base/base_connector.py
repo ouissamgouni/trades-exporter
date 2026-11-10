@@ -30,6 +30,15 @@ class BalanceEntry:
     available: Decimal = Decimal(0)  # Available for trading/transfer
     locked: Decimal = Decimal(0)  # In open orders, staking, etc.
     chain: Optional[str] = None  # Network/chain (for on-chain connectors)
+    contract_address: Optional[str] = (
+        None  # Token contract (None for native coins / CEX)
+    )
+    # Set by BalanceService
+    asset_id: Optional[int] = None
+    match_symbol: Optional[str] = (
+        None  # Distinct key when the contract is not the ticker's real asset
+    )
+    spam_reason: Optional[str] = None  # "spam_rule" | "rejected_transactions"
     raw: Dict[str, Any] = field(default_factory=dict)  # Original response data
 
 
@@ -500,7 +509,9 @@ class BaseConnector(ABC):
                 result = self._mapper_for_raw_origin().raw_to_normalized(raw_item)
 
                 # Check if result is a generator (multi-yield support)
-                results = result if isinstance(result, types.GeneratorType) else [result]
+                results = (
+                    result if isinstance(result, types.GeneratorType) else [result]
+                )
                 for normalized in results:
                     if (
                         history_cutoff
@@ -535,7 +546,9 @@ class BaseConnector(ABC):
         try:
             return ensure_utc(datetime.fromisoformat(str(raw)))
         except (TypeError, ValueError):
-            log.warning(f"[{self.connector_name}] Ignoring invalid history_cutoff {raw!r}")
+            log.warning(
+                f"[{self.connector_name}] Ignoring invalid history_cutoff {raw!r}"
+            )
             return None
 
     def _mapper_for_raw_origin(self) -> "BaseConnector":
@@ -560,7 +573,9 @@ class BaseConnector(ABC):
                         config={"renormalize_mode": True, "disable_file_output": True},
                     )
                 except Exception as e:
-                    log.warning(f"[{self.connector_name}] No mapper for raw source {source!r}: {e}")
+                    log.warning(
+                        f"[{self.connector_name}] No mapper for raw source {source!r}: {e}"
+                    )
             cache[source] = mapper
         return cache[source]
 

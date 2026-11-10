@@ -145,6 +145,12 @@ class DenominationCurrencyRef(BaseModel):
     label: Optional[str] = None
 
 
+class AssetContractRef(BaseModel):
+    network: str
+    contract_address: str
+    tx_count: int
+
+
 class AssetResponse(BaseModel):
     """Response model for assets."""
 
@@ -160,6 +166,7 @@ class AssetResponse(BaseModel):
     denomination_currency: Optional[DenominationCurrencyRef] = None
     price_getters: Optional[List[AssetPriceGetterResponse]] = None
     categories: Optional[List[CategoryResponse]] = None
+    contracts: Optional[List[AssetContractRef]] = None
 
 
 # ============================================================================
@@ -383,17 +390,41 @@ def get_asset(
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found")
 
-        return _asset_to_response(
+        response = _asset_to_response(
             asset,
             include_getters=include_getters,
             include_categories=include_categories,
             session=session,
         )
+        response.contracts = _asset_contracts(session, asset_id)
+        return response
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+def _asset_contracts(session: Session, asset_id: int) -> List[AssetContractRef]:
+    """Distinct (network, token contract) pairs seen in the asset's non-rejected transactions."""
+    T = NormalizedTransaction
+    net = func.lower(func.coalesce(T.network, ""))
+    rows = session.exec(
+        select(net, func.min(T.token_contract_address), func.count())
+        .where(
+            T.asset_id == asset_id,
+            T.review_status != "invalid",
+            T.token_contract_address.isnot(None),
+            T.token_contract_address != "",
+        )
+        # Solana mints are case-sensitive: group case-insensitively, keep an original-case address.
+        .group_by(net, func.lower(T.token_contract_address))
+        .order_by(func.count().desc())
+    ).all()
+    return [
+        AssetContractRef(network=n, contract_address=addr, tx_count=cnt)
+        for n, addr, cnt in rows
+    ]
 
 
 @router.post("", response_model=AssetResponse)

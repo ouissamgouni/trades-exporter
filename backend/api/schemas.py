@@ -242,6 +242,16 @@ class TransactionIdsResponse(BaseModel):
     truncated: bool
 
 
+class TransactionLocateResponse(BaseModel):
+    id: int
+    date_time: Optional[datetime] = None
+    review_status: str
+    matches_filters: bool
+    # Rank in date order among filtered rows (for paging); None when filtered out
+    index: Optional[int] = None
+    total: int
+
+
 # =============================================================================
 # Transaction API Models
 # =============================================================================

@@ -12,6 +12,7 @@
 import React from 'react';
 import { Badge, Button } from '../ui/primitives';
 import { FiAlertTriangle, FiActivity, FiRefreshCw } from 'react-icons/fi';
+import { LuLink2Off } from 'react-icons/lu';
 import { Tooltip } from '../ui/tooltip';
 import { PnLSummary, UnmappedLiveAsset } from './types';
 
@@ -231,7 +232,11 @@ export const BalanceHealthCard: React.FC<BalanceHealthCardProps> = ({
                     <Badge colorScheme="green">✓</Badge>
                 )}
                 {unmappedLiveAssets.length > 0 && (
-                    <Badge colorScheme="purple">📦{unmappedLiveAssets.length}</Badge>
+                    <Tooltip content={`${unmappedLiveAssets.length} live asset${unmappedLiveAssets.length !== 1 ? 's' : ''} without P&L record`}>
+                        <Badge colorScheme="purple">
+                            <span className="flex items-center gap-0.5"><LuLink2Off size={10} />{unmappedLiveAssets.length}</span>
+                        </Badge>
+                    </Tooltip>
                 )}
                 {/* Inline tolerance slider */}
                 <div className="ml-auto flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>

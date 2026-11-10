@@ -20,6 +20,7 @@ import { TaxabilityStatus, UnitPattern } from '../../enums';
 import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
 import { Badge, Button, Spinner } from '../ui/primitives';
+import { BundleCompletionSuggestion } from './BundleCompletionSuggestion';
 
 interface BundleMembershipPopoverProps {
     /** The bundle ID to display */
@@ -279,6 +280,20 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
                             </>
                         ) : null}
                     </div>
+
+                    {bundle && (
+                        <BundleCompletionSuggestion
+                            bundleId={bundleId}
+                            memberIds={bundle.transactions.map(t => t.id)}
+                            enabled={open}
+                            onTransactionClick={onTransactionClick}
+                            onCompleted={async () => {
+                                const updated = await fetch(`${API_URL}/bundles/${bundleId}`);
+                                if (updated.ok) setBundle(await updated.json());
+                            }}
+                            className="mx-3 mb-3"
+                        />
+                    )}
 
                     {/* Actions */}
                     {bundle && (

@@ -54,6 +54,10 @@ import { Tooltip } from './ui/tooltip';
 import { ConnectorRunDetailDrawer } from './ConnectorRunDetailDrawer';
 import { TransactionPnlImpact } from './pnl/TransactionPnlImpact';
 import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
+import { BundleCompletionSuggestion } from './bundles/BundleCompletionSuggestion';
+import { SuggestionPopover } from './bundles/SuggestionPopover';
+import { useBundleSuggestionMap } from '../hooks/useBundleSuggestionMap';
+import { TransactionSummaryHeader } from './TransactionSummaryHeader';
 import { toaster } from './ui/toaster';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
 import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
@@ -69,6 +73,16 @@ interface RawTransactionData {
     raw_data: Record<string, unknown>;
     ingestion_time: string;
 }
+
+type PanelTab = 'details' | 'pricing' | 'pnl' | 'bundle' | 'raw';
+
+const PANEL_TABS: { id: PanelTab; label: string }[] = [
+    { id: 'details', label: 'Details' },
+    { id: 'pricing', label: 'Pricing' },
+    { id: 'pnl', label: 'P&L' },
+    { id: 'bundle', label: 'Bundle' },
+    { id: 'raw', label: 'Raw' },
+];
 
 export interface TransactionSidePanelProps {
     transaction: Transaction;
@@ -239,6 +253,13 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
     // ------- Local transaction state (optimistic updates) -------
     const [tx, setTx] = useState<Transaction>(initialTx);
     useEffect(() => { setTx(initialTx); }, [initialTx]);
+
+    const [tab, setTab] = useState<PanelTab>('details');
+    useEffect(() => { setTab('details'); }, [initialTx.id]);
+    const [reviewing, setReviewing] = useState(false);
+    const [openSuggestion, setOpenSuggestion] = useState(false);
+    const { suggestionMap } = useBundleSuggestionMap(true);
+    const suggestionEntry = suggestionMap.get(initialTx.id);
 
     const { patchField, patchFields } = useTransactionPatch(tx.id);
     const { getConnectorColor } = useEntityColors();
@@ -526,6 +547,17 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
         } finally { setRawDataLoading(false); }
     }, [tx.raw_transaction_id, hasFetchedRaw, rawDataLoading]);
 
+    useEffect(() => {
+        if (tab === 'raw' && tx.raw_transaction_id && !hasFetchedRaw && !rawDataLoading) fetchRawData();
+    }, [tab, tx.raw_transaction_id, hasFetchedRaw, rawDataLoading, fetchRawData]);
+
+    // Raw data belongs to one transaction; reset when navigating to another
+    useEffect(() => {
+        setRawData(null);
+        setHasFetchedRaw(false);
+        setRawDataError(null);
+    }, [tx.raw_transaction_id]);
+
     const copyJson = async () => {
         if (!rawData?.raw_data) return;
         await navigator.clipboard.writeText(JSON.stringify(rawData.raw_data, null, 2));
@@ -647,11 +679,48 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
 
     return (
         <>
-            <div className="select-text">
-
+            <div className="flex h-full min-h-0 flex-col select-text">
+                <div className="shrink-0">
+                    <TransactionSummaryHeader
+                        tx={tx}
+                        accounts={accounts}
+                        reviewing={reviewing}
+                        onReview={async (status) => {
+                            setReviewing(true);
+                            try { await saveField('review_status', status); } finally { setReviewing(false); }
+                        }}
+                        onEdit={() => setTab('details')}
+                        onOpenBundle={() => setTab('bundle')}
+                        onOpenPricing={() => setTab('pricing')}
+                    />
+                    <div role="tablist" className="flex gap-1 border-b border-slate-200 bg-slate-50 px-2">
+                        {PANEL_TABS.map(({ id, label }) => {
+                            const marker = id === 'bundle'
+                                ? (tx.user_calculation_unit_id ? 'bg-purple-500' : suggestionEntry ? 'bg-teal-500' : null)
+                                : id === 'pricing' && tx.price == null && tx.transaction_type !== 'memo' ? 'bg-orange-500' : null;
+                            return (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={tab === id}
+                                    onClick={() => setTab(id)}
+                                    className={tab === id
+                                        ? 'relative -mb-px border-b-2 border-blue-600 px-3 py-2 text-sm font-semibold text-blue-700'
+                                        : 'relative -mb-px border-b-2 border-transparent px-3 py-2 text-sm text-slate-600 hover:text-slate-900'}
+                                >
+                                    {label}
+                                    {marker && <span className={`absolute right-1 top-1.5 h-1.5 w-1.5 rounded-full ${marker}`} />}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-2">
                 {/* ============================================================ */}
                 {/* 📍 Source & Timing */}
                 {/* ============================================================ */}
+                {tab === 'details' && (<>
                 <Section title="Source & Timing" icon="📍" defaultOpen={true} colorScheme="blue">
                     {/* Account (LinkableAccountField) */}
                     <LinkableAccountField
@@ -729,10 +798,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         onSave={async (v) => { await saveField('source_transaction_id', v); }}
                     />
                 </Section>
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 💱 Transaction Details */}
                 {/* ============================================================ */}
+                {tab === 'details' && (<>
                 <Section title="Transaction Details" icon="💱" defaultOpen={true} colorScheme="purple">
                     {/* Type (simplified) */}
                     <EditableField
@@ -839,10 +910,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         onSave={async (v) => { await savePriceOrQuantity('quantity', v); }}
                     />
                 </Section>
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 🔄 Transfer (consolidated from/to section) */}
                 {/* ============================================================ */}
+                {tab === 'details' && (<>
                 {(isTransfer || tx.source_from_account || tx.from_account_id || tx.source_to_account || tx.to_account_id) && (
                     <Section title="Transfer" icon="🔄" defaultOpen={true} colorScheme="cyan">
                         {/* From Account (merged with address) */}
@@ -917,10 +990,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         })()}
                     </Section>
                 )}
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 💰 Pricing & Fees */}
                 {/* ============================================================ */}
+                {tab === 'pricing' && (<>
                 <Section title="Pricing & Fees" icon="💰" defaultOpen={true} colorScheme="green">
                     {/* Price + Quote (compound edit) */}
                     <EditableField
@@ -1089,10 +1164,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         onSave={async (v) => { await saveField('fee', v); }}
                     />
                 </Section>
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 💰 P&L */}
                 {/* ============================================================ */}
+                {tab === 'pnl' && (<>
                 <Section title="P&L" icon="💰" defaultOpen={true} colorScheme="green">
                     <EditableField
                         label="Include Fees"
@@ -1123,11 +1200,13 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         </div>
                     )}
                 </Section>
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 🔗 Network & Advanced */}
                 {/* ============================================================ */}
-                <Section title="Network & Advanced" icon="🔗" defaultOpen={isTransfer} colorScheme="teal">
+                {tab === 'details' && (<>
+                <Section title="Network & Advanced" icon="🔗" defaultOpen={true} colorScheme="teal">
                     <EditableField
                         label="Network"
                         value={tx.network || ''}
@@ -1150,12 +1229,14 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         onSave={async (v) => { await saveField('token_contract_address', v); }}
                     />
                 </Section>
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 📦 Bundle */}
                 {/* ============================================================ */}
+                {tab === 'bundle' && (<>
                 {tx.user_calculation_unit_id && (
-                    <Section title="Bundle" icon="📦" defaultOpen={false} colorScheme="blue">
+                    <Section title="Bundle" icon="📦" defaultOpen={true} colorScheme="blue">
                         {bundleLoading ? (
                             <div className="flex items-center gap-2 py-2">
                                 <Spinner size="xs" />
@@ -1229,6 +1310,15 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                         transactionIds={bundleData.transactions.map(t => t.id)}
                                     />
                                 </div>
+                                <BundleCompletionSuggestion
+                                    bundleId={bundleData.id}
+                                    memberIds={bundleData.transactions.map(t => t.id)}
+                                    className="mb-2"
+                                    onCompleted={async () => {
+                                        const r = await fetch(`${API_URL}/bundles/${bundleData.id}`);
+                                        if (r.ok) setBundleData(await r.json());
+                                    }}
+                                />
 
                                 {/* Remove from bundle */}
                                 <Button
@@ -1249,10 +1339,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         )}
                     </Section>
                 )}
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 🎯 Position (for perp_open / perp_close transactions) */}
                 {/* ============================================================ */}
+                {tab === 'details' && (<>
                 {(tx.source_transaction_type === 'perp_open' || tx.source_transaction_type === 'perp_close') && (
                     <PositionCard transactionId={tx.id} />
                 )}
@@ -1291,10 +1383,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         )}
                     </div>
                 )}
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 🏷️ Tags */}
                 {/* ============================================================ */}
+                {tab === 'details' && (<>
                 <Section title="Tags" icon="🏷️" defaultOpen={false} colorScheme="blue">
                     <div className="mb-1 flex flex-wrap gap-1">
                         {normalizedTags.length > 0 ? (
@@ -1349,10 +1443,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         )}
                     </>
                 </Section>
+                </>)}
 
                 {/* ============================================================ */}
                 {/* ✅ Review */}
                 {/* ============================================================ */}
+                {tab === 'details' && (<>
                 <Section title="Review" icon="✅" defaultOpen={true} colorScheme="green">
                     <EditableField
                         label="Review Status"
@@ -1404,14 +1500,16 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         onSave={async (v) => { await saveField('review_notes', v); }}
                     />
                 </Section>
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 📤 Source / Raw Data */}
                 {/* ============================================================ */}
+                {tab === 'raw' && (<>
                 <Section
                     title="Source / Raw Data"
                     icon="📤"
-                    defaultOpen={false}
+                    defaultOpen={true}
                     colorScheme="orange"
                     onOpen={() => { if (tx.raw_transaction_id && !hasFetchedRaw && !rawDataLoading) fetchRawData(); }}
                 >
@@ -1496,11 +1594,13 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         onClose={() => setShowRunDrawer(false)}
                     />
                 )}
+                </>)}
 
                 {/* ============================================================ */}
                 {/* 🔗 Source-Mappings */}
                 {/* ============================================================ */}
-                <Section title="Source-Mappings" icon="🔗" defaultOpen={false} colorScheme="blue">
+                {tab === 'raw' && (<>
+                <Section title="Source-Mappings" icon="🔗" defaultOpen={true} colorScheme="blue">
                     <p className="mb-1 text-[12px] text-slate-500">Source value → Resolved ID</p>
 
                     <InfoRow
@@ -1639,6 +1739,35 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         }
                     />
                 </Section>
+                </>)}
+
+                {tab === 'bundle' && !tx.user_calculation_unit_id && (
+                    <div className="border border-slate-200 bg-white p-3 text-[13px] text-slate-600">
+                        {suggestionEntry ? (
+                            <>
+                                <p className="mb-2">
+                                    Suggested bundle: <b>{suggestionEntry.suggestion.label}</b>
+                                    <span className="text-slate-400"> · {Math.round(suggestionEntry.suggestion.confidence * 100)}% · {suggestionEntry.suggestion.reason}</span>
+                                </p>
+                                <BundleMemberTransactionsTable transactionIds={suggestionEntry.suggestion.transactions.map(t => t.id)} />
+                                <SuggestionPopover
+                                    suggestion={suggestionEntry.suggestion}
+                                    open={openSuggestion}
+                                    onOpenChange={setOpenSuggestion}
+                                    onAccepted={async () => {
+                                        const r = await fetch(`${API_URL}/transactions/${tx.id}`);
+                                        if (r.ok) { const updated = await r.json(); setTx(updated); onTransactionUpdate?.(updated); }
+                                    }}
+                                >
+                                    <Button size="sm" colorScheme="green" className="mt-2">Review suggestion…</Button>
+                                </SuggestionPopover>
+                            </>
+                        ) : (
+                            <p>Not in a bundle, and no bundle suggestion for this transaction.</p>
+                        )}
+                    </div>
+                )}
+                </div>
             </div>
 
             {/* Quick-create dialogs */}
