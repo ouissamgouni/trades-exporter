@@ -5,16 +5,25 @@ Maps source-specific account labels/addresses to normalized accounts.
 
 import time
 from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select, func
 from sqlalchemy import update, or_
 from sqlalchemy.exc import OperationalError
 
+from backend.api.schemas import SuggestionInfo
 from backend.db.database import get_db
 from backend.db.models import RawAccount, NormalizedTransaction
 from backend.config.loader import configure_logging
+from backend.services.raw_mapping_overview import (
+    VERIFIED_CONFIDENCE,
+    account_suggestion,
+    account_suggestion_context,
+    filter_items,
+    mapped_label_index,
+    raw_account_overview,
+)
 
 log = configure_logging("raw_accounts_api")
 router = APIRouter(prefix="/raw-accounts", tags=["Raw Accounts"])
@@ -99,6 +108,22 @@ class BulkMapAccountResponse(BaseModel):
     )
 
 
+def _propagate_account(
+    session: Session, raw_account: RawAccount, account_id: Optional[int]
+) -> None:
+    """Set from/to/account ids on transactions using this label (network-scoped when set)."""
+    T = NormalizedTransaction
+    for label_col, values in (
+        (T.source_from_account, {"from_account_id": account_id}),
+        (T.source_to_account, {"to_account_id": account_id}),
+        (T.source_account, {"account_id": account_id}),
+    ):
+        conditions = [T.source == raw_account.source, label_col == raw_account.label]
+        if raw_account.network:
+            conditions.append(T.network == raw_account.network)
+        session.exec(update(T).where(*conditions).values(values))
+
+
 @router.post("/bulk-map", response_model=BulkMapAccountResponse)
 def bulk_map_accounts(
     request: BulkMapAccountRequest,
@@ -125,54 +150,8 @@ def bulk_map_accounts(
                     errors.append(f"Raw account ID {item.raw_account_id} not found")
                     continue
 
-                source = raw_account.source
-                label = raw_account.label
-                network = raw_account.network
                 raw_account.account_id = item.account_id
-
-                # Propagate to transactions
-                # When network is set, only propagate to matching-network transactions
-                # Update from_account_id for transactions matching source_from_account
-                from_conditions = [
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_from_account == label,
-                ]
-                if network:
-                    from_conditions.append(NormalizedTransaction.network == network)
-                stmt_from = (
-                    update(NormalizedTransaction)
-                    .where(*from_conditions)
-                    .values(from_account_id=item.account_id)
-                )
-                session.exec(stmt_from)
-
-                # Update to_account_id for transactions matching source_to_account
-                to_conditions = [
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_to_account == label,
-                ]
-                if network:
-                    to_conditions.append(NormalizedTransaction.network == network)
-                stmt_to = (
-                    update(NormalizedTransaction)
-                    .where(*to_conditions)
-                    .values(to_account_id=item.account_id)
-                )
-                session.exec(stmt_to)
-
-                # Update account_id for transactions matching source_account
-                account_conditions = [
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_account == label,
-                ]
-                if network:
-                    account_conditions.append(NormalizedTransaction.network == network)
-                stmt_account = (
-                    update(NormalizedTransaction)
-                    .where(*account_conditions)
-                    .values(account_id=item.account_id)
-                )
-                session.exec(stmt_account)
+                _propagate_account(session, raw_account, item.account_id)
 
                 success_count += 1
 
@@ -189,6 +168,139 @@ def bulk_map_accounts(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Bulk mapping failed: {str(e)}")
+
+
+class RawAccountOverviewItem(BaseModel):
+    id: int
+    source: str
+    label: str
+    network: str = ""
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+    account_type: Optional[str] = None
+    status: str
+    suggestion: Optional[SuggestionInfo] = None
+    usage_count: int = 0
+    account_count: int = 0
+    from_count: int = 0
+    to_count: int = 0
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    dismissed: bool = False
+    dismissed_at: Optional[datetime] = None
+    dismissed_reason: Optional[str] = None
+
+
+class RawAccountOverviewResponse(BaseModel):
+    items: List[RawAccountOverviewItem]
+    counts: Dict[str, int]
+    verified_count: int = Field(0, description="All suggestions that may be bulk-accepted")
+    sources: List[str]
+    networks: List[str]
+
+
+class AcceptAccountSuggestionsRequest(BaseModel):
+    ids: Optional[List[int]] = Field(
+        None, description="Raw account ids; all verified suggestions when omitted"
+    )
+
+
+class AcceptAccountSuggestionsResponse(BaseModel):
+    applied: int
+    skipped_unverified: int
+
+
+class RawAccountLookupResponse(BaseModel):
+    suggestion: Optional[SuggestionInfo] = None
+    existing: List[RawAccountResponse]
+
+
+@router.get("/overview", response_model=RawAccountOverviewResponse)
+def raw_accounts_overview(
+    status: Optional[str] = Query(None, description="suggested | unmapped | mapped | ignored"),
+    q: Optional[str] = Query(None, description="Search label, source, network or account"),
+    source: Optional[str] = Query(None),
+    network: Optional[str] = Query(None),
+    session: Session = Depends(get_db),
+):
+    """Raw accounts with usage per role, status and the best mapping suggestion."""
+    items = raw_account_overview(session)
+    rows, counts = filter_items(
+        items,
+        ("label", "source", "network", "account_name"),
+        status=status,
+        q=q,
+        source=source,
+        network=network,
+    )
+    return RawAccountOverviewResponse(
+        items=rows,
+        counts=counts,
+        verified_count=sum(
+            1
+            for it in items
+            if it["status"] == "suggested" and it["suggestion"].confidence >= VERIFIED_CONFIDENCE
+        ),
+        sources=sorted({it["source"] for it in items}),
+        networks=sorted({it["network"] for it in items if it["network"]}),
+    )
+
+
+@router.post("/accept-suggestions", response_model=AcceptAccountSuggestionsResponse)
+def accept_raw_account_suggestions(
+    request: AcceptAccountSuggestionsRequest,
+    session: Session = Depends(get_db),
+):
+    """Apply verified suggestions (same label mapped elsewhere, exact address/name match)."""
+    wanted = None if request.ids is None else set(request.ids)
+    applied = skipped = 0
+    for it in raw_account_overview(session):
+        if it["status"] != "suggested" or (wanted is not None and it["id"] not in wanted):
+            continue
+        suggestion = it["suggestion"]
+        if suggestion.confidence < VERIFIED_CONFIDENCE:
+            skipped += 1
+            continue
+        raw = session.get(RawAccount, it["id"])
+        raw.account_id = suggestion.id
+        session.add(raw)
+        _propagate_account(session, raw, suggestion.id)
+        applied += 1
+    session.commit()
+    return AcceptAccountSuggestionsResponse(applied=applied, skipped_unverified=skipped)
+
+
+@router.get("/lookup", response_model=RawAccountLookupResponse)
+def lookup_raw_account(
+    label: str = Query(..., min_length=1),
+    source: str = Query(""),
+    network: str = Query(""),
+    session: Session = Depends(get_db),
+):
+    """What a new mapping would resolve to: suggestion + rows already using this label."""
+    existing = session.exec(
+        select(RawAccount).where(func.lower(RawAccount.label) == label.strip().lower())
+    ).all()
+    accounts, connectors_map = account_suggestion_context(session)
+    suggestion = account_suggestion(
+        label, source, network, accounts, mapped_label_index(existing), connectors_map
+    )
+    return RawAccountLookupResponse(
+        suggestion=suggestion,
+        existing=[
+            RawAccountResponse(
+                id=r.id,
+                source=r.source,
+                label=r.label,
+                network=r.network,
+                account_id=r.account_id,
+                dismissed=r.dismissed,
+                dismissed_at=r.dismissed_at,
+                dismissed_reason=r.dismissed_reason,
+            )
+            for r in existing
+        ],
+    )
 
 
 @router.get("", response_model=List[RawAccountResponse])
@@ -552,7 +664,11 @@ def get_raw_account_transactions(
                 "account_count": account_count,
                 "from_count": from_count,
                 "to_count": to_count,
-                "filtered_count": len(transactions),
+                "filtered_count": {
+                    "account": account_count,
+                    "from": from_count,
+                    "to": to_count,
+                }.get(field_type, total_count),
                 "field_type": field_type,
                 "limit": limit,
                 "offset": offset,
@@ -596,6 +712,8 @@ def create_raw_account(
         )
 
         session.add(raw_account)
+        if raw_account.account_id is not None:
+            _propagate_account(session, raw_account, raw_account.account_id)
         session.commit()
         session.refresh(raw_account)
 

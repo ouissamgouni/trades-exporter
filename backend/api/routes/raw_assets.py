@@ -3,15 +3,26 @@ Raw Assets endpoints for the TradeTrail API.
 Maps source-specific asset symbols (and on-chain token contracts) to normalized assets.
 """
 
+from collections import defaultdict
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import update, func, or_
+from sqlalchemy import update, func, or_, and_
 
+from backend.api.schemas import SuggestionInfo
 from backend.db.database import get_db
-from backend.db.models import RawAsset, NormalizedTransaction
+from backend.db.models import Asset, RawAsset, NormalizedTransaction, utc_now
 from backend.db.repositories.raw_asset_repository import token_key
+from backend.services.asset_contract_suggestions import suggest_asset_for_contract
+from backend.services.raw_mapping_overview import (
+    VERIFIED_CONFIDENCE,
+    filter_items,
+    raw_asset_overview,
+    symbol_suggestion,
+)
+from backend.services.spam_heuristic_service import ALLOW, BLOCK, apply_contract_verdict
 
 router = APIRouter(prefix="/raw-assets", tags=["Raw Assets"])
 
@@ -190,6 +201,168 @@ def bulk_map_assets(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Bulk mapping failed: {str(e)}")
+
+
+class RawAssetOverviewItem(BaseModel):
+    symbol: str
+    source: str
+    network: str = ""
+    contract_address: str = ""
+    asset_id: Optional[int] = None
+    asset_symbol: Optional[str] = None
+    asset_label: Optional[str] = None
+    status: str
+    suggestion: Optional[SuggestionInfo] = None
+    usage_count: int = 0
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    dismissed: bool = False
+    dismissed_at: Optional[datetime] = None
+    dismissed_reason: Optional[str] = None
+    spam_verdict: Optional[str] = None
+
+
+class RawAssetOverviewResponse(BaseModel):
+    items: List[RawAssetOverviewItem]
+    counts: Dict[str, int]
+    verified_count: int = Field(0, description="All suggestions that may be bulk-accepted")
+    sources: List[str]
+    networks: List[str]
+
+
+class RawAssetKey(BaseModel):
+    symbol: str
+    source: str
+    network: str = ""
+    contract_address: str = ""
+
+
+class AcceptSuggestionsRequest(BaseModel):
+    keys: Optional[List[RawAssetKey]] = Field(
+        None, description="Rows to accept; all verified suggestions when omitted"
+    )
+
+
+class AcceptSuggestionsResponse(BaseModel):
+    applied: int
+    skipped_unverified: int
+
+
+class RawAssetLookupResponse(BaseModel):
+    suggestion: Optional[SuggestionInfo] = None
+    existing: List[RawAssetResponse]
+
+
+class DismissRawAssetRequest(BaseModel):
+    reason: str = Field(..., min_length=1)
+
+
+@router.get("/overview", response_model=RawAssetOverviewResponse)
+def raw_assets_overview(
+    status: Optional[str] = Query(None, description="suggested | unmapped | mapped | ignored"),
+    q: Optional[str] = Query(None, description="Search symbol, contract, source or asset"),
+    source: Optional[str] = Query(None),
+    network: Optional[str] = Query(None),
+    session: Session = Depends(get_db),
+):
+    """Raw assets with usage, status and the best mapping suggestion (mapping workbench)."""
+    items = raw_asset_overview(session)
+    rows, counts = filter_items(
+        items,
+        ("symbol", "contract_address", "asset_symbol", "source", "network"),
+        status=status,
+        q=q,
+        source=source,
+        network=network,
+    )
+    return RawAssetOverviewResponse(
+        items=rows,
+        counts=counts,
+        verified_count=sum(
+            1
+            for it in items
+            if it["status"] == "suggested" and it["suggestion"].confidence >= VERIFIED_CONFIDENCE
+        ),
+        sources=sorted({it["source"] for it in items}),
+        networks=sorted({it["network"] for it in items if it["network"]}),
+    )
+
+
+@router.post("/accept-suggestions", response_model=AcceptSuggestionsResponse)
+def accept_raw_asset_suggestions(
+    request: AcceptSuggestionsRequest,
+    session: Session = Depends(get_db),
+):
+    """Apply verified suggestions (confidence >= 0.9); unverified ones are never bulk-applied."""
+    wanted = (
+        None
+        if request.keys is None
+        else {
+            (k.source, k.symbol, *token_key(k.network, k.contract_address))
+            for k in request.keys
+        }
+    )
+    applied = skipped = 0
+    for it in raw_asset_overview(session):
+        key = (it["source"], it["symbol"], it["network"], it["contract_address"])
+        if it["status"] != "suggested" or (wanted is not None and key not in wanted):
+            continue
+        suggestion = it["suggestion"]
+        if suggestion.confidence < VERIFIED_CONFIDENCE:
+            skipped += 1
+            continue
+        raw = _find(session, it["symbol"], it["source"], it["network"], it["contract_address"])
+        raw.asset_id = suggestion.id
+        session.add(raw)
+        _propagate(session, raw, suggestion.id)
+        applied += 1
+    session.commit()
+    return AcceptSuggestionsResponse(applied=applied, skipped_unverified=skipped)
+
+
+@router.get("/lookup", response_model=RawAssetLookupResponse)
+def lookup_raw_asset(
+    symbol: str = Query("", description="Source symbol"),
+    network: str = Query(""),
+    contract_address: str = Query(""),
+    session: Session = Depends(get_db),
+):
+    """What a new mapping would resolve to: suggestion + existing rows for the same contract/symbol."""
+    net, contract = token_key(network, contract_address)
+    if contract:
+        suggestion = suggest_asset_for_contract(session, symbol, net, contract)
+        existing = session.exec(
+            select(RawAsset).where(
+                RawAsset.network == net, RawAsset.contract_address == contract
+            )
+        ).all()
+    else:
+        key = symbol.strip().upper()
+        existing = (
+            session.exec(
+                select(RawAsset).where(
+                    func.upper(RawAsset.symbol) == key, RawAsset.contract_address == ""
+                )
+            ).all()
+            if key
+            else []
+        )
+        candidates = session.exec(
+            select(Asset).where(func.upper(Asset.symbol) == key)
+        ).all() if key else []
+        mapped = defaultdict(set)
+        for r in existing:
+            if r.asset_id is not None:
+                mapped[key].add(r.asset_id)
+        suggestion = symbol_suggestion(
+            key,
+            mapped,
+            {key: list(candidates)},
+            {a.asset_id: a for a in candidates},
+        ) if key else None
+    return RawAssetLookupResponse(
+        suggestion=suggestion, existing=[_to_response(r) for r in existing]
+    )
 
 
 @router.get("", response_model=List[RawAssetResponse])
@@ -386,3 +559,119 @@ def delete_raw_asset(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.post("/{source}/{symbol}/dismiss", response_model=RawAssetResponse)
+def dismiss_raw_asset(
+    source: str,
+    symbol: str,
+    request: DismissRawAssetRequest,
+    network: str = Query(""),
+    contract_address: str = Query(""),
+    session: Session = Depends(get_db),
+):
+    """Ignore a raw asset; a token row also blocks its contract as spam."""
+    raw = _find(session, symbol, source, network, contract_address)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Raw asset not found")
+    raw.dismissed = True
+    raw.dismissed_at = utc_now()
+    raw.dismissed_reason = request.reason
+    session.add(raw)
+    if raw.contract_address:
+        apply_contract_verdict(session, raw.network, raw.contract_address, BLOCK)
+    session.commit()
+    session.refresh(raw)
+    return _to_response(raw)
+
+
+@router.delete("/{source}/{symbol}/dismiss", response_model=RawAssetResponse)
+def undismiss_raw_asset(
+    source: str,
+    symbol: str,
+    network: str = Query(""),
+    contract_address: str = Query(""),
+    session: Session = Depends(get_db),
+):
+    """Restore an ignored raw asset; a token row is marked "not spam"."""
+    raw = _find(session, symbol, source, network, contract_address)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Raw asset not found")
+    raw.dismissed = False
+    raw.dismissed_at = None
+    raw.dismissed_reason = None
+    session.add(raw)
+    if raw.contract_address:
+        apply_contract_verdict(session, raw.network, raw.contract_address, ALLOW)
+    session.commit()
+    session.refresh(raw)
+    return _to_response(raw)
+
+
+@router.get("/{source}/{symbol}/transactions")
+def get_raw_asset_transactions(
+    source: str,
+    symbol: str,
+    network: str = Query(""),
+    contract_address: str = Query(""),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_db),
+):
+    """Transactions covered by a raw asset row (same scope as mapping propagation)."""
+    from backend.api.routes.transactions import _build_transaction_response
+    from sqlalchemy.orm import joinedload
+
+    T = NormalizedTransaction
+    net, contract = token_key(network, contract_address)
+    if contract:
+        contract_col = (
+            func.lower(T.token_contract_address)
+            if contract.startswith("0x")
+            else T.token_contract_address
+        )
+        condition = and_(
+            T.source == source,
+            T.source_asset_symbol == symbol,
+            func.lower(func.coalesce(T.network, "")) == net,
+            contract_col == contract,
+        )
+    else:
+        condition = and_(
+            T.source == source,
+            or_(
+                and_(
+                    T.source_asset_symbol == symbol,
+                    or_(T.token_contract_address.is_(None), T.token_contract_address == ""),
+                ),
+                T.source_price_quote_asset_symbol == symbol,
+                T.source_fee_quote_asset_symbol == symbol,
+                T.source_attributed_asset_symbol == symbol,
+            ),
+        )
+    total = session.exec(select(func.count()).select_from(T).where(condition)).one()
+    transactions = session.exec(
+        select(T)
+        .options(
+            joinedload(T.asset),
+            joinedload(T.price_quote_asset),
+            joinedload(T.fee_quote_asset),
+            joinedload(T.account_rel),
+            joinedload(T.from_account),
+            joinedload(T.to_account),
+            joinedload(T.sync_connector_run),
+        )
+        .where(condition)
+        .order_by(T.date_time.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return {
+        "results": [_build_transaction_response(tx, session) for tx in transactions],
+        "metadata": {
+            "total_count": total,
+            "filtered_count": total,
+            "limit": limit,
+            "offset": offset,
+        },
+    }
