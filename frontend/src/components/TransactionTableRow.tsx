@@ -23,6 +23,7 @@ import { AccountSelector } from './AccountSelector';
 import { AccountSuggestionBadges } from './AccountSuggestionBadges';
 import { AssetBadge } from './AssetBadge';
 import { AssetSelector } from './AssetSelector';
+import { rawAssetKeyQuery } from '../utils/rawAccountApi';
 import { SourceInfoCell } from './SourceInfoCell';
 import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
@@ -1045,6 +1046,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         placeholder="Link..."
                                         rawAssetSource={tx.source}
                                         rawAssetSymbol={tx.source_asset_symbol}
+                                        rawAssetNetwork={tx.network}
+                                        rawAssetContract={tx.token_contract_address}
                                     />
                                     {/* Show asset suggestions when editing unlinked asset */}
                                     {tx.source_asset_symbol && !tx.asset_id && (() => {
@@ -1104,6 +1107,8 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                             prefill: { symbol: tx.source_asset_symbol || '' },
                                                             rawSource: tx.source,
                                                             rawSymbol: tx.source_asset_symbol || undefined,
+                                                            rawNetwork: tx.network,
+                                                            rawContract: tx.token_contract_address,
                                                         });
                                                     }}
                                                     className="flex shrink-0 cursor-pointer items-center text-green-500 hover:text-green-700"
@@ -1114,7 +1119,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                         </div>
                                         {/* Always-visible suggestion badges for unlinked asset */}
                                         {(() => {
-                                            const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 2);
+                                            const suggestions = tx.token_contract_address ? [] : getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 2);
                                             return suggestions.length > 0 ? (
                                                 <div className="flex flex-wrap gap-0.5">
                                                     {suggestions.map((s, idx) => (
@@ -1134,7 +1139,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                                         // Also link the raw_asset
                                                                         if (tx.source_asset_symbol) {
                                                                             try {
-                                                                                await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_asset_symbol)}`, {
+                                                                                await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_asset_symbol)}${rawAssetKeyQuery(tx.network, tx.token_contract_address)}`, {
                                                                                     method: 'PATCH',
                                                                                     headers: { 'Content-Type': 'application/json' },
                                                                                     body: JSON.stringify({ asset_id: s.item.asset_id })

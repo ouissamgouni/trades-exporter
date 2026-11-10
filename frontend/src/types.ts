@@ -603,6 +603,9 @@ export interface TestFetchResponse {
 export interface RawAsset {
     symbol: string;
     source: string;
+    /** Set (with network) for on-chain token rows; '' for plain symbols */
+    network?: string;
+    contract_address?: string;
     asset_id?: number;
 }
 
@@ -1055,6 +1058,8 @@ export interface SuggestionInfo {
     id: number;
     name: string;
     confidence: number;
+    /** Token-contract suggestions only */
+    reason?: 'known_contract' | 'official_deployment' | 'unverified_contract' | null;
 }
 
 /**
@@ -1108,6 +1113,8 @@ export interface TransactionIssue {
     source_asset_symbol: string;
     source: string;
     network?: string | null;
+    /** Main-asset token contract (unlinked_asset issues from on-chain transfers) */
+    token_contract_address?: string | null;
 
     // Issue details
     issue_type: IssueType;

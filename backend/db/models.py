@@ -729,15 +729,22 @@ class PriceSnapshot(SQLModel, table=True):
 class RawAsset(SQLModel, table=True):
     """
     Raw asset mapping table.
-    Maps (symbol, source) pairs to asset_id in the assets table.
+    Maps (symbol, source, network, contract_address) to asset_id in the assets table.
+    network/contract_address are "" for non-token rows (CEX symbols, quote/fee symbols).
     """
 
     __tablename__ = "raw_assets"
-    __table_args__ = (UniqueConstraint("symbol", "source", name="uq_raw_asset"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol", "source", "network", "contract_address", name="uq_raw_asset"
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     symbol: str = Field(nullable=False, index=True)
     source: str = Field(nullable=False, index=True)
+    network: str = Field(default="", nullable=False)
+    contract_address: str = Field(default="", nullable=False)
     asset_id: Optional[int] = Field(default=None, foreign_key="assets.asset_id")
 
     # Relationships
@@ -1568,7 +1575,9 @@ class CostLot(SQLModel, table=True):
             unit_cost_in_base=self.unit_cost_in_base,
             total_cost_in_base=qty * self.unit_cost_in_base,
             economic_unit_cost_in_base=econ_unit,
-            economic_total_cost_in_base=(qty * econ_unit) if econ_unit is not None else None,
+            economic_total_cost_in_base=(qty * econ_unit)
+            if econ_unit is not None
+            else None,
             cost_lot=self,  # Set cost_lot relationship - cascade handles persistence
             unit_id=self.unit_id,  # Set unit_id for direct link to calculation unit
         )
@@ -2090,7 +2099,11 @@ class CalculationUnit(SQLModel, table=True):
     def total_realized_pnl_in_base(self) -> Decimal:
         if not self.realized_pnl_records:
             return Decimal("0")
-        return sum(r.economic_pnl for r in self.realized_pnl_records if r.pnl_in_base is not None)
+        return sum(
+            r.economic_pnl
+            for r in self.realized_pnl_records
+            if r.pnl_in_base is not None
+        )
 
     # Persisted leg accessors (for API/queries)
     @property
@@ -2482,7 +2495,11 @@ class PnlWarningAck(SQLModel, table=True):
     __tablename__ = "pnl_warning_acks"
     __table_args__ = (
         UniqueConstraint(
-            "warning_type", "transaction_id", "asset_id", "fingerprint", name="uq_pnl_warning_ack"
+            "warning_type",
+            "transaction_id",
+            "asset_id",
+            "fingerprint",
+            name="uq_pnl_warning_ack",
         ),
     )
 
@@ -3245,4 +3262,6 @@ from sqlalchemy import func as _sa_func  # noqa: E402
 ECONOMIC_UNIT_COST = _sa_func.coalesce(
     CostLot.economic_unit_cost_in_base, CostLot.unit_cost_in_base
 )
-ECONOMIC_PNL = _sa_func.coalesce(RealizedPnl.economic_pnl_in_base, RealizedPnl.pnl_in_base)
+ECONOMIC_PNL = _sa_func.coalesce(
+    RealizedPnl.economic_pnl_in_base, RealizedPnl.pnl_in_base
+)

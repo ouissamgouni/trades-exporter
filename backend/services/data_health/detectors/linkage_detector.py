@@ -10,6 +10,7 @@ from backend.services.similarity_service import (
     get_best_asset_suggestion,
     get_best_account_suggestion,
 )
+from backend.services.asset_contract_suggestions import suggest_asset_for_contract
 from .base import IssueDetector
 
 
@@ -87,6 +88,7 @@ class LinkageIssueDetector(IssueDetector):
                 issues_union.c.issue_type,
                 issues_union.c.raw_value,
                 NormalizedTransaction.network,
+                NormalizedTransaction.token_contract_address,
             )
             .join(issues_union, NormalizedTransaction.id == issues_union.c.tx_id)
             .order_by(NormalizedTransaction.date_time.desc())
@@ -133,13 +135,22 @@ class LinkageIssueDetector(IssueDetector):
         
         # Build TransactionIssue objects with suggestions
         issues_list = []
+        contract_suggestions: dict = {}
         for row in issues_rows:
-            tx_id, date_time, direction, quantity, source_asset_symbol, source, account_id, source_account, sync_connector_run_id, issue_type, raw_value, network = row
-            
+            tx_id, date_time, direction, quantity, source_asset_symbol, source, account_id, source_account, sync_connector_run_id, issue_type, raw_value, network, token_contract = row
+            is_token_issue = issue_type == IssueType.UNLINKED_ASSET.value and bool(token_contract)
+
             # Get suggestion based on issue type
             suggestion = None
             if raw_value:
-                if issue_type in (
+                if is_token_issue:
+                    key = (raw_value, network, token_contract)
+                    if key not in contract_suggestions:
+                        contract_suggestions[key] = suggest_asset_for_contract(
+                            self.session, raw_value, network, token_contract
+                        )
+                    suggestion = contract_suggestions[key]
+                elif issue_type in (
                     IssueType.UNLINKED_ASSET.value,
                     IssueType.UNLINKED_PRICE_QUOTE.value,
                     IssueType.UNLINKED_FEE_QUOTE.value,
@@ -175,6 +186,8 @@ class LinkageIssueDetector(IssueDetector):
                 quantity=float(quantity) if quantity else 0.0,
                 source_asset_symbol=source_asset_symbol or "",
                 source=source or "",
+                network=network,
+                token_contract_address=token_contract if is_token_issue else None,
                 account_id=account_id,
                 account_name=account_name,
                 source_account=source_account,

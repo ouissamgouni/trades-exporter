@@ -517,6 +517,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         prefill: AssetPrefill;
         rawSource?: string;
         rawSymbol?: string;
+        rawNetwork?: string | null;
+        rawContract?: string | null;
     } | null>(null);
 
     // ============== Invalid Row Collapse State ==============
@@ -3013,6 +3015,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 prefill={quickCreateAsset?.prefill}
                 rawAssetSource={quickCreateAsset?.rawSource}
                 rawAssetSymbol={quickCreateAsset?.rawSymbol}
+                rawAssetNetwork={quickCreateAsset?.rawNetwork}
+                rawAssetContract={quickCreateAsset?.rawContract}
             />
 
             {/* Bundle Create Dialog */}

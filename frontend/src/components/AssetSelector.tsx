@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { API_URL, Asset } from '../types';
 import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
 import { Input } from './ui/primitives';
+import { linkRawAsset as linkRawAssetApi } from '../utils/rawAccountApi';
 
 interface AssetSelectorProps {
     value: number | null;
@@ -15,6 +16,9 @@ interface AssetSelectorProps {
     // For linking raw_asset when creating new asset from transaction context
     rawAssetSource?: string;
     rawAssetSymbol?: string;
+    /** Token network/contract: link the contract-specific raw asset instead of the plain symbol */
+    rawAssetNetwork?: string | null;
+    rawAssetContract?: string | null;
 }
 
 export const AssetSelector: React.FC<AssetSelectorProps> = ({
@@ -28,6 +32,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     disabled,
     rawAssetSource,
     rawAssetSymbol,
+    rawAssetNetwork,
+    rawAssetContract,
 }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -59,25 +65,13 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
         // If raw asset context is provided, link the raw_asset to the asset
         if (rawAssetSource && rawAssetSymbol && assetId) {
             try {
-                // First try to PATCH (update existing raw asset)
-                const patchResponse = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAssetSource)}/${encodeURIComponent(rawAssetSymbol)}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ asset_id: assetId })
+                await linkRawAssetApi({
+                    source: rawAssetSource,
+                    symbol: rawAssetSymbol,
+                    network: rawAssetNetwork,
+                    contractAddress: rawAssetContract,
+                    assetId,
                 });
-
-                // If raw asset doesn't exist (404), create it
-                if (patchResponse.status === 404) {
-                    await fetch(`${API_URL}/raw-assets`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            symbol: rawAssetSymbol,
-                            source: rawAssetSource,
-                            asset_id: assetId
-                        })
-                    });
-                }
             } catch (linkErr) {
                 console.warn('Failed to link raw asset:', linkErr);
                 // Don't fail the whole operation if linking fails
@@ -105,7 +99,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     };
 
     const openCreateDialog = () => {
-        const symbolValue = search || rawAssetSymbol || defaultSymbol;
+        const symbolValue = search || defaultSymbol || rawAssetSymbol;
         setCreatePrefill({
             symbol: symbolValue,
             label: symbolValue,
@@ -173,6 +167,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 prefill={createPrefill}
                 rawAssetSource={rawAssetSource}
                 rawAssetSymbol={rawAssetSymbol}
+                rawAssetNetwork={rawAssetNetwork}
+                rawAssetContract={rawAssetContract}
             />
         </div>
     );

@@ -22,7 +22,14 @@ import { toaster } from '../../ui/toaster';
 import { Tooltip } from '../../ui/tooltip';
 import { ISSUE_CONFIG } from '../../../constants/issueConfig';
 import { useShowInContextRowAction } from '../rowActions';
-import { linkRawAccount, linkRawAsset } from '../../../utils/rawAccountApi';
+import { linkRawAccount, linkRawAsset, contractAssetSymbol } from '../../../utils/rawAccountApi';
+import { formatAddress } from '../../../utils/addressUtils';
+
+const REASON_META: Record<string, { label: string; scheme: BadgeColorScheme; hint: string }> = {
+    known_contract: { label: 'known contract', scheme: 'green', hint: 'This contract is already mapped from another source' },
+    official_deployment: { label: 'official', scheme: 'green', hint: 'CoinGecko lists this contract for the suggested asset' },
+    unverified_contract: { label: 'unverified', scheme: 'orange', hint: 'Only the symbol matches — could be spam or a bridged variant. Map manually, create a separate asset or mark as spam.' },
+};
 
 const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
 const toBadgeColor = (color: string): BadgeColorScheme =>
@@ -127,7 +134,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
             if (isAccountIssue(issue.issue_type)) {
                 await linkRawAccount({ source: issue.source, label: issue.raw_value, network: issue.network || undefined, accountId: targetId });
             } else {
-                await linkRawAsset({ source: issue.source, symbol: issue.raw_value, network: issue.network || undefined, assetId: targetId });
+                await linkRawAsset({ source: issue.source, symbol: issue.raw_value, network: issue.network, contractAddress: issue.token_contract_address, assetId: targetId });
             }
             setFixedKeys(prev => new Set(prev).add(key));
             toaster.success({ title: 'Mapped', description: `${issue.raw_value} linked` });
@@ -152,7 +159,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
             const accountIssuesList = highConfidenceIssues.filter(i => accountTypes.has(i.issue_type));
 
             if (assetIssues.length) {
-                const unique = new Map(assetIssues.map(i => [`${i.source}:${i.raw_value}`, i]));
+                const unique = new Map(assetIssues.map(i => [`${i.source}:${i.raw_value}:${i.network || ''}:${i.token_contract_address || ''}`, i]));
                 await fetch(`${API_URL}/raw-assets/bulk-map`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -160,6 +167,8 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                         mappings: Array.from(unique.values()).map(i => ({
                             symbol: i.raw_value,
                             source: i.source,
+                            network: i.network || '',
+                            contract_address: i.token_contract_address || '',
                             asset_id: i.suggestion!.id,
                         })),
                     }),
@@ -184,6 +193,30 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
             setIsApplyingAll(false);
         }
     }, [highConfidenceIssues, queryClient, onFixed]);
+
+    const handleBlockSpam = useCallback(async (issue: TransactionIssue) => {
+        const key = `${issue.transaction_id}-${issue.issue_type}`;
+        setApplyingKeys(prev => new Set(prev).add(key));
+        try {
+            const res = await fetch(`${API_URL}/spam/verdict`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transaction_id: issue.transaction_id, verdict: 'block', scope: 'token' }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            setFixedKeys(prev => new Set(prev).add(key));
+            toaster.success({ title: 'Marked as spam', description: `${issue.raw_value}: ${data.updated_count} transaction(s) rejected` });
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            queryClient.invalidateQueries({ queryKey: ['missingDataIssues'] });
+            queryClient.invalidateQueries({ queryKey: ['dataHealthStatus'] });
+            onFixed?.();
+        } catch {
+            toaster.error({ title: 'Error', description: 'Failed to mark as spam' });
+        } finally {
+            setApplyingKeys(prev => { const n = new Set(prev); n.delete(key); return n; });
+        }
+    }, [queryClient, onFixed]);
 
     // Issues column plugin
     const additionalColumns: ColumnPlugin<Transaction>[] = useMemo(() => [
@@ -242,6 +275,28 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                                             </Button>
                                         )}
                                     </div>
+                                    {issue.token_contract_address && (
+                                        <div className="flex flex-wrap items-center gap-1 text-[8px]">
+                                            <span className="font-mono text-slate-500" title={`${issue.network ?? ''} ${issue.token_contract_address}`}>
+                                                {issue.network} · {formatAddress(issue.token_contract_address)}
+                                            </span>
+                                            {issue.suggestion?.reason && REASON_META[issue.suggestion.reason] && (
+                                                <Tooltip content={`${REASON_META[issue.suggestion.reason].hint} (suggested: ${issue.suggestion.name})`} openDelay={100}>
+                                                    <Badge colorScheme={REASON_META[issue.suggestion.reason].scheme} className="text-[7px]">
+                                                        {REASON_META[issue.suggestion.reason].label} → {issue.suggestion.name}
+                                                    </Badge>
+                                                </Tooltip>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => handleBlockSpam(issue)}
+                                                className="text-red-600 hover:underline"
+                                                title="Block this token contract as spam (rejects its transactions, incl. future syncs)"
+                                            >
+                                                spam
+                                            </button>
+                                        </div>
+                                    )}
                                     <div className="min-w-0 flex-1">
                                         {isAccountIssue(issue.issue_type) ? (
                                             <AccountSelector
@@ -264,9 +319,15 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                                                 onAssetCreated={onAssetsUpdated}
                                                 size="sm"
                                                 placeholder="+ Add"
-                                                defaultSymbol={issue.raw_value}
+                                                defaultSymbol={
+                                                    issue.token_contract_address && issue.suggestion?.reason === 'unverified_contract'
+                                                        ? contractAssetSymbol(issue.raw_value, issue.token_contract_address)
+                                                        : issue.raw_value
+                                                }
                                                 rawAssetSymbol={issue.raw_value}
                                                 rawAssetSource={issue.source}
+                                                rawAssetNetwork={issue.network}
+                                                rawAssetContract={issue.token_contract_address}
                                             />
                                         )}
                                     </div>
@@ -277,7 +338,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
                 );
             },
         },
-    ], [issuesByTxId, fixedKeys, applyingKeys, accounts, assets, handleFix, onAssetsUpdated, onAccountsUpdated]);
+    ], [issuesByTxId, fixedKeys, applyingKeys, accounts, assets, handleFix, handleBlockSpam, onAssetsUpdated, onAccountsUpdated]);
 
     // Table configuration
     const tableConfig: TableConfig<Transaction> = useMemo(() => ({

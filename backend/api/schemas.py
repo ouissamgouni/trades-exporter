@@ -778,6 +778,10 @@ class SuggestionInfo(BaseModel):
     id: int = Field(..., description="Suggested asset_id or account_id")
     name: str = Field(..., description="Display name (symbol/label)")
     confidence: float = Field(..., description="Match confidence (0-1)")
+    reason: Optional[str] = Field(
+        None,
+        description="Why it was suggested: known_contract | official_deployment | unverified_contract",
+    )
 
 
 class RawAssetIssue(BaseModel):
@@ -979,6 +983,9 @@ class TransactionIssue(BaseModel):
     source: str = Field(..., description="Source platform/exchange")
     network: Optional[str] = Field(
         None, description="Blockchain network (e.g., ethereum, polygon)"
+    )
+    token_contract_address: Optional[str] = Field(
+        None, description="Token contract of the main asset (on-chain transfers)"
     )
 
     # Issue details

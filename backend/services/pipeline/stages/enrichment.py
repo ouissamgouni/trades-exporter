@@ -54,7 +54,10 @@ class AssetEnrichmentStage(PipelineStage):
                 # Enrich main asset
                 if tx.source_asset_symbol and not tx.asset_id:
                     raw_asset = raw_asset_repo.get_or_create(
-                        tx.source_asset_symbol, source
+                        tx.source_asset_symbol,
+                        source,
+                        tx.network or "",
+                        tx.token_contract_address or "",
                     )
                     if raw_asset.asset_id:
                         tx.asset_id = raw_asset.asset_id
