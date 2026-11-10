@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Badge, Button, Input, Spinner, type BadgeColorScheme } from '../ui/primitives';
-import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiDatabase, FiRefreshCw, FiChevronDown, FiEdit2, FiArchive, FiArrowDown, FiArrowUp } from 'react-icons/fi';
+import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiDatabase, FiRefreshCw, FiChevronDown, FiEdit2, FiClock, FiMinusCircle, FiXCircle, FiArrowDown, FiArrowUp } from 'react-icons/fi';
 import { PriceResponse, PriceState } from '../../types';
 import { formatRelativeTime, formatDateTimeLocale } from '../../utils/dateUtils';
 import { Tooltip } from '../ui/tooltip';
@@ -53,15 +53,15 @@ const CATEGORY_META: Record<Category, { label: string; scheme: BadgeColorScheme;
     na: { label: 'N/A', scheme: 'gray', ring: 'ring-slate-400' },
 };
 
-const STATE_STYLE: Record<PriceState, { icon: React.ComponentType<{ size?: number }>; color: string; bg: string }> = {
-    live: { icon: FiCheckCircle, color: 'text-green-500', bg: 'hover:bg-gray-50' },
-    cached: { icon: FiArchive, color: 'text-slate-500', bg: 'hover:bg-gray-50' },
-    fallback: { icon: FiAlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 hover:bg-orange-100' },
-    stale: { icon: FiAlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 hover:bg-orange-100' },
-    failed_with_last_known: { icon: FiAlertTriangle, color: 'text-orange-600', bg: 'bg-orange-50 hover:bg-orange-100' },
-    failed: { icon: FiAlertCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100' },
-    missing: { icon: FiAlertCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100' },
-    skipped: { icon: FiDatabase, color: 'text-gray-400', bg: 'bg-gray-50 hover:bg-gray-100' },
+const STATE_STYLE: Record<PriceState, { icon: React.ComponentType<{ size?: number }>; color: string; bg: string; hint: string }> = {
+    live: { icon: FiCheckCircle, color: 'text-green-500', bg: 'hover:bg-gray-50', hint: 'Fresh price fetched live' },
+    cached: { icon: FiClock, color: 'text-slate-500', bg: 'hover:bg-gray-50', hint: 'Stored price, not refreshed live yet' },
+    fallback: { icon: FiAlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 hover:bg-orange-100', hint: 'Priced from a fallback source' },
+    stale: { icon: FiAlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 hover:bg-orange-100', hint: 'Last known price is stale' },
+    failed_with_last_known: { icon: FiAlertTriangle, color: 'text-orange-600', bg: 'bg-orange-50 hover:bg-orange-100', hint: 'Live fetch failed — using last known price' },
+    failed: { icon: FiXCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100', hint: 'Price fetch failed, no price available' },
+    missing: { icon: FiAlertCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100', hint: 'No price available' },
+    skipped: { icon: FiMinusCircle, color: 'text-gray-400', bg: 'bg-gray-50 hover:bg-gray-100', hint: 'Not priced — no open position (no active cost lots)' },
 };
 
 const categoryOf = (state: PriceState): Category => {
@@ -256,7 +256,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                     <React.Fragment key={id}>
                                         <tr className={`border-b border-gray-50 ${isLoading ? 'bg-blue-50/40' : style.bg}`}>
                                             <td className="py-1.5 pl-3">
-                                                {isLoading ? <Spinner size="xs" className="text-blue-500" /> : <span className={style.color}><Icon size={13} /></span>}
+                                                {isLoading ? <Spinner size="xs" className="text-blue-500" /> : <span className={style.color} title={style.hint} aria-label={style.hint}><Icon size={13} /></span>}
                                             </td>
                                             <td className="max-w-[260px] py-1.5">
                                                 <AssetNameCell id={id} symbol={item.asset.symbol} label={item.asset.label} pnlVersionId={pnlVersionId} />

@@ -390,6 +390,8 @@ export interface Asset {
     denomination_currency?: { asset_id: number; symbol: string; label?: string | null } | null;
     price_getters?: AssetPriceGetter[];
     categories?: Category[];  // Categories assigned to this asset
+    /** (network, token contract) pairs seen in the asset's non-rejected transactions (single-asset GET only) */
+    contracts?: { network: string; contract_address: string; tx_count: number }[];
 }
 
 export interface PriceSnapshot {

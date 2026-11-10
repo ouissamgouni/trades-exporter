@@ -112,6 +112,28 @@ def test_pnl_transaction_groups_unknown_version(client):
     assert response.status_code == 404
 
 
+def test_get_asset_includes_contracts():
+    from backend.db.models import Asset
+
+    session = MagicMock()
+    session.get.return_value = Asset(asset_id=7, symbol="USDC")
+    categories, contracts = MagicMock(), MagicMock()
+    categories.all.return_value = []
+    contracts.all.return_value = [("base", "0x8335", 5), ("solana", "EPjF", 3)]
+    session.exec.side_effect = [categories, contracts]
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        with patch("backend.api.main.init_db"):
+            response = TestClient(app).get("/assets/7")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["contracts"] == [
+        {"network": "base", "contract_address": "0x8335", "tx_count": 5},
+        {"network": "solana", "contract_address": "EPjF", "tx_count": 3},
+    ]
+
+
 def test_update_transaction_validation(client):
     """Test transaction update validates fields."""
     # Invalid review_status should fail validation - use a value not in the enum

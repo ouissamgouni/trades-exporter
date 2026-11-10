@@ -20,6 +20,7 @@ import { useAssets } from '../../hooks/useAssets';
 import { usePortfolioTimeline, useVersionMetrics, useBookMetrics, useLiveMetrics, useVersionPerformers } from '../../hooks/useChartData';
 import type { PortfolioTimelineResponse, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse } from '../../hooks/useChartData';
 import { computeDelta } from './deltaUtils';
+import { publishLiveBalanceSnapshot } from '../../hooks/useLiveBalanceSnapshot';
 import type { BalanceHealthData } from './SummaryCards';
 import type { VersionListItem, AssetPnLRow, AccountBalanceBreakdown, UnmappedLiveAsset } from './types';
 import {
@@ -260,6 +261,10 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
         }
         return map;
     }, [liveAccountBalancesRaw]);
+
+    useEffect(() => {
+        if (liveBalanceMap.size > 0) publishLiveBalanceSnapshot(liveBalanceMap);
+    }, [liveBalanceMap]);
 
     const liveAccountBalanceMap = useMemo(() => {
         if (liveAccountBalancesRaw.length === 0) return new Map<string, Map<number, number>>();

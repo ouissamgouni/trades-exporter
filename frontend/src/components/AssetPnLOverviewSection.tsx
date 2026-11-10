@@ -26,7 +26,7 @@ import { useQuery } from '@tanstack/react-query';
 
 // ─── Account balances hook (standalone, single-asset) ───────────────────────
 
-function useAccountBalances(versionId: number | null, assetId: number | null) {
+export function useAccountBalances(versionId: number | null, assetId: number | null) {
     const result = useQuery<PerAccountBalanceItem[]>({
         queryKey: ['account-balances-asset', versionId, assetId],
         queryFn: async ({ signal }) => {
