@@ -1,16 +1,17 @@
 """
 Raw Assets endpoints for the TradeTrail API.
-Maps source-specific asset symbols to normalized assets.
+Maps source-specific asset symbols (and on-chain token contracts) to normalized assets.
 """
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import update
+from sqlalchemy import update, func, or_
 
 from backend.db.database import get_db
 from backend.db.models import RawAsset, NormalizedTransaction
+from backend.db.repositories.raw_asset_repository import token_key
 
 router = APIRouter(prefix="/raw-assets", tags=["Raw Assets"])
 
@@ -20,6 +21,8 @@ class RawAssetCreate(BaseModel):
 
     symbol: str
     source: str
+    network: str = ""
+    contract_address: str = ""
     asset_id: Optional[int] = None
 
 
@@ -34,6 +37,8 @@ class RawAssetResponse(BaseModel):
 
     symbol: str
     source: str
+    network: str = ""
+    contract_address: str = ""
     asset_id: Optional[int] = None
 
 
@@ -42,6 +47,8 @@ class BulkMapAssetItem(BaseModel):
 
     symbol: str = Field(..., description="Raw asset symbol")
     source: str = Field(..., description="Source platform/exchange")
+    network: str = Field("", description="Token network (only used with a contract)")
+    contract_address: str = Field("", description="Token contract; empty for non-token symbols")
     asset_id: int = Field(..., description="Target asset_id to map to")
 
 
@@ -63,6 +70,76 @@ class BulkMapResponse(BaseModel):
     )
 
 
+def _to_response(ra: RawAsset) -> RawAssetResponse:
+    return RawAssetResponse(
+        symbol=ra.symbol,
+        source=ra.source,
+        network=ra.network or "",
+        contract_address=ra.contract_address or "",
+        asset_id=ra.asset_id,
+    )
+
+
+def _find(
+    session: Session, symbol: str, source: str, network: str, contract_address: str
+) -> Optional[RawAsset]:
+    network, contract = token_key(network, contract_address)
+    return session.exec(
+        select(RawAsset).where(
+            RawAsset.symbol == symbol,
+            RawAsset.source == source,
+            RawAsset.network == network,
+            RawAsset.contract_address == contract,
+        )
+    ).first()
+
+
+def _propagate(session: Session, raw: RawAsset, asset_id: Optional[int]) -> None:
+    """Apply a raw asset mapping to the transactions it covers.
+
+    A token row only covers transactions of that exact contract; a plain row covers
+    contract-less transactions plus quote/fee/attributed symbols.
+    """
+    T = NormalizedTransaction
+    if raw.contract_address:
+        contract_col = (
+            func.lower(T.token_contract_address)
+            if raw.contract_address.startswith("0x")
+            else T.token_contract_address
+        )
+        session.exec(
+            update(T)
+            .where(
+                T.source == raw.source,
+                T.source_asset_symbol == raw.symbol,
+                func.lower(func.coalesce(T.network, "")) == raw.network,
+                contract_col == raw.contract_address,
+            )
+            .values(asset_id=asset_id)
+        )
+        return
+
+    session.exec(
+        update(T)
+        .where(
+            T.source == raw.source,
+            T.source_asset_symbol == raw.symbol,
+            or_(T.token_contract_address.is_(None), T.token_contract_address == ""),
+        )
+        .values(asset_id=asset_id)
+    )
+    for symbol_col, id_field in (
+        (T.source_price_quote_asset_symbol, "price_quote_asset_id"),
+        (T.source_fee_quote_asset_symbol, "fee_quote_asset_id"),
+        (T.source_attributed_asset_symbol, "attributed_asset_id"),
+    ):
+        session.exec(
+            update(T)
+            .where(T.source == raw.source, symbol_col == raw.symbol)
+            .values({id_field: asset_id})
+        )
+
+
 @router.post("/bulk-map", response_model=BulkMapResponse)
 def bulk_map_assets(
     request: BulkMapAssetRequest,
@@ -81,72 +158,23 @@ def bulk_map_assets(
     try:
         for item in request.mappings:
             try:
-                # Find the raw asset
-                statement = select(RawAsset).where(
-                    RawAsset.symbol == item.symbol,
-                    RawAsset.source == item.source,
+                raw_asset = _find(
+                    session, item.symbol, item.source, item.network, item.contract_address
                 )
-                raw_asset = session.exec(statement).first()
-
                 if not raw_asset:
-                    # Create if doesn't exist
+                    network, contract = token_key(item.network, item.contract_address)
                     raw_asset = RawAsset(
                         symbol=item.symbol,
                         source=item.source,
+                        network=network,
+                        contract_address=contract,
                         asset_id=item.asset_id,
                     )
                     session.add(raw_asset)
                 else:
                     raw_asset.asset_id = item.asset_id
 
-                # Propagate to transactions
-                # Update asset_id for transactions matching source_asset_symbol
-                stmt_asset = (
-                    update(NormalizedTransaction)
-                    .where(
-                        NormalizedTransaction.source == item.source,
-                        NormalizedTransaction.source_asset_symbol == item.symbol,
-                    )
-                    .values(asset_id=item.asset_id)
-                )
-                session.exec(stmt_asset)
-
-                # Update price_quote_asset_id for transactions matching source_price_quote_asset_symbol
-                stmt_price = (
-                    update(NormalizedTransaction)
-                    .where(
-                        NormalizedTransaction.source == item.source,
-                        NormalizedTransaction.source_price_quote_asset_symbol
-                        == item.symbol,
-                    )
-                    .values(price_quote_asset_id=item.asset_id)
-                )
-                session.exec(stmt_price)
-
-                # Update fee_quote_asset_id for transactions matching source_fee_quote_asset_symbol
-                stmt_fee = (
-                    update(NormalizedTransaction)
-                    .where(
-                        NormalizedTransaction.source == item.source,
-                        NormalizedTransaction.source_fee_quote_asset_symbol
-                        == item.symbol,
-                    )
-                    .values(fee_quote_asset_id=item.asset_id)
-                )
-                session.exec(stmt_fee)
-
-                # Update attributed_asset_id for transactions matching source_attributed_asset_symbol
-                stmt_attr = (
-                    update(NormalizedTransaction)
-                    .where(
-                        NormalizedTransaction.source == item.source,
-                        NormalizedTransaction.source_attributed_asset_symbol
-                        == item.symbol,
-                    )
-                    .values(attributed_asset_id=item.asset_id)
-                )
-                session.exec(stmt_attr)
-
+                _propagate(session, raw_asset, item.asset_id)
                 success_count += 1
 
             except Exception as e:
@@ -194,21 +222,14 @@ def list_raw_assets(
             statement = statement.where(RawAsset.asset_id == None)
 
         statement = (
-            statement.order_by(RawAsset.source, RawAsset.symbol)
+            statement.order_by(
+                RawAsset.source, RawAsset.symbol, RawAsset.network, RawAsset.contract_address
+            )
             .offset(offset)
             .limit(limit)
         )
 
-        raw_assets = session.exec(statement).all()
-
-        return [
-            RawAssetResponse(
-                symbol=ra.symbol,
-                source=ra.source,
-                asset_id=ra.asset_id,
-            )
-            for ra in raw_assets
-        ]
+        return [_to_response(ra) for ra in session.exec(statement).all()]
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
@@ -218,6 +239,8 @@ def list_raw_assets(
 def get_raw_asset(
     source: str,
     symbol: str,
+    network: str = Query("", description="Token network (with contract_address)"),
+    contract_address: str = Query("", description="Token contract address"),
     session: Session = Depends(get_db),
 ):
     """
@@ -227,20 +250,12 @@ def get_raw_asset(
     - **symbol**: Asset symbol from the source
     """
     try:
-        statement = select(RawAsset).where(
-            RawAsset.symbol == symbol,
-            RawAsset.source == source,
-        )
-        raw_asset = session.exec(statement).first()
+        raw_asset = _find(session, symbol, source, network, contract_address)
 
         if not raw_asset:
             raise HTTPException(status_code=404, detail="Raw asset not found")
 
-        return RawAssetResponse(
-            symbol=raw_asset.symbol,
-            source=raw_asset.source,
-            asset_id=raw_asset.asset_id,
-        )
+        return _to_response(raw_asset)
 
     except HTTPException:
         raise
@@ -259,12 +274,13 @@ def create_raw_asset(
     - **raw_asset_data**: The raw asset data to create
     """
     try:
-        # Check if raw asset already exists
-        statement = select(RawAsset).where(
-            RawAsset.symbol == raw_asset_data.symbol,
-            RawAsset.source == raw_asset_data.source,
+        existing = _find(
+            session,
+            raw_asset_data.symbol,
+            raw_asset_data.source,
+            raw_asset_data.network,
+            raw_asset_data.contract_address,
         )
-        existing = session.exec(statement).first()
 
         if existing:
             raise HTTPException(
@@ -272,21 +288,24 @@ def create_raw_asset(
                 detail=f"Raw asset ({raw_asset_data.symbol}, {raw_asset_data.source}) already exists",
             )
 
+        network, contract = token_key(
+            raw_asset_data.network, raw_asset_data.contract_address
+        )
         raw_asset = RawAsset(
             symbol=raw_asset_data.symbol,
             source=raw_asset_data.source,
+            network=network,
+            contract_address=contract,
             asset_id=raw_asset_data.asset_id,
         )
 
         session.add(raw_asset)
+        if raw_asset.asset_id is not None:
+            _propagate(session, raw_asset, raw_asset.asset_id)
         session.commit()
         session.refresh(raw_asset)
 
-        return RawAssetResponse(
-            symbol=raw_asset.symbol,
-            source=raw_asset.source,
-            asset_id=raw_asset.asset_id,
-        )
+        return _to_response(raw_asset)
 
     except HTTPException:
         raise
@@ -299,6 +318,8 @@ def update_raw_asset(
     source: str,
     symbol: str,
     asset_update: RawAssetUpdate,
+    network: str = Query("", description="Token network (with contract_address)"),
+    contract_address: str = Query("", description="Token contract address"),
     session: Session = Depends(get_db),
 ):
     """
@@ -307,80 +328,24 @@ def update_raw_asset(
 
     - **source**: Source exchange/platform name
     - **symbol**: Asset symbol from the source
-    - **update**: Fields to update
+    - **network** / **contract_address**: select the token row (empty = plain symbol row)
     """
     try:
-        statement = select(RawAsset).where(
-            RawAsset.symbol == symbol,
-            RawAsset.source == source,
-        )
-        existing = session.exec(statement).first()
+        existing = _find(session, symbol, source, network, contract_address)
 
         if not existing:
             raise HTTPException(status_code=404, detail="Raw asset not found")
 
-        # Update asset_id
         update_data = asset_update.model_dump(exclude_unset=True)
         if "asset_id" in update_data:
-            new_asset_id = update_data["asset_id"]
-            existing.asset_id = new_asset_id
-
-            # Propagate asset_id to transactions where this raw asset is used
-            # Use bulk updates for efficiency and reliability
-
-            # Update asset_id for transactions matching source_asset_symbol
-            stmt_asset = (
-                update(NormalizedTransaction)
-                .where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_asset_symbol == symbol,
-                )
-                .values(asset_id=new_asset_id)
-            )
-            session.exec(stmt_asset)
-
-            # Update price_quote_asset_id for transactions matching source_price_quote_asset_symbol
-            stmt_price = (
-                update(NormalizedTransaction)
-                .where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_price_quote_asset_symbol == symbol,
-                )
-                .values(price_quote_asset_id=new_asset_id)
-            )
-            session.exec(stmt_price)
-
-            # Update fee_quote_asset_id for transactions matching source_fee_quote_asset_symbol
-            stmt_fee = (
-                update(NormalizedTransaction)
-                .where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_fee_quote_asset_symbol == symbol,
-                )
-                .values(fee_quote_asset_id=new_asset_id)
-            )
-            session.exec(stmt_fee)
-
-            # Update attributed_asset_id for transactions matching source_attributed_asset_symbol
-            stmt_attr = (
-                update(NormalizedTransaction)
-                .where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_attributed_asset_symbol == symbol,
-                )
-                .values(attributed_asset_id=new_asset_id)
-            )
-            session.exec(stmt_attr)
+            existing.asset_id = update_data["asset_id"]
+            _propagate(session, existing, existing.asset_id)
 
         session.add(existing)
         session.commit()
         session.refresh(existing)
 
-        return RawAssetResponse(
-            symbol=existing.symbol,
-            source=existing.source,
-            asset_id=existing.asset_id,
-        )
+        return _to_response(existing)
 
     except HTTPException:
         raise
@@ -392,6 +357,8 @@ def update_raw_asset(
 def delete_raw_asset(
     source: str,
     symbol: str,
+    network: str = Query("", description="Token network (with contract_address)"),
+    contract_address: str = Query("", description="Token contract address"),
     session: Session = Depends(get_db),
 ):
     """
@@ -401,11 +368,7 @@ def delete_raw_asset(
     - **symbol**: Asset symbol from the source
     """
     try:
-        statement = select(RawAsset).where(
-            RawAsset.symbol == symbol,
-            RawAsset.source == source,
-        )
-        existing = session.exec(statement).first()
+        existing = _find(session, symbol, source, network, contract_address)
 
         if not existing:
             raise HTTPException(status_code=404, detail="Raw asset not found")
