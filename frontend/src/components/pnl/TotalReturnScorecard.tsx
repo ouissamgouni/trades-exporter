@@ -663,9 +663,9 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         <div className="text-xs text-gray-400">Loading performers...</div>
                                     </div>
                                 ) : (
-                                    <div className="border border-purple-200 bg-white p-2">
+                                    <div className="border border-purple-200 bg-white p-3">
                                         {/* Controls row: badges left, $/%+slider right */}
-                                        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                                             {/* Left: Asset/Account/Category + sort metric badges */}
                                             <div className="flex flex-wrap items-center gap-0.5">
                                                 <Badge
@@ -739,25 +739,25 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-2 gap-4">
                                             {/* Best */}
                                             <div>
-                                                <div className="mb-1 flex items-center justify-between gap-1">
+                                                <div className="mb-2 flex items-center justify-between gap-1 border-b border-gray-100 pb-1.5">
                                                     <div className="flex items-center gap-1">
                                                         <FiTrendingUp size={14} color="#38A169" />
                                                         <span className="text-sm font-semibold text-green-600">Best</span>
                                                     </div>
                                                     {topTotal && (
-                                                        <span className="text-[10px] text-gray-500">
-                                                            Total <span className="font-semibold text-green-600">{topTotal}</span>
+                                                        <span className="text-xs text-gray-500">
+                                                            Total <span className="text-base font-bold text-green-600">{topTotal}</span>
                                                         </span>
                                                     )}
                                                 </div>
                                                 {visibleTop.length === 0 ? (
                                                     <div className="text-[10px] text-gray-400">No positive returns</div>
                                                 ) : (
-                                                    <div className="max-h-[200px] overflow-y-auto">
-                                                        <div className="flex flex-col gap-0.5">
+                                                    <div className="max-h-[240px] overflow-y-auto">
+                                                        <div className="flex flex-col gap-1">
                                                             {visibleTop.map((p, i) => (
                                                                 <PerformerMiniRow
                                                                     key={p.id}
@@ -779,22 +779,22 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
 
                                             {/* Worst */}
                                             <div>
-                                                <div className="mb-1 flex items-center justify-between gap-1">
+                                                <div className="mb-2 flex items-center justify-between gap-1 border-b border-gray-100 pb-1.5">
                                                     <div className="flex items-center gap-1">
                                                         <FiTrendingDown size={14} color="#E53E3E" />
                                                         <span className="text-sm font-semibold text-red-600">Worst</span>
                                                     </div>
                                                     {flopTotal && (
-                                                        <span className="text-[10px] text-gray-500">
-                                                            Total <span className="font-semibold text-red-600">{flopTotal}</span>
+                                                        <span className="text-xs text-gray-500">
+                                                            Total <span className="text-base font-bold text-red-600">{flopTotal}</span>
                                                         </span>
                                                     )}
                                                 </div>
                                                 {visibleFlop.length === 0 ? (
                                                     <div className="text-[10px] text-gray-400">No negative returns</div>
                                                 ) : (
-                                                    <div className="max-h-[200px] overflow-y-auto">
-                                                        <div className="flex flex-col gap-0.5">
+                                                    <div className="max-h-[240px] overflow-y-auto">
+                                                        <div className="flex flex-col gap-1">
                                                             {visibleFlop.map((p, i) => (
                                                                 <PerformerMiniRow
                                                                     key={p.id}
@@ -900,7 +900,7 @@ const PerformerMiniRow: React.FC<{
 
     return (
         <div
-            className={`flex items-center gap-1 px-1 py-0.5 transition-colors ${onClick ? 'cursor-pointer hover:bg-gray-50' : 'cursor-default'}`}
+            className={`flex items-center gap-1.5 px-1 py-1 transition-colors ${onClick ? 'cursor-pointer hover:bg-gray-50' : 'cursor-default'}`}
             onClick={onClick}
         >
             <div className="min-w-[12px] text-right text-[10px] font-bold text-gray-400">{rank}</div>
@@ -919,7 +919,7 @@ const PerformerMiniRow: React.FC<{
                     <LuInfo size={11} />
                 </button>
             )}
-            <div className={`relative h-3 flex-1 overflow-hidden ${isPositive ? 'bg-green-50' : 'bg-red-50'}`}>
+            <div className={`relative h-4 flex-1 overflow-hidden ${isPositive ? 'bg-green-50' : 'bg-red-50'}`}>
                 <div className={`h-full transition-all duration-300 ${isPositive ? 'bg-green-400' : 'bg-red-400'}`} style={{ width: `${barPct}%` }} />
                 <div className={`absolute left-1 top-1/2 -translate-y-1/2 text-[10px] font-bold ${barPct > 30 ? 'text-white' : isPositive ? 'text-green-700' : 'text-red-700'}`}>
                     {performerPrimaryValue(item, sortBy, baseCurrency, display)}

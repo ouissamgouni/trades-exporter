@@ -190,7 +190,16 @@ def apply_token_verdict(
     network, contract = token_key(tx)
     if not contract:
         raise ValueError("Transaction has no token contract address")
+    return apply_contract_verdict(session, network, contract, verdict)
 
+
+def apply_contract_verdict(
+    session: Session, network: str, contract: str, verdict: str
+) -> Dict[str, Any]:
+    """Record an allow/block verdict for a (network, contract) token and apply it to all its rows."""
+    if verdict not in (ALLOW, BLOCK):
+        raise ValueError(f"Unknown verdict '{verdict}'")
+    network, contract = (network or "").lower(), (contract or "").lower()
     rule = session.exec(
         select(SpamTokenRule)
         .where(SpamTokenRule.network == network)

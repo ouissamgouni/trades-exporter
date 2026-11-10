@@ -10,9 +10,15 @@ from datetime import datetime, timezone
 import pytest
 from sqlmodel import select
 
-from backend.api.routes.raw_assets import _propagate
-from backend.db.models import Asset, NormalizedTransaction, RawAsset
+from backend.api.routes.raw_assets import (
+    DismissRawAssetRequest,
+    _propagate,
+    dismiss_raw_asset,
+    undismiss_raw_asset,
+)
+from backend.db.models import Asset, NormalizedTransaction, RawAsset, SpamTokenRule
 from backend.db.repositories.raw_asset_repository import RawAssetRepository
+from backend.services.raw_mapping_overview import raw_asset_overview
 
 T0 = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
 REAL = "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b"
@@ -110,3 +116,32 @@ class TestRawAssetContracts:
         assert ids[real_tx.id] == asset.asset_id
         assert ids[plain_tx.id] == asset.asset_id
         assert ids[fake_tx.id] is None
+
+    def test_ignoring_token_row_blocks_contract_and_restore_allows(self, pg_session):
+        tx = _tx(pg_session, FAKE, quantity=4)
+        _add(
+            pg_session,
+            RawAsset(symbol="CTRTEST", source="ctr_test_src", network="base", contract_address=FAKE),
+        )
+
+        dismiss_raw_asset(
+            "ctr_test_src", "CTRTEST", DismissRawAssetRequest(reason="spam"),
+            network="base", contract_address=FAKE, session=pg_session,
+        )
+        rule = pg_session.exec(
+            select(SpamTokenRule).where(SpamTokenRule.contract_address == FAKE)
+        ).one()
+        row = next(
+            it for it in raw_asset_overview(pg_session)
+            if it["source"] == "ctr_test_src" and it["contract_address"] == FAKE
+        )
+        pg_session.refresh(tx)
+        assert (rule.verdict, row["status"], row["usage_count"]) == ("block", "ignored", 1)
+        assert tx.review_status == "invalid"
+
+        undismiss_raw_asset(
+            "ctr_test_src", "CTRTEST", network="base", contract_address=FAKE, session=pg_session,
+        )
+        pg_session.refresh(rule)
+        pg_session.refresh(tx)
+        assert (rule.verdict, tx.review_status) == ("allow", "pending")

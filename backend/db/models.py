@@ -747,6 +747,10 @@ class RawAsset(SQLModel, table=True):
     contract_address: str = Field(default="", nullable=False)
     asset_id: Optional[int] = Field(default=None, foreign_key="assets.asset_id")
 
+    dismissed: bool = Field(default=False, nullable=False)
+    dismissed_at: Optional[datetime] = Field(default=None)
+    dismissed_reason: Optional[str] = Field(default=None)
+
     # Relationships
     asset: Optional[Asset] = Relationship(back_populates="raw_assets")
 
