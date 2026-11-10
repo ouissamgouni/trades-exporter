@@ -23,6 +23,7 @@ import { API_URL, DimensionWithCategories } from '../types';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
 import { toaster } from './ui/toaster';
 import { useAssets } from '../hooks/useAssets';
+import { linkRawAsset as linkRawAssetApi } from '../utils/rawAccountApi';
 
 const VALID_BADGE_COLORS: BadgeColorScheme[] = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
 const toBadgeColor = (c: string): BadgeColorScheme =>
@@ -41,6 +42,8 @@ interface AssetFormDialogProps {
     /** If provided, link the raw_asset to the newly created asset. */
     rawAssetSource?: string;
     rawAssetSymbol?: string;
+    rawAssetNetwork?: string | null;
+    rawAssetContract?: string | null;
 }
 
 const AssetFormDialog: React.FC<AssetFormDialogProps> = ({
@@ -49,6 +52,8 @@ const AssetFormDialog: React.FC<AssetFormDialogProps> = ({
     prefill,
     rawAssetSource,
     rawAssetSymbol,
+    rawAssetNetwork,
+    rawAssetContract,
 }) => {
     const { assets: allAssets, refetchAssets } = useAssets();
     const [formData, setFormData] = useState({
@@ -113,25 +118,13 @@ const AssetFormDialog: React.FC<AssetFormDialogProps> = ({
     const linkRawAsset = async (assetId: number) => {
         if (!rawAssetSource || !rawAssetSymbol || !assetId) return;
         try {
-            const patchResponse = await fetch(
-                `${API_URL}/raw-assets/${encodeURIComponent(rawAssetSource)}/${encodeURIComponent(rawAssetSymbol)}`,
-                {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ asset_id: assetId }),
-                }
-            );
-            if (patchResponse.status === 404) {
-                await fetch(`${API_URL}/raw-assets`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        symbol: rawAssetSymbol,
-                        source: rawAssetSource,
-                        asset_id: assetId,
-                    }),
-                });
-            }
+            await linkRawAssetApi({
+                source: rawAssetSource,
+                symbol: rawAssetSymbol,
+                network: rawAssetNetwork,
+                contractAddress: rawAssetContract,
+                assetId,
+            });
         } catch (err) {
             console.warn('Failed to link raw asset:', err);
         }

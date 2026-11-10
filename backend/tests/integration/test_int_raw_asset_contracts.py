@@ -27,39 +27,56 @@ def _add(session, obj):
 
 
 def _tx(session, contract, source="ctr_test_src", **kw):
-    return _add(session, NormalizedTransaction(
-        source=source,
-        source_transaction_id=f"{source}-{contract}-{kw.get('quantity', 1)}",
-        date_time=T0,
-        direction="inflow",
-        transaction_type="transfer",
-        source_asset_symbol="CTRTEST",
-        quantity=kw.pop("quantity", 1),
-        network="base",
-        token_contract_address=contract,
-        review_status="pending",
-        **kw,
-    ))
+    return _add(
+        session,
+        NormalizedTransaction(
+            source=source,
+            source_transaction_id=f"{source}-{contract}-{kw.get('quantity', 1)}",
+            date_time=T0,
+            direction="inflow",
+            transaction_type="transfer",
+            source_asset_symbol="CTRTEST",
+            quantity=kw.pop("quantity", 1),
+            network="base",
+            token_contract_address=contract,
+            review_status="pending",
+            **kw,
+        ),
+    )
 
 
 @pytest.mark.integration
 class TestRawAssetContracts:
     def test_new_contract_stays_unmapped_even_if_symbol_mapped(self, pg_session):
         asset = _add(pg_session, Asset(symbol="CTRTEST"))
-        _add(pg_session, RawAsset(symbol="CTRTEST", source="ctr_test_src", asset_id=asset.asset_id))
+        _add(
+            pg_session,
+            RawAsset(symbol="CTRTEST", source="ctr_test_src", asset_id=asset.asset_id),
+        )
         repo = RawAssetRepository(pg_session)
 
-        raw = repo.get_or_create("CTRTEST", "ctr_test_src", "Base", "0x" + FAKE[2:].upper())
+        raw = repo.get_or_create(
+            "CTRTEST", "ctr_test_src", "Base", "0x" + FAKE[2:].upper()
+        )
 
         assert (raw.network, raw.contract_address, raw.asset_id) == ("base", FAKE, None)
 
     def test_known_contract_from_other_source_is_auto_mapped(self, pg_session):
         asset = _add(pg_session, Asset(symbol="CTRTEST"))
-        _add(pg_session, RawAsset(
-            symbol="CTRTEST", source="other_src", network="base", contract_address=REAL, asset_id=asset.asset_id,
-        ))
+        _add(
+            pg_session,
+            RawAsset(
+                symbol="CTRTEST",
+                source="other_src",
+                network="base",
+                contract_address=REAL,
+                asset_id=asset.asset_id,
+            ),
+        )
 
-        raw = RawAssetRepository(pg_session).get_or_create("CTRTEST", "ctr_test_src", "base", REAL)
+        raw = RawAssetRepository(pg_session).get_or_create(
+            "CTRTEST", "ctr_test_src", "base", REAL
+        )
 
         assert raw.asset_id == asset.asset_id
 
@@ -69,19 +86,27 @@ class TestRawAssetContracts:
         fake_tx = _tx(pg_session, FAKE, quantity=2)
         plain_tx = _tx(pg_session, None, quantity=3)
 
-        token_row = _add(pg_session, RawAsset(
-            symbol="CTRTEST", source="ctr_test_src", network="base", contract_address=REAL,
-        ))
+        token_row = _add(
+            pg_session,
+            RawAsset(
+                symbol="CTRTEST",
+                source="ctr_test_src",
+                network="base",
+                contract_address=REAL,
+            ),
+        )
         _propagate(pg_session, token_row, asset.asset_id)
         plain_row = _add(pg_session, RawAsset(symbol="CTRTEST", source="ctr_test_src"))
         _propagate(pg_session, plain_row, asset.asset_id)
         pg_session.commit()
 
-        ids = dict(pg_session.exec(
-            select(NormalizedTransaction.id, NormalizedTransaction.asset_id).where(
-                NormalizedTransaction.id.in_([real_tx.id, fake_tx.id, plain_tx.id])
-            )
-        ).all())
+        ids = dict(
+            pg_session.exec(
+                select(NormalizedTransaction.id, NormalizedTransaction.asset_id).where(
+                    NormalizedTransaction.id.in_([real_tx.id, fake_tx.id, plain_tx.id])
+                )
+            ).all()
+        )
         assert ids[real_tx.id] == asset.asset_id
         assert ids[plain_tx.id] == asset.asset_id
         assert ids[fake_tx.id] is None

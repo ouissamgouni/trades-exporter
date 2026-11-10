@@ -73,8 +73,22 @@ export async function linkRawAccount({
 export interface LinkRawAssetParams {
     source: string;
     symbol: string;
-    network?: string;
+    network?: string | null;
+    /** Token contract — selects the contract-specific raw asset row */
+    contractAddress?: string | null;
     assetId: number;
+}
+
+/** Query string selecting a token raw asset row; '' for plain symbol rows. */
+export function rawAssetKeyQuery(network?: string | null, contractAddress?: string | null): string {
+    if (!contractAddress) return '';
+    return `?${new URLSearchParams({ network: network || '', contract_address: contractAddress })}`;
+}
+
+/** Symbol to prefill when creating a distinct asset for a token contract (symbols are unique). */
+export function contractAssetSymbol(symbol: string, contractAddress: string): string {
+    const tag = contractAddress.replace(/^0x/i, '').slice(0, 4).toUpperCase();
+    return `${symbol}-${tag}`;
 }
 
 /**
@@ -85,13 +99,10 @@ export async function linkRawAsset({
     source,
     symbol,
     network,
+    contractAddress,
     assetId,
 }: LinkRawAssetParams): Promise<void> {
-    const networkParam = network
-        ? `?network=${encodeURIComponent(network)}`
-        : '';
-
-    const patchUrl = `${API_URL}/raw-assets/${encodeURIComponent(source)}/${encodeURIComponent(symbol)}${networkParam}`;
+    const patchUrl = `${API_URL}/raw-assets/${encodeURIComponent(source)}/${encodeURIComponent(symbol)}${rawAssetKeyQuery(network, contractAddress)}`;
 
     const patchResponse = await fetch(patchUrl, {
         method: 'PATCH',
@@ -107,6 +118,7 @@ export async function linkRawAsset({
                 symbol,
                 source,
                 network: network || '',
+                contract_address: contractAddress || '',
                 asset_id: assetId,
             }),
         });

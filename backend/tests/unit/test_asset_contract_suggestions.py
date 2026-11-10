@@ -24,7 +24,9 @@ def test_token_key_normalizes_evm_and_keeps_case_sensitive_addresses():
 
 
 def test_known_contract_wins(monkeypatch):
-    monkeypatch.setattr(svc.RawAssetRepository, "known_contract_asset_id", lambda self, n, c: 7)
+    monkeypatch.setattr(
+        svc.RawAssetRepository, "known_contract_asset_id", lambda self, n, c: 7
+    )
     session = MagicMock()
     session.get.return_value = Asset(asset_id=7, symbol="USDC")
     s = svc.suggest_asset_for_contract(session, "USDC", "base", EVM)
@@ -32,19 +34,33 @@ def test_known_contract_wins(monkeypatch):
 
 
 def test_official_deployment_via_coingecko(monkeypatch):
-    monkeypatch.setattr(svc.RawAssetRepository, "known_contract_asset_id", lambda self, n, c: None)
-    monkeypatch.setattr(svc, "coingecko_platforms", lambda coin_id: {"base": EVM} if coin_id == "usd-coin" else {})
+    monkeypatch.setattr(
+        svc.RawAssetRepository, "known_contract_asset_id", lambda self, n, c: None
+    )
+    monkeypatch.setattr(
+        svc,
+        "coingecko_platforms",
+        lambda coin_id: {"base": EVM} if coin_id == "usd-coin" else {},
+    )
     session = MagicMock()
-    session.exec.side_effect = [_result([Asset(asset_id=3, symbol="USDC")]), _result(["usd-coin"])]
+    session.exec.side_effect = [
+        _result([Asset(asset_id=3, symbol="USDC")]),
+        _result(["usd-coin"]),
+    ]
     s = svc.suggest_asset_for_contract(session, "usdc", "base", EVM.lower())
     assert (s.id, s.confidence, s.reason) == (3, 0.95, "official_deployment")
 
 
 def test_same_symbol_unknown_contract_is_low_confidence(monkeypatch):
-    monkeypatch.setattr(svc.RawAssetRepository, "known_contract_asset_id", lambda self, n, c: None)
+    monkeypatch.setattr(
+        svc.RawAssetRepository, "known_contract_asset_id", lambda self, n, c: None
+    )
     monkeypatch.setattr(svc, "coingecko_platforms", lambda coin_id: {"base": EVM})
     session = MagicMock()
-    session.exec.side_effect = [_result([Asset(asset_id=250, symbol="VIRTUAL")]), _result(["virtual-protocol"])]
+    session.exec.side_effect = [
+        _result([Asset(asset_id=250, symbol="VIRTUAL")]),
+        _result(["virtual-protocol"]),
+    ]
     fake = "0xf094052b3b9d76c6c2e0f54cba92e9811a1ef5b8"
     s = svc.suggest_asset_for_contract(session, "VIRTUAL", "base", fake)
     assert (s.id, s.reason) == (250, "unverified_contract")

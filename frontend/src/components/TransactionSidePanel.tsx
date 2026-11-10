@@ -322,6 +322,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
         prefill: AssetPrefill;
         rawSource?: string;
         rawSymbol?: string;
+        rawNetwork?: string | null;
+        rawContract?: string | null;
     } | null>(null);
 
     // ------- Transfer inline account creation -------
@@ -873,6 +875,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 prefill: { symbol: tx.source_asset_symbol || '' },
                                 rawSource: tx.source,
                                 rawSymbol: tx.source_asset_symbol || undefined,
+                                rawNetwork: tx.network,
+                                rawContract: tx.token_contract_address,
                             });
                         } : undefined}
                     />
@@ -1791,6 +1795,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                     prefill={quickCreateAsset.prefill}
                     rawAssetSource={quickCreateAsset.rawSource}
                     rawAssetSymbol={quickCreateAsset.rawSymbol}
+                    rawAssetNetwork={quickCreateAsset.rawNetwork}
+                    rawAssetContract={quickCreateAsset.rawContract}
                 />
             )}
         </>

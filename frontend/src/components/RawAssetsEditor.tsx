@@ -5,6 +5,8 @@ import { LuChevronLeft, LuChevronRight, LuChevronsLeft, LuChevronsRight } from '
 import { API_URL, Asset, RawAsset } from '../types';
 import { useAssets } from '../hooks/useAssets';
 import { AssetSelector } from './AssetSelector';
+import { rawAssetKeyQuery } from '../utils/rawAccountApi';
+import { formatAddress } from '../utils/addressUtils';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
@@ -105,12 +107,15 @@ export const RawAssetsEditor: React.FC = () => {
         }
     };
 
+    const getEditKey = (rawAsset: RawAsset) => `${rawAsset.source}:${rawAsset.symbol}:${rawAsset.network ?? ''}:${rawAsset.contract_address ?? ''}`;
+
     // Compute smart suggestions for unlinked raw assets
     const suggestionsMap = useMemo(() => {
         const map = new Map<string, SuggestedMatch[]>();
 
         rawAssets
-            .filter(ra => ra.asset_id === null)
+            // Token rows: same-symbol guesses are unsafe; suggestions come from Data Health
+            .filter(ra => ra.asset_id === null && !ra.contract_address)
             .forEach(rawAsset => {
                 const symbol = rawAsset.symbol;
                 const suggestions: SuggestedMatch[] = [];
@@ -124,7 +129,7 @@ export const RawAssetsEditor: React.FC = () => {
 
                 // Sort by confidence and take top 3
                 suggestions.sort((a, b) => b.confidence - a.confidence);
-                const key = `${rawAsset.source}:${rawAsset.symbol}`;
+                const key = getEditKey(rawAsset);
                 map.set(key, suggestions.slice(0, 3));
             });
 
@@ -137,7 +142,6 @@ export const RawAssetsEditor: React.FC = () => {
         return asset?.symbol || `ID:${assetId}`;
     };
 
-    const getEditKey = (rawAsset: RawAsset) => `${rawAsset.source}:${rawAsset.symbol}`;
 
     const startEditing = (rawAsset: RawAsset) => {
         setEditingKey(getEditKey(rawAsset));
@@ -146,7 +150,7 @@ export const RawAssetsEditor: React.FC = () => {
 
     const saveRawAsset = async (rawAsset: RawAsset) => {
         try {
-            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}`, {
+            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}${rawAssetKeyQuery(rawAsset.network, rawAsset.contract_address)}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ asset_id: editAssetId })
@@ -163,7 +167,7 @@ export const RawAssetsEditor: React.FC = () => {
     // Quick accept suggestion
     const acceptSuggestion = async (rawAsset: RawAsset, assetId: number) => {
         try {
-            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}`, {
+            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}${rawAssetKeyQuery(rawAsset.network, rawAsset.contract_address)}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ asset_id: assetId })
@@ -236,7 +240,7 @@ export const RawAssetsEditor: React.FC = () => {
         if (!deleteConfirm.data) return;
         const rawAsset = deleteConfirm.data;
         try {
-            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}`, {
+            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}${rawAssetKeyQuery(rawAsset.network, rawAsset.contract_address)}`, {
                 method: 'DELETE'
             });
             if (!response.ok) throw new Error('Failed to delete raw asset');
@@ -248,7 +252,7 @@ export const RawAssetsEditor: React.FC = () => {
 
     const unlinkRawAsset = async (rawAsset: RawAsset) => {
         try {
-            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}`, {
+            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}${rawAssetKeyQuery(rawAsset.network, rawAsset.contract_address)}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ asset_id: null })
@@ -444,6 +448,11 @@ export const RawAssetsEditor: React.FC = () => {
                                             <tr key={key} className={isUnlinked ? 'bg-orange-50' : undefined}>
                                                 <td className="max-w-[200px]">
                                                     <Text className="truncate text-xs font-medium" title={rawAsset.symbol}>{rawAsset.symbol}</Text>
+                                                    {rawAsset.contract_address && (
+                                                        <Text className="block truncate font-mono text-[10px] text-slate-500" title={`${rawAsset.network} ${rawAsset.contract_address}`}>
+                                                            {rawAsset.network} · {formatAddress(rawAsset.contract_address)}
+                                                        </Text>
+                                                    )}
                                                 </td>
                                                 <td>
                                                     <Badge colorScheme="purple">{rawAsset.source}</Badge>

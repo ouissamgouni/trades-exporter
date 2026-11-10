@@ -69,7 +69,9 @@ def coingecko_platforms(coin_id: str) -> Dict[str, str]:
             timeout=5,
         )
         resp.raise_for_status()
-        platforms = {k: v for k, v in (resp.json().get("platforms") or {}).items() if k and v}
+        platforms = {
+            k: v for k, v in (resp.json().get("platforms") or {}).items() if k and v
+        }
         _platforms_cache[coin_id] = (time.time() + _PLATFORMS_TTL, platforms)
         return platforms
     except (requests.RequestException, ValueError) as e:
@@ -79,7 +81,10 @@ def coingecko_platforms(coin_id: str) -> Dict[str, str]:
 
 
 def suggest_asset_for_contract(
-    session: Session, symbol: str, network: Optional[str], contract_address: Optional[str]
+    session: Session,
+    symbol: str,
+    network: Optional[str],
+    contract_address: Optional[str],
 ) -> Optional[SuggestionInfo]:
     network, contract = token_key(network, contract_address)
     if not contract:
