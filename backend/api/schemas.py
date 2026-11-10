@@ -903,7 +903,8 @@ class TransactionStatusResponse(BaseModel):
         0, description="Confirmed bundles that are empty or missing one side"
     )
     dismissed_transfer_issues_count: int = Field(
-        0, description="Transfer issues dismissed by the user (not counted in total_issues)"
+        0,
+        description="Transfer issues dismissed by the user (not counted in total_issues)",
     )
 
     # Aggregated totals
