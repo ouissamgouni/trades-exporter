@@ -184,7 +184,7 @@ export function getReviewStatusLabel(status: ReviewStatus | string): string {
   const labels: Record<string, string> = {
     [ReviewStatus.VALID]: 'Valid',
     [ReviewStatus.PENDING]: 'Pending',
-    [ReviewStatus.INVALID]: 'Invalid',
+    [ReviewStatus.INVALID]: 'Rejected',
   };
   return labels[status] || status;
 }

@@ -18,7 +18,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Badge, Button, Input, Textarea, Spinner } from './ui/primitives';
 import { FiCopy, FiCheck, FiLoader, FiTag, FiX, FiChevronDown, FiChevronRight, FiAlertTriangle, FiArrowDown, FiArrowUp } from 'react-icons/fi';
 import { Transaction, Account, Bundle, API_URL } from '../types';
-import { UnitPattern, TaxabilityStatus } from '../enums';
+import { UnitPattern, TaxabilityStatus, getReviewStatusLabel } from '../enums';
 import { AssetBadge } from './AssetBadge';
 import { formatDateTimeLocale } from '../utils/dateUtils';
 import { ValueDisplay } from './ValueDisplay';
@@ -462,7 +462,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                                 colorScheme={tx.review_status === 'valid' ? 'green' : tx.review_status === 'invalid' ? 'red' : 'yellow'}
                                 className="text-[9px]"
                             >
-                                {tx.review_status}
+                                {getReviewStatusLabel(tx.review_status || '')}
                             </Badge>
                         }
                     />

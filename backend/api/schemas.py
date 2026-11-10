@@ -1251,13 +1251,16 @@ class IncomeFilterOptionsResponse(BaseModel):
 
 
 class SpamVerdictRequest(BaseModel):
-    transaction_id: int
+    transaction_id: Optional[int] = None
+    transaction_ids: List[int] = Field(default_factory=list)
     verdict: Literal["allow", "block"]
+    # "token" records a rule for the whole token (incl. future syncs); "transaction" only touches the given rows.
+    scope: Literal["token", "transaction"] = "token"
 
 
 class SpamVerdictResponse(BaseModel):
-    network: str
-    contract_address: str
+    network: Optional[str] = None
+    contract_address: Optional[str] = None
     verdict: str
     updated_count: int
 

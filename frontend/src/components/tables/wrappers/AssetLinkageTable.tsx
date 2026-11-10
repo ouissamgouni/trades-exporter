@@ -190,6 +190,7 @@ export const AssetLinkageTable: React.FC<AssetLinkageTableProps> = ({
     // Render TransactionsTable with filtered transactions
     return (
         <TransactionsTable
+            defaultExpandAllDays
             title="Asset Linkage Issues"
             subtitle={`${totalCount} transaction${totalCount !== 1 ? 's' : ''} with unlinked assets`}
             tableId="assetLinkage"

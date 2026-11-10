@@ -81,6 +81,7 @@ const mergeRealTimeIntoConnectorRun = (
         synced_count: realTimeStatus.new_count,
         updated_count: realTimeStatus.updated_count,
         skipped_count: realTimeStatus.skipped_count,
+        rejected_count: realTimeStatus.rejected_count ?? dbRun.rejected_count,
         error_count: realTimeStatus.error_count ?? 0,
     };
 };
@@ -162,6 +163,14 @@ const ConnectorRunCard: React.FC<ConnectorRunCardProps> = ({ run, onExpand }) =>
                             {run.updated_count}
                         </span>
                     </div>
+                    {(run.rejected_count ?? 0) > 0 && (
+                        <div className="flex flex-col items-end gap-0">
+                            <span className="text-red-500">Rejected</span>
+                            <span className="font-medium text-red-500">
+                                {run.rejected_count}
+                            </span>
+                        </div>
+                    )}
                     {run.error_count > 0 && (
                         <div className="flex flex-col items-end gap-0">
                             <span className="text-red-600">Errors</span>
@@ -313,6 +322,12 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         <span className="font-medium">{detail.skipped_count}</span>
                     </div>
                     <div className="flex flex-col items-start gap-0">
+                        <span className="text-xs text-slate-500">Rejected</span>
+                        <span className={`font-medium ${(detail.rejected_count ?? 0) > 0 ? 'text-red-600' : ''}`}>
+                            {detail.rejected_count ?? 0}
+                        </span>
+                    </div>
+                    <div className="flex flex-col items-start gap-0">
                         <span className="text-xs text-slate-500">Errors</span>
                         <span className={`font-medium ${detail.error_count > 0 ? 'text-red-600' : ''}`}>
                             {detail.error_count}
@@ -388,7 +403,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
 
                 <TabsContent value="synced">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId="jobDetail-synced"
+                        expandInvalidRows
                         title=""
                         subtitle=""
                         showFilters={false}
@@ -408,7 +425,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
 
                 <TabsContent value="updated">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId="jobDetail-updated"
+                        expandInvalidRows
                         title=""
                         subtitle=""
                         showFilters={false}
@@ -428,7 +447,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
 
                 <TabsContent value="skipped">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId="jobDetail-skipped"
+                        expandInvalidRows
                         title=""
                         subtitle=""
                         showFilters={false}
@@ -665,6 +686,7 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
             total_new: realTimeStatus.new_entries_added,
             total_updated: realTimeStatus.entries_updated,
             total_skipped: realTimeStatus.duplicates_skipped,
+            total_rejected: realTimeStatus.entries_rejected ?? job.total_rejected,
             total_errors: realTimeStatus.error_count,
             connector_runs: mergedConnectorRuns,
         };
@@ -840,6 +862,14 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                                                 </span>
                                                 <span className="font-medium">
                                                     {mergedJob.total_skipped}
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col items-start gap-0">
+                                                <span className="text-xs text-slate-500">
+                                                    Rejected
+                                                </span>
+                                                <span className={`font-medium ${(mergedJob.total_rejected ?? 0) > 0 ? 'text-red-600' : ''}`}>
+                                                    {mergedJob.total_rejected ?? 0}
                                                 </span>
                                             </div>
                                             <div className="flex flex-col items-start gap-0">

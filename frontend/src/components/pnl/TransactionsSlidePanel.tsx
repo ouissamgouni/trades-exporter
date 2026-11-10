@@ -116,6 +116,7 @@ export const TransactionsSlidePanel: React.FC<TransactionsSlidePanelProps> = ({
             {isOpen && (
                 <div className="max-h-[calc(100vh-160px)] overflow-auto">
                     <TransactionsTable
+                        defaultExpandAllDays
                         tableId={`pnl-audit-tx-${view}`}
                         filters={effectiveFilters}
                         onFiltersChange={handleFiltersChange}

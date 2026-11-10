@@ -522,7 +522,7 @@ interface QuickFilterBarProps {
 const QUICK_STATUSES = [
     { value: 'pending', label: 'Pending', on: 'border-amber-300 bg-amber-50 text-amber-800', off: 'border-slate-200 bg-white text-amber-700/60 hover:bg-amber-50/50' },
     { value: 'valid', label: 'Valid', on: 'border-green-300 bg-green-50 text-green-800', off: 'border-slate-200 bg-white text-green-700/60 hover:bg-green-50/50' },
-    { value: 'invalid', label: 'Invalid', on: 'border-red-200 bg-red-50 text-red-700', off: 'border-slate-200 bg-white text-red-700/60 hover:bg-red-50/50' },
+    { value: 'invalid', label: 'Rejected', on: 'border-red-200 bg-red-50 text-red-700', off: 'border-slate-200 bg-white text-red-700/60 hover:bg-red-50/50' },
 ];
 
 const QUICK_PILL = 'shrink-0 whitespace-nowrap border px-2 py-0.5 text-xs transition-colors';

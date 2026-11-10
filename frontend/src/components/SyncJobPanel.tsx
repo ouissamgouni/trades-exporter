@@ -540,6 +540,12 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                                         </p>
                                     </div>
                                     <div>
+                                        <p className="text-sm text-slate-500" title="Auto-rejected (e.g. spam) or rejected transactions of this job">Rejected</p>
+                                        <p className={`text-2xl font-bold ${(jobStatus.entries_rejected ?? 0) > 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                                            {jobStatus.entries_rejected ?? 0}
+                                        </p>
+                                    </div>
+                                    <div>
                                         <p className="text-sm text-slate-500">Errors</p>
                                         <p className={`text-2xl font-bold ${jobStatus.error_count > 0 ? 'text-red-600' : 'text-slate-500'}`}>
                                             {jobStatus.error_count}
@@ -551,11 +557,11 @@ export const SyncJobPanel: React.FC<SyncJobPanelProps> = ({ isActive = true, act
                                 <div className="mb-4 flex flex-wrap gap-6">
                                     <div>
                                         <p className="text-sm text-slate-500">Started</p>
-                                        <p>{formatDateTime(jobStatus.started_at)}</p>
+                                        <p className="text-xs text-slate-500">{formatDateTime(jobStatus.started_at)}</p>
                                     </div>
                                     <div>
                                         <p className="text-sm text-slate-500">Finished</p>
-                                        <p>{formatDateTime(jobStatus.finished_at)}</p>
+                                        <p className="text-xs text-slate-500">{formatDateTime(jobStatus.finished_at)}</p>
                                     </div>
                                 </div>
 

@@ -48,21 +48,39 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export const BROKEN_BUNDLES_QUERY_KEY = ['brokenBundles'];
 
-export const BrokenBundlesPanel: React.FC<{ onFixed?: () => void }> = ({ onFixed }) => {
-    const queryClient = useQueryClient();
-    const showInAllTransactions = useShowInAllTransactions();
-    const [busyKey, setBusyKey] = useState<string | null>(null);
-    const [pageSize, setPageSize] = useState(10);
-    const [page, setPage] = useState(0); // 0-indexed
-
-    const { data: bundles = [], isLoading } = useQuery<BrokenBundle[]>({
+export function useBrokenBundles() {
+    return useQuery<BrokenBundle[]>({
         queryKey: BROKEN_BUNDLES_QUERY_KEY,
         queryFn: async () => {
             const res = await fetch(`${API_URL}/bundles/broken`);
             if (!res.ok) throw new Error('Failed to load broken bundles');
             return res.json();
         },
+        staleTime: 30_000,
     });
+}
+
+/** Broken bundles that have at least one standalone transaction able to complete them. */
+export function useCompletableBundleCount(): number {
+    const { data = [] } = useBrokenBundles();
+    return data.filter(b => b.candidates.length > 0).length;
+}
+
+interface BrokenBundlesPanelProps {
+    onFixed?: () => void;
+    /** Only list bundles with completion candidates; renders nothing when there are none (Bundles tab). */
+    onlyCompletable?: boolean;
+}
+
+export const BrokenBundlesPanel: React.FC<BrokenBundlesPanelProps> = ({ onFixed, onlyCompletable = false }) => {
+    const queryClient = useQueryClient();
+    const showInAllTransactions = useShowInAllTransactions();
+    const [busyKey, setBusyKey] = useState<string | null>(null);
+    const [pageSize, setPageSize] = useState(10);
+    const [page, setPage] = useState(0); // 0-indexed
+
+    const { data: allBundles = [], isLoading } = useBrokenBundles();
+    const bundles = onlyCompletable ? allBundles.filter(b => b.candidates.length > 0) : allBundles;
 
     const refresh = () => {
         queryClient.invalidateQueries({ queryKey: BROKEN_BUNDLES_QUERY_KEY });
@@ -104,6 +122,7 @@ export const BrokenBundlesPanel: React.FC<{ onFixed?: () => void }> = ({ onFixed
         }
     };
 
+    if (onlyCompletable && bundles.length === 0) return null;
     if (isLoading) {
         return <div className="flex justify-center py-8"><Spinner size="md" /></div>;
     }
@@ -135,12 +154,15 @@ export const BrokenBundlesPanel: React.FC<{ onFixed?: () => void }> = ({ onFixed
                     <LuTriangleAlert size={16} className="mt-0.5 shrink-0 text-orange-600" />
                     <div className="flex flex-col gap-0.5">
                         <span className="text-sm font-semibold text-orange-900">
-                            {bundles.length} broken bundle{bundles.length !== 1 ? 's' : ''}
+                            {onlyCompletable
+                                ? `💡 ${bundles.length} bundle${bundles.length !== 1 ? 's' : ''} can be completed`
+                                : `${bundles.length} broken bundle${bundles.length !== 1 ? 's' : ''}`}
                             {emptyCount > 0 && <span className="font-normal text-orange-800"> · {emptyCount} empty</span>}
                         </span>
                         <p className="text-xs text-orange-900">
-                            Confirmed bundles that are empty or lost one of their sides, usually because a connector reset
-                            re-created the transactions with new IDs. Re-attach the matching transaction, or delete empty bundles.
+                            {onlyCompletable
+                                ? 'These confirmed bundles miss one side, and a standalone transaction matches it (same asset, opposite direction, other account, within 24h).'
+                                : 'Confirmed bundles that are empty or lost one of their sides, usually because a connector reset re-created the transactions with new IDs. Re-attach the matching transaction, or delete empty bundles.'}
                         </p>
                     </div>
                 </div>

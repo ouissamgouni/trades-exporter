@@ -54,7 +54,7 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
     onNotesChange,
     onTagsChange,
     onTransactionUpdate,
-    width = '450px',
+    width = '560px',
 }) => {
     const [fetchedTransaction, setFetchedTransaction] = useState<Transaction | null>(null);
     const [loading, setLoading] = useState(false);

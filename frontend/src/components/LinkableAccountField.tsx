@@ -163,7 +163,7 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                 {/* Editable source text */}
                 {onSourceChange && (
                     <div className="mb-1 flex items-center gap-1">
-                        <span className="shrink-0 text-[9px] text-slate-500">Source:</span>
+                        <span className="shrink-0 text-[12px] text-slate-500">Source:</span>
                         {editingSource ? (
                             <input
                                 value={localSource}
@@ -173,11 +173,11 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                                     if (e.key === 'Enter') { e.preventDefault(); handleSourceSave(); }
                                 }}
                                 autoFocus
-                                className="flex-1 border border-slate-300 bg-white px-1 py-0.5 font-mono text-[9px] outline-none focus:border-blue-500"
+                                className="flex-1 border border-slate-300 bg-white px-1 py-0.5 font-mono text-[12px] outline-none focus:border-blue-500"
                             />
                         ) : (
                             <span
-                                className={`flex-1 cursor-pointer font-mono text-[9px] hover:text-blue-500 ${sourceValue ? 'text-slate-600' : 'text-slate-400'}`}
+                                className={`flex-1 cursor-pointer font-mono text-[12px] hover:text-blue-500 ${sourceValue ? 'text-slate-600' : 'text-slate-400'}`}
                                 onClick={() => setEditingSource(true)}
                             >
                                 {sourceValue || '(empty)'}
@@ -233,7 +233,7 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                         {/* Show truncated source address when copyable and different from account name */}
                         {copyable && sourceValue && (
                             <>
-                                <span className="break-all font-mono text-[9px] text-slate-500">
+                                <span className="break-all font-mono text-[12px] text-slate-500">
                                     {truncateLength && sourceValue.length > truncateLength
                                         ? `${sourceValue.slice(0, truncateLength)}…`
                                         : sourceValue}
@@ -252,7 +252,7 @@ export const LinkableAccountField: React.FC<LinkableAccountFieldProps> = ({
                                         {copied ? <FiCheck size={9} /> : <FiCopy size={9} />}
                                     </button>
                                 </Tooltip>
-                                <span className="text-[9px] text-slate-400">→</span>
+                                <span className="text-[12px] text-slate-400">→</span>
                             </>
                         )}
                         <AccountBadge

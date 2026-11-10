@@ -71,8 +71,10 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
     const {
         data: allSuggestions = [],
         isLoading,
+        isFetching,
         error,
         refetch,
+        dataUpdatedAt,
     } = useQuery({
         queryKey: ['bundleSuggestions'],
         queryFn: async () => {
@@ -168,10 +170,10 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
         }
     };
 
-    // Don't render if no suggestions
-    if (!isLoading && suggestions.length === 0) {
-        return null;
-    }
+    const scan = () => {
+        refetch();
+        queryClient.invalidateQueries({ queryKey: ['brokenBundles'] });
+    };
 
     return (
         <div
@@ -189,17 +191,23 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
+                    {dataUpdatedAt > 0 && (
+                        <span className="text-[11px] text-teal-600">
+                            Last scan {new Date(dataUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                    )}
                     <Button
                         size="sm"
-                        variant="ghost"
+                        variant="outline"
                         colorScheme="gray"
-                        className="text-teal-600 hover:bg-teal-50"
+                        className="border-teal-300 text-teal-700 hover:bg-teal-100"
+                        disabled={isFetching}
                         onClick={(e) => {
                             e.stopPropagation();
-                            refetch();
+                            scan();
                         }}
                     >
-                        ↻ Refresh
+                        {isFetching ? <Spinner size="xs" /> : '🔍'} Scan for suggestions
                     </Button>
                     <span className="text-teal-600">{expanded ? '▼' : '▶'}</span>
                 </div>
@@ -238,7 +246,7 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
                     {/* Empty state */}
                     {!isLoading && !error && suggestions.length === 0 && (
                         <span className="text-sm text-teal-600">
-                            No bundle suggestions available. Add more transactions to get pattern-based suggestions.
+                            No bundle suggestions right now. Scan again after a sync or after editing transactions.
                         </span>
                     )}
 

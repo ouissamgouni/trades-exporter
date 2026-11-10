@@ -5,6 +5,8 @@ import { Badge, Spinner, Tabs, TabsList, TabsTrigger, TabsContent } from './comp
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { API_URL, SyncJobProgress, ConnectorProgress, BundleSuggestion } from './types';
 import { DataHealthProvider, useDataHealth } from './contexts/DataHealthContext';
+import { useSuspectedSpamCount } from './hooks/useSpamReview';
+import { useCompletableBundleCount } from './components/BrokenBundlesPanel';
 import logoSrc from './assets/logo.png';
 import { AssetDetailPanelProvider } from './contexts/AssetDetailPanelContext';
 import { AssetDetailSlidePanel } from './components/AssetDetailSlidePanel';
@@ -107,6 +109,10 @@ const AppContent = () => {
             return response.json() as Promise<BundleSuggestion[]>;
         },
     });
+
+    const suspectedSpamCount = useSuspectedSpamCount();
+    const completableBundleCount = useCompletableBundleCount();
+    const bundleHintCount = bundleSuggestions.length + completableBundleCount;
 
     // Fetch setup status for Setup tab badge
     useEffect(() => {
@@ -285,9 +291,14 @@ const AppContent = () => {
                                         {validationSummary.pending_count}
                                     </Badge>
                                 )}
-                                {bundleSuggestions.length > 0 && (
-                                    <Badge colorScheme="green" className="ml-1">
-                                        {bundleSuggestions.length} 💡
+                                {bundleHintCount > 0 && (
+                                    <Badge colorScheme="green" className="ml-1" title="Bundle suggestions and bundles that can be completed">
+                                        {bundleHintCount} 💡
+                                    </Badge>
+                                )}
+                                {suspectedSpamCount > 0 && (
+                                    <Badge colorScheme="orange" className="ml-1" title="Suspected spam to review">
+                                        {suspectedSpamCount} 🚫
                                     </Badge>
                                 )}
                             </span>

@@ -25,7 +25,7 @@ const STATUS_ICON: Record<StatusKind, IconType> = { valid: LuCircleCheck, pendin
 const STATUS_LABEL: Record<StatusKind, string> = {
     valid: 'valid',
     pending: 'pending review',
-    invalid: 'invalid (excluded from totals)',
+    invalid: 'rejected (excluded from totals)',
 };
 
 const StatusCell: React.FC<{ kind: StatusKind; count: number; title?: string }> = ({ kind, count, title }) => {
@@ -54,7 +54,7 @@ export const GroupStatusCells: React.FC<{
     showInvalid?: boolean;
 }> = ({ group, showPnl, baseCurrency, showInvalid = true }) => (
     <>
-        <StatusCell kind="valid" count={group.valid_count} title={`${group.valid_count} valid · ${group.total_count} total excluding invalid`} />
+        <StatusCell kind="valid" count={group.valid_count} title={`${group.valid_count} valid · ${group.total_count} total excluding rejected`} />
         <StatusCell kind="pending" count={group.pending_count} />
         {showInvalid ? <StatusCell kind="invalid" count={group.invalid_count} /> : <span />}
         <span>

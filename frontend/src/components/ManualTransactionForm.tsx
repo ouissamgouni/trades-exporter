@@ -598,7 +598,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                             >
                                                 <option value="pending">🟡 Pending</option>
                                                 <option value="valid">🟢 Valid</option>
-                                                <option value="invalid">🔴 Invalid</option>
+                                                <option value="invalid">🔴 Rejected</option>
                                             </select>
                                         </div>
                                     </div>

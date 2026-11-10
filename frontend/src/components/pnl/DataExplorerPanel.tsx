@@ -455,6 +455,7 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                         </div>
                         {allTxIds.length > 0 ? (
                             <TransactionsTable
+                                defaultExpandAllDays
                                 filters={txFilters}
                                 showFilters={false}
                                 showBundles={false}
@@ -2315,6 +2316,7 @@ const TransactionsTab: React.FC<{
 
             {/* Controlled transactions table */}
             <TransactionsTable
+                defaultExpandAllDays
                 tableId="pnl-explorer"
                 title=""
                 subtitle=""

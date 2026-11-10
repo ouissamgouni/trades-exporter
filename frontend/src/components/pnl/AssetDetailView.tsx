@@ -136,6 +136,7 @@ const AssetTransactionsTab: React.FC<{
 
     return (
         <TransactionsTable
+            defaultExpandAllDays
             tableId={`asset-detail-txs-${assetId}`}
             title=""
             subtitle=""

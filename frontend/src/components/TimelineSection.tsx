@@ -179,7 +179,7 @@ export const TimelineSection: React.FC = () => {
                             </span>
                             {timelineData.excluded_invalid_count > 0 && (
                                 <Badge colorScheme="red">
-                                    {timelineData.excluded_invalid_count} invalid excluded
+                                    {timelineData.excluded_invalid_count} rejected excluded
                                 </Badge>
                             )}
                         </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LuChevronDown, LuChevronRight, LuCheck, LuUndo2 } from 'react-icons/lu';
+import { LuChevronDown, LuChevronRight, LuChevronsDownUp, LuChevronsUpDown, LuCheck, LuUndo2 } from 'react-icons/lu';
 import type { Transaction } from '../../../types';
 import { Spinner } from '../../ui/primitives';
 import { cn } from '../../../lib/cn';
@@ -47,9 +47,13 @@ export interface GroupedTransactionsBodyProps {
     onExcludedInvalidCount?: (count: number | null) => void;
     /** Datetime of the focused transaction: its month and day open by default. */
     focusDate?: string;
+    /** Open every loaded month and day on mount (review tables). */
+    defaultExpandAll?: boolean;
 }
 
-type SharedProps = Omit<GroupedTransactionsBodyProps, 'groupsUrl' | 'params' | 'sortDir' | 'colSpan' | 'emptyMessage' | 'hideInvalid' | 'onExcludedInvalidCount'> & {
+type ExpandMode = 'default' | 'expanded' | 'collapsed';
+
+type SharedProps = Omit<GroupedTransactionsBodyProps, 'groupsUrl' | 'params' | 'sortDir' | 'colSpan' | 'emptyMessage' | 'hideInvalid' | 'onExcludedInvalidCount' | 'defaultExpandAll'> & {
     groupsUrl: string;
     sortDir: 'asc' | 'desc';
     colSpan: number;
@@ -83,8 +87,10 @@ function containsFocus(focusDate: string | undefined, group: TransactionGroup): 
 }
 
 export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = ({
-    params, emptyMessage, hideInvalid: hideInvalidRequested = false, onExcludedInvalidCount, ...shared
+    params, emptyMessage, hideInvalid: hideInvalidRequested = false, onExcludedInvalidCount, defaultExpandAll = false, ...shared
 }) => {
+    const [expandMode, setExpandMode] = useState<ExpandMode>(defaultExpandAll ? 'expanded' : 'default');
+    const [expandVersion, setExpandVersion] = useState(0);
     // Nothing to hide when the status filter keeps only invalid transactions.
     const hideInvalid = hideInvalidRequested && withoutInvalid(params) !== null;
     const months = useTransactionGroups({
@@ -113,10 +119,39 @@ export const GroupedTransactionsBody: React.FC<GroupedTransactionsBodyProps> = (
         return <StatusRow colSpan={shared.colSpan}>{emptyMessage || 'No transactions found'}</StatusRow>;
     }
 
+    const allExpanded = expandMode === 'expanded';
+    const toggleExpandAll = () => {
+        setExpandMode(allExpanded ? 'collapsed' : 'expanded');
+        setExpandVersion(v => v + 1);
+    };
+
     return (
         <>
+            <tr>
+                <td colSpan={shared.colSpan} className="p-0">
+                    <div className={cn(VIEWPORT_BOX, 'flex items-center px-2 py-1')}>
+                        <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-blue-600"
+                            onClick={toggleExpandAll}
+                        >
+                            {allExpanded ? <LuChevronsDownUp size={14} /> : <LuChevronsUpDown size={14} />}
+                            {allExpanded ? 'Collapse all' : 'Expand all days'}
+                        </button>
+                    </div>
+                </td>
+            </tr>
             {groups.map((month, i) => (
-                <MonthSection key={month.period_start} month={month} defaultExpanded={i === 0 || containsFocus(shared.focusDate, month)} params={params} showPnl={showPnl} hideInvalid={hideInvalid} {...shared} />
+                <MonthSection
+                    key={`${month.period_start}:${expandVersion}`}
+                    month={month}
+                    defaultExpanded={expandMode === 'expanded' || (expandMode === 'default' && i === 0) || containsFocus(shared.focusDate, month)}
+                    defaultExpandDays={expandMode === 'expanded' ? true : expandMode === 'collapsed' ? false : undefined}
+                    params={params}
+                    showPnl={showPnl}
+                    hideInvalid={hideInvalid}
+                    {...shared}
+                />
             ))}
             {months.hasNextPage && (
                 <tr>
@@ -232,7 +267,7 @@ const MarkReviewedAction: React.FC<GroupScopeProps> = ({ group, params, scopeLab
             title={`Mark all pending in ${scopeLabel} as valid`}
             onClick={e => { e.stopPropagation(); setConfirming(true); }}
         >
-            <LuCheck size={12} /> Mark reviewed
+            <LuCheck size={12} /> Mark as valid
         </button>
     );
 };
@@ -252,11 +287,11 @@ const toggleKeys = (toggle: () => void) => (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
 };
 
-const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExpanded: boolean; params: URLSearchParams }> = (props) => {
-    const { month, defaultExpanded, params, colSpan, onApplyFacetsGlobally, showPnl, hideInvalid } = props;
+const MonthSection: React.FC<SharedProps & { month: TransactionGroup; defaultExpanded: boolean; defaultExpandDays?: boolean; params: URLSearchParams }> = (props) => {
+    const { month, defaultExpanded, defaultExpandDays, params, colSpan, onApplyFacetsGlobally, showPnl, hideInvalid } = props;
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [facets, setFacets] = useState<GroupFacetSelection>({});
-    const [expandAllDays, setExpandAllDays] = useState(() => shouldAutoExpandDays(month));
+    const [expandAllDays, setExpandAllDays] = useState(() => defaultExpandDays ?? shouldAutoExpandDays(month));
     const [expandVersion, setExpandVersion] = useState(0);
     const label = formatMonthLabel(month.period_start);
     const scopedParams = useMemo(() => applyFacetSelection(params, facets), [params, facets]);

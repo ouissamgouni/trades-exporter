@@ -205,7 +205,7 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
                     side="right"
                     align="start"
                     sideOffset={4}
-                    className={`w-[840px] border bg-white p-0 shadow-lg ${allResolved ? 'border-green-300' : 'border-orange-200'}`}
+                    className={`z-[2100] w-[840px] border bg-white p-0 shadow-lg ${allResolved ? 'border-green-300' : 'border-orange-200'}`}
                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                 >
                     <RadixPopover.Arrow className="fill-white" />

@@ -30,7 +30,7 @@ import {
 } from 'react-icons/fi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Transaction, Account, Asset, API_URL, DerivativePosition, Bundle } from '../types';
-import { Direction, ReviewStatus, TransactionType, TaxabilityStatus, UnitPattern } from '../enums';
+import { Direction, ReviewStatus, TransactionType, TaxabilityStatus, UnitPattern, getReviewStatusLabel } from '../enums';
 import { AssetBadge } from './AssetBadge';
 import { AccountBadge } from './AccountBadge';
 import { ComboSelect, SOURCE_OPTIONS } from './ComboSelect';
@@ -108,23 +108,23 @@ interface InfoRowProps {
     alert?: boolean;
 }
 
-const SECTION_COLORS: Record<string, { headerBg: string; headerBgMain: string; headerHover: string; headerHoverMain: string; text: string }> = {
-    blue: { headerBg: 'bg-blue-50', headerBgMain: 'bg-blue-100', headerHover: 'hover:bg-blue-100', headerHoverMain: 'hover:bg-blue-200', text: 'text-blue-700' },
-    purple: { headerBg: 'bg-purple-50', headerBgMain: 'bg-purple-100', headerHover: 'hover:bg-purple-100', headerHoverMain: 'hover:bg-purple-200', text: 'text-purple-700' },
-    cyan: { headerBg: 'bg-cyan-50', headerBgMain: 'bg-cyan-100', headerHover: 'hover:bg-cyan-100', headerHoverMain: 'hover:bg-cyan-200', text: 'text-cyan-700' },
-    green: { headerBg: 'bg-green-50', headerBgMain: 'bg-green-100', headerHover: 'hover:bg-green-100', headerHoverMain: 'hover:bg-green-200', text: 'text-green-700' },
-    teal: { headerBg: 'bg-teal-50', headerBgMain: 'bg-teal-100', headerHover: 'hover:bg-teal-100', headerHoverMain: 'hover:bg-teal-200', text: 'text-teal-700' },
-    orange: { headerBg: 'bg-orange-50', headerBgMain: 'bg-orange-100', headerHover: 'hover:bg-orange-100', headerHoverMain: 'hover:bg-orange-200', text: 'text-orange-700' },
-    gray: { headerBg: 'bg-slate-50', headerBgMain: 'bg-slate-100', headerHover: 'hover:bg-slate-100', headerHoverMain: 'hover:bg-slate-200', text: 'text-slate-700' },
+const SECTION_COLORS: Record<string, { accent: string; text: string }> = {
+    blue: { accent: 'border-l-blue-500', text: 'text-blue-800' },
+    purple: { accent: 'border-l-purple-500', text: 'text-purple-800' },
+    cyan: { accent: 'border-l-cyan-500', text: 'text-cyan-800' },
+    green: { accent: 'border-l-green-500', text: 'text-green-800' },
+    teal: { accent: 'border-l-teal-500', text: 'text-teal-800' },
+    orange: { accent: 'border-l-orange-500', text: 'text-orange-800' },
+    gray: { accent: 'border-l-slate-400', text: 'text-slate-800' },
 };
 
 const InfoRow: React.FC<InfoRowProps> = ({ label, value, muted, alert }) => (
-    <div className="flex items-center justify-between gap-2 py-0.5">
-        <span className="shrink-0 text-[10px] text-slate-500">{label}</span>
+    <div className="flex items-center justify-between gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
+        <span className="shrink-0 text-[13px] text-slate-500">{label}</span>
         <div className="flex items-center gap-1">
             {alert && <FiAlertTriangle size={10} color="orange" />}
             <span
-                className={`break-all text-right font-mono text-[10px] ${alert ? 'text-orange-500' : muted ? 'text-slate-400' : 'text-slate-700'}`}
+                className={`break-all text-right font-mono text-[13px] ${alert ? 'text-orange-500' : muted ? 'text-slate-400' : 'text-slate-700'}`}
             >
                 {value}
             </span>
@@ -156,28 +156,28 @@ const Section: React.FC<SectionProps> = ({
     const colors = SECTION_COLORS[colorScheme] ?? SECTION_COLORS.gray;
 
     return (
-        <div className={isMain ? 'mb-2' : 'mb-1'}>
-            <div
+        <section className={isMain ? `mb-3 border border-l-4 border-slate-200 bg-white shadow-sm ${colors.accent}` : 'mb-2'}>
+            <button
+                type="button"
+                aria-expanded={isOpen}
                 onClick={() => {
                     const willOpen = !isOpen;
                     setIsOpen(willOpen);
                     if (willOpen && onOpen) onOpen();
                 }}
-                className={`flex cursor-pointer items-center gap-1 px-2 ${isMain ? 'py-1.5' : 'py-1'} ${isMain ? colors.headerBgMain : colors.headerBg} ${isMain ? colors.headerHoverMain : colors.headerHover}`}
+                className={`flex w-full items-center gap-1.5 text-left hover:bg-slate-50 ${isMain ? 'px-3 py-2' : 'px-1 py-1'}`}
             >
-                {isOpen ? <FiChevronDown size={isMain ? 14 : 12} /> : <FiChevronRight size={isMain ? 14 : 12} />}
-                <span
-                    className={`${isMain ? 'text-[11px]' : 'text-[10px]'} font-bold ${colors.text} ${isMain ? 'uppercase' : ''}`}
-                >
+                {isOpen ? <FiChevronDown size={isMain ? 16 : 14} className="text-slate-400" /> : <FiChevronRight size={isMain ? 16 : 14} className="text-slate-400" />}
+                <span className={`${isMain ? `text-[15px] ${colors.text}` : 'text-[13px] text-slate-600'} font-semibold`}>
                     {icon && `${icon} `}{title}
                 </span>
-            </div>
+            </button>
             {isOpen && (
-                <div className={`${isMain ? 'px-1' : 'px-2'} py-1 ${isMain ? 'ml-0' : 'ml-2'}`}>
+                <div className={isMain ? 'px-3 pb-3' : 'pl-5 pr-1'}>
                     {children}
                 </div>
             )}
-        </div>
+        </section>
     );
 };
 
@@ -195,10 +195,10 @@ const TagChip: React.FC<TagChipProps> = ({ tag, onRemove, editable }) => {
                 <Badge
                     key={index}
                     colorScheme="blue"
-                    className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px]"
+                    className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[12px]"
                 >
                     <FiTag size={8} />
-                    <span className="text-[9px]">{key === 'value' ? String(value) : `${key}: ${value}`}</span>
+                    <span className="text-[12px]">{key === 'value' ? String(value) : `${key}: ${value}`}</span>
                     {editable && onRemove && index === entries.length - 1 && (
                         <button
                             type="button"
@@ -907,7 +907,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                             if (!transferType) return null;
                             return (
                                 <div className={`mb-1 mt-1 p-2 ${transferType === 'internal' ? 'bg-green-100' : 'bg-orange-100'}`}>
-                                    <span className={`text-[9px] font-bold ${transferType === 'internal' ? 'text-green-700' : 'text-orange-700'}`}>
+                                    <span className={`text-[12px] font-bold ${transferType === 'internal' ? 'text-green-700' : 'text-orange-700'}`}>
                                         {transferType === 'internal'
                                             ? '🏠 Internal Transfer — Both accounts are owned. No taxable event.'
                                             : '🌐 External Transfer — To/from external party.'}
@@ -928,7 +928,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={String(tx.price ?? '')}
                         displayValue={
                             <div className="flex flex-wrap items-center gap-1">
-                                <span className="font-mono text-[10px]"><ValueDisplay value={tx.price} /></span>
+                                <span className="font-mono text-[13px]"><ValueDisplay value={tx.price} /></span>
                                 <AssetBadge
                                     asset={tx.price_quote_asset}
                                     sourceSymbol={tx.source_price_quote_asset_symbol}
@@ -940,7 +940,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                     <Tooltip key={i} content={`${s.item.symbol}${s.item.label ? ` (${s.item.label})` : ''} - ${formatConfidence(s.confidence)} match`} openDelay={100}>
                                         <Badge
                                             colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                            className="cursor-pointer text-[7px]"
+                                            className="cursor-pointer text-[10px]"
                                             onClick={(e: React.MouseEvent) => {
                                                 e.stopPropagation();
                                                 savePriceQuoteAsset(String(s.item.asset_id));
@@ -964,7 +964,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                         if (e.key === 'Enter') { e.preventDefault(); onSave(); }
                                         if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
                                     }}
-                                    className="h-6 font-mono text-[10px]"
+                                    className="h-6 font-mono text-[13px]"
                                     autoFocus
                                 />
                                 <AssetSelector
@@ -980,7 +980,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                             <Tooltip key={i} content={`${s.item.symbol} - ${formatConfidence(s.confidence)} match`} openDelay={100}>
                                                 <Badge
                                                     colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                    className="cursor-pointer text-[8px]"
+                                                    className="cursor-pointer text-[11px]"
                                                     onClick={() => savePriceQuoteAsset(String(s.item.asset_id))}
                                                 >
                                                     {s.item.symbol.slice(0, 8)}{s.item.symbol.length > 8 ? '\u2026' : ''}
@@ -1001,7 +1001,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={String(tx.total ?? '')}
                         displayValue={
                             <div className="flex items-center gap-1">
-                                <span className="font-mono text-[10px]"><ValueDisplay value={tx.total} /></span>
+                                <span className="font-mono text-[13px]"><ValueDisplay value={tx.total} /></span>
                                 <AssetBadge
                                     asset={tx.price_quote_asset}
                                     sourceSymbol={tx.source_price_quote_asset_symbol}
@@ -1022,7 +1022,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={String(tx.fee ?? '')}
                         displayValue={tx.fee ? (
                             <div className="flex flex-wrap items-center gap-1">
-                                <span className="font-mono text-[10px]"><ValueDisplay value={tx.fee} /></span>
+                                <span className="font-mono text-[13px]"><ValueDisplay value={tx.fee} /></span>
                                 <AssetBadge
                                     asset={tx.fee_quote_asset}
                                     sourceSymbol={tx.source_fee_quote_asset_symbol}
@@ -1034,7 +1034,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                     <Tooltip key={i} content={`${s.item.symbol}${s.item.label ? ` (${s.item.label})` : ''} - ${formatConfidence(s.confidence)} match`} openDelay={100}>
                                         <Badge
                                             colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                            className="cursor-pointer text-[7px]"
+                                            className="cursor-pointer text-[10px]"
                                             onClick={(e: React.MouseEvent) => {
                                                 e.stopPropagation();
                                                 saveField('fee_quote_asset_id', s.item.asset_id);
@@ -1058,7 +1058,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                         if (e.key === 'Enter') { e.preventDefault(); onSave(); }
                                         if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
                                     }}
-                                    className="h-6 font-mono text-[10px]"
+                                    className="h-6 font-mono text-[13px]"
                                     autoFocus
                                 />
                                 <AssetSelector
@@ -1074,7 +1074,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                             <Tooltip key={i} content={`${s.item.symbol} - ${formatConfidence(s.confidence)} match`} openDelay={100}>
                                                 <Badge
                                                     colorScheme={getConfidenceColor(s.confidence) as BadgeColorScheme}
-                                                    className="cursor-pointer text-[8px]"
+                                                    className="cursor-pointer text-[11px]"
                                                     onClick={() => saveField('fee_quote_asset_id', s.item.asset_id)}
                                                 >
                                                     {s.item.symbol.slice(0, 8)}{s.item.symbol.length > 8 ? '\u2026' : ''}
@@ -1113,8 +1113,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                     />
                     {tx.has_fr_tax_override && (
                         <div className="flex items-center gap-2 bg-blue-50 px-2 py-1">
-                            <Badge colorScheme="blue" className="text-[7px]">FR</Badge>
-                            <span className="text-[9px] text-blue-600">French Tax override active — managed from the FR Tax tab</span>
+                            <Badge colorScheme="blue" className="text-[10px]">FR</Badge>
+                            <span className="text-[12px] text-blue-600">French Tax override active — managed from the FR Tax tab</span>
                         </div>
                     )}
                     {tx.id != null && (
@@ -1159,10 +1159,10 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         {bundleLoading ? (
                             <div className="flex items-center gap-2 py-2">
                                 <Spinner size="xs" />
-                                <span className="text-[9px] text-slate-400">Loading bundle...</span>
+                                <span className="text-[12px] text-slate-400">Loading bundle...</span>
                             </div>
                         ) : bundleError ? (
-                            <span className="text-[9px] text-red-400">{bundleError}</span>
+                            <span className="text-[12px] text-red-400">{bundleError}</span>
                         ) : bundleData ? (
                             <>
                                 {/* Header: pattern badge + bundle ID */}
@@ -1178,20 +1178,20 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 </div>
 
                                 {/* Label */}
-                                <p className="mb-0.5 text-[10px] font-bold text-slate-700">
+                                <p className="mb-0.5 text-[13px] font-bold text-slate-700">
                                     {bundleData.label || `Bundle #${bundleData.id}`}
                                 </p>
 
                                 {/* Notes */}
                                 {bundleData.notes && (
-                                    <p className="mb-1 text-[9px] text-slate-400">
+                                    <p className="mb-1 text-[12px] text-slate-400">
                                         {bundleData.notes}
                                     </p>
                                 )}
 
                                 {/* Taxability Override */}
                                 <div className="mb-2 flex items-center gap-2">
-                                    <span className="shrink-0 text-[9px] text-slate-500">
+                                    <span className="shrink-0 text-[12px] text-slate-500">
                                         Taxability:
                                     </span>
                                     <select
@@ -1220,7 +1220,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 </div>
 
                                 {/* Transaction count + embedded table */}
-                                <p className="mb-1 text-[9px] font-medium text-slate-500">
+                                <p className="mb-1 text-[12px] font-medium text-slate-500">
                                     {bundleData.transaction_count} transaction
                                     {bundleData.transaction_count !== 1 ? 's' : ''}
                                 </p>
@@ -1235,7 +1235,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                     size="sm"
                                     variant="outline"
                                     colorScheme="red"
-                                    className="mt-1 w-full text-[9px]"
+                                    className="mt-1 w-full text-[12px]"
                                     onClick={unbundleTransaction}
                                     disabled={unbundling}
                                 >
@@ -1262,16 +1262,16 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                     <div className="mt-2 border border-red-700 bg-red-950 p-2">
                         <div className="mb-1 flex items-center gap-1.5">
                             <span className="text-red-400"><FiAlertTriangle size={14} /></span>
-                            <span className="text-[10px] font-bold text-red-300">Spam / Phishing Detection</span>
+                            <span className="text-[13px] font-bold text-red-300">Spam / Phishing Detection</span>
                         </div>
-                        <p className="whitespace-pre-wrap font-mono text-[9px] text-red-200">
+                        <p className="whitespace-pre-wrap font-mono text-[12px] text-red-200">
                             {tx.review_notes}
                         </p>
                         {tx.token_contract_address && (
                             <div className="mt-1.5 flex flex-wrap items-center gap-1">
                                 <button
                                     type="button"
-                                    className="border border-slate-200 bg-white px-2 py-0.5 text-[9px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="border border-slate-200 bg-white px-2 py-0.5 text-[12px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     disabled={isApplyingSpamVerdict}
                                     onClick={() => applySpamVerdict([tx], 'allow')}
                                 >
@@ -1280,7 +1280,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 {getSpamLevel(tx) === 'suspected' && (
                                     <button
                                         type="button"
-                                        className="border border-slate-200 bg-white px-2 py-0.5 text-[9px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="border border-slate-200 bg-white px-2 py-0.5 text-[12px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                         disabled={isApplyingSpamVerdict}
                                         onClick={() => applySpamVerdict([tx], 'block')}
                                     >
@@ -1302,7 +1302,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 <TagChip key={i} tag={tag} editable onRemove={() => removeTag(i)} />
                             ))
                         ) : (
-                            <span className="text-[9px] text-slate-400">No tags</span>
+                            <span className="text-[12px] text-slate-400">No tags</span>
                         )}
                     </div>
                     <>
@@ -1311,13 +1311,13 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 placeholder="Key"
                                 value={newTagKey}
                                 onChange={(e) => setNewTagKey(e.target.value)}
-                                className="h-6 w-[50px] text-[9px]"
+                                className="h-6 w-[50px] text-[12px]"
                             />
                             <Input
                                 placeholder="Value"
                                 value={newTagValue}
                                 onChange={(e) => setNewTagValue(e.target.value)}
-                                className="h-6 flex-1 text-[9px]"
+                                className="h-6 flex-1 text-[12px]"
                                 onKeyDown={(e) => e.key === 'Enter' && addTag()}
                             />
                             <Button size="sm" className="h-6 px-2" onClick={addTag} disabled={!newTagValue.trim()}>+</Button>
@@ -1336,7 +1336,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                         <Badge
                                             key={idx}
                                             colorScheme="gray"
-                                            className="cursor-pointer text-[8px] hover:bg-blue-50"
+                                            className="cursor-pointer text-[11px] hover:bg-blue-50"
                                             onClick={() => {
                                                 const newTag = { [tag.key]: tag.value };
                                                 applyTagsUpdate([...normalizedTags, newTag]);
@@ -1362,14 +1362,14 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 <Badge
                                     colorScheme={(tx.review_status === 'valid' ? 'green' : tx.review_status === 'invalid' ? 'red' : 'yellow') as BadgeColorScheme}
                                 >
-                                    {tx.review_status}
+                                    {getReviewStatusLabel(tx.review_status || '')}
                                 </Badge>
                                 {/* Quick action buttons */}
                                 {tx.review_status !== 'valid' && (
                                     <Tooltip content="Mark as Valid" openDelay={100}>
                                         <Badge
                                             colorScheme="green"
-                                            className="cursor-pointer px-1 text-[9px] hover:bg-green-100"
+                                            className="cursor-pointer px-1 text-[12px] hover:bg-green-100"
                                             onClick={(e: React.MouseEvent) => { e.stopPropagation(); saveField('review_status', ReviewStatus.VALID); }}
                                         >
                                             ✓ Valid
@@ -1377,13 +1377,13 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                     </Tooltip>
                                 )}
                                 {tx.review_status !== 'invalid' && (
-                                    <Tooltip content="Mark as Invalid" openDelay={100}>
+                                    <Tooltip content="Mark as Rejected" openDelay={100}>
                                         <Badge
                                             colorScheme="red"
-                                            className="cursor-pointer px-1 text-[9px] hover:bg-red-100"
+                                            className="cursor-pointer px-1 text-[12px] hover:bg-red-100"
                                             onClick={(e: React.MouseEvent) => { e.stopPropagation(); saveField('review_status', ReviewStatus.INVALID); }}
                                         >
-                                            ✗ Invalid
+                                            ✗ Rejected
                                         </Badge>
                                     </Tooltip>
                                 )}
@@ -1393,7 +1393,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         options={[
                             { label: 'Pending', value: ReviewStatus.PENDING },
                             { label: 'Valid', value: ReviewStatus.VALID },
-                            { label: 'Invalid', value: ReviewStatus.INVALID },
+                            { label: 'Rejected', value: ReviewStatus.INVALID },
                         ]}
                         onSave={async (v) => { await saveField('review_status', v); }}
                     />
@@ -1420,13 +1420,13 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         label="Connector"
                         value={
                             tx.connector_name ? (
-                                <Badge className="text-[8px]" style={{ backgroundColor: hexToRgba(getConnectorColor(tx.connector_name), 0.18), color: getConnectorColor(tx.connector_name) }}>{tx.connector_name}</Badge>
-                            ) : <span className="text-[9px] text-slate-400">—</span>
+                                <Badge className="text-[11px]" style={{ backgroundColor: hexToRgba(getConnectorColor(tx.connector_name), 0.18), color: getConnectorColor(tx.connector_name) }}>{tx.connector_name}</Badge>
+                            ) : <span className="text-[12px] text-slate-400">—</span>
                         }
                     />
                     <InfoRow
                         label="Source"
-                        value={<Badge colorScheme="gray" className="text-[8px]">{tx.source || '—'}</Badge>}
+                        value={<Badge colorScheme="gray" className="text-[11px]">{tx.source || '—'}</Badge>}
                     />
 
                     {/* Run Job Data */}
@@ -1437,7 +1437,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 value={
                                     <Badge
                                         colorScheme="blue"
-                                        className="cursor-pointer text-[8px] hover:bg-blue-100"
+                                        className="cursor-pointer text-[11px] hover:bg-blue-100"
                                         onClick={(e: React.MouseEvent) => { e.stopPropagation(); setShowRunDrawer(true); }}
                                     >
                                         #{tx.sync_connector_run_id} ↗
@@ -1453,17 +1453,17 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                     {/* Raw Data (auto-fetched on section open) */}
                     {!tx.raw_transaction_id ? (
                         <div className="mt-1 bg-slate-50 p-2 text-center">
-                            <span className="text-[9px] text-slate-500">No raw transaction linked (manual entry)</span>
+                            <span className="text-[12px] text-slate-500">No raw transaction linked (manual entry)</span>
                         </div>
                     ) : rawDataLoading ? (
                         <div className="mt-1 flex items-center justify-center gap-2 py-2">
                             <FiLoader className="animate-spin" size={12} />
-                            <span className="text-[9px] text-slate-500">Loading raw data...</span>
+                            <span className="text-[12px] text-slate-500">Loading raw data...</span>
                         </div>
                     ) : rawDataError ? (
                         <div className="mt-1 bg-red-50 p-2">
-                            <span className="text-[9px] text-red-500">Error: {rawDataError}</span>
-                            <Button size="sm" className="mt-1 text-[9px]" onClick={() => { setHasFetchedRaw(false); setRawDataError(null); }}>
+                            <span className="text-[12px] text-red-500">Error: {rawDataError}</span>
+                            <Button size="sm" className="mt-1 text-[12px]" onClick={() => { setHasFetchedRaw(false); setRawDataError(null); }}>
                                 Retry
                             </Button>
                         </div>
@@ -1471,14 +1471,14 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         <div className="mt-1 border-t border-slate-200 pt-1">
                             <div className="mb-1 flex items-center justify-between">
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[9px] text-slate-500">Raw TX ID: {rawData.id}</span>
-                                    <span className="text-[8px] text-slate-400">• {rawData.source_transaction_id}</span>
+                                    <span className="text-[12px] text-slate-500">Raw TX ID: {rawData.id}</span>
+                                    <span className="text-[11px] text-slate-400">• {rawData.source_transaction_id}</span>
                                 </div>
-                                <Button size="sm" variant="ghost" onClick={copyJson} className="px-1 text-[9px]">
+                                <Button size="sm" variant="ghost" onClick={copyJson} className="px-1 text-[12px]">
                                     {copiedJson ? <FiCheck size={10} /> : <FiCopy size={10} />}
                                 </Button>
                             </div>
-                            <div className="max-h-[200px] select-text overflow-y-auto whitespace-pre-wrap break-all bg-slate-900 p-2 font-mono text-[8px] text-green-300">
+                            <div className="max-h-[200px] select-text overflow-y-auto whitespace-pre-wrap break-all bg-slate-900 p-2 font-mono text-[11px] text-green-300">
                                 {JSON.stringify(rawData.raw_data, null, 2)}
                             </div>
                             {rawData.ingestion_time && (
@@ -1501,15 +1501,15 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                 {/* 🔗 Source-Mappings */}
                 {/* ============================================================ */}
                 <Section title="Source-Mappings" icon="🔗" defaultOpen={false} colorScheme="blue">
-                    <p className="mb-1 text-[9px] text-slate-500">Source value → Resolved ID</p>
+                    <p className="mb-1 text-[12px] text-slate-500">Source value → Resolved ID</p>
 
                     <InfoRow
                         label="Account"
                         value={
                             tx.account_id ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500">{tx.source_account || '-'}</span>
-                                    <span className="text-[9px]">→</span>
+                                    <span className="max-w-[60px] truncate text-[12px] text-slate-500">{tx.source_account || '-'}</span>
+                                    <span className="text-[12px]">→</span>
                                     <AccountBadge
                                         account={accounts.find(a => a.id === tx.account_id)}
                                         accountId={tx.account_id}
@@ -1520,9 +1520,9 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 </div>
                             ) : tx.source_account ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500">{tx.source_account}</span>
-                                    <span className="text-[9px]">→</span>
-                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                    <span className="max-w-[60px] truncate text-[12px] text-slate-500">{tx.source_account}</span>
+                                    <span className="text-[12px]">→</span>
+                                    <span className="text-[12px] text-orange-500">NOT LINKED</span>
                                 </div>
                             ) : '-'
                         }
@@ -1534,15 +1534,15 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={
                             tx.asset_id ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[9px] text-slate-500">{tx.source_asset_symbol}</span>
-                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[12px] text-slate-500">{tx.source_asset_symbol}</span>
+                                    <span className="text-[12px]">→</span>
                                     <AssetBadge asset={tx.linked_asset} size="xs" colorPalette="purple" maxLength={15} />
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[9px] text-slate-500">{tx.source_asset_symbol || '-'}</span>
-                                    <span className="text-[9px]">→</span>
-                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                    <span className="text-[12px] text-slate-500">{tx.source_asset_symbol || '-'}</span>
+                                    <span className="text-[12px]">→</span>
+                                    <span className="text-[12px] text-orange-500">NOT LINKED</span>
                                 </div>
                             )
                         }
@@ -1554,15 +1554,15 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={
                             tx.price_quote_asset_id ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[9px] text-slate-500">{tx.source_price_quote_asset_symbol}</span>
-                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[12px] text-slate-500">{tx.source_price_quote_asset_symbol}</span>
+                                    <span className="text-[12px]">→</span>
                                     <AssetBadge asset={tx.price_quote_asset} size="xs" colorPalette="green" maxLength={15} />
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[9px] text-slate-500">{tx.source_price_quote_asset_symbol || '-'}</span>
-                                    <span className="text-[9px]">→</span>
-                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                    <span className="text-[12px] text-slate-500">{tx.source_price_quote_asset_symbol || '-'}</span>
+                                    <span className="text-[12px]">→</span>
+                                    <span className="text-[12px] text-orange-500">NOT LINKED</span>
                                 </div>
                             )
                         }
@@ -1574,15 +1574,15 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={
                             tx.fee_quote_asset_id ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[9px] text-slate-500">{tx.source_fee_quote_asset_symbol}</span>
-                                    <span className="text-[9px]">→</span>
+                                    <span className="text-[12px] text-slate-500">{tx.source_fee_quote_asset_symbol}</span>
+                                    <span className="text-[12px]">→</span>
                                     <AssetBadge asset={tx.fee_quote_asset} size="xs" colorPalette="green" maxLength={15} />
                                 </div>
                             ) : tx.source_fee_quote_asset_symbol ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[9px] text-slate-500">{tx.source_fee_quote_asset_symbol}</span>
-                                    <span className="text-[9px]">→</span>
-                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                    <span className="text-[12px] text-slate-500">{tx.source_fee_quote_asset_symbol}</span>
+                                    <span className="text-[12px]">→</span>
+                                    <span className="text-[12px] text-orange-500">NOT LINKED</span>
                                 </div>
                             ) : '-'
                         }
@@ -1594,8 +1594,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={
                             tx.from_account_id ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_from_account || undefined}>{tx.source_from_account || '-'}</span>
-                                    <span className="text-[9px]">→</span>
+                                    <span className="max-w-[60px] truncate text-[12px] text-slate-500" title={tx.source_from_account || undefined}>{tx.source_from_account || '-'}</span>
+                                    <span className="text-[12px]">→</span>
                                     <AccountBadge
                                         account={accounts.find(a => a.id === tx.from_account_id)}
                                         accountId={tx.from_account_id}
@@ -1606,9 +1606,9 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 </div>
                             ) : tx.source_from_account ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_from_account}>{tx.source_from_account}</span>
-                                    <span className="text-[9px]">→</span>
-                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                    <span className="max-w-[60px] truncate text-[12px] text-slate-500" title={tx.source_from_account}>{tx.source_from_account}</span>
+                                    <span className="text-[12px]">→</span>
+                                    <span className="text-[12px] text-orange-500">NOT LINKED</span>
                                 </div>
                             ) : '-'
                         }
@@ -1619,8 +1619,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         value={
                             tx.to_account_id ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_to_account || undefined}>{tx.source_to_account || '-'}</span>
-                                    <span className="text-[9px]">→</span>
+                                    <span className="max-w-[60px] truncate text-[12px] text-slate-500" title={tx.source_to_account || undefined}>{tx.source_to_account || '-'}</span>
+                                    <span className="text-[12px]">→</span>
                                     <AccountBadge
                                         account={accounts.find(a => a.id === tx.to_account_id)}
                                         accountId={tx.to_account_id}
@@ -1631,9 +1631,9 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                                 </div>
                             ) : tx.source_to_account ? (
                                 <div className="flex items-center gap-1">
-                                    <span className="max-w-[60px] truncate text-[9px] text-slate-500" title={tx.source_to_account}>{tx.source_to_account}</span>
-                                    <span className="text-[9px]">→</span>
-                                    <span className="text-[9px] text-orange-500">NOT LINKED</span>
+                                    <span className="max-w-[60px] truncate text-[12px] text-slate-500" title={tx.source_to_account}>{tx.source_to_account}</span>
+                                    <span className="text-[12px]">→</span>
+                                    <span className="text-[12px] text-orange-500">NOT LINKED</span>
                                 </div>
                             ) : '-'
                         }
@@ -1688,9 +1688,9 @@ const PositionCard: React.FC<{ transactionId: number }> = ({ transactionId }) =>
         return (
             <div className="mt-2 border border-slate-600 bg-slate-800 p-2">
                 <div className="mb-1 flex items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-slate-300">🎯 Position</span>
+                    <span className="text-[13px] font-bold text-slate-300">🎯 Position</span>
                 </div>
-                <span className="text-[9px] text-slate-400">Loading...</span>
+                <span className="text-[12px] text-slate-400">Loading...</span>
             </div>
         );
     }
@@ -1705,18 +1705,18 @@ const PositionCard: React.FC<{ transactionId: number }> = ({ transactionId }) =>
         <div className="mt-2 border border-slate-600 bg-slate-800 p-2">
             {/* Header */}
             <div className="mb-2 flex items-center gap-1.5">
-                <span className="text-[10px] font-bold text-slate-300">🎯 Position</span>
-                <Badge colorScheme="purple" className="text-[9px]">{pos.coin}</Badge>
-                <Badge colorScheme={sideColor} className="text-[9px]">
+                <span className="text-[13px] font-bold text-slate-300">🎯 Position</span>
+                <Badge colorScheme="purple" className="text-[12px]">{pos.coin}</Badge>
+                <Badge colorScheme={sideColor} className="text-[12px]">
                     {pos.side.toUpperCase()}
                 </Badge>
-                <Badge colorScheme={statusColor} className="text-[9px]">
+                <Badge colorScheme={statusColor} className="text-[12px]">
                     {pos.status}
                 </Badge>
             </div>
 
             {/* Body */}
-            <div className="flex flex-col gap-0.5 text-[9px]">
+            <div className="flex flex-col gap-0.5 text-[12px]">
                 <div className="flex justify-between">
                     <span className="text-slate-400">Entry Price</span>
                     <span className="text-slate-200">${pos.entry_price?.toFixed(2)}</span>

@@ -330,6 +330,7 @@ export const MissingDataTable: React.FC<MissingDataTableProps> = ({
             )}
 
             <TransactionsTable
+                defaultExpandAllDays
                 title="Missing Data Issues"
                 subtitle={`${transactionIds.length} transaction${transactionIds.length !== 1 ? 's' : ''} with missing data`}
                 tableId="missingData"
