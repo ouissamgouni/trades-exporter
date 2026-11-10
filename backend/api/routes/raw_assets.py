@@ -59,7 +59,9 @@ class BulkMapAssetItem(BaseModel):
     symbol: str = Field(..., description="Raw asset symbol")
     source: str = Field(..., description="Source platform/exchange")
     network: str = Field("", description="Token network (only used with a contract)")
-    contract_address: str = Field("", description="Token contract; empty for non-token symbols")
+    contract_address: str = Field(
+        "", description="Token contract; empty for non-token symbols"
+    )
     asset_id: int = Field(..., description="Target asset_id to map to")
 
 
@@ -170,7 +172,11 @@ def bulk_map_assets(
         for item in request.mappings:
             try:
                 raw_asset = _find(
-                    session, item.symbol, item.source, item.network, item.contract_address
+                    session,
+                    item.symbol,
+                    item.source,
+                    item.network,
+                    item.contract_address,
                 )
                 if not raw_asset:
                     network, contract = token_key(item.network, item.contract_address)
@@ -225,7 +231,9 @@ class RawAssetOverviewItem(BaseModel):
 class RawAssetOverviewResponse(BaseModel):
     items: List[RawAssetOverviewItem]
     counts: Dict[str, int]
-    verified_count: int = Field(0, description="All suggestions that may be bulk-accepted")
+    verified_count: int = Field(
+        0, description="All suggestions that may be bulk-accepted"
+    )
     sources: List[str]
     networks: List[str]
 
@@ -259,8 +267,12 @@ class DismissRawAssetRequest(BaseModel):
 
 @router.get("/overview", response_model=RawAssetOverviewResponse)
 def raw_assets_overview(
-    status: Optional[str] = Query(None, description="suggested | unmapped | mapped | ignored"),
-    q: Optional[str] = Query(None, description="Search symbol, contract, source or asset"),
+    status: Optional[str] = Query(
+        None, description="suggested | unmapped | mapped | ignored"
+    ),
+    q: Optional[str] = Query(
+        None, description="Search symbol, contract, source or asset"
+    ),
     source: Optional[str] = Query(None),
     network: Optional[str] = Query(None),
     session: Session = Depends(get_db),
@@ -281,7 +293,8 @@ def raw_assets_overview(
         verified_count=sum(
             1
             for it in items
-            if it["status"] == "suggested" and it["suggestion"].confidence >= VERIFIED_CONFIDENCE
+            if it["status"] == "suggested"
+            and it["suggestion"].confidence >= VERIFIED_CONFIDENCE
         ),
         sources=sorted({it["source"] for it in items}),
         networks=sorted({it["network"] for it in items if it["network"]}),
@@ -311,7 +324,9 @@ def accept_raw_asset_suggestions(
         if suggestion.confidence < VERIFIED_CONFIDENCE:
             skipped += 1
             continue
-        raw = _find(session, it["symbol"], it["source"], it["network"], it["contract_address"])
+        raw = _find(
+            session, it["symbol"], it["source"], it["network"], it["contract_address"]
+        )
         raw.asset_id = suggestion.id
         session.add(raw)
         _propagate(session, raw, suggestion.id)
@@ -347,19 +362,25 @@ def lookup_raw_asset(
             if key
             else []
         )
-        candidates = session.exec(
-            select(Asset).where(func.upper(Asset.symbol) == key)
-        ).all() if key else []
+        candidates = (
+            session.exec(select(Asset).where(func.upper(Asset.symbol) == key)).all()
+            if key
+            else []
+        )
         mapped = defaultdict(set)
         for r in existing:
             if r.asset_id is not None:
                 mapped[key].add(r.asset_id)
-        suggestion = symbol_suggestion(
-            key,
-            mapped,
-            {key: list(candidates)},
-            {a.asset_id: a for a in candidates},
-        ) if key else None
+        suggestion = (
+            symbol_suggestion(
+                key,
+                mapped,
+                {key: list(candidates)},
+                {a.asset_id: a for a in candidates},
+            )
+            if key
+            else None
+        )
     return RawAssetLookupResponse(
         suggestion=suggestion, existing=[_to_response(r) for r in existing]
     )
@@ -396,7 +417,10 @@ def list_raw_assets(
 
         statement = (
             statement.order_by(
-                RawAsset.source, RawAsset.symbol, RawAsset.network, RawAsset.contract_address
+                RawAsset.source,
+                RawAsset.symbol,
+                RawAsset.network,
+                RawAsset.contract_address,
             )
             .offset(offset)
             .limit(limit)
@@ -642,7 +666,10 @@ def get_raw_asset_transactions(
             or_(
                 and_(
                     T.source_asset_symbol == symbol,
-                    or_(T.token_contract_address.is_(None), T.token_contract_address == ""),
+                    or_(
+                        T.token_contract_address.is_(None),
+                        T.token_contract_address == "",
+                    ),
                 ),
                 T.source_price_quote_asset_symbol == symbol,
                 T.source_fee_quote_asset_symbol == symbol,

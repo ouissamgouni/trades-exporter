@@ -102,7 +102,13 @@ def raw_asset_usage(session: Session) -> Dict[Tuple[str, str, str, str], Usage]:
         T.source_attributed_asset_symbol,
     ):
         rows = session.exec(
-            select(T.source, col, func.count(), func.min(T.date_time), func.max(T.date_time))
+            select(
+                T.source,
+                col,
+                func.count(),
+                func.min(T.date_time),
+                func.max(T.date_time),
+            )
             .where(col != "")
             .group_by(T.source, col)
         ).all()
@@ -167,9 +173,13 @@ def raw_asset_overview(session: Session) -> List[Dict[str, Any]]:
         suggestion = None
         if r.asset_id is None and not ignored:
             suggestion = (
-                suggest_asset_for_contract(session, r.symbol, r.network, r.contract_address)
+                suggest_asset_for_contract(
+                    session, r.symbol, r.network, r.contract_address
+                )
                 if r.contract_address
-                else symbol_suggestion(r.symbol, mapped_symbol_ids, assets_by_symbol, assets_by_id)
+                else symbol_suggestion(
+                    r.symbol, mapped_symbol_ids, assets_by_symbol, assets_by_id
+                )
             )
         count, first, last = usage.get(
             (r.source, r.symbol, r.network, r.contract_address), [0, None, None]
@@ -203,7 +213,9 @@ def raw_asset_overview(session: Session) -> List[Dict[str, Any]]:
 
 def raw_account_usage(
     session: Session,
-) -> Dict[Tuple[str, str], List[Tuple[str, str, int, Optional[datetime], Optional[datetime]]]]:
+) -> Dict[
+    Tuple[str, str], List[Tuple[str, str, int, Optional[datetime], Optional[datetime]]]
+]:
     """Per (source, label): (network, role, count, first, last) rows; role is account/from/to."""
     T = NormalizedTransaction
     out: Dict[Tuple[str, str], list] = defaultdict(list)
@@ -213,7 +225,14 @@ def raw_account_usage(
         ("to", T.source_to_account),
     ):
         rows = session.exec(
-            select(T.source, col, T.network, func.count(), func.min(T.date_time), func.max(T.date_time))
+            select(
+                T.source,
+                col,
+                T.network,
+                func.count(),
+                func.min(T.date_time),
+                func.max(T.date_time),
+            )
             .where(col.isnot(None), col != "")
             .group_by(T.source, col, T.network)
         ).all()
@@ -266,16 +285,26 @@ def account_suggestion(
             confidence=0.95,
             reason="known_label",
         )
-    for field, reason in (("address_or_identifier", "exact_address"), ("name", "exact_name")):
-        exact = [a for a in accounts if (getattr(a, field) or "").strip().lower() == key]
+    for field, reason in (
+        ("address_or_identifier", "exact_address"),
+        ("name", "exact_name"),
+    ):
+        exact = [
+            a for a in accounts if (getattr(a, field) or "").strip().lower() == key
+        ]
         if len(exact) > 1 and network:
             exact = [
                 a
                 for a in exact
-                if any((c.config or {}).get("chain") == network for c in connectors_map.get(a.id, []))
+                if any(
+                    (c.config or {}).get("chain") == network
+                    for c in connectors_map.get(a.id, [])
+                )
             ]
         if len(exact) == 1:
-            return SuggestionInfo(id=exact[0].id, name=exact[0].name, confidence=1.0, reason=reason)
+            return SuggestionInfo(
+                id=exact[0].id, name=exact[0].name, confidence=1.0, reason=reason
+            )
     top = get_top_account_suggestions(
         label=label,
         accounts=accounts,
@@ -338,12 +367,16 @@ def raw_account_overview(session: Session) -> List[Dict[str, Any]]:
                 "account_id": r.account_id,
                 "account_name": acc.name if acc else None,
                 "account_type": acc.account_type if acc else None,
-                "status": status_of(bool(r.dismissed), r.account_id is not None, suggestion),
+                "status": status_of(
+                    bool(r.dismissed), r.account_id is not None, suggestion
+                ),
                 "suggestion": suggestion,
                 "dismissed": bool(r.dismissed),
                 "dismissed_at": r.dismissed_at,
                 "dismissed_reason": r.dismissed_reason,
-                **account_usage_for(usage.get((r.source, r.label), []), r.network or ""),
+                **account_usage_for(
+                    usage.get((r.source, r.label), []), r.network or ""
+                ),
             }
         )
     return items

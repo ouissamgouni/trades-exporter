@@ -22,7 +22,9 @@ def upgrade() -> None:
         sa.Column("dismissed", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
     op.add_column("raw_assets", sa.Column("dismissed_at", sa.DateTime(), nullable=True))
-    op.add_column("raw_assets", sa.Column("dismissed_reason", sa.String(), nullable=True))
+    op.add_column(
+        "raw_assets", sa.Column("dismissed_reason", sa.String(), nullable=True)
+    )
 
 
 def downgrade() -> None:

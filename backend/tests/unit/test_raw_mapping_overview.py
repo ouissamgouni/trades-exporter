@@ -8,7 +8,9 @@ from backend.services import raw_mapping_overview as svc
 
 
 def _acc(id, name, address=None):
-    return Account(id=id, name=name, address_or_identifier=address, account_type="wallet")
+    return Account(
+        id=id, name=name, address_or_identifier=address, account_type="wallet"
+    )
 
 
 def test_symbol_suggestion_prefers_known_mapping_then_exact_symbol():
@@ -74,9 +76,27 @@ def test_account_usage_network_scoping():
 
 def test_filter_items_counts_ignore_status_filter():
     items = [
-        {"source": "a", "network": "", "symbol": "BTC", "status": "mapped", "usage_count": 1},
-        {"source": "a", "network": "", "symbol": "ETH", "status": "suggested", "usage_count": 5},
-        {"source": "b", "network": "base", "symbol": "USDC", "status": "unmapped", "usage_count": 9},
+        {
+            "source": "a",
+            "network": "",
+            "symbol": "BTC",
+            "status": "mapped",
+            "usage_count": 1,
+        },
+        {
+            "source": "a",
+            "network": "",
+            "symbol": "ETH",
+            "status": "suggested",
+            "usage_count": 5,
+        },
+        {
+            "source": "b",
+            "network": "base",
+            "symbol": "USDC",
+            "status": "unmapped",
+            "usage_count": 9,
+        },
     ]
     rows, counts = svc.filter_items(items, ("symbol",), status="mapped", source="a")
     assert [r["symbol"] for r in rows] == ["BTC"]

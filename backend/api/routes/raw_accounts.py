@@ -194,7 +194,9 @@ class RawAccountOverviewItem(BaseModel):
 class RawAccountOverviewResponse(BaseModel):
     items: List[RawAccountOverviewItem]
     counts: Dict[str, int]
-    verified_count: int = Field(0, description="All suggestions that may be bulk-accepted")
+    verified_count: int = Field(
+        0, description="All suggestions that may be bulk-accepted"
+    )
     sources: List[str]
     networks: List[str]
 
@@ -217,8 +219,12 @@ class RawAccountLookupResponse(BaseModel):
 
 @router.get("/overview", response_model=RawAccountOverviewResponse)
 def raw_accounts_overview(
-    status: Optional[str] = Query(None, description="suggested | unmapped | mapped | ignored"),
-    q: Optional[str] = Query(None, description="Search label, source, network or account"),
+    status: Optional[str] = Query(
+        None, description="suggested | unmapped | mapped | ignored"
+    ),
+    q: Optional[str] = Query(
+        None, description="Search label, source, network or account"
+    ),
     source: Optional[str] = Query(None),
     network: Optional[str] = Query(None),
     session: Session = Depends(get_db),
@@ -239,7 +245,8 @@ def raw_accounts_overview(
         verified_count=sum(
             1
             for it in items
-            if it["status"] == "suggested" and it["suggestion"].confidence >= VERIFIED_CONFIDENCE
+            if it["status"] == "suggested"
+            and it["suggestion"].confidence >= VERIFIED_CONFIDENCE
         ),
         sources=sorted({it["source"] for it in items}),
         networks=sorted({it["network"] for it in items if it["network"]}),
@@ -255,7 +262,9 @@ def accept_raw_account_suggestions(
     wanted = None if request.ids is None else set(request.ids)
     applied = skipped = 0
     for it in raw_account_overview(session):
-        if it["status"] != "suggested" or (wanted is not None and it["id"] not in wanted):
+        if it["status"] != "suggested" or (
+            wanted is not None and it["id"] not in wanted
+        ):
             continue
         suggestion = it["suggestion"]
         if suggestion.confidence < VERIFIED_CONFIDENCE:
