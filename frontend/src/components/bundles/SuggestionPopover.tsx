@@ -54,6 +54,7 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
     );
     const [selectedPattern, setSelectedPattern] = useState<string>(suggestion.pattern);
     const [accepting, setAccepting] = useState(false);
+    const completesBundleId = suggestion.existing_bundle_id ?? null;
 
     const acceptSuggestion = async () => {
         setAccepting(true);
@@ -74,9 +75,10 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                 queryClient.invalidateQueries({ queryKey: ['bundles'] });
                 queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
                 queryClient.invalidateQueries({ queryKey: ['filterOptions'] });
+                queryClient.invalidateQueries({ queryKey: ['brokenBundles'] });
 
                 toaster.success({
-                    title: 'Bundle created',
+                    title: completesBundleId ? `Bundle #${completesBundleId} completed` : 'Bundle created',
                     description: suggestion.label,
                 });
 
@@ -191,6 +193,11 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                                 {suggestion.total_quantity} {suggestion.asset_symbol}
                             </span>
                         )}
+                        {completesBundleId && (
+                            <span className="mt-2 block rounded border border-purple-200 bg-purple-50 px-2 py-1 text-xs text-purple-800">
+                                Completes broken bundle 📦 #{completesBundleId}: accepting adds the missing leg(s) to it.
+                            </span>
+                        )}
                     </div>
 
                     {/* Transactions */}
@@ -246,7 +253,7 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                                 }}
                                 disabled={accepting}
                             >
-                                {accepting ? <Spinner size="xs" /> : '✓ Create Bundle'}
+                                {accepting ? <Spinner size="xs" /> : completesBundleId ? `✓ Add to bundle #${completesBundleId}` : '✓ Create Bundle'}
                             </Button>
                             <Button
                                 size="sm"

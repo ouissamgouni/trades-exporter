@@ -33,6 +33,10 @@ def _entry_to_dict(entry) -> Dict[str, Any]:
         "available": _decimal_to_str(entry.available),
         "locked": _decimal_to_str(entry.locked),
         "chain": entry.chain,
+        "contract_address": entry.contract_address,
+        "asset_id": entry.asset_id,
+        "match_symbol": entry.match_symbol,
+        "spam_reason": entry.spam_reason,
         "raw": entry.raw,
     }
 

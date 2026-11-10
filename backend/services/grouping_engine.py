@@ -84,6 +84,8 @@ class GroupingSuggestion:
     reason: str
     confidence: float
     transactions: List[Dict[str, Any]] = field(default_factory=list)
+    # Broken bundle this suggestion would complete (some legs already belong to it)
+    existing_bundle_id: Optional[int] = None
     
     @property
     def transaction_ids(self) -> List[int]:

@@ -449,7 +449,7 @@ class HyperliquidPerpsConnector(BaseConnector):
         return not self.test_mode and self._info is not None
 
     def get_balance(self) -> List[BalanceEntry]:
-        """Fetch USDC margin balance and open position values."""
+        """Fetch perp margin (USDC), open positions and spot wallet balances."""
         state = self._info.user_state(self._wallet_address)
         entries = []
 
@@ -459,6 +459,28 @@ class HyperliquidPerpsConnector(BaseConnector):
         withdrawable = Decimal(state.get("withdrawable", "0"))
         margin_used = Decimal(margin.get("totalMarginUsed", "0"))
 
+        # Spot wallet is a separate clearinghouse; USDC there is merged with perp margin.
+        spot_entries: Dict[str, BalanceEntry] = {}
+        spot = self._info.spot_user_state(self._wallet_address)
+        for bal in spot.get("balances", []):
+            coin = bal.get("coin", "")
+            total = Decimal(bal.get("total", "0"))
+            hold = Decimal(bal.get("hold", "0"))
+            if coin and total > 0:
+                spot_entries[coin] = BalanceEntry(
+                    asset_symbol=coin,
+                    total=total,
+                    available=total - hold,
+                    locked=hold,
+                    raw=bal,
+                )
+
+        spot_usdc = spot_entries.pop("USDC", None)
+        if spot_usdc:
+            account_value += spot_usdc.total
+            withdrawable += spot_usdc.available
+            margin_used += spot_usdc.locked
+
         if account_value > 0:
             entries.append(
                 BalanceEntry(
@@ -466,9 +488,10 @@ class HyperliquidPerpsConnector(BaseConnector):
                     total=account_value,
                     available=withdrawable,
                     locked=margin_used,
-                    raw=margin,
+                    raw={"perp": margin, "spot": spot_usdc.raw if spot_usdc else None},
                 )
             )
+        entries.extend(spot_entries.values())
 
         # Open positions as individual entries
         for pos in state.get("assetPositions", []):

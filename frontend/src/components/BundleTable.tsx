@@ -24,6 +24,7 @@ import { formatDateTimeCompact, parseApiDate } from '../utils/dateUtils';
 import { formatQuantity } from '../utils/numberUtils';
 import { ValueDisplay } from './ValueDisplay';
 import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
+import { BundleCompletionSuggestion } from './bundles/BundleCompletionSuggestion';
 import { useAssets } from '../hooks/useAssets';
 
 // ============================================================================
@@ -821,6 +822,12 @@ const BundleRow: React.FC<BundleRowProps> = ({
                         />
                     </div>
                 )}
+                <BundleCompletionSuggestion
+                    bundleId={bundle.id}
+                    memberIds={(bundle.transactions || []).map(t => t.id)}
+                    onTransactionClick={onTransactionClick}
+                    className="mt-1.5"
+                />
             </div>
 
             {/* Delete Confirmation Dialog */}

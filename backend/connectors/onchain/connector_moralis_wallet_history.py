@@ -715,6 +715,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                         total=total,
                         available=total,
                         chain=self.chain_name,
+                        contract_address=None if tok.get("native_token") else tok.get("token_address"),
                         raw=tok,
                     ))
         except Exception as e:
@@ -722,9 +723,9 @@ class ConnectorMoralisWalletHistory(BaseConnector):
 
         # Deduplicate by symbol — the tokens endpoint may return
         # the native token that was already fetched via /balance.
-        seen: dict[str, BalanceEntry] = {}
+        seen: dict[tuple, BalanceEntry] = {}
         for entry in entries:
-            key = entry.asset_symbol
+            key = (entry.asset_symbol, (entry.contract_address or "").lower())
             if key in seen:
                 # Keep the entry with the larger balance
                 if entry.total > seen[key].total:

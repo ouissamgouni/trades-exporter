@@ -16,8 +16,9 @@ import { computeDelta, deltaColor, formatPct } from './deltaUtils';
 import { AssetBadge } from '../AssetBadge';
 import { AccountBadge } from '../AccountBadge';
 import { useAssets } from '../../hooks/useAssets';
+import { EntityInfoButton } from '../EntityInfoButton';
 import type { UnmappedLiveAsset } from './types';
-import type { AccountBalance, AssetRef } from '../../types';
+import { liveEntryKey, type AccountBalance, type AssetRef } from '../../types';
 
 // ── Types ──
 
@@ -69,12 +70,14 @@ function formatQty(qty: number): string {
 function buildLiveData(accountBalances: AccountBalance[]) {
     const liveMap = new Map<string, number>();
     const holdingsMap = new Map<string, AccountHolding[]>();
+    const assetIdMap = new Map<string, number>();
 
     for (const ab of accountBalances) {
         for (const cb of ab.connector_balances) {
             for (const entry of cb.entries) {
-                const sym = entry.asset_symbol.toUpperCase();
+                const sym = liveEntryKey(entry);
                 const amount = parseFloat(entry.total) || 0;
+                if (entry.asset_id != null && !assetIdMap.has(sym)) assetIdMap.set(sym, entry.asset_id);
                 liveMap.set(sym, (liveMap.get(sym) ?? 0) + amount);
                 if (!holdingsMap.has(sym)) holdingsMap.set(sym, []);
                 holdingsMap.get(sym)!.push({
@@ -86,7 +89,7 @@ function buildLiveData(accountBalances: AccountBalance[]) {
             }
         }
     }
-    return { liveMap, holdingsMap };
+    return { liveMap, holdingsMap, assetIdMap };
 }
 
 // ── Row sub-component ──
@@ -95,7 +98,8 @@ const BalanceRowItem: React.FC<{
     row: BalanceRow;
     deltaThreshold: number;
     assetMap: Map<string, AssetRef>;
-}> = ({ row, deltaThreshold, assetMap }) => {
+    assetIdMap: Map<string, number>;
+}> = ({ row, deltaThreshold, assetMap, assetIdMap }) => {
     const [expanded, setExpanded] = useState(false);
     const isMismatch = row.covered && !row.matched && Math.abs(row.pct ?? 0) > deltaThreshold / 100;
     const canExpand = row.accounts.length > 0;
@@ -118,6 +122,13 @@ const BalanceRowItem: React.FC<{
                         sourceSymbol={row.symbol}
                         size="xs"
                         showWarning={false}
+                        hideInfoIcon
+                    />
+                    <EntityInfoButton
+                        kind="asset"
+                        id={assetMap.get(row.symbol)?.id ?? assetIdMap.get(row.symbol)}
+                        label={row.symbol}
+                        size={12}
                     />
                 </div>
                 <div className="text-right font-mono text-xs text-gray-600">
@@ -191,12 +202,22 @@ const UnmappedRowItem: React.FC<{
                             {expanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
                         </span>
                     )}
-                    <Badge colorScheme="purple">
+                    <Badge colorScheme="purple" title={asset.contractAddress ?? undefined}>
                         <span className="flex items-center gap-0.5">
                             <LuLink2Off size={10} />
                             <span className="truncate">{asset.symbol}</span>
                         </span>
                     </Badge>
+                    {asset.spamReason && (
+                        <Badge
+                            colorScheme="red"
+                            className="shrink-0 text-[10px]"
+                            title={asset.spamReason === 'spam_rule' ? 'Token contract blocked as spam' : 'Only seen in rejected transactions'}
+                        >
+                            spam
+                        </Badge>
+                    )}
+                    <EntityInfoButton kind="asset" id={asset.assetId} label={asset.symbol} size={12} />
                 </div>
                 <div className="text-right font-mono text-xs text-gray-400">
                     —
@@ -275,7 +296,7 @@ export const BalanceSlidePanel: React.FC<BalanceSlidePanelProps> = ({
     }, [allDbAssets]);
 
     // Build live balance map + per-account holdings from raw account balances
-    const { liveMap, holdingsMap } = useMemo(
+    const { liveMap, holdingsMap, assetIdMap } = useMemo(
         () => buildLiveData(liveAccountBalances),
         [liveAccountBalances],
     );
@@ -405,6 +426,7 @@ export const BalanceSlidePanel: React.FC<BalanceSlidePanelProps> = ({
                                 row={row}
                                 deltaThreshold={deltaThreshold}
                                 assetMap={assetMap}
+                                assetIdMap={assetIdMap}
                             />
                         ))}
 

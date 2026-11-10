@@ -17,7 +17,7 @@ Returns CalculationUnit objects directly (the unified grouping concept).
 
 from decimal import Decimal
 from typing import List, Optional
-from sqlmodel import Session, select
+from sqlmodel import Session, or_, select
 from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
@@ -77,11 +77,13 @@ class SuggestionService:
         Returns:
             List of GroupingSuggestion objects (can be converted to CalculationUnit).
         """
+        broken_ids: set[int] = set()
         if transactions is None:
             if include_bundled:
                 transactions = self._get_all_transactions()
             else:
-                transactions = self._get_standalone_transactions()
+                broken_ids = self._broken_bundle_ids()
+                transactions = self._get_standalone_transactions(broken_ids)
 
         if not transactions:
             return []
@@ -95,6 +97,25 @@ class SuggestionService:
             if len(s.transaction_ids) >= 2  # Only 2+ transactions
             and (include_unknown or s.pattern != PATTERN_UNKNOWN)
         ]
+
+        # Members of broken bundles are candidates only to complete their own bundle.
+        if broken_ids:
+            bundle_of = {
+                t.id: t.user_calculation_unit_id
+                for t in transactions
+                if t.user_calculation_unit_id is not None
+            }
+            kept = []
+            for s in filtered:
+                bundles = {bundle_of[i] for i in s.transaction_ids if i in bundle_of}
+                if not bundles:
+                    kept.append(s)
+                elif len(bundles) == 1 and len(
+                    [i for i in s.transaction_ids if i in bundle_of]
+                ) < len(s.transaction_ids):
+                    s.existing_bundle_id = bundles.pop()
+                    kept.append(s)
+            filtered = kept
 
         # Filter out dismissed suggestions
         dismissed_fps = self.dismissed_repo.get_dismissed_fingerprints()
@@ -128,6 +149,17 @@ class SuggestionService:
         Returns:
             Created UserCalculationBundle (persisted)
         """
+        target = self._completable_bundle(suggestion.transaction_ids)
+        if target is not None:
+            for tx_id in suggestion.transaction_ids:
+                tx = self.session.get(NormalizedTransaction, tx_id)
+                if tx and tx.user_calculation_unit_id is None:
+                    tx.user_calculation_unit_id = target.id
+                    self.session.add(tx)
+            self.session.commit()
+            log.info(f"Completed broken bundle {target.id} from suggestion")
+            return target
+
         # Create UserCalculationBundle from suggestion
         bundle = UserCalculationBundle(
             label=label or suggestion.label,
@@ -226,11 +258,52 @@ class SuggestionService:
         )
         return list(self.session.exec(statement).all())
     
-    def _get_standalone_transactions(self) -> List[NormalizedTransaction]:
-        """Get all standalone transactions (not yet grouped)."""
+    def _broken_bundle_ids(self) -> set[int]:
+        from backend.services.bundle_health import BundleHealthService
+
+        return {
+            b.bundle_id
+            for b in BundleHealthService(self.session).find_broken(with_candidates=False)
+        }
+
+    def completable_bundle_id(self, transaction_ids: List[int]) -> Optional[int]:
+        bundle = self._completable_bundle(transaction_ids)
+        return bundle.id if bundle else None
+
+    def _completable_bundle(
+        self, transaction_ids: List[int]
+    ) -> Optional[UserCalculationBundle]:
+        """The single broken bundle some (not all) of these transactions belong to."""
+        bundle_ids = set()
+        unbundled = 0
+        for tx_id in transaction_ids:
+            tx = self.session.get(NormalizedTransaction, tx_id)
+            if tx is None:
+                continue
+            if tx.user_calculation_unit_id is None:
+                unbundled += 1
+            else:
+                bundle_ids.add(tx.user_calculation_unit_id)
+        if len(bundle_ids) != 1 or unbundled == 0:
+            return None
+        bundle_id = bundle_ids.pop()
+        if bundle_id not in self._broken_bundle_ids():
+            return None
+        return self.session.get(UserCalculationBundle, bundle_id)
+
+    def _get_standalone_transactions(
+        self, broken_bundle_ids: Optional[set[int]] = None
+    ) -> List[NormalizedTransaction]:
+        """Standalone transactions plus members of broken bundles (which may be completed)."""
+        condition = NormalizedTransaction.user_calculation_unit_id.is_(None)
+        if broken_bundle_ids:
+            condition = or_(
+                condition,
+                NormalizedTransaction.user_calculation_unit_id.in_(broken_bundle_ids),
+            )
         statement = (
             select(NormalizedTransaction)
-            .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
+            .where(condition)
             .options(selectinload(NormalizedTransaction.account_rel))
             .order_by(NormalizedTransaction.date_time)
         )

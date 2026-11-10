@@ -10,12 +10,19 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from backend.config.loader import configure_logging
 from backend.connectors.base.base_connector import BalanceEntry
 from backend.connectors.connector_registry import get_connector_registry
-from backend.db.models import Account, AccountConnector
+from backend.db.models import (
+    Account,
+    AccountConnector,
+    Asset,
+    NormalizedTransaction,
+    ReviewStatus,
+    SpamTokenRule,
+)
 from backend.services.connector_loader_service import ConnectorLoaderService
 
 log = configure_logging("balance_service")
@@ -158,6 +165,73 @@ class BalanceService:
     # Internal
     # ------------------------------------------------------------------
 
+    def _annotate_entries(self, account_id: int, entries: List[BalanceEntry]) -> None:
+        """Resolve each entry to an asset, keeping other contracts that reuse a ticker apart.
+
+        A token contract is a distinct asset: when it is not the contract behind the
+        account's valid history for that ticker (spoofed / spam / rejected-only), it
+        gets its own match_symbol so it never adds to the real asset's live balance.
+        """
+        contracts = {e.contract_address.lower() for e in entries if e.contract_address}
+        blocked: set[str] = set()
+        contract_assets: Dict[str, Optional[int]] = {}
+        valid_contracts: set[str] = set()
+        seen_contracts: set[str] = set()
+        valid_symbol_contracts: Dict[str, set[str]] = {}
+        if contracts:
+            blocked = {
+                r.contract_address.lower()
+                for r in self.session.exec(
+                    select(SpamTokenRule).where(
+                        func.lower(SpamTokenRule.contract_address).in_(contracts),
+                        SpamTokenRule.verdict == "block",
+                    )
+                ).all()
+            }
+            T = NormalizedTransaction
+            rows = self.session.exec(
+                select(
+                    func.upper(T.source_asset_symbol),
+                    func.lower(T.token_contract_address),
+                    T.review_status,
+                    T.asset_id,
+                )
+                .where(T.account_id == account_id, T.token_contract_address.isnot(None))
+                .distinct()
+            ).all()
+            for symbol, contract, review_status, asset_id in rows:
+                seen_contracts.add(contract)
+                if review_status != ReviewStatus.INVALID.value:
+                    valid_contracts.add(contract)
+                    valid_symbol_contracts.setdefault(symbol or "", set()).add(contract)
+                    if asset_id is not None:
+                        contract_assets.setdefault(contract, asset_id)
+
+        symbols = {e.asset_symbol.upper() for e in entries}
+        assets_by_symbol = {
+            a.symbol.upper(): a.asset_id
+            for a in self.session.exec(
+                select(Asset).where(func.upper(Asset.symbol).in_(symbols))
+            ).all()
+        }
+
+        for e in entries:
+            contract = (e.contract_address or "").lower()
+            if contract in blocked:
+                e.spam_reason = "spam_rule"
+            elif contract and contract in seen_contracts and contract not in valid_contracts:
+                e.spam_reason = "rejected_transactions"
+            foreign = bool(contract) and contract not in valid_contracts and (
+                e.spam_reason is not None
+                or bool(valid_symbol_contracts.get(e.asset_symbol.upper()))
+            )
+            if foreign:
+                e.match_symbol = f"{e.asset_symbol} ({contract[:6]}…{contract[-4:]})"
+            else:
+                e.asset_id = contract_assets.get(contract) or assets_by_symbol.get(
+                    e.asset_symbol.upper()
+                )
+
     def _fetch_single(
         self,
         ac: AccountConnector,
@@ -195,6 +269,7 @@ class BalanceService:
 
             entries = connector.get_balance()
             connector.cleanup()
+            self._annotate_entries(account.id, entries)
 
             return ConnectorBalance(
                 connector_id=ac.id,

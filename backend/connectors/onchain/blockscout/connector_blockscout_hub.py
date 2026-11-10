@@ -179,6 +179,7 @@ class ConnectorBlockscoutHub(BaseHubConnector):
                         total=total,
                         available=total,
                         chain=self.chain_name,
+                        contract_address=token_info.get("address_hash") or token_info.get("address"),
                         raw=tok,
                     ))
         except Exception as e:

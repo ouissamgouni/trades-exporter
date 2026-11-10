@@ -1,6 +1,6 @@
 import { Badge, Button, Spinner, type BadgeColorScheme } from './ui/primitives';
 import { cn } from '../lib/cn';
-import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuBan, LuCalendarDays, LuFilter, LuList, LuPlus, LuMinus, LuX } from 'react-icons/lu';
+import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuBan, LuCalendarDays, LuFilter, LuList, LuLocateFixed, LuPlus, LuMinus, LuX } from 'react-icons/lu';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import * as RadixDialog from '@radix-ui/react-dialog';
@@ -43,6 +43,7 @@ import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
 import { BundleCreateDialog, BundleCreateDefaults } from './bundles/BundleCreateDialog';
 import { TransactionTableRow, TransactionRowCallbacks, EditableField } from './TransactionTableRow';
 import { buildTransactionFilterParams } from '../utils/transactionFilterParams';
+import { contextDateWindow } from '../hooks/useShowInAllTransactions';
 import {
     GroupedTransactionsBody,
     PageDayGroupedRows,
@@ -457,19 +458,28 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [filtersExpanded, setFiltersExpanded] = useState(!defaultFiltersCollapsed);
 
+    // Locate by id: highlighted row, optionally shown in a temporary context view when filtered out
+    const [locate, setLocate] = useState<{ txId: number; dateTime: string | null; temp: boolean; nonce: number } | null>(null);
+    const preLocateFiltersRef = useRef<TransactionFilterState | null>(null);
+    const locateInputRef = useRef<HTMLInputElement>(null);
+    const tableRootRef = useRef<HTMLDivElement>(null);
+    const [locateInput, setLocateInput] = useState('');
+    const effectiveFocusId = locate?.txId ?? focusTransactionId;
+    const effectiveFocusDate = locate?.dateTime ?? focusDateTime;
+
     // Rows may arrive asynchronously (grouped server pages), so poll briefly for the focused row.
     useEffect(() => {
-        if (focusTransactionId == null) return;
+        if (effectiveFocusId == null) return;
         let tries = 0;
         const timer = window.setInterval(() => {
-            const row = document.querySelector(`tr[data-tx-id="${focusTransactionId}"]`);
+            const row = (tableRootRef.current ?? document).querySelector(`tr[data-tx-id="${effectiveFocusId}"]`);
             if (row || ++tries > 40) {
                 window.clearInterval(timer);
                 row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
             }
         }, 250);
         return () => window.clearInterval(timer);
-    }, [focusTransactionId]);
+    }, [effectiveFocusId, locate?.nonce]);
 
     // ============== Bundle Suggestion State ==============
     // Fetch suggestions and build tx→suggestion lookup map
@@ -1461,7 +1471,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     // since that component no longer depends on Chakra design tokens.
     const getRowBgColor = (tx: Transaction) => {
         if (selectedIds.has(tx.id)) return '#dbeafe'; // blue-100
-        if (tx.id === focusTransactionId) return '#fef9c3'; // yellow-100
+        if (tx.id === effectiveFocusId) return '#fef9c3'; // yellow-100
         // Highlight sibling rows when hovering a suggestion indicator
         if (hoveredSuggestionGroup !== null && showSuggestions) {
             const entry = suggestionMap.get(tx.id);
@@ -1696,7 +1706,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
             duplicateEntry={duplicateMap.get(tx.id)}
             rowBgColor={getRowBgColor(tx)}
-            isFocused={tx.id === focusTransactionId}
+            isFocused={tx.id === effectiveFocusId || (isDrawerOpen && tx.id === drawerTransactionId)}
             rowBorderColor={getRowBorderColor(tx)}
             isInvalidCollapsed={isInvalidCollapsed(tx)}
             accounts={accounts}
@@ -1811,6 +1821,117 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         />
     );
 
+    const handleLocate = async (txId: number) => {
+        setDrawerTransactionId(txId);
+        setIsDrawerOpen(true);
+        if (customApiUrl) {
+            setLocate({ txId, dateTime: null, temp: false, nonce: Date.now() });
+            return;
+        }
+        let info: { date_time: string | null; review_status: string; matches_filters: boolean; index: number | null };
+        try {
+            const res = await fetch(`${API_URL}/transactions/locate/${txId}?${filterParams.toString()}&sort_dir=${sortDir}`);
+            if (res.status === 404) {
+                toaster.error({ title: 'Not found', description: `Transaction #${txId} does not exist` });
+                setIsDrawerOpen(false);
+                return;
+            }
+            if (!res.ok) throw new Error('Failed to locate transaction');
+            info = await res.json();
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to locate transaction' });
+            return;
+        }
+        if (info.review_status === 'invalid') {
+            setShowInvalidGroups(true);
+            setExpandedInvalidIds(prev => new Set(prev).add(txId));
+        }
+        if (info.matches_filters) {
+            if (!serverGrouping && sortBy === 'date' && info.index != null) {
+                pagination.setPage(Math.floor(info.index / pagination.pageSize) + 1);
+            }
+            setLocate(prev => ({ txId, dateTime: info.date_time, temp: prev?.temp ?? false, nonce: Date.now() }));
+            return;
+        }
+        // Hidden by the current filters: temporary view around it; "Back" restores the user's filters.
+        if (!locate?.temp) preLocateFiltersRef.current = filters;
+        const dateWindow = contextDateWindow(info.date_time);
+        setFilters({
+            ...effectiveResetFilters,
+            reviewStatus: [],
+            ...(dateWindow ? { dateFrom: dateWindow.dateFrom, dateTo: dateWindow.dateTo } : {}),
+        });
+        setLocate({ txId, dateTime: info.date_time, temp: true, nonce: Date.now() });
+    };
+
+    const exitLocate = () => {
+        if (locate?.temp && preLocateFiltersRef.current) setFilters(preLocateFiltersRef.current);
+        preLocateFiltersRef.current = null;
+        setLocate(null);
+    };
+
+    // Ctrl/Cmd+G focuses the locate box (main tables only)
+    useEffect(() => {
+        if (embeddedMode) return;
+        const onKey = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+                e.preventDefault();
+                locateInputRef.current?.focus();
+                locateInputRef.current?.select();
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [embeddedMode]);
+
+    // Prev/next follow the rows as displayed (works for grouped and flat layouts)
+    const displayedRowIds = (): number[] =>
+        Array.from(tableRootRef.current?.querySelectorAll<HTMLTableRowElement>('tr[data-tx-id]') ?? [])
+            .map(r => Number(r.dataset.txId));
+    const [drawerNeighbors, setDrawerNeighbors] = useState({ prev: false, next: false });
+    useEffect(() => {
+        if (!isDrawerOpen || drawerTransactionId == null) return;
+        const ids = displayedRowIds();
+        const i = ids.indexOf(drawerTransactionId);
+        setDrawerNeighbors({ prev: i > 0, next: i >= 0 && i < ids.length - 1 });
+    }, [isDrawerOpen, drawerTransactionId, transactions]);
+    const navigateDrawer = (direction: -1 | 1) => {
+        const ids = displayedRowIds();
+        const i = drawerTransactionId == null ? -1 : ids.indexOf(drawerTransactionId);
+        const nextId = i < 0 ? undefined : ids[i + direction];
+        if (nextId == null) return;
+        setDrawerTransactionId(nextId);
+        tableRootRef.current?.querySelector(`tr[data-tx-id="${nextId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    };
+
+    const locateBox = !embeddedMode && (
+        <form
+            className="ml-auto flex items-center gap-1"
+            onSubmit={(e) => {
+                e.preventDefault();
+                const id = parseInt(locateInput.replace('#', '').trim(), 10);
+                if (id) { handleLocate(id); setLocateInput(''); }
+            }}
+        >
+            <LuLocateFixed size={14} className="text-slate-400" />
+            <input
+                ref={locateInputRef}
+                value={locateInput}
+                onChange={(e) => setLocateInput(e.target.value)}
+                placeholder="Locate #id"
+                aria-label="Locate transaction by id"
+                title="Locate a transaction by id (Ctrl/Cmd+G)"
+                inputMode="numeric"
+                className="h-7 w-28 border border-slate-300 bg-white px-2 text-sm focus:border-blue-400 focus:outline-none"
+            />
+            {locate && !locate.temp && (
+                <button type="button" className="text-slate-400 hover:text-slate-700" title="Clear highlight" onClick={exitLocate}>
+                    <LuX size={14} />
+                </button>
+            )}
+        </form>
+    );
+
     const groupingBar = (
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-3 py-2">
             <div className="inline-flex border border-slate-300 bg-slate-100 p-0.5" role="group" aria-label="Transactions layout">
@@ -1842,6 +1963,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     Grouping paused (sorted by {sortBy}) · sort by date
                 </button>
             )}
+            {locateBox}
         </div>
     );
 
@@ -1913,6 +2035,18 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const tableContent = (
         <>
             {!embeddedMode && !hideLegend && groupingBar}
+            {!embeddedMode && hideLegend && locateBox && <div className="flex px-3 py-1">{locateBox}</div>}
+            {locate?.temp && (
+                <div className="mx-3 my-2 flex items-center gap-2 border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    <LuLocateFixed size={12} />
+                    <span>
+                        <b>#{locate.txId}</b> is hidden by your filters. Showing a temporary view around it (all statuses, ±3 days).
+                    </span>
+                    <button type="button" className="ml-auto flex items-center gap-1 font-medium text-amber-700 hover:text-amber-900" onClick={exitLocate}>
+                        <LuX size={12} /> Back to my filters
+                    </button>
+                </div>
+            )}
 
             {/* Top Pagination - show when more than 15 transactions */}
             {!loading && !error && !embeddedMode && !serverGrouping && (filterMetadata?.filtered_count ?? 0) > 15 && (
@@ -2003,8 +2137,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                         <tbody>
                             {serverGrouping && groupsUrl ? (
                                 <GroupedTransactionsBody
-                                    key={focusTransactionId ?? 'no-focus'}
-                                    focusDate={focusDateTime}
+                                    key={effectiveFocusId ?? 'no-focus'}
+                                    focusDate={effectiveFocusDate}
                                     defaultExpandAll={defaultExpandAllDays}
                                     groupsUrl={groupsUrl}
                                     listUrl={(customApiUrl || `${API_URL}/transactions`)}
@@ -2057,7 +2191,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     );
 
     return (
-        <div className="pb-0" style={selectedIds.size > 0 && !embeddedMode ? { paddingBottom: '48px' } : undefined}>
+        <div ref={tableRootRef} className="pb-0" style={selectedIds.size > 0 && !embeddedMode ? { paddingBottom: '48px' } : undefined}>
             {!embeddedMode && (title || subtitle) && (
                 <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-2">
                     <div>
@@ -2802,6 +2936,10 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             <TransactionDetailDrawer
                 transactionId={drawerTransactionId}
                 isOpen={isDrawerOpen}
+                onNavigate={navigateDrawer}
+                hasPrev={drawerNeighbors.prev}
+                hasNext={drawerNeighbors.next}
+                onGoTo={embeddedMode ? undefined : handleLocate}
                 onClose={() => {
                     setIsDrawerOpen(false);
                     setDrawerTransactionId(null);

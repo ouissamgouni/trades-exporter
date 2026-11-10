@@ -108,6 +108,10 @@ class SuggestionResponse(BaseModel):
     asset_symbol: Optional[str] = None
     date_range: Optional[str] = None
     transactions: List[TransactionSummary] = []
+    existing_bundle_id: Optional[int] = Field(
+        default=None,
+        description="Broken bundle this suggestion completes (accepting adds the missing legs to it)",
+    )
 
 
 class TransactionIdsRequest(BaseModel):
@@ -307,6 +311,7 @@ def get_suggestions(
                 taxability_suggestion=taxability_hint.taxability,
                 taxability_suggestion_reason=taxability_hint.reason,
                 transactions=tx_summaries,
+                existing_bundle_id=s.existing_bundle_id,
             )
         )
 
@@ -426,6 +431,9 @@ def accept_suggestion(
 
     This persists the suggestion as a real unit.
     """
+    service = SuggestionService(session)
+    completes = service.completable_bundle_id(request.transaction_ids) is not None
+
     # Validate transactions are not already in a bundle
     conflicts = []
     for tx_id in request.transaction_ids:
@@ -434,7 +442,7 @@ def accept_suggestion(
             raise HTTPException(
                 status_code=404, detail=f"Transaction {tx_id} not found"
             )
-        if tx.user_calculation_unit_id:
+        if tx.user_calculation_unit_id and not completes:
             conflicts.append(
                 f"Transaction {tx_id} is already in bundle {tx.user_calculation_unit_id}"
             )
@@ -453,7 +461,6 @@ def accept_suggestion(
         transactions=[{"id": tx_id} for tx_id in request.transaction_ids],
     )
 
-    service = SuggestionService(session)
     unit = service.accept_suggestion(
         suggestion,
         label=request.label,

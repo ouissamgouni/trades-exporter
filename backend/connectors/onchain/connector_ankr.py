@@ -397,6 +397,11 @@ class ConnectorAnkr(BaseConnector):
                     total=total,
                     available=total,
                     chain=self.chain_name,
+                    contract_address=(
+                        None
+                        if asset.get("tokenType") == "NATIVE"
+                        else asset.get("contractAddress") or None
+                    ),
                     raw=asset,
                 )
             )

@@ -30,6 +30,11 @@ class BalanceEntry:
     available: Decimal = Decimal(0)  # Available for trading/transfer
     locked: Decimal = Decimal(0)  # In open orders, staking, etc.
     chain: Optional[str] = None  # Network/chain (for on-chain connectors)
+    contract_address: Optional[str] = None  # Token contract (None for native coins / CEX)
+    # Set by BalanceService
+    asset_id: Optional[int] = None
+    match_symbol: Optional[str] = None  # Distinct key when the contract is not the ticker's real asset
+    spam_reason: Optional[str] = None  # "spam_rule" | "rejected_transactions"
     raw: Dict[str, Any] = field(default_factory=dict)  # Original response data
 
 

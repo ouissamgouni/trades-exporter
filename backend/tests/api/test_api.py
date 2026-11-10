@@ -102,6 +102,11 @@ def test_transaction_ids_endpoint(client):
     assert response.json() == {"ids": [], "total": 0, "truncated": False}
 
 
+def test_locate_transaction_not_found(client):
+    response = client.get("/transactions/locate/99999?review_status=pending")
+    assert response.status_code == 404
+
+
 def test_pnl_transaction_groups_unknown_version(client):
     response = client.get("/pnl/versions/999/enriched-transactions/groups")
     assert response.status_code == 404

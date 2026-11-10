@@ -89,7 +89,7 @@ function flattenConnectorBalance(cb: ConnectorBalance): AccountHolding[] {
         connectorType: cb.connector_type,
         chain: entry.chain ?? cb.chain,
         amount: parseFloat(entry.total) || 0,
-        symbol: entry.asset_symbol,
+        symbol: entry.match_symbol || entry.asset_symbol,
     }));
 }
 
@@ -100,7 +100,7 @@ function aggregateFromAccounts(abs: AccountBalance[], txCounts?: Map<string, num
     for (const ab of abs) {
         for (const cb of ab.connector_balances) {
             for (const entry of cb.entries) {
-                const sym = entry.asset_symbol;
+                const sym = entry.match_symbol || entry.asset_symbol;
                 const amount = parseFloat(entry.total) || 0;
                 if (!map.has(sym)) {
                     map.set(sym, { symbol: sym, totalAmount: 0, accounts: [] });
@@ -129,7 +129,7 @@ function aggregateFromConnector(cb: ConnectorBalance, txCounts?: Map<string, num
     const map = new Map<string, AggregatedToken>();
 
     for (const entry of cb.entries) {
-        const sym = entry.asset_symbol;
+        const sym = entry.match_symbol || entry.asset_symbol;
         const amount = parseFloat(entry.total) || 0;
         if (!map.has(sym)) {
             map.set(sym, { symbol: sym, totalAmount: 0, accounts: [] });
@@ -174,7 +174,7 @@ function aggregateByAccount(abs: AccountBalance[], txCounts?: Map<string, number
             for (const entry of cb.entries) {
                 const amount = parseFloat(entry.total) || 0;
                 agg.entries.push({
-                    symbol: entry.asset_symbol,
+                    symbol: entry.match_symbol || entry.asset_symbol,
                     amount,
                     connectorType: cb.connector_type,
                     chain: entry.chain ?? cb.chain,
@@ -193,7 +193,7 @@ function aggregateByAccount(abs: AccountBalance[], txCounts?: Map<string, number
 /** Build the account-aggregated list from a single ConnectorBalance */
 function aggregateByAccountFromConnector(cb: ConnectorBalance): AggregatedAccount[] {
     const entries: AccountEntry[] = cb.entries.map((entry) => ({
-        symbol: entry.asset_symbol,
+        symbol: entry.match_symbol || entry.asset_symbol,
         amount: parseFloat(entry.total) || 0,
         connectorType: cb.connector_type,
         chain: entry.chain ?? cb.chain,
