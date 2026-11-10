@@ -18,11 +18,18 @@ def test_other_contracts_reusing_a_ticker_stay_separate_and_visible():
     session = MagicMock()
     session.exec.side_effect = [
         _result([SimpleNamespace(contract_address=SPAM)]),  # block rules
-        _result([  # (symbol, contract, review_status, asset_id)
-            ("VIRTUAL", REAL, "valid", 42),
-            ("VIRTUAL", FAKE, "invalid", 42),
-        ]),
-        _result([SimpleNamespace(symbol="ETH", asset_id=1), SimpleNamespace(symbol="VIRTUAL", asset_id=42)]),
+        _result(
+            [  # (symbol, contract, review_status, asset_id)
+                ("VIRTUAL", REAL, "valid", 42),
+                ("VIRTUAL", FAKE, "invalid", 42),
+            ]
+        ),
+        _result(
+            [
+                SimpleNamespace(symbol="ETH", asset_id=1),
+                SimpleNamespace(symbol="VIRTUAL", asset_id=42),
+            ]
+        ),
     ]
     svc = BalanceService.__new__(BalanceService)
     svc.session = session

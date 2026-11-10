@@ -186,7 +186,9 @@ class ConnectorAnkr(BaseConnector):
         }
         if self.since_datetime:
             # +1s: the boundary tx is already stored, possibly by a previous provider.
-            base_params["fromTimestamp"] = int(ensure_utc(self.since_datetime).timestamp()) + 1
+            base_params["fromTimestamp"] = (
+                int(ensure_utc(self.since_datetime).timestamp()) + 1
+            )
 
         txs = list(
             self._paginate(

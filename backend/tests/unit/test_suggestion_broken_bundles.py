@@ -31,8 +31,9 @@ def test_broken_bundle_members_only_suggested_to_complete_their_bundle():
             _sugg(4, 5),  # spans two bundles
         ]
     )
-    with patch.object(svc, "_broken_bundle_ids", return_value={7, 8}), patch.object(
-        svc, "_get_standalone_transactions", return_value=txs
+    with (
+        patch.object(svc, "_broken_bundle_ids", return_value={7, 8}),
+        patch.object(svc, "_get_standalone_transactions", return_value=txs),
     ):
         result = svc.get_suggestions()
 

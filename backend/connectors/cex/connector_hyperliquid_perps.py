@@ -35,8 +35,8 @@ PAGE_SIZE = 2000
 
 # Rate-limit / retry settings
 MAX_RETRIES = 5
-INITIAL_BACKOFF = 2.0   # seconds, doubles each retry
-REQUEST_DELAY = 0.3     # polite delay between every request
+INITIAL_BACKOFF = 2.0  # seconds, doubles each retry
+REQUEST_DELAY = 0.3  # polite delay between every request
 
 # Default start date when no since_datetime is configured.
 # Oct 1, 2025 00:00 UTC — aligns with accounts.yaml default start_datetime.
@@ -105,12 +105,8 @@ class HyperliquidPerpsConnector(BaseConnector):
         try:
             from hyperliquid.info import Info
 
-            self._info = Info(
-                base_url="https://api.hyperliquid.xyz", skip_ws=True
-            )
-            log.info(
-                f"✅ Hyperliquid Info API initialized for {self._wallet_address}"
-            )
+            self._info = Info(base_url="https://api.hyperliquid.xyz", skip_ws=True)
+            log.info(f"✅ Hyperliquid Info API initialized for {self._wallet_address}")
         except Exception as e:
             log.error(f"❌ Failed to initialize Hyperliquid SDK: {e}")
             raise
@@ -283,13 +279,9 @@ class HyperliquidPerpsConnector(BaseConnector):
 
             first = group[0]
             total_qty = sum(Decimal(f["sz"]) for f in group)
-            total_notional = sum(
-                Decimal(f["px"]) * Decimal(f["sz"]) for f in group
-            )
+            total_notional = sum(Decimal(f["px"]) * Decimal(f["sz"]) for f in group)
             total_fee = sum(Decimal(f.get("fee", "0")) for f in group)
-            total_closed_pnl = sum(
-                Decimal(f.get("closedPnl", "0")) for f in group
-            )
+            total_closed_pnl = sum(Decimal(f.get("closedPnl", "0")) for f in group)
 
             # VWAP = total_notional / total_qty
             vwap = total_notional / total_qty if total_qty else Decimal("0")

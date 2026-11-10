@@ -14,7 +14,10 @@ from typing import Dict, Any, Generator
 from backend.connectors.base.base_connector import BaseConnector
 from backend.config.loader import configure_logging
 from backend.core.network_normalizer import normalize_network
-from backend.core.spam_detection import detect_moralis_erc20_phishing, apply_spam_markers
+from backend.core.spam_detection import (
+    detect_moralis_erc20_phishing,
+    apply_spam_markers,
+)
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("moralis_wallet_history")
@@ -77,7 +80,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
 
         # Live mode: API configuration and validation
         self.base_url = "https://deep-index.moralis.io/api/v2.2"
-        
+
         # Load API key from environment
         self.api_key = os.getenv("MORALIS_API_KEY")
         if not self.api_key:
@@ -120,9 +123,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 elif response.status_code >= 400:
                     error_text = response.text[:200]
                     log.error(f"HTTP {response.status_code}: {error_text}")
-                    raise RuntimeError(
-                        f"HTTP {response.status_code}: {error_text}"
-                    )
+                    raise RuntimeError(f"HTTP {response.status_code}: {error_text}")
 
                 data = response.json()
                 return data
@@ -132,7 +133,9 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 if attempt < self.max_retries:
                     delay *= 2
                     continue
-                raise RuntimeError(f"Network error after {self.max_retries} retries: {e}")
+                raise RuntimeError(
+                    f"Network error after {self.max_retries} retries: {e}"
+                )
             except Exception as e:
                 log.error(f"⚠️ API error: {e}")
                 if attempt < self.max_retries:
@@ -149,47 +152,49 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         try:
             # Test mode: Load from fixture file
             if self.test_mode:
-                test_file = self.config.get("test_file_path") or self._get_default_test_file()
+                test_file = (
+                    self.config.get("test_file_path") or self._get_default_test_file()
+                )
                 log.info(f"🧪 [TEST MODE] Loading test data from {test_file}")
-                
+
                 if not os.path.exists(test_file):
                     log.warning(f"Test file not found: {test_file}")
                     return
-                
+
                 with open(test_file, "r") as f:
                     data = json.load(f)
-                
+
                 # Return the result array from the fixture
                 items = data.get("result", [])
                 for item in items:
                     yield item
-                
+
                 log.info(f"🧪 [TEST MODE] Loaded {len(items)} test transactions")
                 return
-            
+
             # Live mode: Fetch from API
             self.update_progress(
                 operation="Fetching wallet history",
                 current=0,
                 total=1,
-                log_message=f"Fetching wallet history for {self.wallet_address[:10]}... on {self.chain_name}"
+                log_message=f"Fetching wallet history for {self.wallet_address[:10]}... on {self.chain_name}",
             )
-            
+
             endpoint = f"/wallets/{self.wallet_address}/history"
             cursor = None
             total_items = 0
             page = 0
-            
+
             while True:
                 page += 1
                 params = {
                     "chain": self.chain_name,
                     "order": "DESC",
                 }
-                
+
                 if cursor:
                     params["cursor"] = cursor
-                
+
                 result = self.safe_request(endpoint, params)
 
                 # Moralis returns {"result": [...], "cursor": "..."}
@@ -197,28 +202,26 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 if not isinstance(items, list):
                     log.warning(f"Unexpected response format: {type(items)}")
                     break
-                
+
                 # Yield items from this page immediately
                 for item in items:
                     total_items += 1
                     yield item
-                
+
                 log.info(f"   Page {page}: yielded {len(items)} transactions")
-                
+
                 # Check for more pages
                 cursor = result.get("cursor")
                 if not cursor or len(items) == 0:
                     break
 
-            log.info(
-                f"   ✅ Found {total_items} transactions on {self.chain_name}"
-            )
-            
+            log.info(f"   ✅ Found {total_items} transactions on {self.chain_name}")
+
             self.update_progress(
                 operation="Completed",
                 current=1,
                 total=1,
-                log_message=f"✅ Found {total_items} transactions on {self.chain_name}"
+                log_message=f"✅ Found {total_items} transactions on {self.chain_name}",
             )
         except Exception as e:
             log.error(f"   ⚠️ Error fetching wallet history: {e}")
@@ -226,14 +229,16 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 operation="Failed",
                 current=1,
                 total=1,
-                log_message=f"❌ Error: {str(e)[:100]}"
+                log_message=f"❌ Error: {str(e)[:100]}",
             )
             raise
 
-    def raw_to_normalized(self, tx: Dict) -> Generator[NormalizedTransaction, None, None]:
+    def raw_to_normalized(
+        self, tx: Dict
+    ) -> Generator[NormalizedTransaction, None, None]:
         """
         Map raw Moralis API transaction to standardized format.
-        
+
         Since one transaction can contain multiple transfers (ERC20, native, NFT),
         this yields multiple NormalizedTransaction objects per raw transaction.
 
@@ -248,32 +253,34 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             tx_hash = tx.get("hash")
             if not tx_hash:
                 raise ValueError(f"Cannot determine transaction hash from '{tx}'")
-            
+
             # Parse timestamp
             timestamp_str = tx.get("block_timestamp", "")
             if timestamp_str:
                 dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             else:
                 dt = datetime.now(timezone.utc)
-            
+
             # Parse transaction fee
             transaction_fee_str = tx.get("transaction_fee", "0")
             transaction_fee = float(transaction_fee_str) if transaction_fee_str else 0.0
-            
+
             # Get common fields
             from_address = tx.get("from_address", "").lower()
-            to_address = tx.get("to_address", "").lower() if tx.get("to_address") else None
+            to_address = (
+                tx.get("to_address", "").lower() if tx.get("to_address") else None
+            )
             category = tx.get("category", "unknown")
             possible_spam = tx.get("possible_spam", False)
-            
+
             # Build base tags
             base_tags = []
             if possible_spam:
                 base_tags.append({"spam": True})
-            
+
             # Track if we yielded any transfers
             yielded_count = 0
-            
+
             # Process ERC20 transfers
             erc20_transfers = tx.get("erc20_transfers", [])
             for idx, transfer in enumerate(erc20_transfers):
@@ -283,12 +290,14 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                     transfer=transfer,
                     transfer_index=idx,
                     dt=dt,
-                    transaction_fee=transaction_fee if idx == 0 else 0.0,  # Only first transfer gets fee
+                    transaction_fee=transaction_fee
+                    if idx == 0
+                    else 0.0,  # Only first transfer gets fee
                     category=category,
                     base_tags=base_tags,
                     tx=tx,
                 )
-            
+
             # Process native transfers
             native_transfers = tx.get("native_transfers", [])
             for idx, transfer in enumerate(native_transfers):
@@ -298,11 +307,13 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                     transfer=transfer,
                     transfer_index=idx,
                     dt=dt,
-                    transaction_fee=transaction_fee if yielded_count == 1 else 0.0,  # Only first transfer overall gets fee
+                    transaction_fee=transaction_fee
+                    if yielded_count == 1
+                    else 0.0,  # Only first transfer overall gets fee
                     category=category,
                     base_tags=base_tags,
                 )
-            
+
             # Process NFT transfers
             nft_transfers = tx.get("nft_transfers", [])
             for idx, transfer in enumerate(nft_transfers):
@@ -312,11 +323,13 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                     transfer=transfer,
                     transfer_index=idx,
                     dt=dt,
-                    transaction_fee=transaction_fee if yielded_count == 1 else 0.0,  # Only first transfer overall gets fee
+                    transaction_fee=transaction_fee
+                    if yielded_count == 1
+                    else 0.0,  # Only first transfer overall gets fee
                     category=category,
                     base_tags=base_tags,
                 )
-            
+
             # If no transfers at all (e.g., approve, contract interaction), create one record for the transaction
             if yielded_count == 0:
                 yield self._map_empty_transaction(
@@ -329,9 +342,11 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                     tx=tx,
                     base_tags=base_tags,
                 )
-                
+
         except Exception as e:
-            log.error(f"   ⚠️ Error mapping transaction {tx.get('hash', 'unknown')}: {e}")
+            log.error(
+                f"   ⚠️ Error mapping transaction {tx.get('hash', 'unknown')}: {e}"
+            )
             raise
 
     def _map_erc20_transfer(
@@ -346,7 +361,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         tx: Dict = None,
     ) -> NormalizedTransaction:
         """Map an ERC20 transfer to NormalizedTransaction."""
-        
+
         # Extract transfer details
         token_symbol = transfer.get("token_symbol", "UNKNOWN")
         token_decimals = int(transfer.get("token_decimals", 18))
@@ -354,18 +369,18 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         value_formatted = transfer.get("value_formatted")
         contract_address = transfer.get("address", "").lower()
         log_index = transfer.get("log_index", transfer_index)
-        
+
         # Calculate amount
         if value_formatted:
             quantity = float(value_formatted)
         else:
             quantity = float(Decimal(value_raw) / Decimal(10**token_decimals))
-        
+
         # Determine direction
         transfer_from = transfer.get("from_address", "").lower()
         transfer_to = transfer.get("to_address", "").lower()
         direction = transfer.get("direction", "unknown")  # Moralis provides this
-        
+
         if direction not in ["send", "receive"]:
             # Fallback to manual detection
             if transfer_from == self.wallet_address:
@@ -376,16 +391,16 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 direction = "neutral"
         else:
             direction = "outflow" if direction == "send" else "inflow"
-        
+
         # Build tags
         tags = base_tags.copy()
         if transfer.get("possible_spam"):
             if {"spam": True} not in tags:
                 tags.append({"spam": True})
-        
+
         # Build source transaction ID
         source_transaction_id = f"{tx_hash}_erc20_{log_index}"
-        
+
         normalized = NormalizedTransaction(
             source=f"moralis_wallet_history_{self.chain_name}",
             account_id=self.account_id,
@@ -400,7 +415,9 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             quantity=quantity,
             fee=transaction_fee,
             source_fee_quote_asset_symbol=self._get_native_token(),
-            include_fee=True if direction == "outflow" and transaction_fee > 0 else False,
+            include_fee=True
+            if direction == "outflow" and transaction_fee > 0
+            else False,
             source_from_account=transfer_from,
             source_to_account=transfer_to,
             token_contract_address=contract_address,
@@ -410,7 +427,9 @@ class ConnectorMoralisWalletHistory(BaseConnector):
 
         # Phishing / spam detection
         if tx:
-            spam_reasons = detect_moralis_erc20_phishing(tx, transfer, self.wallet_address)
+            spam_reasons = detect_moralis_erc20_phishing(
+                tx, transfer, self.wallet_address
+            )
             if spam_reasons:
                 apply_spam_markers(
                     normalized,
@@ -432,23 +451,23 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         base_tags: list,
     ) -> NormalizedTransaction:
         """Map a native token transfer to NormalizedTransaction."""
-        
+
         # Extract transfer details
         value_raw = transfer.get("value", "0")
         value_formatted = transfer.get("value_formatted")
         token_symbol = transfer.get("token_symbol", self._get_native_token())
-        
+
         # Native tokens always use 18 decimals
         if value_formatted:
             quantity = float(value_formatted)
         else:
             quantity = float(Decimal(value_raw) / Decimal(10**18))
-        
+
         # Determine direction
         transfer_from = transfer.get("from_address", "").lower()
         transfer_to = transfer.get("to_address", "").lower()
         direction = transfer.get("direction", "unknown")
-        
+
         if direction not in ["send", "receive"]:
             # Fallback to manual detection
             if transfer_from == self.wallet_address:
@@ -459,10 +478,10 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 direction = "neutral"
         else:
             direction = "outflow" if direction == "send" else "inflow"
-        
+
         # Build source transaction ID
         source_transaction_id = f"{tx_hash}_native_{transfer_index}"
-        
+
         return NormalizedTransaction(
             source=f"moralis_wallet_history_{self.chain_name}",
             account_id=self.account_id,
@@ -477,7 +496,9 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             quantity=quantity,
             fee=transaction_fee,
             source_fee_quote_asset_symbol=self._get_native_token(),
-            include_fee=True if direction == "outflow" and transaction_fee > 0 else False,
+            include_fee=True
+            if direction == "outflow" and transaction_fee > 0
+            else False,
             source_from_account=transfer_from,
             source_to_account=transfer_to,
             network=normalize_network(self.chain_name),
@@ -495,23 +516,23 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         base_tags: list,
     ) -> NormalizedTransaction:
         """Map an NFT transfer to NormalizedTransaction."""
-        
+
         # Extract transfer details
         token_symbol = transfer.get("token_symbol", "NFT")
         token_name = transfer.get("token_name", "Unknown NFT")
         token_id = transfer.get("token_id", "")
         contract_address = transfer.get("address", "").lower()
         log_index = transfer.get("log_index", transfer_index)
-        
+
         # NFT quantity (1 for ERC721, actual amount for ERC1155)
         amount = transfer.get("amount", "1")
         quantity = float(amount)
-        
+
         # Determine direction
         transfer_from = transfer.get("from_address", "").lower()
         transfer_to = transfer.get("to_address", "").lower()
         direction = transfer.get("direction", "unknown")
-        
+
         if direction not in ["send", "receive"]:
             if transfer_from == self.wallet_address:
                 direction = "outflow"
@@ -521,18 +542,20 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 direction = "neutral"
         else:
             direction = "outflow" if direction == "send" else "inflow"
-        
+
         # Build tags with NFT metadata
         tags = base_tags.copy()
-        tags.append({
-            "nft": True,
-            "token_id": token_id,
-            "token_name": token_name,
-        })
-        
+        tags.append(
+            {
+                "nft": True,
+                "token_id": token_id,
+                "token_name": token_name,
+            }
+        )
+
         # Build source transaction ID
         source_transaction_id = f"{tx_hash}_nft_{log_index}"
-        
+
         return NormalizedTransaction(
             source=f"moralis_wallet_history_{self.chain_name}",
             account_id=self.account_id,
@@ -547,7 +570,9 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             quantity=quantity,
             fee=transaction_fee,
             source_fee_quote_asset_symbol=self._get_native_token(),
-            include_fee=True if direction == "outflow" and transaction_fee > 0 else False,
+            include_fee=True
+            if direction == "outflow" and transaction_fee > 0
+            else False,
             source_from_account=transfer_from,
             source_to_account=transfer_to,
             token_contract_address=contract_address,
@@ -570,13 +595,13 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         Map a transaction with no transfers (e.g., approve, contract interaction).
         Creates a record to track the transaction and gas fees.
         """
-        
+
         # Determine direction based on who paid the gas
         direction = "outflow" if from_address == self.wallet_address else "neutral"
-        
+
         # Build tags with contract interaction details
         tags = base_tags.copy()
-        
+
         # Add approve details if available
         contract_interactions = tx.get("contract_interactions", {})
         if contract_interactions:
@@ -585,17 +610,19 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 approval = approvals[0]  # Get first approval
                 token_info = approval.get("token", {})
                 spender_info = approval.get("spender", {})
-                tags.append({
-                    "approve": True,
-                    "token_symbol": token_info.get("token_symbol", ""),
-                    "spender": spender_info.get("address", ""),
-                })
-        
+                tags.append(
+                    {
+                        "approve": True,
+                        "token_symbol": token_info.get("token_symbol", ""),
+                        "spender": spender_info.get("address", ""),
+                    }
+                )
+
         # Add method label if available
         method_label = tx.get("method_label")
         if method_label:
             tags.append({"method": method_label})
-        
+
         return NormalizedTransaction(
             source=f"moralis_wallet_history_{self.chain_name}",
             account_id=self.account_id,
@@ -610,7 +637,9 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             quantity=0.0,  # No value transfer
             fee=transaction_fee,
             source_fee_quote_asset_symbol=self._get_native_token(),
-            include_fee=True if direction == "outflow" and transaction_fee > 0 else False,
+            include_fee=True
+            if direction == "outflow" and transaction_fee > 0
+            else False,
             source_from_account=from_address,
             source_to_account=to_address,
             network=normalize_network(self.chain_name),
@@ -642,7 +671,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             "tests",
             "fixtures",
             "moralis",
-            f"wallet_history_{self.chain_name}.json"
+            f"wallet_history_{self.chain_name}.json",
         )
 
     # ------------------------------------------------------------------
@@ -660,8 +689,12 @@ class ConnectorMoralisWalletHistory(BaseConnector):
 
         headers = {"Accept": "application/json", "X-API-Key": self.api_key}
         moralis_chain = {
-            "ethereum": "eth", "bsc": "bsc", "polygon": "polygon",
-            "arbitrum": "arbitrum", "optimism": "optimism", "base": "base",
+            "ethereum": "eth",
+            "bsc": "bsc",
+            "polygon": "polygon",
+            "arbitrum": "arbitrum",
+            "optimism": "optimism",
+            "base": "base",
             "avalanche": "avalanche",
         }.get(self.chain_name, self.chain_name)
         entries = []
@@ -671,25 +704,32 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             resp = requests.get(
                 f"{self.base_url}/{self.wallet_address}/balance",
                 params={"chain": moralis_chain},
-                headers=headers, timeout=30,
+                headers=headers,
+                timeout=30,
             )
             resp.raise_for_status()
             data = resp.json()
             balance = data.get("balance", "0")
             if int(balance) > 0:
-                total = Decimal(balance) / Decimal(10 ** 18)
+                total = Decimal(balance) / Decimal(10**18)
                 native_symbol = {
-                    "ethereum": "ETH", "bsc": "BNB", "polygon": "MATIC",
-                    "arbitrum": "ETH", "optimism": "ETH", "base": "ETH",
+                    "ethereum": "ETH",
+                    "bsc": "BNB",
+                    "polygon": "MATIC",
+                    "arbitrum": "ETH",
+                    "optimism": "ETH",
+                    "base": "ETH",
                     "avalanche": "AVAX",
                 }.get(self.chain_name, "ETH")
-                entries.append(BalanceEntry(
-                    asset_symbol=native_symbol,
-                    total=total,
-                    available=total,
-                    chain=self.chain_name,
-                    raw=data,
-                ))
+                entries.append(
+                    BalanceEntry(
+                        asset_symbol=native_symbol,
+                        total=total,
+                        available=total,
+                        chain=self.chain_name,
+                        raw=data,
+                    )
+                )
         except Exception as e:
             log.warning(f"Failed to fetch Moralis native balance: {e}")
 
@@ -698,7 +738,8 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             resp = requests.get(
                 f"{self.base_url}/wallets/{self.wallet_address}/tokens",
                 params={"chain": moralis_chain},
-                headers=headers, timeout=30,
+                headers=headers,
+                timeout=30,
             )
             resp.raise_for_status()
             tokens = resp.json()
@@ -709,15 +750,19 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                 decimals = int(tok.get("decimals", 18))
                 symbol = tok.get("symbol", "UNKNOWN")
                 if int(balance) > 0:
-                    total = Decimal(balance) / Decimal(10 ** decimals)
-                    entries.append(BalanceEntry(
-                        asset_symbol=symbol,
-                        total=total,
-                        available=total,
-                        chain=self.chain_name,
-                        contract_address=None if tok.get("native_token") else tok.get("token_address"),
-                        raw=tok,
-                    ))
+                    total = Decimal(balance) / Decimal(10**decimals)
+                    entries.append(
+                        BalanceEntry(
+                            asset_symbol=symbol,
+                            total=total,
+                            available=total,
+                            chain=self.chain_name,
+                            contract_address=None
+                            if tok.get("native_token")
+                            else tok.get("token_address"),
+                            raw=tok,
+                        )
+                    )
         except Exception as e:
             log.warning(f"Failed to fetch Moralis token balances: {e}")
 

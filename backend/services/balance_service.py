@@ -219,11 +219,19 @@ class BalanceService:
             contract = (e.contract_address or "").lower()
             if contract in blocked:
                 e.spam_reason = "spam_rule"
-            elif contract and contract in seen_contracts and contract not in valid_contracts:
+            elif (
+                contract
+                and contract in seen_contracts
+                and contract not in valid_contracts
+            ):
                 e.spam_reason = "rejected_transactions"
-            foreign = bool(contract) and contract not in valid_contracts and (
-                e.spam_reason is not None
-                or bool(valid_symbol_contracts.get(e.asset_symbol.upper()))
+            foreign = (
+                bool(contract)
+                and contract not in valid_contracts
+                and (
+                    e.spam_reason is not None
+                    or bool(valid_symbol_contracts.get(e.asset_symbol.upper()))
+                )
             )
             if foreign:
                 e.match_symbol = f"{e.asset_symbol} ({contract[:6]}…{contract[-4:]})"

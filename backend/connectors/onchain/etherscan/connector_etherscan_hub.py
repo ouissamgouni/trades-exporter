@@ -135,7 +135,9 @@ class ConnectorEtherscanHub(BaseHubConnector):
         registry = get_connector_registry()
         chain_config = registry.get_chain_config("etherscan", self.chain_name)
         chain_id = chain_config.chain_id if chain_config else 1
-        native_symbol = (chain_config.native_currency if chain_config else None) or "ETH"
+        native_symbol = (
+            chain_config.native_currency if chain_config else None
+        ) or "ETH"
         decimals = (chain_config.native_token_decimals if chain_config else None) or 18
         entries = []
 
