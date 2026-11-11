@@ -207,7 +207,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
             for (const pt of filteredPoints) {
                 const item = pt.breakdown.find(b => b.asset_id === assetId);
                 if (!item || Math.abs(item.qty) < 1e-12) continue;
-                const unitPrice = item.value_in_base / item.qty;
+                const unitPrice = (item.value_in_base / item.qty) * (item.split_factor ?? 1);
                 if (price0 === null) price0 = unitPrice;
                 if (price0 > 0) {
                     data.push({

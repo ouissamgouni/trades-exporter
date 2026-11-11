@@ -490,3 +490,46 @@ class TestPortfolioTimelineCache:
             pt.clear_portfolio_timeline_cache()
             pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
             assert compute.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# _compute_split_factors — split-continuous per-asset unit price
+# ---------------------------------------------------------------------------
+
+
+class TestComputeSplitFactors:
+    DAYS = ["2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28"]
+
+    def _prices(self, values):
+        return {ds: {7: v} for ds, v in zip(self.DAYS, values)}
+
+    def test_unadjusted_history_gets_factor_from_price_drop(self):
+        from backend.services.pnl.portfolio_timeline import _compute_split_factors
+
+        prices = self._prices([100.0, 101.0, 102.0, 10.3, 10.4])
+        factors = _compute_split_factors({7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5)
+        assert [factors[7][d] for d in self.DAYS] == [1.0, 1.0, 1.0, 10.0, 10.0]
+
+    def test_price_drop_one_bucket_late_is_matched(self):
+        from backend.services.pnl.portfolio_timeline import _compute_split_factors
+
+        prices = self._prices([100.0, 101.0, 102.0, 103.0, 10.4])
+        factors = _compute_split_factors({7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5)
+        assert factors[7]["2026-10-27"] == 1.0
+        assert factors[7]["2026-10-28"] == 10.0
+
+    def test_already_adjusted_history_is_left_untouched(self):
+        from backend.services.pnl.portfolio_timeline import _compute_split_factors
+
+        prices = self._prices([10.0, 10.1, 10.2, 10.3, 10.4])
+        factors = _compute_split_factors({7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5)
+        assert 7 not in factors
+
+    def test_reverse_split(self):
+        from backend.services.pnl.portfolio_timeline import _compute_split_factors
+
+        prices = self._prices([1.0, 1.0, 1.0, 5.0, 5.1])
+        factors = _compute_split_factors({7: [("2026-10-27", 0.2)]}, prices, self.DAYS, window=5)
+        assert factors[7]["2026-10-26"] == 1.0
+        assert factors[7]["2026-10-27"] == 0.2
+

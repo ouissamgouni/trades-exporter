@@ -6862,6 +6862,7 @@ def get_portfolio_timeline(
                         "qty": b.qty,
                         "cost_basis_in_base": b.cost_basis_in_base,
                         "realized_pnl_to_date": b.realized_pnl_to_date,
+                        "split_factor": b.split_factor,
                     }
                     for b in p.breakdown
                 ],

@@ -1179,6 +1179,7 @@ class PortfolioTimelineBreakdownItem(BaseModel):
     qty: float
     cost_basis_in_base: float
     realized_pnl_to_date: float
+    split_factor: float = 1.0
 
 
 class PortfolioTimelinePoint(BaseModel):

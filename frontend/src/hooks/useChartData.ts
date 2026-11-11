@@ -19,6 +19,8 @@ export interface TimelineBreakdownItem {
     qty: number;
     cost_basis_in_base: number;
     realized_pnl_to_date: number;
+    /** Cumulative stock-split ratio; multiply the unit price by it for a split-continuous series */
+    split_factor?: number;
 }
 
 export interface TimelinePoint {
