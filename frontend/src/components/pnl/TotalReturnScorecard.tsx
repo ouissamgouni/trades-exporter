@@ -2,7 +2,8 @@
  * TotalReturnScorecard
  *
  * Unified period-aware P&L overview:
- * - TimeframeIndicators — period selector + hero metrics + best/worst performers
+ * - TimeframeIndicators — hero (total return, gains/losses/net) + return bridge + accounts slot
+ *   + period chart and contributors
  *
  * For "All" range: uses authoritative summary from the P&L engine.
  * For specific ranges (1Y, 6M, etc.): computes deltas from the timeline.
@@ -10,14 +11,13 @@
  * Total Return = Unrealized P&L + Realized P&L
  * ROI% = Total Return / Cost Basis
  */
-import React, { useContext, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Badge } from '../ui/primitives';
 import { FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
-import { LuReceipt, LuInfo, LuBanknote } from 'react-icons/lu';
-import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
-import { Tooltip } from '../ui/tooltip';
+import { LuBanknote } from 'react-icons/lu';
 import { InfoTip, TERM_HELP } from './pnlTerms';
-import { HeroMetricsBar } from './HeroMetricsBar';
+import { ReturnBridge, buildBridgeRows } from './ReturnBridge';
+import { ContributorsPanel } from './ContributorsPanel';
 import { PeriodChartPanel } from './PeriodChartPanel';
 import type { TimelinePoint, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy } from '../../hooks/useChartData';
 import type { DimensionWithCategories } from '../../types';
@@ -307,33 +307,8 @@ interface TimeframeIndicatorsProps {
     assetId?: number;
     /** Asset symbol — label for price chart series */
     assetSymbol?: string;
-}
-
-interface PerformerItem {
-    id: number;
-    name: string;
-    totalReturn: number;
-    roiPct: number;
-    unrealizedPnl: number;
-    marketValue: number;
-    costBasis: number;
-    totalFees: number;
-    efficiency: number;
-}
-
-/** Map backend performer to local display shape */
-function toLocalPerformer(p: BackendPerformerItem): PerformerItem {
-    return {
-        id: p.id,
-        name: p.label || p.name,
-        totalReturn: p.total_return,
-        roiPct: p.roi_pct,
-        unrealizedPnl: p.unrealized_pnl ?? 0,
-        marketValue: p.market_value ?? 0,
-        costBasis: p.cost_basis ?? 0,
-        totalFees: p.total_fees ?? 0,
-        efficiency: p.efficiency ?? 0,
-    };
+    /** Rendered between the bridge and the chart row (accounts strip / balance by account) */
+    accountsSlot?: React.ReactNode;
 }
 
 export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
@@ -369,18 +344,10 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     contextLabel,
     assetId,
     assetSymbol,
+    accountsSlot,
 }) => {
-    const [performerCount, setPerformerCount] = useState(7);
-    const [displayFormat, setDisplayFormat] = useState<PerformerDisplay>('$');
-    const [sortMetric, setSortMetric] = useState<PerformerMetric>('TR');
-
-    const assetPanelCtx = useContext(AssetDetailPanelContext);
-    const handleInfoClick = groupBy === 'asset' && assetPanelCtx
-        ? (assetId: number) => assetPanelCtx.openAssetPanel(assetId, { pnlVersionId: versionId ?? undefined })
-        : undefined;
-
-    // Map sortMetric to PerformerSort for internal helpers
-    const performerSort: PerformerSort = sortMetric === 'U' ? 'unrealized' : sortMetric === 'MV' ? 'market_value' : sortMetric === 'Eff' ? 'efficiency' : 'return';
+    const periodLabel = RANGES.find(r => r.key === range)?.label ?? 'All';
+    const isPeriod = range !== 'all';
 
     // Pre-compute ROI% for all ranges: must use liveData (live-price-dependent)
     const allRangeRois = useMemo(() => {
@@ -413,7 +380,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 taxableRealizedPnl: book.taxable_realized_pnl ?? 0,
                 deferredGain: book.deferred_gain ?? 0,
                 realizedInPeriod: book.realized_in_period,
-                taxableRealizedInPeriod: (book as any).taxable_realized_in_period ?? 0,
+                taxableRealizedInPeriod: (book as { taxable_realized_in_period?: number }).taxable_realized_in_period ?? 0,
                 totalFees: book.fees_in_period ?? summary?.totalFees ?? 0,
                 feeEntryCount: summary?.feeEntryCount ?? 0,
                 costBasisInPeriod: book.cost_basis_in_period ?? 0,
@@ -439,7 +406,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 realizedPnl: backendRange.realized_pnl,
                 taxableRealizedPnl: backendRange.taxable_realized_pnl ?? 0,
                 realizedInPeriod: backendRange.realized_in_period,
-                taxableRealizedInPeriod: (backendRange as any).taxable_realized_in_period ?? 0,
+                taxableRealizedInPeriod: (backendRange as { taxable_realized_in_period?: number }).taxable_realized_in_period ?? 0,
                 totalFees: backendRange.fees_in_period ?? summary?.totalFees ?? 0,
                 feeEntryCount: summary?.feeEntryCount ?? 0,
                 costBasisInPeriod: backendRange.cost_basis_in_period ?? 0,
@@ -455,61 +422,59 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
         return computeMetricsForRange(range, points, summary);
     }, [points, range, summary, bookData, liveData, periodSummaryData]);
 
-    const color = (val: number) => (val >= 0 ? 'green.600' : 'red.600');
-
-    // Build performer lists: prefer standalone performers endpoint, fallback to periodSummaryData
-    const { topItems, flopItems, maxPerformerCount } = useMemo(() => {
-        if (performersData) {
-            const topRaw = (performersData.top_performers ?? []).map(toLocalPerformer);
-            const flopRaw = (performersData.flop_performers ?? []).map(toLocalPerformer);
-            const maxCount = performersData.total_count ?? Math.max(topRaw.length, flopRaw.length, 3);
-            return { topItems: topRaw, flopItems: flopRaw, maxPerformerCount: maxCount };
-        }
+    // All ranked items (top_n is large, so top + flop is the full set)
+    const contributorItems = useMemo((): BackendPerformerItem[] => {
+        if (performersData) return [...(performersData.top_performers ?? []), ...(performersData.flop_performers ?? [])];
         const rangeData = periodSummaryData?.ranges?.[range as RangeKey];
-        const topRaw = (rangeData?.top_performers ?? []).map(toLocalPerformer);
-        const flopRaw = (rangeData?.flop_performers ?? []).map(toLocalPerformer);
-        const maxCount = Math.max(topRaw.length, flopRaw.length, 3);
-        return { topItems: topRaw, flopItems: flopRaw, maxPerformerCount: maxCount };
+        return [...(rangeData?.top_performers ?? []), ...(rangeData?.flop_performers ?? [])];
     }, [performersData, periodSummaryData, range]);
 
-    // Sort performers based on selected sort metric
-    const sortFn = (a: PerformerItem, b: PerformerItem) => {
-        switch (performerSort) {
-            case 'unrealized': return Math.abs(b.unrealizedPnl) - Math.abs(a.unrealizedPnl);
-            case 'market_value': return Math.abs(b.marketValue) - Math.abs(a.marketValue);
-            case 'efficiency': return Math.abs(b.efficiency) - Math.abs(a.efficiency);
-            default: return Math.abs(b.totalReturn) - Math.abs(a.totalReturn);
-        }
-    };
-
-    const visibleTop = [...topItems].sort(sortFn).slice(0, performerCount);
-    const visibleFlop = [...flopItems].sort(sortFn).slice(0, performerCount);
-    const topTotal = performerTotal(topItems, performerSort, baseCurrency, displayFormat);
-    const flopTotal = performerTotal(flopItems, performerSort, baseCurrency, displayFormat);
-    const maxAbsReturn = Math.max(
-        ...visibleTop.map(p => performerBarValue(p, performerSort)),
-        ...visibleFlop.map(p => performerBarValue(p, performerSort)),
-        1,
+    const bridgeRows = useMemo(
+        () => (metrics ? buildBridgeRows(metrics, isPeriod, baseCurrency, { onMetricClick, onFeesClick, onIncomeClick }) : []),
+        [metrics, isPeriod, baseCurrency, onMetricClick, onFeesClick, onIncomeClick],
     );
 
     // Unified performer click: prefer onPerformerClick, fallback to type-specific handlers
-    const handlePerformerClick = (p: PerformerItem) => {
+    const handlePerformerClick = (p: BackendPerformerItem) => {
+        const name = p.label || p.name;
         if (onPerformerClick) {
-            onPerformerClick(p.id, groupBy, p.name);
+            onPerformerClick(p.id, groupBy, name);
         } else if (groupBy === 'asset' && onAssetClick) {
             onAssetClick(p.id);
         } else if (groupBy === 'category' && onCategoryClick) {
-            onCategoryClick(p.id, p.name);
+            onCategoryClick(p.id, name);
         } else if (groupBy === 'account' && onAccountClick) {
-            onAccountClick(p.id, p.name);
+            onAccountClick(p.id, name);
         }
     };
+
+    const gainsTotal = performersData?.gains_total;
+    const lossesTotal = performersData?.losses_total;
+    const netTotal = performersData?.net_total;
+
+    const sideContent = hidePerformers
+        ? performerSlot ?? null
+        : (
+            <ContributorsPanel
+                items={contributorItems}
+                baseCurrency={baseCurrency}
+                isLoading={isPerformersLoading}
+                periodLabel={periodLabel}
+                groupBy={groupBy}
+                onGroupByChange={onGroupByChange}
+                dimensions={dimensions}
+                selectedDimensionId={selectedDimensionId}
+                onDimensionChange={onDimensionChange}
+                onItemClick={handlePerformerClick}
+                versionId={versionId}
+            />
+        );
 
     return (
         <div className="border border-gray-200 bg-white p-3">
             {/* Timeframe selector cards (hidden when rendered externally) */}
             {!hidePeriodCards && (
-                <div className="mb-2 flex gap-1.5 overflow-x-auto">
+                <div className="mb-3 flex gap-1.5 overflow-x-auto">
                     {RANGES.map(r => {
                         const roi = allRangeRois[r.key];
                         const isActive = range === r.key;
@@ -536,304 +501,49 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
             )}
 
             {isLoading ? (
-                <div className="text-xs text-gray-400">Loading...</div>
+                <div className="flex flex-col gap-3">
+                    <div className="h-16 animate-pulse bg-slate-50" />
+                    <div className="h-28 animate-pulse bg-slate-50" />
+                </div>
             ) : metrics ? (
                 <>
-                    {/* Hero + Metrics + PnL bar */}
-                    <div className="mb-2">
-                        <HeroMetricsBar
-                            totalReturn={metrics.totalReturn}
-                            roi={metrics.roi}
-                            baseCurrency={baseCurrency}
-                            costBasisInPeriod={metrics.costBasisInPeriod}
-                            unrealizedInPeriod={metrics.unrealizedInPeriod}
-                            realizedInPeriod={metrics.realizedInPeriod}
-                            feesInPeriod={metrics.feesInPeriod}
-                            fmtCurrencySigned={fmtCurrencySigned}
-                            color={color}
-                        >
-                            {range !== 'all' ? (
-                                <>
-                                    <MetricItem
-                                        label="Value Δ"
-                                        value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedInPeriod + metrics.costBasisInPeriod, baseCurrency)}
-                                        color={isLiveLoading ? 'gray.400' : color(metrics.unrealizedInPeriod + metrics.costBasisInPeriod)}
-                                        icon={<FiDollarSign size={14} />}
-                                        bg="blue.50"
-                                        onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
-                                    />
-                                    <MetricItem
-                                        label="Cost Δ"
-                                        value={fmtCurrencySigned(metrics.costBasisInPeriod, baseCurrency)}
-                                        color="gray.700"
-                                        icon={<LuReceipt size={14} />}
-                                        bg="gray.100"
-                                        onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined}
-                                        info={TERM_HELP.cost}
-                                        subLines={metrics.netDeposits ? [{ label: 'Net deposits', value: fmtCurrencySigned(metrics.netDeposits, baseCurrency), info: TERM_HELP.netDeposits }] : undefined}
-                                    />
-                                    <MetricItem
-                                        label="Unrealized Δ"
-                                        value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedInPeriod, baseCurrency)}
-                                        color={isLiveLoading ? 'gray.400' : color(metrics.unrealizedInPeriod)}
-                                        icon={metrics.unrealizedInPeriod >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />}
-                                        bg={metrics.unrealizedInPeriod >= 0 ? 'green.50' : 'red.50'}
-                                        onClick={onMetricClick ? () => onMetricClick('unrealized') : undefined}
-                                    />
-                                    <MetricItem
-                                        label="Realized Δ"
-                                        value={fmtCurrencySigned(metrics.realizedInPeriod, baseCurrency)}
-                                        color={color(metrics.realizedInPeriod)}
-                                        icon={metrics.realizedInPeriod >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />}
-                                        bg={metrics.realizedInPeriod >= 0 ? 'green.50' : 'red.50'}
-                                        info={TERM_HELP.realized}
-                                        subLines={[{ label: 'Taxable', value: fmtCurrencySigned(metrics.taxableRealizedInPeriod, baseCurrency), info: TERM_HELP.taxable }]}
-                                        onClick={onMetricClick ? () => onMetricClick('realized') : undefined}
-                                    />
-                                    <MetricItem
-                                        label="Fees Δ"
-                                        value={fmtCurrencySigned(metrics.feesInPeriod, baseCurrency)}
-                                        color={metrics.feesInPeriod !== 0 ? 'orange.700' : 'gray.600'}
-                                        icon={<LuReceipt size={14} />}
-                                        bg="orange.50"
-                                        onClick={onFeesClick}
-                                    />
-                                </>
-                            ) : (
-                                <>
-                                    <MetricItem
-                                        label="Value"
-                                        value={isLiveLoading ? '...' : fmtCurrency(metrics.currentValue, baseCurrency)}
-                                        color={isLiveLoading ? 'gray.400' : 'gray.800'}
-                                        icon={<FiDollarSign size={14} />}
-                                        bg="blue.50"
-                                        onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
-                                    />
-                                    <MetricItem label="Cost" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined} info={TERM_HELP.cost} subLines={[
-                                        ...(metrics.netDeposits ? [{ label: 'Net deposits', value: fmtCurrency(metrics.netDeposits, baseCurrency), info: TERM_HELP.netDeposits }] : []),
-                                        ...(metrics.unfundedSpend ? [{ label: 'Incl. unfunded spend', value: fmtCurrency((metrics.netDeposits ?? 0) + metrics.unfundedSpend, baseCurrency) }] : []),
-                                    ]} />
-                                    <MetricItem
-                                        label="Unrealized"
-                                        value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedPnl, baseCurrency)}
-                                        color={isLiveLoading ? 'gray.400' : color(metrics.unrealizedPnl)}
-                                        icon={metrics.unrealizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />}
-                                        bg={metrics.unrealizedPnl >= 0 ? 'green.50' : 'red.50'}
-                                        onClick={onMetricClick ? () => onMetricClick('unrealized') : undefined}
-                                    />
-                                    <MetricItem label="Realized" value={fmtCurrencySigned(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} icon={metrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={metrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} info={TERM_HELP.realized} subLines={realizedSubLines(metrics, baseCurrency, fmtCurrencySigned)} onClick={onMetricClick ? () => onMetricClick('realized') : undefined} />
-                                    <MetricItem label="Fees" value={fmtCurrency(metrics.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" subValue={`${metrics.feeEntryCount} events`} onClick={onFeesClick} />
-                                    {metrics.incomeEventCount > 0 && (
-                                        <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />
-                                    )}
-                                </>
-                            )}
-                        </HeroMetricsBar>
+                    {/* Header: total return + gains / losses / net */}
+                    <OverviewHeader
+                        totalReturn={metrics.totalReturn}
+                        roi={metrics.roi}
+                        baseCurrency={baseCurrency}
+                        periodLabel={periodLabel}
+                        isLiveLoading={isLiveLoading}
+                        gains={gainsTotal}
+                        losses={lossesTotal}
+                        net={netTotal}
+                        isTotalsLoading={isPerformersLoading}
+                        onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
+                    />
+
+                    <div className="mt-3">
+                        <ReturnBridge rows={bridgeRows} baseCurrency={baseCurrency} isLiveLoading={isLiveLoading} />
                     </div>
 
-                    {/* Performers / custom slot — full width below */}
-                    {hidePerformers ? (
-                        <div>
-                            {/* Custom slot + Period Chart — side by side */}
-                            <div className={`grid items-start gap-3 ${performerSlot ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-                                {performerSlot && <div>{performerSlot}</div>}
-                                {/* Period chart */}
-                                <div className="border border-blue-200 bg-white p-2">
-                                    <PeriodChartPanel
-                                        points={points}
-                                        baseCurrency={baseCurrency}
-                                        range={range}
-                                        isLoading={isLoading}
-                                        versionId={versionId}
-                                        assets={assetsProp}
-                                        contextLabel={contextLabel}
-                                        assetId={assetId}
-                                        assetSymbol={assetSymbol}
-                                    />
-                                </div>
-                            </div>
+                    {accountsSlot && <div className="mt-3">{accountsSlot}</div>}
+
+                    {/* Chart (60%) + contributors / custom slot (40%) */}
+                    <div className={`mt-3 grid grid-cols-1 items-start gap-3 ${sideContent ? 'lg:grid-cols-5' : ''}`}>
+                        <div className={`border border-slate-200 bg-white p-2 ${sideContent ? 'lg:col-span-3' : ''}`}>
+                            <PeriodChartPanel
+                                points={points}
+                                baseCurrency={baseCurrency}
+                                range={range}
+                                isLoading={isLoading}
+                                versionId={versionId}
+                                assets={assetsProp}
+                                contextLabel={contextLabel}
+                                assetId={assetId}
+                                assetSymbol={assetSymbol}
+                            />
                         </div>
-                    ) : (
-                        <div>
-                            {/* Best/Worst + Period Chart — side by side */}
-                            <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
-                                {/* Left half: Best & Worst */}
-                                {isPerformersLoading ? (
-                                    <div className="border border-purple-200 bg-white p-2">
-                                        <div className="text-xs text-gray-400">Loading performers...</div>
-                                    </div>
-                                ) : (
-                                    <div className="border border-purple-200 bg-white p-3">
-                                        {/* Controls row: badges left, $/%+slider right */}
-                                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                            {/* Left: Asset/Account/Category + sort metric badges */}
-                                            <div className="flex flex-wrap items-center gap-0.5">
-                                                <Badge
-                                                    colorScheme={groupBy === 'asset' ? 'blue' : 'gray'}
-                                                    className={`cursor-pointer px-1.5 ${groupBy === 'asset' ? 'ring-2 ring-blue-400' : ''}`}
-                                                    onClick={() => onGroupByChange?.('asset')}
-                                                >
-                                                    Asset
-                                                </Badge>
-                                                <Badge
-                                                    colorScheme={groupBy === 'account' ? 'blue' : 'gray'}
-                                                    className={`cursor-pointer px-1.5 ${groupBy === 'account' ? 'ring-2 ring-blue-400' : ''}`}
-                                                    onClick={() => onGroupByChange?.('account')}
-                                                >
-                                                    Account
-                                                </Badge>
-                                                {dimensions.map(dim => (
-                                                    <Badge
-                                                        key={dim.id}
-                                                        colorScheme={groupBy === 'category' && selectedDimensionId === dim.id ? 'green' : 'gray'}
-                                                        className={`cursor-pointer px-1.5 ${groupBy === 'category' && selectedDimensionId === dim.id ? 'ring-2 ring-green-400' : ''}`}
-                                                        onClick={() => {
-                                                            onGroupByChange?.('category');
-                                                            onDimensionChange?.(dim.id);
-                                                        }}
-                                                    >
-                                                        {dim.label}
-                                                    </Badge>
-                                                ))}
-                                                <div className="mx-1 h-3.5 w-px shrink-0 bg-gray-300" />
-                                                {([['TR', 'Total Return'], ['U', 'Unrealized P&L'], ['MV', 'Market Value'], ['Eff', 'Efficiency']] as [PerformerMetric, string][]).map(([key, tip]) => (
-                                                    <Tooltip key={key} content={tip} openDelay={400}>
-                                                        <Badge
-                                                            colorScheme={sortMetric === key ? 'green' : 'gray'}
-                                                            className={`cursor-pointer px-1 ${sortMetric === key ? 'ring-2 ring-green-400' : ''}`}
-                                                            onClick={() => setSortMetric(key)}
-                                                        >
-                                                            {key}
-                                                        </Badge>
-                                                    </Tooltip>
-                                                ))}
-                                            </div>
-
-                                            {/* Right: $/%  + count slider */}
-                                            <div className="flex shrink-0 items-center gap-1.5">
-                                                <div className="flex gap-0.5">
-                                                    {([['$', 'Dollar values'], ['%', 'Percentages']] as [PerformerDisplay, string][]).map(([key, tip]) => (
-                                                        <Tooltip key={key} content={tip} openDelay={400}>
-                                                            <Badge
-                                                                colorScheme={displayFormat === key ? 'purple' : 'gray'}
-                                                                className={`cursor-pointer px-1 ${displayFormat === key ? 'ring-2 ring-purple-400' : ''}`}
-                                                                onClick={() => setDisplayFormat(key)}
-                                                            >
-                                                                {key}
-                                                            </Badge>
-                                                        </Tooltip>
-                                                    ))}
-                                                </div>
-                                                <div className="whitespace-nowrap text-[10px] text-gray-400">
-                                                    {performerCount}
-                                                </div>
-                                                <input
-                                                    type="range"
-                                                    min={3}
-                                                    max={Math.max(maxPerformerCount, 5)}
-                                                    step={1}
-                                                    value={performerCount}
-                                                    onChange={(e) => setPerformerCount(Number(e.target.value))}
-                                                    className="h-1 w-[60px] accent-blue-500"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-4">
-                                            {/* Best */}
-                                            <div>
-                                                <div className="mb-2 flex items-center justify-between gap-1 border-b border-gray-100 pb-1.5">
-                                                    <div className="flex items-center gap-1">
-                                                        <FiTrendingUp size={14} color="#38A169" />
-                                                        <span className="text-sm font-semibold text-green-600">Best</span>
-                                                    </div>
-                                                    {topTotal && (
-                                                        <span className="text-xs text-gray-500">
-                                                            Total <span className="text-base font-bold text-green-600">{topTotal}</span>
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                {visibleTop.length === 0 ? (
-                                                    <div className="text-[10px] text-gray-400">No positive returns</div>
-                                                ) : (
-                                                    <div className="max-h-[240px] overflow-y-auto">
-                                                        <div className="flex flex-col gap-1">
-                                                            {visibleTop.map((p, i) => (
-                                                                <PerformerMiniRow
-                                                                    key={p.id}
-                                                                    rank={i + 1}
-                                                                    item={p}
-                                                                    maxAbs={maxAbsReturn}
-                                                                    baseCurrency={baseCurrency}
-                                                                    isPositive
-                                                                    sortBy={performerSort}
-                                                                    display={displayFormat}
-                                                                    onClick={() => handlePerformerClick(p)}
-                                                                    onInfoClick={handleInfoClick}
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Worst */}
-                                            <div>
-                                                <div className="mb-2 flex items-center justify-between gap-1 border-b border-gray-100 pb-1.5">
-                                                    <div className="flex items-center gap-1">
-                                                        <FiTrendingDown size={14} color="#E53E3E" />
-                                                        <span className="text-sm font-semibold text-red-600">Worst</span>
-                                                    </div>
-                                                    {flopTotal && (
-                                                        <span className="text-xs text-gray-500">
-                                                            Total <span className="text-base font-bold text-red-600">{flopTotal}</span>
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                {visibleFlop.length === 0 ? (
-                                                    <div className="text-[10px] text-gray-400">No negative returns</div>
-                                                ) : (
-                                                    <div className="max-h-[240px] overflow-y-auto">
-                                                        <div className="flex flex-col gap-1">
-                                                            {visibleFlop.map((p, i) => (
-                                                                <PerformerMiniRow
-                                                                    key={p.id}
-                                                                    rank={i + 1}
-                                                                    item={p}
-                                                                    maxAbs={maxAbsReturn}
-                                                                    baseCurrency={baseCurrency}
-                                                                    isPositive={false}
-                                                                    sortBy={performerSort}
-                                                                    display={displayFormat}
-                                                                    onClick={() => handlePerformerClick(p)}
-                                                                    onInfoClick={handleInfoClick}
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Right half: Period chart */}
-                                <div className="border border-blue-200 bg-white p-2">
-                                    <PeriodChartPanel
-                                        points={points}
-                                        baseCurrency={baseCurrency}
-                                        range={range}
-                                        isLoading={isLoading}
-                                        versionId={versionId}
-                                        assets={assetsProp}
-                                        contextLabel={contextLabel}
-                                        assetId={assetId}
-                                        assetSymbol={assetSymbol}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                        {sideContent && <div className="lg:col-span-2">{sideContent}</div>}
+                    </div>
                 </>
             ) : (
                 <div className="text-xs text-gray-400">No data for this period</div>
@@ -843,94 +553,68 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     );
 };
 
-/** Get the primary display value for a performer based on display format */
-function performerPrimaryValue(item: PerformerItem, sortBy: PerformerSort, baseCurrency: string, display: PerformerDisplay = '$'): string {
-    if (display === '%') {
-        return `${item.roiPct >= 0 ? '+' : ''}${item.roiPct.toFixed(1)}%`;
-    }
-    // Dollar mode: show the value matching the sort metric
-    switch (sortBy) {
-        case 'unrealized': return fmtCurrencySigned(item.unrealizedPnl, baseCurrency);
-        case 'market_value': return fmtCurrency(item.marketValue, baseCurrency);
-        case 'efficiency': return item.efficiency.toFixed(2) + 'x';
-        default: return fmtCurrencySigned(item.totalReturn, baseCurrency);
-    }
-}
-
-/** Total across all listed performers (not only the visible slice); null when a sum is meaningless. */
-function performerTotal(items: PerformerItem[], sortBy: PerformerSort, baseCurrency: string, display: PerformerDisplay): string | null {
-    if (items.length === 0 || sortBy === 'efficiency') return null;
-    if (display === '%') {
-        const cost = items.reduce((acc, p) => acc + p.costBasis, 0);
-        if (cost <= 0) return null;
-        const pct = (items.reduce((acc, p) => acc + p.totalReturn, 0) / cost) * 100;
-        return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
-    }
-    switch (sortBy) {
-        case 'unrealized': return fmtCurrencySigned(items.reduce((acc, p) => acc + p.unrealizedPnl, 0), baseCurrency);
-        case 'market_value': return fmtCurrency(items.reduce((acc, p) => acc + p.marketValue, 0), baseCurrency);
-        default: return fmtCurrencySigned(items.reduce((acc, p) => acc + p.totalReturn, 0), baseCurrency);
-    }
-}
-
-/** Get the abs value used for bar sizing */
-function performerBarValue(item: PerformerItem, sortBy: PerformerSort): number {
-    switch (sortBy) {
-        case 'unrealized': return Math.abs(item.unrealizedPnl);
-        case 'market_value': return Math.abs(item.marketValue);
-        case 'efficiency': return Math.abs(item.efficiency);
-        default: return Math.abs(item.totalReturn);
-    }
-}
-
-/** Inline mini performer row for best/worst inside TimeframeIndicators */
-const PerformerMiniRow: React.FC<{
-    rank: number;
-    item: PerformerItem;
-    maxAbs: number;
+/** Hero: total return + ROI, with asset-level gains / losses / net on the right. */
+export const OverviewHeader: React.FC<{
+    totalReturn: number;
+    roi: number;
     baseCurrency: string;
-    isPositive: boolean;
-    sortBy?: PerformerSort;
-    display?: PerformerDisplay;
+    periodLabel: string;
+    isLiveLoading?: boolean;
+    gains?: number;
+    losses?: number;
+    net?: number;
+    isTotalsLoading?: boolean;
+    compact?: boolean;
     onClick?: () => void;
-    onInfoClick?: (id: number) => void;
-}> = ({ rank, item, maxAbs, baseCurrency, isPositive, sortBy = 'return', display = '$', onClick, onInfoClick }) => {
-    const barVal = performerBarValue(item, sortBy);
-    const barPct = maxAbs > 0 ? Math.max((barVal / maxAbs) * 100, 4) : 4;
-
+}> = ({ totalReturn, roi, baseCurrency, periodLabel, isLiveLoading, gains, losses, net, isTotalsLoading, compact, onClick }) => {
+    const positive = totalReturn >= 0;
+    const Icon = positive ? FiTrendingUp : FiTrendingDown;
+    const hasTotals = gains != null && losses != null;
     return (
-        <div
-            className={`flex items-center gap-1.5 px-1 py-1 transition-colors ${onClick ? 'cursor-pointer hover:bg-gray-50' : 'cursor-default'}`}
-            onClick={onClick}
-        >
-            <div className="min-w-[12px] text-right text-[10px] font-bold text-gray-400">{rank}</div>
-            <Tooltip content={item.name} openDelay={300}>
-                <div className="w-[70px] shrink-0 truncate text-xs font-semibold text-gray-700">
-                    {item.name}
+        <div className={`flex flex-wrap items-center gap-x-8 gap-y-2 ${compact ? '' : 'border-b border-slate-100 pb-3'}`} data-testid="overview-header">
+            <div className={onClick ? 'cursor-pointer' : ''} onClick={onClick}>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    Total return · {periodLabel}
                 </div>
-            </Tooltip>
-            {onInfoClick && (
-                <button
-                    type="button"
-                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); onInfoClick(item.id); }}
-                    className="shrink-0 p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
-                    title="Asset details"
-                >
-                    <LuInfo size={11} />
-                </button>
+                <div className="flex items-center gap-2">
+                    <Icon size={compact ? 16 : 22} className={isLiveLoading ? 'text-gray-300' : positive ? 'text-green-600' : 'text-red-600'} />
+                    <span className={`${compact ? 'text-xl' : 'text-3xl'} font-bold tabular-nums ${isLiveLoading ? 'text-gray-300' : positive ? 'text-green-600' : 'text-red-600'}`}>
+                        {isLiveLoading ? '…' : fmtCurrencySigned(totalReturn, baseCurrency)}
+                    </span>
+                    {!isLiveLoading && (
+                        <Badge colorScheme={roi >= 0 ? 'green' : 'red'} className="px-2 text-sm">
+                            {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
+                        </Badge>
+                    )}
+                </div>
+            </div>
+            {(hasTotals || isTotalsLoading) && (
+                <div className="ml-auto flex items-center gap-6">
+                    {isTotalsLoading || !hasTotals ? (
+                        <div className="h-10 w-64 animate-pulse bg-slate-50" />
+                    ) : (
+                        <>
+                            <div className="flex flex-col">
+                                <span className="text-[11px] font-medium text-gray-500">Gains</span>
+                                <span className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums text-green-600`}>▲ {fmtCurrencySigned(gains!, baseCurrency)}</span>
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-[11px] font-medium text-gray-500">Losses</span>
+                                <span className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums text-red-600`}>▼ {fmtCurrencySigned(losses!, baseCurrency)}</span>
+                            </div>
+                            <div className="flex flex-col border-l border-slate-200 pl-6">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                                    Net
+                                    <InfoTip text="Sum of per-asset returns (base currency excluded). Same whatever the grouping." size={10} />
+                                </span>
+                                <span className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums ${(net ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {fmtCurrencySigned(net ?? 0, baseCurrency)}
+                                </span>
+                            </div>
+                        </>
+                    )}
+                </div>
             )}
-            <div className={`relative h-4 flex-1 overflow-hidden ${isPositive ? 'bg-green-50' : 'bg-red-50'}`}>
-                <div className={`h-full transition-all duration-300 ${isPositive ? 'bg-green-400' : 'bg-red-400'}`} style={{ width: `${barPct}%` }} />
-                <div className={`absolute left-1 top-1/2 -translate-y-1/2 text-[10px] font-bold ${barPct > 30 ? 'text-white' : isPositive ? 'text-green-700' : 'text-red-700'}`}>
-                    {performerPrimaryValue(item, sortBy, baseCurrency, display)}
-                </div>
-            </div>
-            <div className={`min-w-[36px] text-right text-[10px] font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                {display === '$'
-                    ? `${item.roiPct >= 0 ? '+' : ''}${item.roiPct.toFixed(1)}%`
-                    : fmtCurrencySigned(item.totalReturn, baseCurrency)
-                }
-            </div>
         </div>
     );
 };
