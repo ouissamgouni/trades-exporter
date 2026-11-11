@@ -14,10 +14,12 @@ Strategy:
   5. Compute cumulative realized P&L from RealizedPnl records
 """
 
-from collections import OrderedDict
+import math
+from bisect import bisect_left
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlmodel import Session, select
@@ -25,11 +27,13 @@ from sqlmodel import Session, select
 from backend.db.models import (
     AssetCategory,
     CalculationUnit,
+    CalculationUnitLeg,
     CalculationVersion,
     CostLot,
     CostLotEvent,
     IncomeEvent,
     PriceSnapshot,
+    UnitPattern,
 )
 from backend.config.loader import configure_logging
 from backend.services.pnl.metrics_service import (
@@ -59,6 +63,8 @@ class BreakdownItem:
     qty: float
     cost_basis_in_base: float
     realized_pnl_to_date: float
+    # Cumulative split ratio to apply to the unit price for a split-continuous price series
+    split_factor: float = 1.0
 
 
 @dataclass
@@ -173,6 +179,91 @@ def _get_cumulative_income_at_dates(
         result[bucket_date.strftime("%Y-%m-%d")] = cumulative
 
     return result
+
+
+def _get_split_events(
+    session: Session,
+    version_id: int,
+    asset_ids: Optional[List[int]] = None,
+) -> Dict[int, List[Tuple[str, float]]]:
+    """
+    Split ratios (inflow qty / outflow qty) per asset from SPLIT units.
+
+    Returns: { asset_id: [(YYYY-MM-DD, ratio), ...] } sorted by date, one entry per day.
+    """
+    query = (
+        select(
+            CalculationUnit.id,
+            CalculationUnit.timestamp,
+            CalculationUnitLeg.asset_id,
+            CalculationUnitLeg.leg_type,
+            CalculationUnitLeg.quantity,
+        )
+        .join(CalculationUnitLeg, CalculationUnitLeg.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+        .where(CalculationUnit.pattern == UnitPattern.SPLIT.value)
+    )
+    if asset_ids:
+        query = query.where(CalculationUnitLeg.asset_id.in_(asset_ids))
+
+    per_unit: Dict[Tuple[int, int], List] = defaultdict(lambda: [None, 0.0, 0.0])
+    for unit_id, ts, asset_id, leg_type, qty in session.exec(query).all():
+        entry = per_unit[(unit_id, asset_id)]
+        entry[0] = ts
+        kind = getattr(leg_type, "value", leg_type)
+        if kind == "inflow":
+            entry[1] += abs(float(qty))
+        elif kind == "outflow":
+            entry[2] += abs(float(qty))
+
+    # Same split booked in several accounts -> keep a single ratio per (asset, day)
+    by_asset: Dict[int, Dict[str, float]] = defaultdict(dict)
+    for (_, asset_id), (ts, in_qty, out_qty) in per_unit.items():
+        if ts is None or in_qty <= 0 or out_qty <= 0:
+            continue
+        ratio = in_qty / out_qty
+        if abs(ratio - 1.0) < 1e-9:
+            continue
+        by_asset[asset_id].setdefault(_ensure_naive(ts).strftime("%Y-%m-%d"), ratio)
+
+    return {aid: sorted(days.items()) for aid, days in by_asset.items()}
+
+
+def _compute_split_factors(
+    split_events: Dict[int, List[Tuple[str, float]]],
+    price_snapshots: Dict[str, Dict[int, float]],
+    bucket_ds: List[str],
+    window: int,
+) -> Dict[int, Dict[str, float]]:
+    """
+    Cumulative split factor per asset and bucket.
+
+    A split is applied only where the stored price actually drops by ~1/ratio
+    near the split date; already split-adjusted price history is left untouched.
+    """
+    factors: Dict[int, Dict[str, float]] = {}
+    for asset_id, events in split_events.items():
+        prices = [price_snapshots.get(ds, {}).get(asset_id) for ds in bucket_ds]
+        cum = [1.0] * len(bucket_ds)
+        applied = False
+        for split_ds, ratio in events:
+            idx = bisect_left(bucket_ds, split_ds)
+            best: Optional[Tuple[float, int]] = None
+            for j in range(max(1, idx - window), min(len(bucket_ds), idx + window + 1)):
+                p0, p1 = prices[j - 1], prices[j]
+                if not p0 or not p1 or p0 <= 0 or p1 <= 0:
+                    continue
+                err = abs(math.log(p1 / p0 * ratio))
+                if best is None or err < best[0]:
+                    best = (err, j)
+            if best is None or best[0] > 0.25 * abs(math.log(ratio)):
+                continue
+            for k in range(best[1], len(bucket_ds)):
+                cum[k] *= ratio
+            applied = True
+        if applied:
+            factors[asset_id] = dict(zip(bucket_ds, cum))
+    return factors
 
 
 def compute_portfolio_timeline(
@@ -309,6 +400,15 @@ def compute_portfolio_timeline(
         session, version_id, buckets
     )
 
+    # 4c. Split factors so per-asset unit prices stay continuous across splits
+    bucket_ds = [b.strftime("%Y-%m-%d") for b in buckets]
+    split_factors = _compute_split_factors(
+        _get_split_events(session, version_id, asset_ids),
+        price_snapshots,
+        bucket_ds,
+        window=5 if granularity == "daily" else 1,
+    )
+
     # 5. Get asset symbols and labels
     asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
     asset_labels = _get_asset_labels(session, all_asset_ids_list)
@@ -348,6 +448,7 @@ def compute_portfolio_timeline(
                 qty=round(qty, 8),
                 cost_basis_in_base=round(cost, 2),
                 realized_pnl_to_date=round(rpnl_by_asset.get(asset_id, 0.0), 2),
+                split_factor=split_factors.get(asset_id, {}).get(date_str, 1.0),
             ))
 
         unrealized = total_value - total_cost_basis
