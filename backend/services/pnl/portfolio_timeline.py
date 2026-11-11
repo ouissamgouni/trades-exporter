@@ -546,3 +546,39 @@ def compute_portfolio_timeline_cached(
 
 def clear_portfolio_timeline_cache() -> None:
     _TIMELINE_CACHE.clear()
+
+
+def compute_account_sparklines(
+    session: Session,
+    version_id: int,
+    account_ids: List[int],
+    date_from: Optional[datetime] = None,
+    asset_ids: Optional[List[int]] = None,
+    category_ids: Optional[List[int]] = None,
+    include_unsettled_negative: bool = False,
+) -> Dict[int, List[Dict[str, Optional[float]]]]:
+    """Weekly {date, value, roi} series per account."""
+    result: Dict[int, List[Dict[str, Optional[float]]]] = {}
+    for account_id in account_ids:
+        points = compute_portfolio_timeline_cached(
+            session,
+            version_id,
+            granularity="weekly",
+            date_from=date_from,
+            asset_ids=asset_ids,
+            account_ids=[account_id],
+            category_ids=category_ids,
+            include_unsettled_negative=include_unsettled_negative,
+        )
+        series: List[Dict[str, Optional[float]]] = []
+        for pt in points:
+            cost = pt.cost_basis_in_base
+            roi = (
+                round((pt.unrealized_pnl + pt.cumulative_realized_pnl) / cost * 100, 2)
+                if cost > 0
+                else None
+            )
+            series.append({"date": pt.date, "value": pt.total_value_in_base, "roi": roi})
+        result[account_id] = series
+    return result
+

@@ -79,6 +79,9 @@ class PerformerItem:
     cost_basis: float = 0.0
     total_fees: float = 0.0
     efficiency: float = 0.0  # total_return / max(cost_basis, 1)
+    realized_pnl: float = 0.0  # all-time for "all", realized in period otherwise
+    income: float = 0.0  # net income (all-time for "all", in period otherwise)
+    roi_base: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +216,10 @@ class PerformersResult:
     top_performers: List[PerformerItem] = field(default_factory=list)
     flop_performers: List[PerformerItem] = field(default_factory=list)
     total_count: int = 0
+    # Asset-level totals, independent of group_type
+    gains_total: float = 0.0
+    losses_total: float = 0.0
+    net_total: float = 0.0
 
 
 @dataclass
@@ -228,6 +235,7 @@ class AssetPeriodDelta:
     realized_in_period: float
     cost_change: float
     market_value_change: float
+    income_in_period: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -1187,6 +1195,34 @@ def _compute_income_in_period(
         return 0.0, 0.0
 
 
+def _get_income_by_asset(
+    session: Session,
+    version_id: int,
+    start_dt: Optional[datetime] = None,
+    account_ids: Optional[List[int]] = None,
+) -> Dict[int, float]:
+    """Net income per position asset (attributed asset, else received asset), optionally since start_dt."""
+    try:
+        asset_col = func.coalesce(IncomeEvent.attributed_asset_id, IncomeEvent.asset_id)
+        query = (
+            select(asset_col, func.coalesce(func.sum(IncomeEvent.net_amount_in_base), 0))
+            .where(IncomeEvent.version_id == version_id)
+            .group_by(asset_col)
+        )
+        if start_dt is not None:
+            query = query.where(IncomeEvent.income_at >= start_dt)
+        if account_ids:
+            query = query.join(
+                NormalizedTransaction,
+                IncomeEvent.transaction_id == NormalizedTransaction.id,
+            ).where(NormalizedTransaction.account_id.in_(account_ids))
+        return {
+            int(r[0]): float(r[1]) for r in session.exec(query).all() if r[0] is not None
+        }
+    except (TypeError, AttributeError, ValueError):
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Shared snapshot infrastructure
 # ---------------------------------------------------------------------------
@@ -1451,6 +1487,89 @@ def _compute_portfolio_range_metrics(
 # ---------------------------------------------------------------------------
 
 
+UNCATEGORIZED_CATEGORY_ID = -1
+
+
+def _build_asset_items(
+    all_asset_ids: set,
+    now_balances: Dict[int, float],
+    now_costs: Dict[int, float],
+    now_prices: Dict[int, float],
+    now_rpnl_by_asset: Dict[int, float],
+    start_balances: Dict[int, float],
+    start_costs: Dict[int, float],
+    start_prices: Dict[int, float],
+    start_rpnl_by_asset: Dict[int, float],
+    asset_symbols: Dict[int, str],
+    asset_labels: Dict[int, Optional[str]],
+    range_key: str,
+    fees_by_asset: Optional[Dict[int, float]] = None,
+    base_currency_id: Optional[int] = None,
+    income_by_asset: Optional[Dict[int, float]] = None,
+) -> List[PerformerItem]:
+    """Per-asset return items (the single formula every grouping aggregates from)."""
+    fees_by_asset = fees_by_asset or {}
+    income_by_asset = income_by_asset or {}
+    items: List[PerformerItem] = []
+
+    # Assets fully bought and sold between boundary dates only show up in realized PnL
+    for aid in set(all_asset_ids) | set(now_rpnl_by_asset.keys()):
+        if aid == base_currency_id:
+            continue
+        qty_now = now_balances.get(aid, 0.0)
+        price_now = now_prices.get(aid, 0.0)
+        cost_now = now_costs.get(aid, 0.0)
+        asset_value = qty_now * price_now
+        asset_unrealized = asset_value - cost_now
+        asset_rpnl_now = now_rpnl_by_asset.get(aid, 0.0)
+        asset_rpnl_start = start_rpnl_by_asset.get(aid, 0.0)
+        asset_realized_in_period = asset_rpnl_now - asset_rpnl_start
+
+        if range_key == "all":
+            asset_total_return = asset_unrealized + asset_rpnl_now
+            asset_roi_base = cost_now
+            asset_realized = asset_rpnl_now
+        else:
+            qty_start = start_balances.get(aid, 0.0)
+            price_start = start_prices.get(aid, 0.0)
+            cost_start = start_costs.get(aid, 0.0)
+            asset_unrealized_start = qty_start * price_start - cost_start
+            asset_unrealized_change = asset_unrealized - asset_unrealized_start
+            asset_total_return = asset_unrealized_change + asset_realized_in_period
+            asset_roi_base = cost_start if cost_start != 0 else cost_now
+            asset_realized = asset_realized_in_period
+
+        if (
+            abs(qty_now) < 1e-12
+            and abs(cost_now) < 1e-12
+            and abs(asset_total_return) < 0.01
+        ):
+            continue
+
+        asset_roi = (
+            (asset_total_return / asset_roi_base * 100) if asset_roi_base != 0 else 0.0
+        )
+        items.append(
+            PerformerItem(
+                id=aid,
+                name=asset_symbols.get(aid, f"#{aid}"),
+                label=asset_labels.get(aid),
+                group_type="asset",
+                total_return=round(asset_total_return, 2),
+                roi_pct=round(asset_roi, 2),
+                unrealized_pnl=round(asset_unrealized, 2),
+                market_value=round(asset_value, 2),
+                cost_basis=round(cost_now, 2),
+                total_fees=round(fees_by_asset.get(aid, 0.0), 2),
+                efficiency=round(asset_total_return / max(cost_now, 1.0), 4),
+                realized_pnl=round(asset_realized, 2),
+                income=round(income_by_asset.get(aid, 0.0), 2),
+                roi_base=round(asset_roi_base, 2),
+            )
+        )
+    return items
+
+
 def _rank_performers_by_asset(
     all_asset_ids: set,
     now_balances: Dict[int, float],
@@ -1467,163 +1586,164 @@ def _rank_performers_by_asset(
     top_n: int,
     fees_by_asset: Optional[Dict[int, float]] = None,
     base_currency_id: Optional[int] = None,
+    income_by_asset: Optional[Dict[int, float]] = None,
 ) -> Tuple[List[PerformerItem], List[PerformerItem], int]:
     """Rank performers at asset level. Excludes base currency."""
-    if fees_by_asset is None:
-        fees_by_asset = {}
-    performances: List[PerformerItem] = []
+    items = _build_asset_items(
+        all_asset_ids,
+        now_balances,
+        now_costs,
+        now_prices,
+        now_rpnl_by_asset,
+        start_balances,
+        start_costs,
+        start_prices,
+        start_rpnl_by_asset,
+        asset_symbols,
+        asset_labels,
+        range_key,
+        fees_by_asset,
+        base_currency_id,
+        income_by_asset,
+    )
+    return _sort_top_flop(items, top_n)
 
-    for aid in all_asset_ids:
-        if aid == base_currency_id:
-            continue
-        qty_now = now_balances.get(aid, 0.0)
-        price_now = now_prices.get(aid, 0.0)
-        cost_now = now_costs.get(aid, 0.0)
-        asset_value = qty_now * price_now
-        asset_unrealized = asset_value - cost_now
-        asset_rpnl_now = now_rpnl_by_asset.get(aid, 0.0)
-        asset_rpnl_start = start_rpnl_by_asset.get(aid, 0.0)
-        asset_realized_in_period = asset_rpnl_now - asset_rpnl_start
 
-        if range_key == "all":
-            asset_total_return = asset_unrealized + asset_rpnl_now
-            asset_roi_base = cost_now
-        else:
-            qty_start = start_balances.get(aid, 0.0)
-            price_start = start_prices.get(aid, 0.0)
-            cost_start = start_costs.get(aid, 0.0)
-            asset_unrealized_start = qty_start * price_start - cost_start
-            asset_unrealized_change = asset_unrealized - asset_unrealized_start
-            asset_total_return = asset_unrealized_change + asset_realized_in_period
-            asset_roi_base = cost_start if cost_start != 0 else cost_now
+def _list_version_account_ids(
+    session: Session,
+    version_id: int,
+    asset_ids: Optional[List[int]],
+    account_ids: Optional[List[int]],
+) -> List[int]:
+    """Accounts holding (or having held) lots in this version."""
+    query = (
+        select(CostLot.account_id)
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+        .distinct()
+    )
+    if asset_ids:
+        query = query.where(CostLot.asset_id.in_(asset_ids))
+    if account_ids:
+        query = query.where(CostLot.account_id.in_(account_ids))
+    return sorted({int(a) for a in session.exec(query).all() if a is not None})
 
-        if (
-            abs(qty_now) < 1e-12
-            and abs(cost_now) < 1e-12
-            and abs(asset_total_return) < 0.01
-        ):
-            continue
 
-        asset_roi = (
-            (asset_total_return / asset_roi_base * 100) if asset_roi_base != 0 else 0.0
-        )
-        asset_fees = fees_by_asset.get(aid, 0.0)
-        asset_efficiency = asset_total_return / max(cost_now, 1.0)
+def _account_performer(
+    session: Session,
+    version_id: int,
+    account_id: int,
+    range_key: str,
+    asset_ids: Optional[List[int]],
+    include_unsettled_negative: bool,
+) -> Optional[PerformerItem]:
+    """Aggregate one account from its own asset-level items (same formula as by-asset)."""
+    snap = _build_version_snapshot(
+        session,
+        version_id,
+        [range_key],
+        asset_ids,
+        [account_id],
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    if snap is None:
+        return None
+    price_snapshots = _build_price_snapshot(session, snap, refresh=False)
+    cumulative_rpnl = _build_realized_pnl_snapshots(
+        session, snap, asset_ids, [account_id], taxable_only=False
+    )
+    now_b, now_c, now_p, _, now_r = _snapshot_at(
+        snap, price_snapshots, cumulative_rpnl, snap.now
+    )
+    start_dt = snap.range_starts[range_key]
+    st_b, st_c, st_p, _, st_r = _snapshot_at(
+        snap, price_snapshots, cumulative_rpnl, start_dt
+    )
+    fees = _get_fees_by_asset(session, version_id, [account_id])
+    income = _get_income_by_asset(
+        session, version_id, None if range_key == "all" else start_dt, [account_id]
+    )
+    items = _build_asset_items(
+        snap.all_asset_ids,
+        now_b,
+        now_c,
+        now_p,
+        now_r,
+        st_b,
+        st_c,
+        st_p,
+        st_r,
+        {},
+        {},
+        range_key,
+        fees,
+        snap.base_currency_id,
+        income,
+    )
 
-        performances.append(
-            PerformerItem(
-                id=aid,
-                name=asset_symbols.get(aid, f"#{aid}"),
-                label=asset_labels.get(aid),
-                group_type="asset",
-                total_return=round(asset_total_return, 2),
-                roi_pct=round(asset_roi, 2),
-                unrealized_pnl=round(asset_unrealized, 2),
-                market_value=round(asset_value, 2),
-                cost_basis=round(cost_now, 2),
-                total_fees=round(asset_fees, 2),
-                efficiency=round(asset_efficiency, 4),
-            )
-        )
+    base = snap.base_currency_id
+    cash_value = now_b.get(base, 0.0) * now_p.get(base, 1.0) if base is not None else 0.0
+    cash_cost = now_c.get(base, 0.0) if base is not None else 0.0
 
-    return _sort_top_flop(performances, top_n)
+    total_return = sum(i.total_return for i in items)
+    roi_base = sum(i.roi_base for i in items)
+    cost_basis = sum(i.cost_basis for i in items) + cash_cost
+    market_value = sum(i.market_value for i in items) + cash_value
+    if (
+        abs(cost_basis) < 1e-12
+        and abs(market_value) < 1e-12
+        and abs(total_return) < 0.01
+    ):
+        return None
+
+    return PerformerItem(
+        id=account_id,
+        name=f"Account #{account_id}",
+        label=None,
+        group_type="account",
+        total_return=round(total_return, 2),
+        roi_pct=round(total_return / roi_base * 100, 2) if roi_base != 0 else 0.0,
+        unrealized_pnl=round(sum(i.unrealized_pnl for i in items), 2),
+        market_value=round(market_value, 2),
+        cost_basis=round(cost_basis, 2),
+        total_fees=round(sum(fees.values()), 2),
+        efficiency=round(total_return / max(cost_basis, 1.0), 4),
+        realized_pnl=round(sum(i.realized_pnl for i in items), 2),
+        income=round(sum(income.values()), 2),
+        roi_base=round(roi_base, 2),
+    )
 
 
 def _rank_performers_by_account(
     session: Session,
     version_id: int,
-    all_asset_ids: set,
-    now_prices: Dict[int, float],
-    start_prices: Dict[int, float],
-    now_ds: str,
-    start_ds: str,
     range_key: str,
     top_n: int,
     asset_ids: Optional[List[int]],
     account_ids: Optional[List[int]],
     include_unsettled_negative: bool,
-    fees_by_asset: Optional[Dict[int, float]] = None,
 ) -> Tuple[List[PerformerItem], List[PerformerItem], int]:
-    """Rank performers at account level with proper server-side aggregation."""
-    # Get current balances/costs per account
-    acct_now = _get_current_from_cost_lots_by_account(
-        session, version_id, asset_ids, account_ids, include_unsettled_negative
-    )
-
-    # Get realized PnL by account at now and start
-    now_dt = datetime.now(timezone.utc)
-    rpnl_by_acct = _get_cumulative_realized_pnl_by_account(
-        session, version_id, [now_dt], asset_ids, account_ids
-    )
-    now_rpnl_acct = rpnl_by_acct.get(now_ds, {})
-
-    # For period start
-    start_rpnl_acct: Dict[int, float] = {}
-    if range_key != "all":
-        start_dt = now_dt - timedelta(days=PERIOD_RANGES.get(range_key, 0) or 0)
-        rpnl_start = _get_cumulative_realized_pnl_by_account(
-            session, version_id, [start_dt], asset_ids, account_ids
-        )
-        start_rpnl_acct = rpnl_start.get(start_dt.strftime("%Y-%m-%d"), {})
-
-    # Account names
-    all_acct_ids = list(acct_now.keys())
+    """Rank accounts; each account is built from a per-account snapshot so periods are exact."""
+    acct_ids = _list_version_account_ids(session, version_id, asset_ids, account_ids)
     acct_names: Dict[int, str] = {}
-    if all_acct_ids:
-        accounts = session.exec(
-            select(Account).where(Account.id.in_(all_acct_ids))
-        ).all()
+    if acct_ids:
+        accounts = session.exec(select(Account).where(Account.id.in_(acct_ids))).all()
         acct_names = {a.id: a.name for a in accounts}
 
     performances: List[PerformerItem] = []
-    for acct_id, (balances, costs) in acct_now.items():
-        # Current value for this account
-        current_val = sum(
-            balances.get(aid, 0.0) * now_prices.get(aid, 0.0) for aid in balances
+    for acct_id in acct_ids:
+        item = _account_performer(
+            session,
+            version_id,
+            acct_id,
+            range_key,
+            asset_ids,
+            include_unsettled_negative,
         )
-        cost_basis = sum(costs.values())
-        unrealized = current_val - cost_basis
-        rpnl_now = now_rpnl_acct.get(acct_id, 0.0)
-        rpnl_start = start_rpnl_acct.get(acct_id, 0.0)
-        realized_in_period = rpnl_now - rpnl_start
-
-        if range_key == "all":
-            total_return = unrealized + rpnl_now
-            roi_base = cost_basis
-        else:
-            # Approximate: we don't have per-account historical snapshots
-            # so use total_return = unrealized_change + realized_in_period
-            # with unrealized_change approximated from current state
-            total_return = unrealized + realized_in_period
-            roi_base = cost_basis
-
-        if abs(cost_basis) < 1e-12 and abs(total_return) < 0.01:
+        if item is None:
             continue
-
-        roi_pct = (total_return / roi_base * 100) if roi_base != 0 else 0.0
-
-        # Aggregate fees for assets in this account
-        acct_fees = 0.0
-        if fees_by_asset:
-            for aid in balances:
-                acct_fees += fees_by_asset.get(aid, 0.0)
-        eff = total_return / max(cost_basis, 1.0)
-
-        performances.append(
-            PerformerItem(
-                id=acct_id,
-                name=acct_names.get(acct_id, f"Account #{acct_id}"),
-                label=None,
-                group_type="account",
-                total_return=round(total_return, 2),
-                roi_pct=round(roi_pct, 2),
-                unrealized_pnl=round(unrealized, 2),
-                market_value=round(current_val, 2),
-                cost_basis=round(cost_basis, 2),
-                total_fees=round(acct_fees, 2),
-                efficiency=round(eff, 4),
-            )
-        )
+        item.name = acct_names.get(acct_id, item.name)
+        performances.append(item)
 
     return _sort_top_flop(performances, top_n)
 
@@ -1643,92 +1763,81 @@ def _rank_performers_by_category(
     top_n: int,
     dimension_id: Optional[int] = None,
     fees_by_asset: Optional[Dict[int, float]] = None,
+    base_currency_id: Optional[int] = None,
+    income_by_asset: Optional[Dict[int, float]] = None,
 ) -> Tuple[List[PerformerItem], List[PerformerItem], int]:
-    """Rank performers at category level using proper cost basis aggregation."""
-    # Load asset → category mapping (optionally filtered by dimension)
+    """Rank categories from asset-level items; uncategorized assets go to an "Uncategorized" bucket."""
+    items = _build_asset_items(
+        all_asset_ids,
+        now_balances,
+        now_costs,
+        now_prices,
+        now_rpnl_by_asset,
+        start_balances,
+        start_costs,
+        start_prices,
+        start_rpnl_by_asset,
+        {},
+        {},
+        range_key,
+        fees_by_asset,
+        None,
+        income_by_asset,
+    )
+    item_ids = [i.id for i in items]
+
     cat_query = select(AssetCategory.asset_id, AssetCategory.category_id).where(
-        AssetCategory.asset_id.in_(list(all_asset_ids))
+        AssetCategory.asset_id.in_(item_ids)
     )
     if dimension_id is not None:
         cat_query = cat_query.join(
             Category, AssetCategory.category_id == Category.id
         ).where(Category.dimension_id == dimension_id)
-    cat_rows = session.exec(cat_query).all()
+    cat_rows = session.exec(cat_query).all() if item_ids else []
 
     asset_to_cats: Dict[int, List[int]] = defaultdict(list)
     for row in cat_rows:
         asset_to_cats[row.asset_id].append(row.category_id)
 
-    # Category labels
-    all_cat_ids = set()
-    for cats in asset_to_cats.values():
-        all_cat_ids.update(cats)
-    cat_labels: Dict[int, str] = {}
+    all_cat_ids = {c for cats in asset_to_cats.values() for c in cats}
+    cat_labels: Dict[int, str] = {UNCATEGORIZED_CATEGORY_ID: "Uncategorized"}
     if all_cat_ids:
         categories = session.exec(
             select(Category).where(Category.id.in_(list(all_cat_ids)))
         ).all()
-        cat_labels = {c.id: c.label for c in categories}
+        cat_labels.update({c.id: c.label for c in categories})
 
-    # Aggregate per-asset metrics into categories
-    # When an asset belongs to N categories, split proportionally (1/N)
-    if fees_by_asset is None:
-        fees_by_asset = {}
-    cat_data: Dict[int, Dict[str, float]] = defaultdict(
-        lambda: {
-            "total_return": 0.0,
-            "cost_basis": 0.0,
-            "unrealized_pnl": 0.0,
-            "market_value": 0.0,
-            "total_fees": 0.0,
-        }
+    keys = (
+        "total_return",
+        "roi_base",
+        "cost_basis",
+        "unrealized_pnl",
+        "market_value",
+        "total_fees",
+        "realized_pnl",
+        "income",
     )
+    cat_data: Dict[int, Dict[str, float]] = defaultdict(lambda: {k: 0.0 for k in keys})
 
-    for aid in all_asset_ids:
-        cats = asset_to_cats.get(aid, [])
+    # An asset in N categories is split 1/N; base currency never lands in "Uncategorized"
+    for item in items:
+        cats = asset_to_cats.get(item.id)
         if not cats:
-            continue
+            if item.id == base_currency_id:
+                continue
+            cats = [UNCATEGORIZED_CATEGORY_ID]
         share = 1.0 / len(cats)
-
-        qty_now = now_balances.get(aid, 0.0)
-        price_now = now_prices.get(aid, 0.0)
-        cost_now = now_costs.get(aid, 0.0)
-        asset_value = qty_now * price_now
-        asset_unrealized = asset_value - cost_now
-        asset_rpnl_now = now_rpnl_by_asset.get(aid, 0.0)
-        asset_rpnl_start = start_rpnl_by_asset.get(aid, 0.0)
-        asset_realized_in_period = asset_rpnl_now - asset_rpnl_start
-
-        if range_key == "all":
-            asset_total_return = asset_unrealized + asset_rpnl_now
-            asset_cost = cost_now
-        else:
-            qty_start = start_balances.get(aid, 0.0)
-            price_start = start_prices.get(aid, 0.0)
-            cost_start = start_costs.get(aid, 0.0)
-            asset_unrealized_start = qty_start * price_start - cost_start
-            asset_unrealized_change = asset_unrealized - asset_unrealized_start
-            asset_total_return = asset_unrealized_change + asset_realized_in_period
-            asset_cost = cost_start if cost_start != 0 else cost_now
-
         for cat_id in cats:
-            cat_data[cat_id]["total_return"] += asset_total_return * share
-            cat_data[cat_id]["cost_basis"] += asset_cost * share
-            cat_data[cat_id]["unrealized_pnl"] += asset_unrealized * share
-            cat_data[cat_id]["market_value"] += asset_value * share
-            cat_data[cat_id]["total_fees"] += fees_by_asset.get(aid, 0.0) * share
+            for k in keys:
+                cat_data[cat_id][k] += getattr(item, k) * share
 
     performances: List[PerformerItem] = []
     for cat_id, data in cat_data.items():
         tr = data["total_return"]
         cb = data["cost_basis"]
-        upnl = data["unrealized_pnl"]
-        mv = data["market_value"]
-        fees = data["total_fees"]
         if abs(cb) < 1e-12 and abs(tr) < 0.01:
             continue
-        roi = (tr / cb * 100) if cb != 0 else 0.0
-        eff = tr / max(cb, 1.0)
+        rb = data["roi_base"]
         performances.append(
             PerformerItem(
                 id=cat_id,
@@ -1736,12 +1845,15 @@ def _rank_performers_by_category(
                 label=None,
                 group_type="category",
                 total_return=round(tr, 2),
-                roi_pct=round(roi, 2),
-                unrealized_pnl=round(upnl, 2),
-                market_value=round(mv, 2),
+                roi_pct=round(tr / rb * 100, 2) if rb != 0 else 0.0,
+                unrealized_pnl=round(data["unrealized_pnl"], 2),
+                market_value=round(data["market_value"], 2),
                 cost_basis=round(cb, 2),
-                total_fees=round(fees, 2),
-                efficiency=round(eff, 4),
+                total_fees=round(data["total_fees"], 2),
+                efficiency=round(tr / max(cb, 1.0), 4),
+                realized_pnl=round(data["realized_pnl"], 2),
+                income=round(data["income"], 2),
+                roi_base=round(rb, 2),
             )
         )
 
@@ -2126,11 +2238,6 @@ def compute_version_metrics(
             top, flop, _ = _rank_performers_by_account(
                 session,
                 version_id,
-                all_asset_ids,
-                now_prices,
-                start_prices,
-                snap.now_ds,
-                start_dt.strftime("%Y-%m-%d"),
                 range_key,
                 top_n,
                 asset_ids,
@@ -2340,10 +2447,6 @@ def compute_performers(
         taxable_only=False,
     )
 
-    all_asset_ids = snap.all_asset_ids
-    all_asset_ids_list = list(all_asset_ids)
-    asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
-    asset_labels = _get_asset_labels(session, all_asset_ids_list)
     fees_by_asset = _get_fees_by_asset(session, version_id, account_ids)
 
     now_balances, now_costs, now_prices, _, now_rpnl_by_asset = _snapshot_at(
@@ -2361,23 +2464,43 @@ def compute_performers(
         start_dt,
     )
 
-    start_ds = start_dt.strftime("%Y-%m-%d")
+    all_asset_ids = set(snap.all_asset_ids) | set(now_rpnl_by_asset.keys())
+    all_asset_ids_list = list(all_asset_ids)
+    asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
+    asset_labels = _get_asset_labels(session, all_asset_ids_list)
+    income_by_asset = _get_income_by_asset(
+        session, version_id, None if period == "all" else start_dt, account_ids
+    )
+
+    asset_items = _build_asset_items(
+        all_asset_ids,
+        now_balances,
+        now_costs,
+        now_prices,
+        now_rpnl_by_asset,
+        start_balances,
+        start_costs,
+        start_prices,
+        start_rpnl_by_asset,
+        asset_symbols,
+        asset_labels,
+        period,
+        fees_by_asset,
+        snap.base_currency_id,
+        income_by_asset,
+    )
+    gains_total = sum(i.total_return for i in asset_items if i.total_return > 0)
+    losses_total = sum(i.total_return for i in asset_items if i.total_return < 0)
 
     if group_by == "account":
         top, flop, total_count = _rank_performers_by_account(
             session,
             version_id,
-            all_asset_ids,
-            now_prices,
-            start_prices,
-            snap.now_ds,
-            start_ds,
             period,
             top_n,
             asset_ids,
             account_ids,
             include_unsettled_negative,
-            fees_by_asset,
         )
     elif group_by == "category":
         top, flop, total_count = _rank_performers_by_category(
@@ -2395,25 +2518,11 @@ def compute_performers(
             top_n,
             dimension_id,
             fees_by_asset,
+            base_currency_id=snap.base_currency_id,
+            income_by_asset=income_by_asset,
         )
     else:
-        top, flop, total_count = _rank_performers_by_asset(
-            all_asset_ids,
-            now_balances,
-            now_costs,
-            now_prices,
-            now_rpnl_by_asset,
-            start_balances,
-            start_costs,
-            start_prices,
-            start_rpnl_by_asset,
-            asset_symbols,
-            asset_labels,
-            period,
-            top_n,
-            fees_by_asset,
-            base_currency_id=snap.base_currency_id,
-        )
+        top, flop, total_count = _sort_top_flop(asset_items, top_n)
 
     log.info(
         "performers_computed", version_id=version_id, period=period, group_by=group_by
@@ -2426,6 +2535,9 @@ def compute_performers(
         top_performers=top,
         flop_performers=flop,
         total_count=total_count,
+        gains_total=round(gains_total, 2),
+        losses_total=round(losses_total, 2),
+        net_total=round(gains_total + losses_total, 2),
     )
 
 
@@ -2555,10 +2667,6 @@ def compute_asset_period_deltas(
         taxable_only=False,
     )
 
-    all_asset_ids = snap.all_asset_ids
-    asset_symbols = _get_asset_symbols(session, list(all_asset_ids))
-    asset_labels = _get_asset_labels(session, list(all_asset_ids))
-
     now_balances, now_costs, now_prices, _, now_rpnl_by_asset = _snapshot_at(
         snap,
         price_snapshots,
@@ -2572,6 +2680,13 @@ def compute_asset_period_deltas(
         price_snapshots,
         cumulative_rpnl,
         start_dt,
+    )
+
+    all_asset_ids = set(snap.all_asset_ids) | set(now_rpnl_by_asset.keys())
+    asset_symbols = _get_asset_symbols(session, list(all_asset_ids))
+    asset_labels = _get_asset_labels(session, list(all_asset_ids))
+    income_by_asset = _get_income_by_asset(
+        session, version_id, None if period == "all" else start_dt, account_ids
     )
 
     base_cid = snap.base_currency_id
@@ -2626,6 +2741,7 @@ def compute_asset_period_deltas(
                 realized_in_period=round(realized_in_period, 2),
                 cost_change=round(cost_change, 2),
                 market_value_change=round(mv_change, 2),
+                income_in_period=round(income_by_asset.get(aid, 0.0), 2),
             )
         )
 

@@ -4,6 +4,7 @@
  * Uses TanStack React Query for automatic caching, deduplication and
  * background refetching — data survives tab switches without re-fetching.
  */
+import { useMemo } from 'react';
 import { useQuery, useQueries } from '@tanstack/react-query';
 import { API_URL } from '../types';
 
@@ -185,6 +186,10 @@ export interface PerformerItem {
     cost_basis: number;
     total_fees: number;
     efficiency: number;
+    /** All-time for "all", realized in period otherwise */
+    realized_pnl?: number;
+    /** Net income (all-time for "all", in period otherwise) */
+    income?: number;
 }
 
 export interface MetricsRangeData {
@@ -299,6 +304,10 @@ export interface PerformersResponse {
     top_performers: PerformerItem[];
     flop_performers: PerformerItem[];
     total_count: number;
+    /** Asset-level totals, independent of group_type */
+    gains_total?: number;
+    losses_total?: number;
+    net_total?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +324,7 @@ export interface AssetPeriodDelta {
     realized_in_period: number;
     cost_change: number;
     market_value_change: number;
+    income_in_period?: number;
 }
 
 export interface AssetPeriodDeltasResponse {
@@ -327,12 +337,16 @@ export function useAssetPeriodDeltas(
     versionId: number | null,
     period: string,
     enabled = true,
+    scope: { assetIds?: number[]; accountIds?: number[]; categoryIds?: number[] } = {},
 ) {
     const result = useQuery<AssetPeriodDeltasResponse>({
-        queryKey: ['asset-period-deltas', versionId, period],
+        queryKey: ['asset-period-deltas', versionId, period, scope.assetIds?.join(','), scope.accountIds?.join(','), scope.categoryIds?.join(',')],
         queryFn: async ({ signal }) => {
             const sp = new URLSearchParams();
             sp.set('period', period);
+            if (scope.assetIds?.length) sp.set('asset_ids', scope.assetIds.join(','));
+            if (scope.accountIds?.length) sp.set('account_ids', scope.accountIds.join(','));
+            if (scope.categoryIds?.length) sp.set('category_ids', scope.categoryIds.join(','));
             const res = await fetch(
                 `${API_URL}/pnl/versions/${versionId}/asset-period-deltas?${sp.toString()}`,
                 { signal },
@@ -340,14 +354,15 @@ export function useAssetPeriodDeltas(
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         },
-        enabled: enabled && !!versionId && period !== 'all',
+        enabled: enabled && !!versionId,
         staleTime: 5 * 60_000,
     });
 
     // Build Map<assetId, AssetPeriodDelta> for O(1) lookups
-    const deltaMap = result.data?.deltas
-        ? new Map(result.data.deltas.map(d => [d.asset_id, d]))
-        : new Map<number, AssetPeriodDelta>();
+    const deltaMap = useMemo(
+        () => new Map<number, AssetPeriodDelta>((result.data?.deltas ?? []).map(d => [d.asset_id, d])),
+        [result.data],
+    );
 
     return {
         data: result.data ?? null,
@@ -358,6 +373,56 @@ export function useAssetPeriodDeltas(
 }
 
 
+
+// ---------------------------------------------------------------------------
+// useAccountSparklines  (React Query)
+// ---------------------------------------------------------------------------
+
+export interface SparklinePoint {
+    date: string;
+    value: number;
+    roi: number | null;
+}
+
+export interface AccountSparklinesResponse {
+    version_id: number;
+    period: string;
+    accounts: Record<string, SparklinePoint[]>;
+}
+
+export function useAccountSparklines(
+    versionId: number | null,
+    accountIds: number[],
+    period: string,
+    scope: { assetIds?: number[]; categoryIds?: number[] } = {},
+    enabled = true,
+) {
+    const ids = [...accountIds].sort((a, b) => a - b).join(',');
+    const result = useQuery<AccountSparklinesResponse>({
+        queryKey: ['account-sparklines', versionId, ids, period, scope.assetIds?.join(','), scope.categoryIds?.join(',')],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            sp.set('account_ids', ids);
+            sp.set('period', period);
+            if (scope.assetIds?.length) sp.set('asset_ids', scope.assetIds.join(','));
+            if (scope.categoryIds?.length) sp.set('category_ids', scope.categoryIds.join(','));
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/account-sparklines?${sp.toString()}`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId && ids.length > 0,
+        staleTime: 5 * 60_000,
+    });
+
+    return {
+        data: result.data ?? null,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+    };
+}
 
 // ---------------------------------------------------------------------------
 // useVersionMetrics  (React Query)

@@ -174,7 +174,7 @@ const SORT_FIELD_LABELS: Record<SortField, string> = {
 // ------------------------------------------------------------------
 
 /** Combined "Cost" cell: cost basis (primary) + total acquired & unit cost on hover */
-const renderCost = (
+export const renderCost = (
     costBasis: number,
     unitCost: number | undefined | null,
     baseCurrency: string,
@@ -212,7 +212,7 @@ const renderCost = (
 };
 
 /** Combined "Value" cell: market value (primary) + unit value / price info on hover */
-const renderValue = (
+export const renderValue = (
     row: AssetPnLRow,
     baseCurrency: string,
 ) => {

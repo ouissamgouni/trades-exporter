@@ -10,6 +10,19 @@ import { Badge, Text } from '../ui/primitives';
 import { FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
 import { PnLBreakdownBar } from './PnLBreakdownBar';
 
+const TOKEN_TEXT_CLASS: Record<string, string> = {
+    'green.500': 'text-green-500',
+    'green.600': 'text-green-600',
+    'green.700': 'text-green-700',
+    'red.500': 'text-red-500',
+    'red.600': 'text-red-600',
+    'red.700': 'text-red-700',
+    'gray.500': 'text-gray-500',
+    'gray.600': 'text-gray-600',
+    'gray.700': 'text-gray-700',
+    'gray.800': 'text-gray-800',
+};
+
 export interface HeroMetricsBarProps {
     totalReturn: number;
     roi: number;
@@ -38,12 +51,10 @@ export const HeroMetricsBar: React.FC<HeroMetricsBarProps> = ({
     fmtCurrencySigned: fmtSigned,
     color,
 }) => {
-    // `color` keeps the Chakra-style dot-notation token format (e.g. "green.600") for
-    // backward compatibility with callers; convert it to a Tailwind text-* class here.
+    // `color` keeps the Chakra-style token format (e.g. "green.600"); map to literal classes so Tailwind sees them.
     const colorClass = (val: number) => {
         const token = color(val);
-        const parts = token.split('.');
-        return parts.length === 2 ? `text-${parts[0]}-${parts[1]}` : 'text-gray-700';
+        return TOKEN_TEXT_CLASS[token] ?? 'text-gray-700';
     };
 
     return (

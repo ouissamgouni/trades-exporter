@@ -7074,6 +7074,8 @@ def get_performers(
             "cost_basis": p.cost_basis,
             "total_fees": p.total_fees,
             "efficiency": p.efficiency,
+            "realized_pnl": p.realized_pnl,
+            "income": p.income,
         }
 
     return {
@@ -7083,6 +7085,9 @@ def get_performers(
         "top_performers": [_serialize_performer(p) for p in result.top_performers],
         "flop_performers": [_serialize_performer(p) for p in result.flop_performers],
         "total_count": result.total_count,
+        "gains_total": result.gains_total,
+        "losses_total": result.losses_total,
+        "net_total": result.net_total,
     }
 
 
@@ -7140,9 +7145,52 @@ def get_asset_period_deltas(
                 "realized_in_period": d.realized_in_period,
                 "cost_change": d.cost_change,
                 "market_value_change": d.market_value_change,
+                "income_in_period": d.income_in_period,
             }
             for d in result
         ],
+    }
+
+
+@router.get("/versions/{version_id}/account-sparklines")
+def get_account_sparklines(
+    version_id: int,
+    account_ids: str = Query(..., description="Comma-separated account IDs"),
+    period: str = Query("all"),
+    asset_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    include_unsettled_negative: bool = Query(False),
+    session: Session = Depends(get_session_dependency),
+):
+    """Weekly value/ROI mini-series per account (one call for the accounts strip)."""
+    from datetime import datetime as dt_cls, timedelta as td_cls, timezone as tz_cls
+
+    from backend.services.pnl.metrics_service import PERIOD_RANGES
+    from backend.services.pnl.portfolio_timeline import compute_account_sparklines
+
+    parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()][:100]
+    parsed_asset_ids = (
+        [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
+    )
+    parsed_category_ids = (
+        [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
+    )
+    days = PERIOD_RANGES.get(period)
+    date_from = dt_cls.now(tz_cls.utc) - td_cls(days=days) if days else None
+
+    series = compute_account_sparklines(
+        session=session,
+        version_id=version_id,
+        account_ids=parsed_account_ids,
+        date_from=date_from,
+        asset_ids=parsed_asset_ids,
+        category_ids=parsed_category_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    return {
+        "version_id": version_id,
+        "period": period,
+        "accounts": {str(k): v for k, v in series.items()},
     }
 
 
@@ -7215,6 +7263,8 @@ def get_version_metrics(
             "cost_basis": p.cost_basis,
             "total_fees": p.total_fees,
             "efficiency": p.efficiency,
+            "realized_pnl": p.realized_pnl,
+            "income": p.income,
         }
 
     return {
