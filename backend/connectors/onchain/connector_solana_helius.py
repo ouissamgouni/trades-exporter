@@ -42,6 +42,11 @@ class ConnectorSolanaHelius(BaseConnector):
     # Max transactions per Helius parse batch
     PARSE_BATCH_SIZE = 100
 
+    TOKEN_PROGRAM_IDS = (
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  # Token-2022 (PUMP, newer pump.fun mints)
+    )
+
     @property
     def connector_name(self) -> str:
         return "solana_helius"
@@ -348,22 +353,20 @@ class ConnectorSolanaHelius(BaseConnector):
         Returns:
             List of ATA public-key strings owned by the wallet.
         """
-        result = self._rpc_request(
-            "getTokenAccountsByOwner",
-            [
-                self.wallet_address,
-                {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
-                {"encoding": "jsonParsed"},
-            ],
-        )
-        if not result or "value" not in result:
-            return []
-
-        return [
-            acct["pubkey"]
-            for acct in result["value"]
-            if acct.get("pubkey")
-        ]
+        pubkeys: list[str] = []
+        for program_id in self.TOKEN_PROGRAM_IDS:
+            result = self._rpc_request(
+                "getTokenAccountsByOwner",
+                [
+                    self.wallet_address,
+                    {"programId": program_id},
+                    {"encoding": "jsonParsed"},
+                ],
+            )
+            if not result or "value" not in result:
+                continue
+            pubkeys.extend(acct["pubkey"] for acct in result["value"] if acct.get("pubkey"))
+        return pubkeys
 
     def _fetch_missing_via_rpc(
         self, seen_signatures: set
@@ -409,16 +412,23 @@ class ConnectorSolanaHelius(BaseConnector):
 
             # 1c. Query getSignaturesForAddress for each address
             for addr in addresses_to_query:
-                rpc_sigs_result = self._rpc_request(
-                    "getSignaturesForAddress",
-                    [addr, {"limit": self.RPC_GAP_FILL_LIMIT}],
-                )
-                if not rpc_sigs_result:
-                    continue
-                for entry in rpc_sigs_result:
-                    sig = entry.get("signature")
-                    if sig and entry.get("err") is None:
-                        all_rpc_sigs.add(sig)
+                before = None
+                while True:
+                    opts = {"limit": self.RPC_GAP_FILL_LIMIT}
+                    if before:
+                        opts["before"] = before
+                    rpc_sigs_result = self._rpc_request("getSignaturesForAddress", [addr, opts])
+                    if not rpc_sigs_result:
+                        break
+                    for entry in rpc_sigs_result:
+                        sig = entry.get("signature")
+                        if sig and entry.get("err") is None:
+                            all_rpc_sigs.add(sig)
+                    if len(rpc_sigs_result) < self.RPC_GAP_FILL_LIMIT:
+                        break
+                    before = rpc_sigs_result[-1].get("signature")
+                    if not before:
+                        break
 
             # Step 2: Find missing signatures
             missing = [sig for sig in all_rpc_sigs if sig not in seen_signatures]
@@ -504,10 +514,11 @@ class ConnectorSolanaHelius(BaseConnector):
             
             while True:
                 page += 1
-                params = {}
+                # Without this, transfers that only touch the wallet's token accounts are omitted
+                params = {"token-accounts": "balanceChanged"}
                 
                 if before_signature:
-                    params["before"] = before_signature
+                    params["before-signature"] = before_signature
                 
                 result = self.safe_request(endpoint, params)
 
@@ -856,37 +867,46 @@ class ConnectorSolanaHelius(BaseConnector):
 
         # SPL token balances via DAS
         try:
-            resp = requests.post(
-                rpc_url,
-                json={
-                    "jsonrpc": "2.0", "id": 2,
-                    "method": "getAssetsByOwner",
-                    "params": {
-                        "ownerAddress": self.wallet_address,
-                        "displayOptions": {"showFungible": True},
+            page = 1
+            while True:
+                resp = requests.post(
+                    rpc_url,
+                    json={
+                        "jsonrpc": "2.0", "id": 2,
+                        "method": "getAssetsByOwner",
+                        "params": {
+                            "ownerAddress": self.wallet_address,
+                            "page": page,
+                            "limit": 1000,
+                            "displayOptions": {"showFungible": True},
+                        },
                     },
-                },
-                timeout=30,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            items = data.get("result", {}).get("items", [])
-            for item in items:
-                token_info = item.get("token_info") or {}
-                balance = token_info.get("balance")
-                decimals = token_info.get("decimals", 0)
-                symbol = token_info.get("symbol") or (
-                    item.get("content", {}).get("metadata", {}).get("symbol")
+                    timeout=30,
                 )
-                if balance and int(balance) > 0 and symbol:
-                    total = Decimal(balance) / Decimal(10 ** int(decimals))
-                    entries.append(BalanceEntry(
-                        asset_symbol=symbol,
-                        total=total,
-                        available=total,
-                        chain="solana",
-                        raw=item,
-                    ))
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("result", {}).get("items", [])
+                for item in items:
+                    token_info = item.get("token_info") or {}
+                    balance = token_info.get("balance")
+                    decimals = token_info.get("decimals", 0)
+                    mint = item.get("id")
+                    symbol = token_info.get("symbol") or (
+                        item.get("content", {}).get("metadata", {}).get("symbol")
+                    ) or mint
+                    if balance and int(balance) > 0 and symbol:
+                        total = Decimal(balance) / Decimal(10 ** int(decimals))
+                        entries.append(BalanceEntry(
+                            asset_symbol=symbol,
+                            total=total,
+                            available=total,
+                            chain="solana",
+                            contract_address=mint,
+                            raw=item,
+                        ))
+                if len(items) < 1000:
+                    break
+                page += 1
         except Exception as e:
             log.warning(f"Failed to fetch Solana token balances: {e}")
 

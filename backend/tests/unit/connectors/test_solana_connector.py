@@ -687,20 +687,68 @@ class TestSolanaRpcGapFill:
         assert results[0]["signature"] == "sig_T"
 
     def test_get_wallet_token_accounts_returns_pubkeys(self):
-        """_get_wallet_token_accounts should return ATA pubkeys."""
+        """ATAs of both the legacy Token program and Token-2022 (e.g. PUMP) are returned."""
         connector = self._make_live_connector()
 
-        rpc_result = {
-            "value": [
-                {"pubkey": "ata_usdc_123"},
-                {"pubkey": "ata_sol_456"},
-            ]
+        by_program = {
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+                "value": [{"pubkey": "ata_usdc_123"}, {"pubkey": "ata_sol_456"}]
+            },
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": {
+                "value": [{"pubkey": "ata_pump_789"}]
+            },
         }
 
-        with patch.object(connector, "_rpc_request", return_value=rpc_result):
+        def mock_rpc(method, params):
+            return by_program[params[1]["programId"]]
+
+        with patch.object(connector, "_rpc_request", side_effect=mock_rpc):
             atas = connector._get_wallet_token_accounts()
 
-        assert atas == ["ata_usdc_123", "ata_sol_456"]
+        assert atas == ["ata_usdc_123", "ata_sol_456", "ata_pump_789"]
+
+    def test_yield_raws_requests_token_account_activity(self):
+        """Regression: incoming PUMP (Token-2022) transfer only touches the wallet's ATA."""
+        connector = self._make_live_connector()
+        pump_tx = {
+            "signature": "VLodtUohx1hG5ndgg6GQQZkM3oH5ixQxGgAfEKWSXyywYRWGJKPVXtnDfNoBxJY6cbq3qgRMb7FE5EYMKhof8Mx",
+            "timestamp": 1794331863,
+            "type": "TRANSFER",
+            "fee": 5543,
+            "feePayer": "ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ",
+            "nativeTransfers": [],
+            "tokenTransfers": [
+                {
+                    "fromTokenAccount": "96iQ6xGxAkT4JpoJK6X5nT3U1HuXyT1M4oD8q8VRbnWu",
+                    "toTokenAccount": "FNkWv4my3bhpZqjMEn2uooaVfHDrdrGwUczMaPCgHTgg",
+                    "fromUserAccount": "ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ",
+                    "toUserAccount": connector.wallet_address,
+                    "tokenAmount": 8836.09,
+                    "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+                }
+            ],
+        }
+        calls = []
+
+        def mock_safe_request(endpoint, params=None, method="GET", json_body=None):
+            calls.append(dict(params or {}))
+            return [pump_tx] if len(calls) == 1 else []
+
+        with patch.object(connector, "safe_request", side_effect=mock_safe_request):
+            with patch.object(connector, "_fetch_missing_via_rpc", return_value=iter([])):
+                with patch.object(connector, "update_progress"):
+                    with patch.object(connector, "_get_token_metadata",
+                                      return_value={"symbol": "PUMP", "decimals": 6}):
+                        raws = list(connector.yield_raws())
+                        normalized = list(connector.raw_to_normalized(raws[0]))
+
+        assert all(c.get("token-accounts") == "balanceChanged" for c in calls)
+        assert calls[1]["before-signature"] == pump_tx["signature"]
+        assert len(normalized) == 1
+        assert normalized[0].direction == "inflow"
+        assert normalized[0].source_asset_symbol == "PUMP"
+        assert normalized[0].quantity == Decimal("8836.09")
+        assert normalized[0].network_transaction_id == pump_tx["signature"]
 
     def test_get_wallet_token_accounts_empty(self):
         """_get_wallet_token_accounts should return empty list when no ATAs."""
