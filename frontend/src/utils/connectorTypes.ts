@@ -88,6 +88,7 @@ export function detectChainFromAddress(address?: string | null): string | null {
     if (!address) return null;
     if (address.startsWith('0x')) return 'evm';
     if (address.startsWith('r') && address.length >= 25 && address.length <= 35) return 'xrp';
+    if (/^[A-Z2-7]{58}$/.test(address)) return 'algorand';
     if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return 'solana';
     return null;
 }

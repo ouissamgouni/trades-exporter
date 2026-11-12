@@ -75,6 +75,9 @@ NETWORK_ALIASES: dict[str, str] = {
     "xrpl": "xrp",
     "xrp ledger": "xrp",
     "ripple": "xrp",
+    # Algorand
+    "algo": "algorand",
+    "algorand mainnet": "algorand",
     # Cardano
     "ada": "cardano",
     "ada-cardano": "cardano",
@@ -128,6 +131,7 @@ NETWORK_DISPLAY_NAMES: dict[str, str] = {
     "optimism": "Optimism",
     "xrp": "XRP Ledger",
     "cardano": "Cardano",
+    "algorand": "Algorand",
     "near": "NEAR",
     "sui": "SUI",
     "bittensor": "Bittensor",

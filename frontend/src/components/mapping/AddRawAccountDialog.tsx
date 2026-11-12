@@ -7,7 +7,7 @@ import { useAccounts } from '../../hooks/useAccounts';
 import { createRawAccount, lookupRawAccount, RawAccountLookup } from '../../utils/mappingApi';
 import { SuggestionChip } from './mappingUi';
 
-const DEFAULT_NETWORKS = ['ethereum', 'base', 'arbitrum', 'optimism', 'polygon', 'bsc', 'avalanche', 'hyperevm', 'solana', 'sui', 'near', 'cardano', 'bitcoin'];
+const DEFAULT_NETWORKS = ['ethereum', 'base', 'arbitrum', 'optimism', 'polygon', 'bsc', 'avalanche', 'hyperevm', 'solana', 'sui', 'near', 'cardano', 'algorand', 'bitcoin'];
 
 type Kind = 'exchange' | 'address';
 

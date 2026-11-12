@@ -540,6 +540,31 @@ class TestRule3bOnchainSwapByNetworkTx:
         assert "AVO" in sg.label
         assert "Swap" in sg.label
 
+    def test_algorand_swap_grouped_by_atomic_group(self, engine):
+        """Algorand swap legs live in different tx ids of one atomic group."""
+        now = datetime.now()
+        group = "R1JPVVBBQUFB"
+        outflow = make_tx(
+            id=1, direction="outflow", symbol="ALGO", source="algorand",
+            source_transaction_id="PAYTX_0_pay", network_transaction_id="PAYTX",
+            source_transaction_type="PAY", quantity=Decimal("10"), account_id=10,
+            network="algorand", transaction_type="transfer", dt=now,
+        )
+        inflow = make_tx(
+            id=2, direction="inflow", symbol="USDC", source="algorand",
+            source_transaction_id="APPLTX_0.0_axfer", network_transaction_id="APPLTX",
+            source_transaction_type="AXFER", quantity=Decimal("1.85"), account_id=10,
+            network="algorand", transaction_type="transfer", dt=now,
+        )
+        outflow.tags = [{"round": 1}, {"group": group}]
+        inflow.tags = [{"round": 1}, {"group": group}]
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        rule3b_swap = [s for s in suggestions if s.pattern == PATTERN_SWAP and s.confidence == 0.95]
+        assert len(rule3b_swap) == 1
+        assert set(rule3b_swap[0].transaction_ids) == {1, 2}
+
     def test_non_swap_type_not_grouped(self, engine):
         """TRANSFER type is now eligible for Rule 3b.
         
