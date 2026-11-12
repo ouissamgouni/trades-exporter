@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { compositionSegments } from './OverviewCards'
 import { splitContributors } from './ContributorsPanel'
-import { sortAccounts, accountsMismatch, isClosedAccount } from './AccountsStrip'
+import { sortAccounts, accountsMismatch, isClosedAccount, groupAccounts, UNGROUPED_LABEL } from './AccountsStrip'
 import { columnValue, sumColumn, splitHalves, type HoldingRow } from './AssetsSection'
 import { aggregateByAccount } from './AccountPnLCard'
 import { cumulativeTwr, seriesReturnBetween } from './chartUtils'
@@ -16,22 +16,22 @@ const perf = (id: number, o: Partial<PerformerItem> = {}): PerformerItem => ({
 })
 
 describe('Composition bar (critical)', () => {
-    it('value run = cost + unrealized, realized apart after a gap', () => {
-        const { segments, valuePct } = compositionSegments(1000, 200, 50)
-        const [cost, unr, real] = segments
-        expect(cost.left).toBe(0)
-        expect(unr.left).toBeCloseTo(cost.width)
-        expect(valuePct).toBeCloseTo(cost.width + unr.width)
-        expect(real.left).toBeGreaterThan(valuePct)
-        expect(cost.width + unr.width + real.width).toBeCloseTo(98.5)
+    it('unrealized and realized first, then cost after a gap, fees at the end of cost', () => {
+        const { segments, fees } = compositionSegments(1000, 200, 50, 20)
+        expect(segments.map(s => s.key)).toEqual(['unrealized', 'realized', 'cost'])
+        const [unr, real, cost] = segments
+        expect(unr.left).toBe(0)
+        expect(real.left).toBeCloseTo(unr.width)
+        expect(cost.left).toBeCloseTo(unr.width + real.width + 1.5)
+        expect(unr.width + real.width + cost.width).toBeCloseTo(98.5)
+        expect(fees!.left + fees!.width).toBeCloseTo(cost.left + cost.width)
     })
 
-    it('negative unrealized is the hatched tail of cost; negative realized flagged', () => {
-        const { segments, valuePct } = compositionSegments(1000, -200, -50)
-        expect(segments[0].width).toBeCloseTo(valuePct)
-        expect(segments[1]).toMatchObject({ key: 'unrealized', negative: true })
-        expect(segments[0].width + segments[1].width).toBeGreaterThan(valuePct)
-        expect(segments[2]).toMatchObject({ key: 'realized', negative: true })
+    it('negative P&L segments are flagged; fees never exceed cost', () => {
+        const { segments, fees } = compositionSegments(100, -200, -50, 500)
+        expect(segments[0]).toMatchObject({ key: 'unrealized', negative: true })
+        expect(segments[1]).toMatchObject({ key: 'realized', negative: true })
+        expect(fees!.width).toBeCloseTo(segments[2].width)
     })
 })
 
@@ -65,6 +65,15 @@ describe('AccountsStrip (major)', () => {
         expect(accountsMismatch(items, 400)).toBeNull()
         expect(accountsMismatch(items, 400.5)).toBeNull()
         expect(accountsMismatch(items, 450)).toBe(-50)
+    })
+
+    it('groups accounts by account group, largest first, Ungrouped last', () => {
+        const groups: Record<number, string | undefined> = { 1: 'CEX', 2: undefined, 3: 'CEX' }
+        const buckets = groupAccounts(items, id => groups[id])
+        expect(buckets.map(b => b.label)).toEqual(['CEX', UNGROUPED_LABEL])
+        expect(buckets[0].items.map(p => p.id)).toEqual([1, 3])
+        expect(buckets[0].value).toBe(100)
+        expect(buckets[0].totalReturn).toBe(7)
     })
 })
 

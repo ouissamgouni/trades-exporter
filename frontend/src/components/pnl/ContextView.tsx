@@ -28,6 +28,8 @@ import { AllocationTreemap } from './AllocationTreemap';
 import { MarketValuePieChart } from './MarketValuePieChart';
 import { InvestigationView } from './InvestigationView';
 import { useCategoryMaps } from '../../hooks/useCategoryMaps';
+import { useAccountScopedAssets } from '../../hooks/useAccountScopedAssets';
+import { sumLiveBalancesForAccounts } from './pnlCalculations';
 import {
     BENCHMARK_PRESETS,
     useVersionMetrics,
@@ -271,14 +273,6 @@ export const ContextView: React.FC<ContextViewProps> = ({
     // ── TWR / IRR per period, and main benchmark returns per period ──
     const returnMetrics = useReturnMetrics(currentVersionId, scopeApiFilters, !!currentVersionId);
 
-    // ── Asset period deltas (period columns + income) ──
-    const assetPeriodDeltas = useAssetPeriodDeltas(
-        currentVersionId,
-        timeframeRange,
-        !!currentVersionId,
-        scopeApiFilters,
-    );
-
     // ── Effective data: scoped when not at portfolio, global otherwise ──
     const effectiveMetrics = hasScope ? scopedVersionMetrics : versionMetrics;
     const effectiveBook = hasScope ? scopedBook : bookMetrics;
@@ -348,6 +342,25 @@ export const ContextView: React.FC<ContextViewProps> = ({
         setLocalCategoryIds(scope.categoryIds ?? []);
         setSearch('');
     }, [scope.level, scope.entityId, scope.accountIds, scope.categoryIds]);
+
+    // With an account filter, asset rows hold only the selected accounts' share (lots, realized, fees)
+    const hasLocalAccountFilter = localAccountIds.length > 0;
+    const accountScoped = useAccountScopedAssets(currentVersionId, localAccountIds, scopedDisplayAssets, state.showUnsettledNegative);
+    const sectionAssets = hasLocalAccountFilter ? (accountScoped.rows ?? []) : scopedDisplayAssets;
+    const sectionLiveBalances = useMemo(
+        () => (hasLocalAccountFilter && liveAccountBalanceMap
+            ? sumLiveBalancesForAccounts(liveAccountBalanceMap, localAccountIds)
+            : liveBalanceMap),
+        [hasLocalAccountFilter, liveAccountBalanceMap, localAccountIds, liveBalanceMap],
+    );
+
+    // ── Asset period deltas (period columns + income), following the assets' account filter ──
+    const assetPeriodDeltas = useAssetPeriodDeltas(
+        currentVersionId,
+        timeframeRange,
+        !!currentVersionId,
+        hasLocalAccountFilter ? { ...scopeApiFilters, accountIds: localAccountIds } : scopeApiFilters,
+    );
 
     // ── Treemap asset filtering (uses scope-filtered assets, not local table filters) ──
     const filteredTreemapAssets = useMemo(() => {
@@ -586,6 +599,8 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                     onApplySelection={onSetAccountScope}
                                     twr={accountSparklines.data?.twr}
                                     benchmark={{ label: mainBenchmarkLabel, returnPct: benchmarkReturns[timeframeRange] }}
+                                    accounts={accounts}
+                                    pnlVersionId={currentVersionId ?? undefined}
                                 />
                             ) : isAsset && accountBreakdowns.length > 0 ? (
                                 <div>
@@ -632,7 +647,8 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
                             </div>
                             <AssetsSection
-                                assets={scopedDisplayAssets}
+                                assets={sectionAssets}
+                                loading={accountScoped.isLoading}
                                 baseCurrency={baseCurrency}
                                 onAssetClick={onAssetClick}
                                 onAccountClick={onAccountClick}
@@ -642,7 +658,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 availableAccountIds={availableAccountIds}
                                 availableCategoryIds={availableCategoryIds}
                                 onLoadAccountBalances={onLoadAccountBalances}
-                                liveBalances={liveBalanceMap}
+                                liveBalances={sectionLiveBalances}
                                 liveAccountBalances={liveAccountBalanceMap}
                                 liveBalanceLoading={liveBalanceLoading}
                                 liveAccountErrors={liveAccountErrors}

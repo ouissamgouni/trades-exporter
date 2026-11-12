@@ -37,28 +37,35 @@ export interface CompositionSegment {
 }
 
 /**
- * Value = Cost + Unrealized as one solid run; a negative Unrealized is the hatched tail of Cost.
- * Realized sits apart after a gap since it is no longer in Value.
+ * P&L first (Unrealized then Realized, hatched when negative), then Cost after a gap, with Fees
+ * as a strip at the end of Cost (fees are already inside cost / realized).
  */
-export function compositionSegments(cost: number, unrealized: number, realized: number): { segments: CompositionSegment[]; valuePct: number; feesScale: number } {
-    const value = cost + unrealized;
-    const gap = realized !== 0 ? 1.5 : 0;
-    const total = Math.max(cost, value, 0) + Math.abs(realized);
-    if (total <= 0) return { segments: [], valuePct: 0, feesScale: 0 };
+export function compositionSegments(cost: number, unrealized: number, realized: number, fees = 0): { segments: CompositionSegment[]; fees: { left: number; width: number } | null } {
+    const pnl = Math.abs(unrealized) + Math.abs(realized);
+    const costAmt = Math.max(cost, 0);
+    const gap = pnl > 0 && costAmt > 0 ? 1.5 : 0;
+    const total = pnl + costAmt;
+    if (total <= 0) return { segments: [], fees: null };
     const usable = 100 - gap;
     const pct = (v: number) => (Math.abs(v) / total) * usable;
     const segments: CompositionSegment[] = [];
-    if (unrealized >= 0) {
-        segments.push({ key: 'cost', left: 0, width: pct(cost), negative: false });
-        segments.push({ key: 'unrealized', left: pct(cost), width: pct(unrealized), negative: false });
-    } else {
-        const kept = Math.max(value, 0);
-        segments.push({ key: 'cost', left: 0, width: pct(kept), negative: false });
-        segments.push({ key: 'unrealized', left: pct(kept), width: pct(cost - kept), negative: true });
+    let left = 0;
+    for (const [key, v] of [['unrealized', unrealized], ['realized', realized]] as const) {
+        if (v === 0) continue;
+        segments.push({ key, left, width: pct(v), negative: v < 0 });
+        left += pct(v);
     }
-    const runEnd = pct(Math.max(cost, value, 0));
-    if (realized !== 0) segments.push({ key: 'realized', left: runEnd + gap, width: pct(realized), negative: realized < 0 });
-    return { segments, valuePct: pct(Math.max(value, 0)), feesScale: usable / total };
+    let feeSeg: { left: number; width: number } | null = null;
+    if (costAmt > 0) {
+        const costLeft = left + gap;
+        const costWidth = pct(costAmt);
+        segments.push({ key: 'cost', left: costLeft, width: costWidth, negative: false });
+        if (fees > 0) {
+            const w = Math.min(pct(fees), costWidth);
+            feeSeg = { left: costLeft + costWidth - w, width: w };
+        }
+    }
+    return { segments, fees: feeSeg };
 }
 
 interface OverviewCardsProps {
@@ -143,14 +150,14 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
 
     const hasGL = gains != null && losses != null;
 
-    const { segments, valuePct, feesScale } = compositionSegments(m.costBasis, m.unrealizedPnl, m.realizedPnl);
+    const { segments, fees: feesSeg } = compositionSegments(m.costBasis, m.unrealizedPnl, m.realizedPnl, m.totalFees);
     const segColor: Record<CompositionSegment['key'], string> = { cost: ACCENT.cost.bg, unrealized: ACCENT.unrealized.bg, realized: ACCENT.realized.bg };
 
     return (
         <div className="flex flex-col gap-2" data-testid="overview-cards">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_1fr]">
                 {/* Total return */}
-                <div className="flex flex-col border border-slate-200 bg-white p-3 md:col-span-2 xl:col-span-1" data-testid="card-total-return">
+                <div className={`flex flex-col border p-3 md:col-span-2 xl:col-span-1 ${isLiveLoading ? 'border-slate-200 bg-white' : total >= 0 ? 'border-green-200 bg-green-50/60' : 'border-red-200 bg-red-50/60'}`} data-testid="card-total-return">
                     <div className="flex items-center justify-between gap-2">
                         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Total return · {periodLabel}</span>
                         {onContributorsClick && (
@@ -262,14 +269,13 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
                                 title={`${s.key === 'cost' ? 'Cost' : s.key === 'unrealized' ? 'Unrealized' : 'Realized'}${s.negative ? ' (loss)' : ''}`}
                             />
                         ))}
-                        {fees > 0 && (
+                        {feesSeg && (
                             <div
-                                className={`absolute bottom-0 left-0 h-1 ${ACCENT.fees.bg}`}
-                                style={{ width: `${Math.max(Math.min(m.totalFees * feesScale, valuePct), 0.3)}%` }}
+                                className={`absolute bottom-0 h-1.5 ${ACCENT.fees.bg}`}
+                                style={{ left: `${feesSeg.left}%`, width: `${Math.max(feesSeg.width, 0.3)}%` }}
                                 title={`Fees ${fmtCurrency(m.totalFees, baseCurrency)} (included in cost / realized)`}
                             />
                         )}
-                        <div className="absolute -top-1 h-6 w-px bg-blue-700" style={{ left: `${valuePct}%` }} title={`Value ${fmtCurrency(m.currentValue, baseCurrency)}`} />
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[10px] text-gray-500">
                         <Badge colorScheme="gray">All time</Badge>

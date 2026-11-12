@@ -46,21 +46,27 @@ export const BenchmarkSummary: React.FC<BenchmarkSummaryProps> = ({ versionId, t
                     <>
                         <span className="tabular-nums text-gray-700" title={data.converted ? `In ${data.currency}` : `In ${data.currency} (not converted)`}>{pct(data.benchmark_return_pct)}</span>
                         {excess != null && (
-                            <span className={`font-semibold tabular-nums ${excess >= 0 ? 'text-green-600' : 'text-red-600'}`} title="Your TWR minus the benchmark return over the same period">
-                                → {excess >= 0 ? '+' : ''}{excess.toFixed(1)} pp {excess >= 0 ? '▲ outperformed' : '▼ underperformed'}
+                            <span
+                                className={`font-semibold tabular-nums ${excess >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                                title={`Your TWR minus the benchmark return over the same period: ${excess >= 0 ? 'outperformed' : 'underperformed'} by ${Math.abs(excess).toFixed(1)} pp${data.excess_annualized_pp != null ? ` (${data.excess_annualized_pp >= 0 ? '+' : ''}${data.excess_annualized_pp.toFixed(1)} pp per year)` : ''}`}
+                            >
+                                {excess >= 0 ? '▲' : '▼'} {excess >= 0 ? '+' : ''}{excess.toFixed(1)} pp
+                                {data.excess_annualized_pp != null && (
+                                    <span className="font-normal text-gray-400"> · {data.excess_annualized_pp >= 0 ? '+' : ''}{data.excess_annualized_pp.toFixed(1)}/y</span>
+                                )}
                             </span>
-                        )}
-                        {data.excess_annualized_pp != null && (
-                            <span className="text-gray-400">({data.excess_annualized_pp >= 0 ? '+' : ''}{data.excess_annualized_pp.toFixed(1)} pp/y)</span>
                         )}
                         {!data.converted && <span className="text-orange-600" title="Exchange rate unavailable">{data.currency}</span>}
                     </>
                 )}
             </div>
             {!isLoading && data?.pme_value != null && pmeDiff != null && (
-                <div className="inline-flex flex-wrap items-center gap-x-1">
-                    Your deposits in {label} instead would be worth <span className="font-semibold tabular-nums text-gray-700">{fmtCurrency(data.pme_value, baseCurrency)}</span>
-                    <span className={`tabular-nums ${pmeDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>· you {pmeDiff >= 0 ? 'are ahead by' : 'are behind by'} {fmtCurrency(Math.abs(pmeDiff), baseCurrency)}</span>
+                <div
+                    className="inline-flex flex-wrap items-center gap-x-1"
+                    title={`Your deposits in ${label} instead would be worth ${fmtCurrency(data.pme_value, baseCurrency)}; you are ${pmeDiff >= 0 ? 'ahead' : 'behind'} by ${fmtCurrency(Math.abs(pmeDiff), baseCurrency)}`}
+                >
+                    Same deposits: <span className="font-semibold tabular-nums text-gray-700">{fmtCurrency(data.pme_value, baseCurrency)}</span>
+                    <span className={`tabular-nums ${pmeDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>· you {fmtCurrencySigned(pmeDiff, baseCurrency)}</span>
                     <InfoTip text={PME_HELP} size={10} />
                 </div>
             )}
