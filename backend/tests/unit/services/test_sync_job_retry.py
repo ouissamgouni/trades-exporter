@@ -39,6 +39,7 @@ def service():
     svc._run_job_db_connector_runs = {}
     svc._active_worker_count = 0
     svc._retry_threads = {}
+    svc._fetching_connectors = set()
     return svc
 
 
@@ -112,6 +113,15 @@ class TestRetryConnectorValidation:
         service.progress.connector_statuses[1] = _make_connector_progress()
         service.progress.job_id = None
         with pytest.raises(ValueError, match="No job record"):
+            service.retry_connector(1)
+
+    def test_raises_if_connector_still_fetching_in_job(self, service):
+        """Prod job #814: a connector shown as warning while its fetch thread still ran was retried concurrently."""
+        service.progress.connector_statuses[1] = _make_connector_progress(
+            status=ConnectorSyncStatus.WARNING
+        )
+        service._fetching_connectors = {1}
+        with pytest.raises(RuntimeError, match="still fetching"):
             service.retry_connector(1)
 
     def test_raises_if_retry_already_in_progress(self, service):

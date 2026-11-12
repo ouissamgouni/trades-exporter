@@ -208,6 +208,7 @@ class TestCompletionCallbacks:
         normalized_item = Mock()
         processor.submit({"id": "tx1"}, normalized_item, connector_id=1, connector_name="binance")
         processor.submit({"id": "tx2"}, normalized_item, connector_id=1, connector_name="binance")
+        processor.mark_connector_fetch_complete(1)
         
         # Wait for callback
         callback_triggered = callback_called.wait(timeout=3.0)
@@ -244,6 +245,8 @@ class TestCompletionCallbacks:
         normalized_item = Mock()
         processor.submit({"id": "tx1"}, normalized_item, connector_id=1, connector_name="binance")
         processor.submit({"id": "tx2"}, normalized_item, connector_id=2, connector_name="etherscan")
+        processor.mark_connector_fetch_complete(1)
+        processor.mark_connector_fetch_complete(2)
         
         # Poll for callbacks instead of fixed sleep
         deadline = time.monotonic() + 5
@@ -273,6 +276,7 @@ class TestCompletionCallbacks:
         # Submit and wait for completion
         normalized_item = Mock()
         processor.submit({"id": "tx1"}, normalized_item, connector_id=1, connector_name="binance")
+        processor.mark_connector_fetch_complete(1)
         
         callback_called.wait(timeout=2.0)
         
@@ -458,10 +462,12 @@ class TestEdgeCases:
         # Don't submit any items - pending count should be 0
         assert processor.get_connector_pending_count(1) == 0
         
-        # Callback should not be triggered automatically for 0-item case
-        # (this requires manual trigger in sync_job_service)
+        # Nothing fires until the hub signals the connector finished fetching
         callback_triggered = callback_called.wait(timeout=0.1)
-        assert not callback_triggered, "Callback should not trigger for 0 items"
+        assert not callback_triggered, "Callback should not trigger before fetch completes"
+
+        processor.mark_connector_fetch_complete(1)
+        assert callback_called.wait(timeout=1.0), "0-item connector completes on fetch complete"
         
         processor.stop()
 
@@ -489,6 +495,7 @@ class TestEdgeCases:
         # Submit item
         normalized_item = Mock()
         processor.submit({"id": "tx1"}, normalized_item, connector_id=1, connector_name="binance")
+        processor.mark_connector_fetch_complete(1)
         
         # Wait for callback
         callback_triggered = callback_called.wait(timeout=2.0)

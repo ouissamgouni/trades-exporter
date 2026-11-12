@@ -212,3 +212,19 @@ class TestFieldSets:
     def test_date_time_in_datetime_fields(self):
         """date_time must be in DATETIME_FIELDS for timezone-safe comparison."""
         assert "date_time" in DATETIME_FIELDS
+
+
+class TestChangedFieldsDiagnostics:
+    def test_lists_changed_fields_with_values(self):
+        stage = PersistenceStage()
+        existing = _make_tx(network="ethereum")
+        new = _make_tx(network="arbitrum", quantity=Decimal("2"))
+
+        changed = stage._changed_fields(existing, new)
+
+        assert any(c.startswith("network: 'ethereum' -> 'arbitrum'") for c in changed)
+        assert any(c.startswith("quantity:") for c in changed)
+
+    def test_no_changes_is_empty(self):
+        stage = PersistenceStage()
+        assert stage._changed_fields(_make_tx(), _make_tx()) == []

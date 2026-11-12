@@ -80,6 +80,7 @@ class TestCompletionCallbackRegisteredForAlreadyRunningConnector:
             connector_id=42,
             connector_name="test-connector",
         )
+        processor.mark_connector_fetch_complete(42)
 
         # Wait for the callback to fire (worker processes item, pending -> 0)
         fired = completion_called.wait(timeout=5)
@@ -178,6 +179,8 @@ class TestCompletionCallbackRegisteredForAlreadyRunningConnector:
         processor.submit({"id": "a"}, mock_norm, connector_id=1, connector_name="c1")
         processor.submit({"id": "b"}, mock_norm, connector_id=1, connector_name="c1")
         processor.submit({"id": "c"}, mock_norm, connector_id=2, connector_name="c2")
+        processor.mark_connector_fetch_complete(1)
+        processor.mark_connector_fetch_complete(2)
 
         # Poll until both connectors complete instead of fixed sleep
         deadline = time.monotonic() + 5
@@ -188,3 +191,104 @@ class TestCompletionCallbackRegisteredForAlreadyRunningConnector:
         assert sorted(completed_ids) == [1, 2], (
             f"Expected both connectors to complete via callbacks, got: {completed_ids}"
         )
+
+
+def _ok_pipeline():
+    pipeline = MagicMock()
+    result = MagicMock(success=True, new_count=1, updated_count=0, skipped_count=0,
+                       split_count=0, transfer_count=0, warnings=[], errors=[])
+    pipeline.process.return_value = result
+    return pipeline
+
+
+class TestCompletionWaitsForFetchComplete:
+    """Regression (prod job #813/#814): a slow connector whose queue drains between
+    fetched batches must NOT be completed until the hub signals FETCH_COMPLETE."""
+
+    def _processor(self):
+        processor = ParallelPipelineProcessor(
+            session=MagicMock(), pipeline=_ok_pipeline(), db_connector_runs={7: 70},
+            num_workers=1, queue_size=10,
+        )
+        processor.start()
+        return processor
+
+    def _drain(self, processor, cid):
+        deadline = time.monotonic() + 5
+        while processor.get_connector_pending_count(cid) > 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    def test_drained_queue_does_not_complete_while_still_fetching(self):
+        processor = self._processor()
+        completed = []
+        processor.register_connector_completion_callback(7, completed.append)
+        norm = MagicMock(source="test")
+
+        processor.submit({"id": "a"}, norm, connector_id=7, connector_name="mexc")
+        self._drain(processor, 7)
+        time.sleep(0.05)
+        assert completed == []
+
+        processor.submit({"id": "b"}, norm, connector_id=7, connector_name="mexc")
+        processor.mark_connector_fetch_complete(7)
+        deadline = time.monotonic() + 5
+        while not completed and time.monotonic() < deadline:
+            time.sleep(0.01)
+        processor.stop(timeout=5)
+
+        assert completed == [7]
+
+    def test_fetch_complete_with_nothing_pending_completes_immediately(self):
+        processor = self._processor()
+        completed = []
+        processor.register_connector_completion_callback(7, completed.append)
+
+        processor.mark_connector_fetch_complete(7)
+        processor.stop(timeout=5)
+
+        assert completed == [7]
+
+    def test_callback_fires_once(self):
+        processor = self._processor()
+        completed = []
+        processor.register_connector_completion_callback(7, completed.append)
+        processor.submit({"id": "a"}, MagicMock(source="t"), connector_id=7, connector_name="c")
+        processor.mark_connector_fetch_complete(7)
+        self._drain(processor, 7)
+        processor.mark_connector_fetch_complete(7)
+        processor.stop(timeout=5)
+
+        assert completed == [7]
+
+
+class TestHandleFetchComplete:
+    def _service(self):
+        svc = SyncJobService()
+        svc.progress = JobProgress()
+        svc._fetching_connectors = {5}
+        return svc
+
+    def test_registers_callback_marks_processor_and_logs(self):
+        svc = self._service()
+        cstatus = ConnectorProgress(connector_id=5, connector_type="mexc-withdrawals",
+                                    account_name="MEXC", status=ConnectorSyncStatus.RUNNING)
+        cstatus.fetched_count = 3
+        cstatus.processed = 3
+        svc.progress.connector_statuses[5] = cstatus
+        processor = MagicMock()
+        processor.get_connector_pending_count.return_value = 2
+
+        svc._handle_fetch_complete(5, processor)
+
+        assert 5 not in svc._fetching_connectors
+        processor.register_connector_completion_callback.assert_called_once_with(
+            5, svc._handle_connector_completion
+        )
+        processor.mark_connector_fetch_complete.assert_called_once_with(5)
+        assert "2 still queued" in cstatus.logs[-1].message
+
+    def test_ignores_missing_connector_id(self):
+        svc = self._service()
+        processor = MagicMock()
+        svc._handle_fetch_complete(None, processor)
+        processor.mark_connector_fetch_complete.assert_not_called()

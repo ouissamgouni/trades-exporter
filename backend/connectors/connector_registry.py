@@ -50,6 +50,9 @@ _RAW_SOURCE_ORIGINS: List[Tuple["re.Pattern[str]", str, str]] = [
 ]
 
 
+TRANSFER_OVERLAP_DAYS = 3
+
+
 @dataclass
 class ConnectorInfo:
     """Complete information about a connector type."""
@@ -73,6 +76,9 @@ class ConnectorInfo:
 
     # Incremental sync support - True for CEX connectors that support "since" parameter
     supports_incremental_sync: bool = False
+    # Re-fetch this many days before the last stored row so transfers that were still
+    # pending at the previous sync (and thus not stored) are picked up once completed
+    incremental_overlap_days: int = 0
 
     # File connector support - groups related API and file connectors in UI
     connector_family: Optional[str] = (
@@ -237,6 +243,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
             )
         )
 
@@ -248,6 +255,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
             )
         )
 
@@ -285,6 +293,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
                 connector_family="mexc-deposits",
             )
         )
@@ -310,6 +319,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
             )
         )
 
@@ -357,6 +367,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
             )
         )
 
@@ -368,6 +379,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
             )
         )
 
@@ -430,6 +442,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
             )
         )
 
@@ -441,6 +454,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["start_datetime"],
                 supports_incremental_sync=True,
+                incremental_overlap_days=TRANSFER_OVERLAP_DAYS,
             )
         )
 

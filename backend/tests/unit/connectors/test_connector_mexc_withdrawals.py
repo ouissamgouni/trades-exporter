@@ -261,8 +261,8 @@ class TestMEXCWithdrawalsConnector:
         assert result == []
 
     def test_yield_raws(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test yield_raws method with 7-day windowing."""
-        connector = MEXCWithdrawalsConnector(account_id=1)
+        """Per-currency 7-day windowing (used when a currencies filter is configured)."""
+        connector = MEXCWithdrawalsConnector(account_id=1, currencies=["BTC", "ETH"])
         
         # Mock currencies - need to mock as dict-like with items() method and active flag
         mock_ccxt_mexc.currencies = {

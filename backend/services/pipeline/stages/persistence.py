@@ -165,13 +165,15 @@ class PersistenceStage(PipelineStage):
 
                 if existing:
                     # Check if update needed
-                    if self._needs_update(existing, tx):
+                    changed = self._changed_fields(existing, tx)
+                    if changed:
                         self._update_transaction(existing, tx, context.sync_connector_run_id)
                         context.session.add(existing)
                         updated_count += 1
                         result.updated_ids.append(tx.source_transaction_id)
-                        log.debug(
+                        log.info(
                             "transaction_updated",
+                            changed=changed,
                             source=tx.source,
                             tx_type=tx.transaction_type,
                             tx_id=tx.source_transaction_id,
@@ -294,34 +296,30 @@ class PersistenceStage(PipelineStage):
         existing: NormalizedTransaction,
         new: NormalizedTransaction,
     ) -> bool:
-        """
-        Check if existing transaction needs to be updated.
-        
-        Uses approximate comparison for float fields to avoid false positives
-        from floating point precision differences.
-        """
+        """Check if existing transaction needs to be updated (tolerant float/datetime comparison)."""
+        return bool(self._changed_fields(existing, new))
+
+    def _changed_fields(
+        self,
+        existing: NormalizedTransaction,
+        new: NormalizedTransaction,
+    ) -> List[str]:
+        """Describe each UPDATABLE_FIELDS difference as 'field: old -> new' (None new values never overwrite)."""
+        changed = []
         for field in UPDATABLE_FIELDS:
             old_val = getattr(existing, field, None)
             new_val = getattr(new, field, None)
-
-            # Skip if new value is None (don't overwrite with None)
             if new_val is None:
                 continue
-
-            # Use tolerance for float/decimal comparisons
             if field in FLOAT_FIELDS:
-                if not self._floats_equal(old_val, new_val):
-                    log.debug(f"Field {field} changed: {old_val} -> {new_val}")
-                    return True
+                same = self._floats_equal(old_val, new_val)
             elif field in DATETIME_FIELDS:
-                if not self._datetimes_equal(old_val, new_val):
-                    log.debug(f"Field {field} changed: {old_val} -> {new_val}")
-                    return True
-            elif old_val != new_val:
-                log.debug(f"Field {field} changed: {old_val} -> {new_val}")
-                return True
-
-        return False
+                same = self._datetimes_equal(old_val, new_val)
+            else:
+                same = old_val == new_val
+            if not same:
+                changed.append(f"{field}: {old_val!r} -> {new_val!r}")
+        return changed
 
     def _floats_equal(
         self,

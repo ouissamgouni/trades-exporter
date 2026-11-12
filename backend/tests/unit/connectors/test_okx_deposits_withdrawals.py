@@ -425,3 +425,70 @@ class TestConnectorRegistry:
         
         assert connector_class is not None
         assert connector_class == OKXWithdrawalsConnector
+
+
+class TestOKXTransferPagination:
+    """OKX deposit/withdrawal records carry no billId: paging must use timestamps (prod: only page 1 was read)."""
+
+    def _connector(self, since=None):
+        config = {"test_mode": False, "disable_file_output": True}
+        if since:
+            config["since_datetime"] = since
+        return OKXDepositsConnector(account_id=1, config=config)
+
+    @staticmethod
+    def _page(start_ts, count, prefix):
+        # CCXT returns pages sorted ascending by timestamp
+        return [{"id": f"{prefix}{i}", "timestamp": start_ts + i * 1000} for i in range(count)]
+
+    def test_pages_backwards_with_after_timestamp(self, mock_ccxt_okx, mock_okx_credentials):
+        newest = self._page(2_000_000, 100, "n")
+        older = self._page(1_000_000, 30, "o")
+        mock_ccxt_okx.fetch_deposits.side_effect = [newest, older]
+
+        items = list(self._connector().yield_raws())
+
+        assert len(items) == 130
+        calls = mock_ccxt_okx.fetch_deposits.call_args_list
+        assert calls[0].kwargs["params"] == {}
+        assert calls[1].kwargs["params"] == {"after": 2_000_000 + 1}
+        assert calls[0].kwargs["limit"] == 100
+
+    def test_stops_on_short_page(self, mock_ccxt_okx, mock_okx_credentials):
+        mock_ccxt_okx.fetch_deposits.return_value = self._page(1_000_000, 3, "a")
+
+        assert len(list(self._connector().yield_raws())) == 3
+        assert mock_ccxt_okx.fetch_deposits.call_count == 1
+
+    def test_stops_when_page_has_nothing_new(self, mock_ccxt_okx, mock_okx_credentials):
+        page = self._page(1_000_000, 100, "a")
+        mock_ccxt_okx.fetch_deposits.side_effect = [page, page, page]
+
+        assert len(list(self._connector().yield_raws())) == 100
+        assert mock_ccxt_okx.fetch_deposits.call_count == 2
+
+    def test_drops_records_before_since(self, mock_ccxt_okx, mock_okx_credentials):
+        since = datetime.fromtimestamp(1_050, tz=timezone.utc)
+        mock_ccxt_okx.fetch_deposits.return_value = self._page(1_000_000, 100, "a")
+
+        items = list(self._connector(since=since).yield_raws())
+
+        assert [i["timestamp"] for i in items][0] == 1_050_000
+        assert mock_ccxt_okx.fetch_deposits.call_count == 1
+
+    def test_retries_rate_limit_then_succeeds(self, mock_ccxt_okx, mock_okx_credentials):
+        import ccxt
+
+        mock_ccxt_okx.fetch_deposits.side_effect = [ccxt.RateLimitExceeded("50011 Too Many Requests"), self._page(1, 2, "a")]
+        with patch("backend.connectors.base.ccxt_errors.time.sleep"):
+            assert len(list(self._connector().yield_raws())) == 2
+
+    def test_auth_error_raises_connector_error(self, mock_ccxt_okx, mock_okx_credentials):
+        import ccxt
+        from backend.connectors.base.connector_exceptions import ConnectorAPIError, ErrorReason
+
+        mock_ccxt_okx.fetch_deposits.side_effect = ccxt.AuthenticationError("50113 Invalid Sign")
+        with pytest.raises(ConnectorAPIError) as exc:
+            list(self._connector().yield_raws())
+        assert exc.value.reason == ErrorReason.AUTHENTICATION_FAILED
+        assert "Invalid Sign" in str(exc.value)

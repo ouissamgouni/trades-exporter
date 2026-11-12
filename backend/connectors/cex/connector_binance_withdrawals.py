@@ -13,14 +13,11 @@ from typing import Dict, Any, Generator, List
 from urllib3.util.retry import Retry
 
 from backend.connectors.base.base_connector import BaseConnector
-from backend.connectors.base.connector_exceptions import (
-    ConnectorAPIError,
-    ErrorReason,
-)
 from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction
 from backend.core.network_normalizer import normalize_network
 from backend.connectors.cex.binance_common import iter_transfer_history
+from backend.connectors.base.ccxt_errors import call_with_retry
 
 log = configure_logging("binance_withdrawals")
 
@@ -112,92 +109,17 @@ class BinanceWithdrawalsConnector(BaseConnector):
         Raises:
             ConnectorAPIError: On API failures
         """
-        try:
-            withdrawals = self.exchange.fetch_withdrawals(
+        withdrawals = call_with_retry(
+            lambda: self.exchange.fetch_withdrawals(
                 code=None, since=since, limit=limit, params=params or {}
-            )
-            log.debug(f"Fetched {len(withdrawals)} withdrawals from Binance (since={since})")
-            return withdrawals
-        except Exception as e:
-            error_str = str(e).lower()
-            
-            # Legitimate empty result
-            if "no withdrawals" in error_str or "empty" in error_str:
-                log.debug("ℹ️ No withdrawals found (legitimate empty result)")
-                return []
-            
-            # Authentication errors
-            if "401" in error_str or "unauthorized" in error_str or "invalid api key" in error_str:
-                log.error(f"❌ Authentication failed for Binance withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Authentication failed - check API credentials",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.AUTHENTICATION_FAILED,
-                    http_status_code=401,
-                    retryable=False,
-                    original_error=e,
-                )
-            
-            if "403" in error_str or "forbidden" in error_str or "permission" in error_str:
-                log.error(f"❌ Permission denied for Binance withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Permission denied - insufficient API key permissions",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.PERMISSION_DENIED,
-                    http_status_code=403,
-                    retryable=False,
-                    original_error=e,
-                )
-            
-            # Rate limiting
-            if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
-                log.warning(f"⚠️ Rate limited on Binance withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Rate limited by Binance API",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.RATE_LIMITED,
-                    http_status_code=429,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            # Network/timeout errors
-            if "timeout" in error_str or "timed out" in error_str:
-                log.warning(f"⚠️ Timeout fetching Binance withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Request timeout",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.TIMEOUT,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            if "connection" in error_str or "network" in error_str:
-                log.warning(f"⚠️ Network error fetching Binance withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Network connection error",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.NETWORK_ERROR,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            # Generic API error
-            log.error(f"❌ API error fetching Binance withdrawals: {e}")
-            raise ConnectorAPIError(
-                message="API request failed",
-                connector_name=self.connector_name,
-                operation="fetch_withdrawals",
-                reason=ErrorReason.API_ERROR,
-                retryable=False,
-                original_error=e,
-                details=str(e),
-            )
+            ),
+            self.connector_name,
+            "fetch_withdrawals",
+            log,
+            details=f"since={since} offset={(params or {}).get('offset', 0)}",
+        )
+        log.debug(f"Fetched {len(withdrawals)} withdrawals from Binance (since={since})")
+        return withdrawals
 
     def raw_to_normalized(self, raw_item: dict) -> "NormalizedTransaction":
         """
