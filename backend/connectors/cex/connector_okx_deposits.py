@@ -44,9 +44,8 @@ class OKXDepositsConnector(OKXBaseConnector):
         """
         from backend.db.models import NormalizedTransaction
 
-        status = str(raw_item.get("status", "")).lower()
-        if status != "ok":
-            raise ValueError(f"Deposit status is not 'ok': {status}")
+        if not self.is_settled_transfer(raw_item, "Deposit"):
+            return None
 
         # Extract deposit data from CCXT format
         deposit_id = str(raw_item.get("id", ""))

@@ -1,22 +1,20 @@
 /**
  * PortfolioPerformanceChart
  *
- * Lightweight rebased performance chart showing:
- *   - Portfolio ROI line (from timeline points)
- *   - Default benchmark: S&P 500
- *
- * Designed for inline / embedded use inside the period panel,
- * with an optional fullscreen mode that shows zoom controls.
+ * Rebased performance chart: portfolio TWR (or ROI on cost) against selectable
+ * benchmarks converted to the base currency. The gap to the main benchmark is shaded.
  */
 import React, { useMemo, useState } from 'react';
 import { ResponsiveLine } from '@nivo/line';
 import {
+    BENCHMARK_PRESETS,
     useMultiBenchmarkSeries,
     type TimelinePoint,
 } from '../../hooks/useChartData';
 import {
     type ZoomPreset,
     ZOOM_PRESETS,
+    cumulativeTwr,
     getAxisDateFormat,
     getTickValues,
     filterPointsByZoom,
@@ -28,37 +26,62 @@ import { Badge } from '../ui/primitives';
 // ---------------------------------------------------------------------------
 
 const PORTFOLIO_COLOR = '#3182CE';
-const BENCHMARK_COLOR = '#d4b872'; // muted gold
+export const BENCHMARK_LINE_COLORS = ['#d4b872', '#9f7aea', '#38a169', '#dd6b20', '#e53e3e', '#718096', '#319795', '#b83280', '#2c5282'];
+
+export type PerformanceBasis = 'twr' | 'roi';
 
 // ---------------------------------------------------------------------------
-// Custom line layer: strong portfolio line, thin dashed benchmark
+// Line layer: strong portfolio line, thin dashed benchmarks, shaded gap to the main benchmark
 // ---------------------------------------------------------------------------
 
-const CustomLineLayer = ({ series, lineGenerator, xScale, yScale }: any) => {
-    return (
-        <>
-            {series.map((s: any) => {
-                const isBenchmark = s.id === 'S&P 500';
-                const lineData = s.data.filter((d: any) => d.data.x != null && d.data.y != null);
-                if (!lineData.length) return null;
-                lineGenerator.x((d: any) => (xScale as any)(d.data.x));
-                lineGenerator.y((d: any) => (yScale as any)(d.data.y));
-                const path = lineGenerator(lineData as any) || '';
-                return (
-                    <path
-                        key={s.id}
-                        d={path}
-                        fill="none"
-                        stroke={s.color}
-                        strokeWidth={isBenchmark ? 1.5 : 2.5}
-                        strokeDasharray={isBenchmark ? '6,3' : undefined}
-                        strokeOpacity={isBenchmark ? 0.7 : 1}
-                    />
-                );
-            })}
-        </>
-    );
-};
+/* eslint-disable @typescript-eslint/no-explicit-any -- nivo custom layer props are untyped */
+function makeLineLayer(portfolioId: string, shadeWithId: string | null) {
+    const Layer = ({ series, lineGenerator, xScale, yScale }: any) => {
+        const portfolio = series.find((s: any) => s.id === portfolioId);
+        const shadeWith = shadeWithId ? series.find((s: any) => s.id === shadeWithId) : null;
+        let shade: string | null = null;
+        if (portfolio && shadeWith && portfolio.data.length > 1) {
+            const xs = portfolio.data.map((d: any) => new Date(d.data.x).getTime());
+            const lo = xs[0];
+            const hi = xs[xs.length - 1];
+            const bench = shadeWith.data.filter((d: any) => {
+                const t = new Date(d.data.x).getTime();
+                return t >= lo && t <= hi;
+            });
+            if (bench.length > 1) {
+                const top = portfolio.data.map((d: any) => `${xScale(d.data.x)},${yScale(d.data.y)}`);
+                const bottom = [...bench].reverse().map((d: any) => `${xScale(d.data.x)},${yScale(d.data.y)}`);
+                shade = `M${[...top, ...bottom].join('L')}Z`;
+            }
+        }
+        return (
+            <>
+                {shade && <path d={shade} fill={PORTFOLIO_COLOR} fillOpacity={0.08} stroke="none" />}
+                {series.map((s: any) => {
+                    const isBenchmark = s.id !== portfolioId;
+                    const lineData = s.data.filter((d: any) => d.data.x != null && d.data.y != null);
+                    if (!lineData.length) return null;
+                    lineGenerator.x((d: any) => xScale(d.data.x));
+                    lineGenerator.y((d: any) => yScale(d.data.y));
+                    const path = lineGenerator(lineData) || '';
+                    return (
+                        <path
+                            key={s.id}
+                            d={path}
+                            fill="none"
+                            stroke={s.color}
+                            strokeWidth={isBenchmark ? 1.5 : 2.5}
+                            strokeDasharray={isBenchmark ? '6,3' : undefined}
+                            strokeOpacity={isBenchmark ? 0.8 : 1}
+                        />
+                    );
+                })}
+            </>
+        );
+    };
+    return Layer;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
 // Props
@@ -77,6 +100,10 @@ interface PortfolioPerformanceChartProps {
     height?: string;
     /** Context label (e.g. asset symbol) shown in legend instead of 'Portfolio' */
     contextLabel?: string;
+    /** Benchmark tickers to overlay (first one is shaded against unless mainBenchmark is set) */
+    benchmarks?: string[];
+    mainBenchmark?: string;
+    basis?: PerformanceBasis;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +119,9 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
     hideControls,
     height = '200px',
     contextLabel,
+    benchmarks = ['^GSPC'],
+    mainBenchmark,
+    basis = 'twr',
 }) => {
     const [internalZoom, setInternalZoom] = useState<ZoomPreset>('all');
     const zoom = controlledZoom ?? internalZoom;
@@ -109,13 +139,19 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
         };
     }, [filteredPoints]);
 
-    // ---- Benchmark data (S&P 500 only) ----
     const benchmarkResults = useMultiBenchmarkSeries(
-        ['^GSPC'],
+        benchmarks,
         dateRange.start,
         dateRange.end,
         filteredPoints.length > 0,
+        baseCurrency,
     );
+
+    const portfolioLabel = `${contextLabel || 'Portfolio'} ${basis === 'twr' ? 'TWR' : 'ROI'}`;
+    const labelOf = (ticker: string) => BENCHMARK_PRESETS.find(b => b.ticker === ticker)?.label ?? ticker;
+    const shadeTicker = mainBenchmark && benchmarks.includes(mainBenchmark) ? mainBenchmark : benchmarks[0];
+    const shadeWithId = shadeTicker ? labelOf(shadeTicker) : null;
+    const lineLayer = useMemo(() => makeLineLayer(portfolioLabel, shadeWithId), [portfolioLabel, shadeWithId]);
 
     // ---- Build chart series ----
     const { chartData, colorMap } = useMemo(() => {
@@ -124,39 +160,37 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
 
         if (!filteredPoints.length) return { chartData: series, colorMap: colors };
 
-        // 1) Portfolio ROI line: ((unrealized + realized + income) / cost_basis) × 100, rebased to 0% at start
-        const portfolioData: { x: string; y: number }[] = [];
-        let roi0: number | null = null;
-        for (const pt of filteredPoints) {
-            const costBasis = pt.cost_basis_in_base;
-            if (costBasis <= 0) continue;
-            const roi = ((pt.unrealized_pnl + pt.cumulative_realized_pnl + (pt.cumulative_income ?? 0)) / costBasis) * 100;
-            if (roi0 === null) roi0 = roi;
-            portfolioData.push({ x: pt.date, y: roi - roi0 });
+        let portfolioData: { x: string; y: number }[];
+        if (basis === 'twr') {
+            portfolioData = cumulativeTwr(filteredPoints);
+        } else {
+            // ROI on cost incl. income, rebased to 0% at start
+            portfolioData = [];
+            let roi0: number | null = null;
+            for (const pt of filteredPoints) {
+                const costBasis = pt.cost_basis_in_base;
+                if (costBasis <= 0) continue;
+                const roi = ((pt.unrealized_pnl + pt.cumulative_realized_pnl + (pt.cumulative_income ?? 0)) / costBasis) * 100;
+                if (roi0 === null) roi0 = roi;
+                portfolioData.push({ x: pt.date, y: roi - roi0 });
+            }
         }
-        const portfolioLabel = contextLabel || 'Portfolio';
         if (portfolioData.length >= 2) {
             series.push({ id: portfolioLabel, data: portfolioData });
             colors[portfolioLabel] = PORTFOLIO_COLOR;
         }
 
-        // 2) S&P 500 benchmark (rebased to 0%)
-        const br = benchmarkResults[0];
-        if (br?.data && br.data.points.length >= 2) {
-            const bPoints = br.data.points;
-            const close0 = bPoints[0].close;
-            if (close0 > 0) {
-                const data = bPoints.map(bp => ({
-                    x: bp.date,
-                    y: ((bp.close / close0) - 1) * 100,
-                }));
-                series.push({ id: 'S&P 500', data });
-                colors['S&P 500'] = BENCHMARK_COLOR;
-            }
-        }
+        benchmarkResults.forEach((br, idx) => {
+            if (!br.data || br.data.points.length < 2) return;
+            const close0 = br.data.points[0].close;
+            if (close0 <= 0) return;
+            const id = labelOf(br.ticker);
+            series.push({ id, data: br.data.points.map(bp => ({ x: bp.date, y: ((bp.close / close0) - 1) * 100 })) });
+            colors[id] = BENCHMARK_LINE_COLORS[idx % BENCHMARK_LINE_COLORS.length];
+        });
 
         return { chartData: series, colorMap: colors };
-    }, [filteredPoints, benchmarkResults, contextLabel]);
+    }, [filteredPoints, benchmarkResults, portfolioLabel, basis]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const totalDays = filteredPoints.length > 1
         ? Math.ceil(
@@ -216,7 +250,7 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                         useMesh={true}
                         colors={(d) => colorMap[d.id] ?? '#999'}
                         lineWidth={2.5}
-                        layers={['grid', 'markers', 'axes', 'areas', CustomLineLayer, 'crosshair', 'slices', 'mesh', 'legends']}
+                        layers={['grid', 'markers', 'axes', 'areas', lineLayer, 'crosshair', 'slices', 'mesh', 'legends']}
                         curve="monotoneX"
                         enableSlices="x"
                         sliceTooltip={({ slice }) => (
@@ -242,7 +276,7 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                             direction: 'row',
                             translateX: 0,
                             translateY: -18,
-                            itemWidth: 80,
+                            itemWidth: 110,
                             itemHeight: 14,
                             symbolSize: 8,
                             symbolShape: 'circle',

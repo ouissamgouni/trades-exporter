@@ -4,21 +4,24 @@
  * One toolbar (search · filters popover with chips · group · view · columns), then:
  *   - Table: configurable columns, period Δ columns when a period is selected, sticky header and
  *     first column, collapsible group rows with subtotals, per-account expansion, totals footer
- *   - Cards: AssetPnLCard grid (same data, grouped the same way)
+ *   - Cards (default): AssetPnLCard grid, split into best / worst halves; account aggregate cards
+ *     when grouped by account
  *   - Allocation: treemap / pie rendered by the parent
  */
 import React, { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { FiAlertCircle, FiChevronDown, FiChevronRight, FiFilter, FiSearch, FiSliders, FiX } from 'react-icons/fi';
-import { LuInfo } from 'react-icons/lu';
+import { FiAlertCircle, FiChevronDown, FiChevronRight, FiColumns, FiDollarSign, FiFilter, FiSearch, FiSliders, FiTrendingDown, FiTrendingUp, FiX } from 'react-icons/fi';
+import { LuInfo, LuReceipt } from 'react-icons/lu';
 import { Badge, Input, Spinner } from '../ui/primitives';
 import { Tooltip } from '../ui/tooltip';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { getAccountColor } from '../../utils/accountColors';
 import { AssetPnLCard } from './AssetPnLCard';
+import { AccountPnLCard, accountAssetDetails, aggregateByAccount, liveValueByAccount } from './AccountPnLCard';
+import { HeroMetricsBar } from './HeroMetricsBar';
 import { DeltaBar } from './DeltaBar';
 import { computeDelta } from './deltaUtils';
 import { renderCost, renderValue, type BalanceStatusFilter, type PnlStatusFilter } from './AssetPnLTable';
-import { fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
+import { MetricItem, fmtCurrency, fmtCurrencySigned, realizedSubLines } from './TotalReturnScorecard';
 import { TERM_HELP, InfoTip } from './pnlTerms';
 import type { AccountBalanceBreakdown, AssetPnLRow } from './types';
 import type { Account, DimensionWithCategories } from '../../types';
@@ -75,6 +78,23 @@ export const COLUMNS: ColumnDef[] = [
 export const DEFAULT_COLUMNS: ColumnId[] = ['weight', 'value', 'unrealized', 'realized', 'totalReturn', 'retDelta', 'roiDelta'];
 
 const COLUMNS_STORAGE_KEY = 'pnl.assets.columns';
+const SPLIT_STORAGE_KEY = 'pnl.assets.split';
+
+/** Best half sorted as-is, worst half from the other end (midpoint split, like the original split view). */
+export function splitHalves<T>(sorted: T[]): { top: T[]; bottom: T[] } {
+    const mid = Math.ceil(sorted.length / 2);
+    return { top: sorted.slice(0, mid), bottom: sorted.slice(mid).reverse() };
+}
+
+const SORT_BAR: { key: ColumnId; label: string; periodOnly?: boolean }[] = [
+    { key: 'totalReturn', label: 'Return' },
+    { key: 'retDelta', label: 'Return Δ', periodOnly: true },
+    { key: 'value', label: 'Value' },
+    { key: 'cost', label: 'Cost' },
+    { key: 'unrealized', label: 'Unrealized' },
+    { key: 'realized', label: 'Realized' },
+    { key: 'efficiency', label: 'Efficiency' },
+];
 
 /** One displayed line: a whole asset, or an asset's slice in one account (partial: no realized/fees split). */
 export interface HoldingRow {
@@ -297,7 +317,7 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     const [view, setView] = useState<AssetsViewMode>(() => {
         const v = readUrlParam('aview');
         if (v === 'table' || v === 'cards' || v === 'allocation') return v;
-        return typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table';
+        return 'cards';
     });
     const [groupKey, setGroupKey] = useState<string>(() => readUrlParam('agroup') ?? 'none');
     const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(() => {
@@ -315,8 +335,12 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     const [expandedAssets, setExpandedAssets] = useState<Set<number>>(new Set());
     const [page, setPage] = useState(0);
     const [pageSize, setPageSize] = useState<number>(25);
+    const [split, setSplit] = useState<boolean>(() => localStorage.getItem(SPLIT_STORAGE_KEY) !== '0');
+    const [splitPages, setSplitPages] = useState<[number, number]>([0, 0]);
+    const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
 
-    useEffect(() => { writeUrlParam('aview', view === 'table' ? null : view); }, [view]);
+    useEffect(() => { writeUrlParam('aview', view === 'cards' ? null : view); }, [view]);
+    useEffect(() => { localStorage.setItem(SPLIT_STORAGE_KEY, split ? '1' : '0'); }, [split]);
     useEffect(() => { writeUrlParam('agroup', groupKey === 'none' ? null : groupKey); }, [groupKey]);
     useEffect(() => { writeUrlParam('asort', sort ? `${sort.key}:${sort.dir}` : null); }, [sort]);
     useEffect(() => {
@@ -441,11 +465,43 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
 
     const sortedFlat = useMemo(() => sortRows(baseRows), [baseRows, effectiveSort, totalValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    useEffect(() => { setPage(0); }, [search, minMarketValue, pnlStatus, balanceStatus, positionFilter, selectedAccountIds, selectedCategoryIds, effectiveSort, effectiveGroupKey, view]);
+    useEffect(() => { setPage(0); setSplitPages([0, 0]); }, [search, minMarketValue, pnlStatus, balanceStatus, positionFilter, selectedAccountIds, selectedCategoryIds, effectiveSort, effectiveGroupKey, view, split]);
 
     const pageCount = pageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedFlat.length / pageSize));
     const safePage = Math.min(page, pageCount - 1);
     const pagedFlat = pageSize === 0 ? sortedFlat : sortedFlat.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+    const splitActive = split && effectiveGroupKey === 'none' && view !== 'allocation' && sortedFlat.length > 1;
+    const halves = useMemo(() => splitHalves(sortedFlat), [sortedFlat]);
+    const pageOf = (rows: HoldingRow[], idx: 0 | 1) => {
+        if (pageSize === 0) return { rows, page: 0, count: 1 };
+        const count = Math.max(1, Math.ceil(rows.length / pageSize));
+        const pg = Math.min(splitPages[idx], count - 1);
+        return { rows: rows.slice(pg * pageSize, (pg + 1) * pageSize), page: pg, count };
+    };
+
+    // ── Totals bar (filtered assets) ──
+    const totals = useMemo(() => {
+        let cost = 0, unrealized = 0, realized = 0, taxable = 0, deferred = 0, fees = 0, value = 0;
+        for (const a of filtered) {
+            if (!a.has_lots) continue;
+            cost += a.cost_basis;
+            unrealized += a.unrealized_pnl;
+            realized += a.realized_pnl;
+            taxable += a.taxable_realized_pnl ?? 0;
+            deferred += a.tax_cost_basis != null ? a.cost_basis - a.tax_cost_basis : 0;
+            fees += a.total_fees;
+            value += a.market_value;
+        }
+        return { cost, unrealized, realized, taxable, deferred, fees, value };
+    }, [filtered]);
+
+    // ── Account aggregate cards (cards view grouped by account) ──
+    const accountCards = useMemo(
+        () => (view === 'cards' && effectiveGroupKey === 'account' ? aggregateByAccount(filtered, accountBalances) : []),
+        [view, effectiveGroupKey, filtered, accountBalances],
+    );
+    const accountLiveValues = useMemo(() => liveValueByAccount(liveAccountBalances, assets), [liveAccountBalances, assets]);
 
     // ── Filter chips ──
     const availableAccounts = useMemo(
@@ -852,25 +908,94 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                         )}
                     </div>
                 )}
-                {view === 'cards' && (
-                    <label className="flex items-center gap-1 text-[11px] text-gray-500">
-                        Sort
-                        <select
-                            value={`${effectiveSort.key}:${effectiveSort.dir}`}
-                            onChange={(e) => { const [k, d] = e.target.value.split(':'); setSort({ key: k as SortKey, dir: d as 'asc' | 'desc' }); }}
-                            className="h-7 border border-slate-200 bg-white px-1.5 text-xs text-slate-700"
-                        >
-                            {COLUMNS.filter(c => c.sortable && (!c.periodOnly || isPeriod)).flatMap(c => [
-                                <option key={`${c.id}:desc`} value={`${c.id}:desc`}>{c.label} ↓</option>,
-                                <option key={`${c.id}:asc`} value={`${c.id}:asc`}>{c.label} ↑</option>,
-                            ])}
-                            <option value="asset:asc">Name A→Z</option>
-                        </select>
-                    </label>
+                {view !== 'allocation' && effectiveGroupKey === 'none' && (
+                    <button
+                        type="button"
+                        onClick={() => setSplit(v => !v)}
+                        title="Split: best half vs worst half by the current sort"
+                        aria-pressed={split}
+                        className={`flex h-7 items-center gap-1.5 border px-2.5 text-xs font-medium ${split ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                    >
+                        <FiColumns size={12} /> Split
+                    </button>
                 )}
             </div>
         </div>
     );
+
+    const sortBar = view === 'cards' && effectiveGroupKey !== 'account' && (
+        <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 px-3 py-1.5">
+            <span className="mr-1 text-[11px] text-gray-500">Sort</span>
+            <div className="flex flex-wrap">
+                {SORT_BAR.filter(o => !o.periodOnly || isPeriod).map(o => (
+                    <Seg key={o.key} active={effectiveSort.key === o.key} onClick={() => toggleSort(o.key)}>
+                        {o.label}{effectiveSort.key === o.key ? (effectiveSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                    </Seg>
+                ))}
+                <Seg active={effectiveSort.key === 'asset'} onClick={() => toggleSort('asset')}>
+                    Name{effectiveSort.key === 'asset' ? (effectiveSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                </Seg>
+            </div>
+        </div>
+    );
+
+    const sortLabel = effectiveSort.key === 'asset' ? 'Name' : (COLUMNS.find(c => c.id === effectiveSort.key)?.label ?? '');
+    const colorFn = (v: number) => (v >= 0 ? 'green.600' : 'red.600');
+    const totalReturn = totals.unrealized + totals.realized;
+    const totalsBar = view !== 'allocation' && filtered.length > 0 && totals.cost > 0 && (
+        <div className="border-b border-slate-100 px-3 py-2" data-testid="assets-totals">
+            <HeroMetricsBar
+                totalReturn={totalReturn}
+                roi={(totalReturn / totals.cost) * 100}
+                baseCurrency={baseCurrency}
+                costBasisInPeriod={totals.cost}
+                unrealizedInPeriod={totals.unrealized}
+                realizedInPeriod={totals.realized}
+                feesInPeriod={totals.fees}
+                fmtCurrencySigned={fmtCurrencySigned}
+                color={colorFn}
+            >
+                <MetricItem label="Value" value={fmtCurrency(totals.value, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} bg="blue.50" />
+                <MetricItem label="Cost" value={fmtCurrency(totals.cost, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" info={TERM_HELP.cost} />
+                <MetricItem label="Unrealized" value={fmtCurrencySigned(totals.unrealized, baseCurrency)} color={colorFn(totals.unrealized)} icon={totals.unrealized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.unrealized >= 0 ? 'green.50' : 'red.50'} />
+                <MetricItem label="Realized" value={fmtCurrencySigned(totals.realized, baseCurrency)} color={colorFn(totals.realized)} icon={totals.realized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.realized >= 0 ? 'green.50' : 'red.50'} info={TERM_HELP.realized} subLines={realizedSubLines({ taxableRealizedPnl: totals.taxable, deferredGain: totals.deferred }, baseCurrency, fmtCurrencySigned)} />
+                <MetricItem label="Fees" value={fmtCurrency(totals.fees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />
+            </HeroMetricsBar>
+        </div>
+    );
+
+    const halfPager = (idx: 0 | 1, total: number, page: number, count: number) => pageSize !== 0 && count > 1 && (
+        <div className="mt-2 flex items-center justify-end gap-2 text-[11px] text-gray-500">
+            <span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total}</span>
+            <Seg active={false} onClick={() => setSplitPages(p => (idx === 0 ? [Math.max(0, p[0] - 1), p[1]] : [p[0], Math.max(0, p[1] - 1)]))}>‹</Seg>
+            <Seg active={false} onClick={() => setSplitPages(p => (idx === 0 ? [Math.min(count - 1, p[0] + 1), p[1]] : [p[0], Math.min(count - 1, p[1] + 1)]))}>›</Seg>
+        </div>
+    );
+
+    const renderSplit = (renderHalf: (rows: HoldingRow[]) => React.ReactNode, vertical: boolean) => {
+        const top = pageOf(halves.top, 0);
+        const bottom = pageOf(halves.bottom, 1);
+        const desc = effectiveSort.dir === 'desc';
+        return (
+            <div className={vertical ? 'flex flex-col gap-4' : 'flex flex-col gap-3 md:flex-row'} data-testid="assets-split">
+                {([[top, halves.top.length, 0], [bottom, halves.bottom.length, 1]] as const).map(([half, total, idx]) => {
+                    const best = idx === 0 ? desc : !desc;
+                    return (
+                        <div key={idx} className={`min-w-0 flex-1 ${!vertical && idx === 0 ? 'border-b border-slate-200 pb-3 md:border-b-0 md:border-r md:pb-0 md:pr-3' : ''}`}>
+                            <div className="mb-2 flex items-center gap-2">
+                                <span className={`text-sm font-semibold ${best ? 'text-green-700' : 'text-red-700'}`}>
+                                    {idx === 0 ? '↓' : '↑'} {sortLabel} · {best ? 'top half' : 'bottom half'}
+                                </span>
+                                <Badge colorScheme="gray">{total}</Badge>
+                            </div>
+                            {renderHalf(half.rows as HoldingRow[])}
+                            {halfPager(idx, total, half.page, half.count)}
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
 
     // ── Cards ──
     const renderCard = (r: HoldingRow) => {
@@ -926,7 +1051,7 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
         });
     }, [effectiveGroupKey, groups, periodDeltaMap]);
 
-    const pagination = view !== 'allocation' && effectiveGroupKey === 'none' && sortedFlat.length > 25 && (
+    const pagination = view !== 'allocation' && effectiveGroupKey === 'none' && !splitActive && sortedFlat.length > 25 && (
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 text-[11px] text-gray-500">
             <div className="flex items-center gap-1">
                 Rows
@@ -944,39 +1069,8 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
         </div>
     );
 
-    return (
-        <div className="border border-slate-200 bg-white" data-testid="assets-section">
-            {toolbar}
-
-            {view === 'allocation' && renderAllocation ? (
-                <div className="p-3">
-                    <div className="mb-2 flex">
-                        <Seg active={allocationMode === 'treemap'} onClick={() => setAllocationMode('treemap')}>Treemap</Seg>
-                        <Seg active={allocationMode === 'pie'} onClick={() => setAllocationMode('pie')}>Pie</Seg>
-                    </div>
-                    {renderAllocation(allocationMode)}
-                </div>
-            ) : loading ? (
-                <div className="py-10 text-center text-xs text-gray-400">Loading assets…</div>
-            ) : filtered.length === 0 ? (
-                <div className="py-10 text-center text-xs text-gray-500">No assets match your criteria</div>
-            ) : view === 'cards' ? (
-                <div className="p-3">
-                    {effectiveGroupKey === 'none' ? (
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">{pagedFlat.map(renderCard)}</div>
-                    ) : cardGroups.map(g => (
-                        <div key={g.key} className="mb-4">
-                            <div className="mb-2 flex items-center gap-2 border-b border-slate-200 pb-1" style={g.color ? { borderLeft: `3px solid ${g.color}`, paddingLeft: 6 } : undefined}>
-                                <span className="text-xs font-semibold text-gray-800">{g.label}</span>
-                                <Badge colorScheme="gray">{g.rows.length}</Badge>
-                                <span className="text-[11px] tabular-nums text-gray-500">{fmtCurrency(g.rows.reduce((s, r) => s + (r.src.unit_value != null ? r.value : 0), 0), baseCurrency)}</span>
-                            </div>
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">{g.rows.map(renderCard)}</div>
-                        </div>
-                    ))}
-                </div>
-            ) : (
-                <div className="max-h-[70vh] overflow-auto">
+    const renderTable = (flatRows: HoldingRow[] | null, withFooter: boolean, maxH = 'max-h-[70vh]') => (
+                <div className={`${maxH} overflow-auto`}>
                     <table className="w-full border-collapse text-xs">
                         <thead className="sticky top-0 z-[2] bg-slate-50">
                             <tr className="border-b border-slate-200">
@@ -999,8 +1093,8 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                             </tr>
                         </thead>
                         <tbody>
-                            {effectiveGroupKey === 'none'
-                                ? pagedFlat.map(r => (
+                            {flatRows
+                                ? flatRows.map(r => (
                                     <Fragment key={r.key}>
                                         {renderTableRow(r, 0)}
                                         {renderExpansion(r)}
@@ -1018,7 +1112,7 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                                     </Fragment>
                                 ))}
                         </tbody>
-                        <tfoot className="sticky bottom-0 z-[2] bg-slate-100">
+                        {withFooter && <tfoot className="sticky bottom-0 z-[2] bg-slate-100">
                             <tr className="border-t-2 border-slate-300">
                                 <td className="sticky left-0 z-[3] bg-slate-100 px-2 py-2 text-xs font-bold text-gray-800">
                                     Total <span className="font-normal text-gray-500">({filtered.length})</span>
@@ -1027,9 +1121,70 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                                     <td key={col.id} className="whitespace-nowrap px-2 py-2 text-right text-xs tabular-nums">{renderTotalCell(col, rowsForTotals)}</td>
                                 ))}
                             </tr>
-                        </tfoot>
+                        </tfoot>}
                     </table>
                 </div>
+    );
+
+    return (
+        <div className="border border-slate-200 bg-white" data-testid="assets-section">
+            {toolbar}
+            {totalsBar}
+            {sortBar}
+
+            {view === 'allocation' && renderAllocation ? (
+                <div className="p-3">
+                    <div className="mb-2 flex">
+                        <Seg active={allocationMode === 'treemap'} onClick={() => setAllocationMode('treemap')}>Treemap</Seg>
+                        <Seg active={allocationMode === 'pie'} onClick={() => setAllocationMode('pie')}>Pie</Seg>
+                    </div>
+                    {renderAllocation(allocationMode)}
+                </div>
+            ) : loading ? (
+                <div className="py-10 text-center text-xs text-gray-400">Loading assets…</div>
+            ) : filtered.length === 0 ? (
+                <div className="py-10 text-center text-xs text-gray-500">No assets match your criteria</div>
+            ) : view === 'cards' ? (
+                <div className="p-3">
+                    {effectiveGroupKey === 'account' ? (
+                        accountCards.length === 0 ? (
+                            <div className="py-8 text-center text-xs text-gray-500">Loading account breakdown…</div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" data-testid="account-cards">
+                                {accountCards.map(row => (
+                                    <AccountPnLCard
+                                        key={row.account_id}
+                                        row={row}
+                                        baseCurrency={baseCurrency}
+                                        isExpanded={expandedAccountIds.has(row.account_id)}
+                                        onToggleExpand={(id) => setExpandedAccountIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
+                                        onAssetClick={(id) => id != null && onAssetClick(id)}
+                                        details={expandedAccountIds.has(row.account_id) ? accountAssetDetails(row.account_id, filtered, accountBalances) : []}
+                                        liveBalanceValue={accountLiveValues.get(row.account_id)}
+                                        liveBalanceLoading={liveBalanceLoading}
+                                    />
+                                ))}
+                            </div>
+                        )
+                    ) : splitActive ? (
+                        renderSplit(rows => <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">{rows.map(renderCard)}</div>, false)
+                    ) : effectiveGroupKey === 'none' ? (
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">{pagedFlat.map(renderCard)}</div>
+                    ) : cardGroups.map(g => (
+                        <div key={g.key} className="mb-4">
+                            <div className="mb-2 flex items-center gap-2 border-b border-slate-200 pb-1" style={g.color ? { borderLeft: `3px solid ${g.color}`, paddingLeft: 6 } : undefined}>
+                                <span className="text-xs font-semibold text-gray-800">{g.label}</span>
+                                <Badge colorScheme="gray">{g.rows.length}</Badge>
+                                <span className="text-[11px] tabular-nums text-gray-500">{fmtCurrency(g.rows.reduce((s, r) => s + (r.src.unit_value != null ? r.value : 0), 0), baseCurrency)}</span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">{g.rows.map(renderCard)}</div>
+                        </div>
+                    ))}
+                </div>
+            ) : splitActive ? (
+                renderSplit(rows => renderTable(rows, false, 'max-h-[60vh]'), true)
+            ) : (
+                renderTable(effectiveGroupKey === 'none' ? pagedFlat : null, true)
             )}
 
             {pagination}

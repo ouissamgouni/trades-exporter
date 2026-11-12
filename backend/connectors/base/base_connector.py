@@ -20,6 +20,22 @@ from backend.db.models import NormalizedTransaction, ensure_utc
 
 log = configure_logging("base_connector")
 
+class _FetchComplete:
+    """Hub marker yielded as normalized item once a child connector yielded its last item."""
+
+    def __repr__(self):
+        return "FETCH_COMPLETE"
+
+    def __bool__(self):
+        # Falsy so consumers guarding with `if normalized_item:` never process it
+        return False
+
+
+FETCH_COMPLETE = _FetchComplete()
+
+# CCXT unified transfer statuses for which no funds moved
+TERMINAL_FAILED_TRANSFER_STATUSES = frozenset({"canceled", "cancelled", "failed", "rejected"})
+
 
 @dataclass
 class BalanceEntry:
@@ -262,6 +278,18 @@ class BaseConnector(ABC):
                 Single transaction or generator yielding multiple transactions
         """
 
+    def is_settled_transfer(self, raw_item: dict, kind: str) -> bool:
+        """True for 'ok'; False for terminal non-success (canceled/failed: nothing moved); raises otherwise."""
+        status = str(raw_item.get("status", "")).lower()
+        if status == "ok":
+            return True
+        if status in TERMINAL_FAILED_TRANSFER_STATUSES:
+            log.info(
+                f"⏭️ [{self.connector_name}] Ignoring {status} {kind.lower()} {raw_item.get('id', 'unknown')}"
+            )
+            return False
+        raise ValueError(f"{kind} status is not 'ok': {status}")
+
     # ------------------------------------------------------------------
     # Balance API (opt-in)
     # ------------------------------------------------------------------
@@ -499,6 +527,7 @@ class BaseConnector(ABC):
 
         history_cutoff = None if self._renormalize_mode else self._history_cutoff()
         skipped_before_cutoff = 0
+        ignored_count = 0
 
         item_count = 0
         # Use _yield_raws() generator which handles test mode automatically
@@ -513,6 +542,12 @@ class BaseConnector(ABC):
                     result if isinstance(result, types.GeneratorType) else [result]
                 )
                 for normalized in results:
+                    if normalized is FETCH_COMPLETE:
+                        yield (raw_item, normalized, None)
+                        continue
+                    if normalized is None:
+                        ignored_count += 1
+                        continue
                     if (
                         history_cutoff
                         and normalized is not None
@@ -532,6 +567,11 @@ class BaseConnector(ABC):
 
         if item_count == 0:
             log.warning(f"⚠️ [{self.connector_name}] No data fetched")
+        if ignored_count:
+            log.info(
+                f"⏭️ [{self.connector_name}] Ignored {ignored_count} raw item(s) with nothing to record "
+                f"(e.g. canceled/failed transfers)"
+            )
         if skipped_before_cutoff:
             log.info(
                 f"⏭️ [{self.connector_name}] Skipped {skipped_before_cutoff} items at or before "

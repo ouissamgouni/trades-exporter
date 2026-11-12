@@ -1,51 +1,37 @@
 import { describe, it, expect } from 'vitest'
-import { buildBridgeRows, bridgeSegments } from './ReturnBridge'
+import { compositionSegments } from './OverviewCards'
 import { splitContributors } from './ContributorsPanel'
 import { sortAccounts, accountsMismatch, isClosedAccount } from './AccountsStrip'
-import { columnValue, sumColumn, type HoldingRow } from './AssetsSection'
-import type { RangeMetrics } from './TotalReturnScorecard'
+import { columnValue, sumColumn, splitHalves, type HoldingRow } from './AssetsSection'
+import { aggregateByAccount } from './AccountPnLCard'
+import { cumulativeTwr, seriesReturnBetween } from './chartUtils'
+import { presetTooltip } from './PeriodPresets'
+import { pnlReducer, createInitialPnLState, computeContextScope } from './pnlState'
 import type { PerformerItem } from '../../hooks/useChartData'
 import type { AssetPnLRow } from './types'
-
-const metrics = (o: Partial<RangeMetrics> = {}): RangeMetrics => ({
-    totalReturn: 0, roi: 0, currentValue: 1200, costBasis: 1000, totalInvested: 1000,
-    unrealizedPnl: 200, realizedPnl: 50, taxableRealizedPnl: 40, realizedInPeriod: 30,
-    taxableRealizedInPeriod: 20, totalFees: 12, feeEntryCount: 3, costBasisInPeriod: 100,
-    unrealizedInPeriod: 80, feesInPeriod: 4, totalIncome: 15, totalWithholding: 5,
-    incomeEventCount: 2, incomeInPeriod: 6, withholdingInPeriod: 1, ...o,
-})
 
 const perf = (id: number, o: Partial<PerformerItem> = {}): PerformerItem => ({
     id, name: `P${id}`, group_type: 'asset', total_return: 0, roi_pct: 0, unrealized_pnl: 0,
     market_value: 0, cost_basis: 0, total_fees: 0, efficiency: 0, ...o,
 })
 
-describe('ReturnBridge (critical)', () => {
-    it('all-time rows: value = cost + unrealized, total return = unrealized + realized, income apart', () => {
-        const [value, ret] = buildBridgeRows(metrics(), false, 'EUR')
-        expect(value.steps.map(s => s.value)).toEqual([1000, 200, 1200])
-        expect(ret.steps.map(s => s.key)).toEqual(['unrealized', 'realized', 'total', 'income'])
-        expect(ret.steps[2].value).toBe(250)
-        expect(ret.steps[3]).toMatchObject({ kind: 'extra', value: 10 })
-        expect(ret.note?.value).toContain('12')
+describe('Composition bar (critical)', () => {
+    it('value run = cost + unrealized, realized apart after a gap', () => {
+        const { segments, valuePct } = compositionSegments(1000, 200, 50)
+        const [cost, unr, real] = segments
+        expect(cost.left).toBe(0)
+        expect(unr.left).toBeCloseTo(cost.width)
+        expect(valuePct).toBeCloseTo(cost.width + unr.width)
+        expect(real.left).toBeGreaterThan(valuePct)
+        expect(cost.width + unr.width + real.width).toBeCloseTo(98.5)
     })
 
-    it('period rows: start + cost Δ + unrealized Δ = end value', () => {
-        const [value, ret] = buildBridgeRows(metrics(), true, 'EUR')
-        const [start, costD, unrD, end] = value.steps.map(s => s.value)
-        expect(start + costD + unrD).toBeCloseTo(end)
-        expect(end).toBe(1200)
-        expect(ret.steps[2].value).toBe(110)
-        expect(ret.steps[3].value).toBe(5)
-    })
-
-    it('segments float deltas from the running total', () => {
-        const [, ret] = buildBridgeRows(metrics({ unrealizedPnl: 200, realizedPnl: -50, incomeEventCount: 0, totalIncome: 0, totalWithholding: 0 }), false, 'EUR')
-        expect(bridgeSegments(ret.steps)).toEqual([
-            { from: 0, to: 200 },
-            { from: 200, to: 150 },
-            { from: 0, to: 150 },
-        ])
+    it('negative unrealized is the hatched tail of cost; negative realized flagged', () => {
+        const { segments, valuePct } = compositionSegments(1000, -200, -50)
+        expect(segments[0].width).toBeCloseTo(valuePct)
+        expect(segments[1]).toMatchObject({ key: 'unrealized', negative: true })
+        expect(segments[0].width + segments[1].width).toBeGreaterThan(valuePct)
+        expect(segments[2]).toMatchObject({ key: 'realized', negative: true })
     })
 })
 
@@ -111,5 +97,57 @@ describe('AssetsSection columns (critical)', () => {
         const rows = [holding(asset()), holding(asset({ asset: { id: 2, symbol: 'ETH', label: null }, realized_pnl: -5, unrealized_pnl: -10 }))]
         expect(sumColumn('realized', rows, 600)).toBe(15)
         expect(sumColumn('income', rows, 600)).toBeNull()
+    })
+})
+
+describe('Time-weighted return (critical)', () => {
+    const pt = (date: string, v: number, pnl: number) => ({ date, total_value_in_base: v, unrealized_pnl: pnl, cumulative_realized_pnl: 0 })
+
+    it('ignores deposit timing (matches backend)', () => {
+        const s = cumulativeTwr([pt('2025-01-01', 100, 0), pt('2025-01-02', 110, 10), pt('2025-01-03', 210, 10), pt('2025-01-04', 231, 31)])
+        expect(s[s.length - 1].y).toBeCloseTo(21)
+        expect(s[2].y).toBeCloseTo(10)
+    })
+
+    it('benchmark return between dates forward-fills', () => {
+        const pts = [{ date: '2025-01-01', close: 100 }, { date: '2025-01-05', close: 110 }, { date: '2025-01-10', close: 121 }]
+        expect(seriesReturnBetween(pts, '2025-01-07')).toBeCloseTo(10)
+        expect(seriesReturnBetween(pts, null)).toBeCloseTo(21)
+        expect(seriesReturnBetween([], null)).toBeNull()
+    })
+
+    it('preset tooltip shows excess vs benchmark', () => {
+        expect(presetTooltip('1Y', 6.4, 11.2, { label: 'S&P 500', value: 8.1 })).toBe('1Y · ROI +6.4% · TWR +11.2% · S&P 500 +8.1% · +3.1 pp')
+    })
+})
+
+describe('Assets split + account cards (major)', () => {
+    it('splits at the midpoint, worst half from the other end', () => {
+        expect(splitHalves([5, 4, 3, 2, 1])).toEqual({ top: [5, 4, 3], bottom: [1, 2] })
+    })
+
+    it('aggregates assets per account with live-price value', () => {
+        const a = (id: number, unit: number) => ({ asset: { id, symbol: `S${id}` }, unit_value: unit, cost_basis: 0, market_value: 0, unrealized_pnl: 0, lot_count: 1 })
+        const bal = new Map([
+            [1, [{ account_id: 7, account_name: 'X', qty: 2, cost_basis_in_base: 10, avg_unit_cost_in_base: 5, lot_count: 1 }]],
+            [2, [{ account_id: 7, account_name: 'X', qty: 1, cost_basis_in_base: 4, avg_unit_cost_in_base: 4, lot_count: 2 }]],
+        ])
+        const [row] = aggregateByAccount([a(1, 10), a(2, 3)], bal)
+        expect(row).toMatchObject({ account_id: 7, asset_count: 2, total_market_value: 23, total_cost_basis: 14, total_unrealized_pnl: 9, total_lot_count: 3 })
+    })
+})
+
+describe('Multi-account scope (critical)', () => {
+    it('toggles accounts into one scope and back to portfolio', () => {
+        let st = createInitialPnLState('EUR', 1, [])
+        st = pnlReducer(st, { type: 'TOGGLE_ACCOUNT_SCOPE', accountId: 3, name: 'Binance' })
+        st = pnlReducer(st, { type: 'TOGGLE_ACCOUNT_SCOPE', accountId: 5, name: 'Degiro' })
+        expect(computeContextScope(st.drill, 'all').accountIds).toEqual([3, 5])
+        expect(st.drill.breadcrumbs.map(b => b.label)).toEqual(['Portfolio', 'Accounts: Binance, Degiro'])
+        st = pnlReducer(st, { type: 'TOGGLE_ACCOUNT_SCOPE', accountId: 3, name: 'Binance' })
+        expect(computeContextScope(st.drill, 'all').accountIds).toEqual([5])
+        expect(st.drill.entityLabel).toBe('Degiro')
+        st = pnlReducer(st, { type: 'TOGGLE_ACCOUNT_SCOPE', accountId: 5, name: 'Degiro' })
+        expect(computeContextScope(st.drill, 'all').level).toBe('portfolio')
     })
 })

@@ -2,8 +2,7 @@
  * TotalReturnScorecard
  *
  * Unified period-aware P&L overview:
- * - TimeframeIndicators — hero (total return, gains/losses/net) + return bridge + accounts slot
- *   + period chart and contributors
+ * - TimeframeIndicators — overview cards + accounts slot + contributors (3/5) and period chart (2/5)
  *
  * For "All" range: uses authoritative summary from the P&L engine.
  * For specific ranges (1Y, 6M, etc.): computes deltas from the timeline.
@@ -16,10 +15,10 @@ import { Badge } from '../ui/primitives';
 import { FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import { LuBanknote } from 'react-icons/lu';
 import { InfoTip, TERM_HELP } from './pnlTerms';
-import { ReturnBridge, buildBridgeRows } from './ReturnBridge';
+import { OverviewCards } from './OverviewCards';
 import { ContributorsPanel } from './ContributorsPanel';
 import { PeriodChartPanel } from './PeriodChartPanel';
-import type { TimelinePoint, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy } from '../../hooks/useChartData';
+import type { TimelinePoint, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy, ReturnMetricsRange } from '../../hooks/useChartData';
 import type { DimensionWithCategories } from '../../types';
 import type { AssetPnLRow } from './types';
 
@@ -307,8 +306,14 @@ interface TimeframeIndicatorsProps {
     assetId?: number;
     /** Asset symbol — label for price chart series */
     assetSymbol?: string;
-    /** Rendered between the bridge and the chart row (accounts strip / balance by account) */
+    /** Rendered between the cards and the chart row (accounts strip / balance by account) */
     accountsSlot?: React.ReactNode;
+    /** TWR / IRR for the selected range */
+    returnMetrics?: ReturnMetricsRange | null;
+    /** Benchmark lines inside the Total return card */
+    benchmarkSlot?: React.ReactNode;
+    /** Page-wide main benchmark ticker for the performance chart */
+    mainBenchmark?: string;
 }
 
 export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
@@ -345,6 +350,9 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     assetId,
     assetSymbol,
     accountsSlot,
+    returnMetrics,
+    benchmarkSlot,
+    mainBenchmark,
 }) => {
     const periodLabel = RANGES.find(r => r.key === range)?.label ?? 'All';
     const isPeriod = range !== 'all';
@@ -429,10 +437,19 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
         return [...(rangeData?.top_performers ?? []), ...(rangeData?.flop_performers ?? [])];
     }, [performersData, periodSummaryData, range]);
 
-    const bridgeRows = useMemo(
-        () => (metrics ? buildBridgeRows(metrics, isPeriod, baseCurrency, { onMetricClick, onFeesClick, onIncomeClick }) : []),
-        [metrics, isPeriod, baseCurrency, onMetricClick, onFeesClick, onIncomeClick],
-    );
+    const startValue = useMemo(() => {
+        const days = RANGES.find(r => r.key === range)?.days;
+        if (!days || !points.length) return null;
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        let v: number | null = null;
+        for (const p of points) {
+            if (p.date > cutoffStr) break;
+            v = p.total_value_in_base;
+        }
+        return v ?? points[0].total_value_in_base;
+    }, [points, range]);
 
     // Unified performer click: prefer onPerformerClick, fallback to type-specific handlers
     const handlePerformerClick = (p: BackendPerformerItem) => {
@@ -450,7 +467,9 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
 
     const gainsTotal = performersData?.gains_total;
     const lossesTotal = performersData?.losses_total;
-    const netTotal = performersData?.net_total;
+    const assetCounts = groupBy === 'asset' && performersData
+        ? { gains: contributorItems.filter(p => p.total_return > 0).length, losses: contributorItems.filter(p => p.total_return < 0).length }
+        : null;
 
     const sideContent = hidePerformers
         ? performerSlot ?? null
@@ -507,114 +526,50 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 </div>
             ) : metrics ? (
                 <>
-                    {/* Header: total return + gains / losses / net */}
-                    <OverviewHeader
-                        totalReturn={metrics.totalReturn}
-                        roi={metrics.roi}
-                        baseCurrency={baseCurrency}
+                    <OverviewCards
+                        metrics={metrics}
+                        isPeriod={isPeriod}
                         periodLabel={periodLabel}
+                        baseCurrency={baseCurrency}
                         isLiveLoading={isLiveLoading}
+                        returnMetrics={returnMetrics}
                         gains={gainsTotal}
                         losses={lossesTotal}
-                        net={netTotal}
+                        gainCount={assetCounts?.gains}
+                        lossCount={assetCounts?.losses}
                         isTotalsLoading={isPerformersLoading}
-                        onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
+                        startValue={startValue}
+                        assets={assetsProp}
+                        benchmarkSlot={benchmarkSlot}
+                        onFeesClick={onFeesClick}
+                        onIncomeClick={onIncomeClick}
                     />
-
-                    <div className="mt-3">
-                        <ReturnBridge rows={bridgeRows} baseCurrency={baseCurrency} isLiveLoading={isLiveLoading} />
-                    </div>
 
                     {accountsSlot && <div className="mt-3">{accountsSlot}</div>}
 
-                    {/* Chart (60%) + contributors / custom slot (40%) */}
+                    {/* Contributors (3/5) + chart (2/5) */}
                     <div className={`mt-3 grid grid-cols-1 items-start gap-3 ${sideContent ? 'lg:grid-cols-5' : ''}`}>
-                        <div className={`border border-slate-200 bg-white p-2 ${sideContent ? 'lg:col-span-3' : ''}`}>
+                        {sideContent && <div className="lg:col-span-3">{sideContent}</div>}
+                        <div className={`border border-slate-200 bg-white p-2 ${sideContent ? 'lg:col-span-2' : ''}`}>
                             <PeriodChartPanel
-                                points={points}
-                                baseCurrency={baseCurrency}
-                                range={range}
-                                isLoading={isLoading}
-                                versionId={versionId}
-                                assets={assetsProp}
-                                contextLabel={contextLabel}
-                                assetId={assetId}
-                                assetSymbol={assetSymbol}
-                            />
+                                    points={points}
+                                    baseCurrency={baseCurrency}
+                                    range={range}
+                                    isLoading={isLoading}
+                                    versionId={versionId}
+                                    assets={assetsProp}
+                                    contextLabel={contextLabel}
+                                    assetId={assetId}
+                                    assetSymbol={assetSymbol}
+                                    mainBenchmark={mainBenchmark}
+                                />
                         </div>
-                        {sideContent && <div className="lg:col-span-2">{sideContent}</div>}
                     </div>
                 </>
             ) : (
                 <div className="text-xs text-gray-400">No data for this period</div>
             )}
 
-        </div>
-    );
-};
-
-/** Hero: total return + ROI, with asset-level gains / losses / net on the right. */
-export const OverviewHeader: React.FC<{
-    totalReturn: number;
-    roi: number;
-    baseCurrency: string;
-    periodLabel: string;
-    isLiveLoading?: boolean;
-    gains?: number;
-    losses?: number;
-    net?: number;
-    isTotalsLoading?: boolean;
-    compact?: boolean;
-    onClick?: () => void;
-}> = ({ totalReturn, roi, baseCurrency, periodLabel, isLiveLoading, gains, losses, net, isTotalsLoading, compact, onClick }) => {
-    const positive = totalReturn >= 0;
-    const Icon = positive ? FiTrendingUp : FiTrendingDown;
-    const hasTotals = gains != null && losses != null;
-    return (
-        <div className={`flex flex-wrap items-center gap-x-8 gap-y-2 ${compact ? '' : 'border-b border-slate-100 pb-3'}`} data-testid="overview-header">
-            <div className={onClick ? 'cursor-pointer' : ''} onClick={onClick}>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                    Total return · {periodLabel}
-                </div>
-                <div className="flex items-center gap-2">
-                    <Icon size={compact ? 16 : 22} className={isLiveLoading ? 'text-gray-300' : positive ? 'text-green-600' : 'text-red-600'} />
-                    <span className={`${compact ? 'text-xl' : 'text-3xl'} font-bold tabular-nums ${isLiveLoading ? 'text-gray-300' : positive ? 'text-green-600' : 'text-red-600'}`}>
-                        {isLiveLoading ? '…' : fmtCurrencySigned(totalReturn, baseCurrency)}
-                    </span>
-                    {!isLiveLoading && (
-                        <Badge colorScheme={roi >= 0 ? 'green' : 'red'} className="px-2 text-sm">
-                            {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
-                        </Badge>
-                    )}
-                </div>
-            </div>
-            {(hasTotals || isTotalsLoading) && (
-                <div className="ml-auto flex items-center gap-6">
-                    {isTotalsLoading || !hasTotals ? (
-                        <div className="h-10 w-64 animate-pulse bg-slate-50" />
-                    ) : (
-                        <>
-                            <div className="flex flex-col">
-                                <span className="text-[11px] font-medium text-gray-500">Gains</span>
-                                <span className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums text-green-600`}>▲ {fmtCurrencySigned(gains!, baseCurrency)}</span>
-                            </div>
-                            <div className="flex flex-col">
-                                <span className="text-[11px] font-medium text-gray-500">Losses</span>
-                                <span className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums text-red-600`}>▼ {fmtCurrencySigned(losses!, baseCurrency)}</span>
-                            </div>
-                            <div className="flex flex-col border-l border-slate-200 pl-6">
-                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500">
-                                    Net
-                                    <InfoTip text="Sum of per-asset returns (base currency excluded). Same whatever the grouping." size={10} />
-                                </span>
-                                <span className={`${compact ? 'text-sm' : 'text-lg'} font-bold tabular-nums ${(net ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    {fmtCurrencySigned(net ?? 0, baseCurrency)}
-                                </span>
-                            </div>
-                        </>
-                    )}
-                </div>
-            )}
         </div>
     );
 };

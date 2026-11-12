@@ -93,6 +93,13 @@ interface AccountsStripProps {
     overviewValue?: number | null;
     sparklines?: Record<string, SparklinePoint[]>;
     onAccountClick?: (accountId: number, name: string) => void;
+    /** Accounts in the current (multi-)account scope */
+    selectedIds?: number[];
+    /** Checkbox / Cmd-Ctrl-click: add or remove the account from the scope */
+    onToggleAccount?: (accountId: number, name: string) => void;
+    /** TWR % per account (keyed by id) */
+    twr?: Record<string, number | null>;
+    benchmark?: { label: string; returnPct: number | null };
 }
 
 export const AccountsStrip: React.FC<AccountsStripProps> = ({
@@ -104,6 +111,10 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
     overviewValue,
     sparklines,
     onAccountClick,
+    selectedIds = [],
+    onToggleAccount,
+    twr,
+    benchmark,
 }) => {
     const [prefs, setPrefs] = useState<StripPrefs>(loadPrefs);
     useEffect(() => {
@@ -125,6 +136,7 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
         <div className="border border-slate-200 bg-white p-3" data-testid="accounts-strip">
             <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold text-gray-700">Accounts</span>
+                {onToggleAccount && <span className="text-[10px] text-gray-400">Tick or ⌘/Ctrl-click to combine accounts</span>}
                 <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
                 <span className="text-xs text-gray-500">
                     {visible.length} account{visible.length !== 1 ? 's' : ''} · <span className="font-semibold tabular-nums text-gray-700">{fmtCurrency(totalValue, baseCurrency)}</span>
@@ -184,15 +196,34 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
                         const weight = totalValue > 0 ? (p.market_value / totalValue) * 100 : 0;
                         const positive = p.total_return >= 0;
                         const series = sparklines?.[String(p.id)] ?? [];
+                        const selected = selectedIds.includes(p.id);
+                        const accTwr = twr?.[String(p.id)];
+                        const clickable = !!onAccountClick || !!onToggleAccount;
                         return (
                             <div
                                 key={p.id}
-                                className={`flex w-[230px] shrink-0 flex-col gap-1.5 border border-slate-200 bg-white p-2.5 transition-colors ${onAccountClick ? 'cursor-pointer hover:border-blue-300' : ''} ${isClosedAccount(p) ? 'opacity-70' : ''}`}
+                                className={`flex w-[230px] shrink-0 flex-col gap-1.5 border p-2.5 transition-colors ${selected ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'} ${clickable ? 'cursor-pointer hover:border-blue-300' : ''} ${isClosedAccount(p) ? 'opacity-70' : ''}`}
                                 style={{ borderLeft: `3px solid ${color}` }}
-                                onClick={onAccountClick ? () => onAccountClick(p.id, p.name) : undefined}
+                                onClick={clickable ? (e) => {
+                                    if (onToggleAccount && (e.metaKey || e.ctrlKey)) onToggleAccount(p.id, p.name);
+                                    else onAccountClick?.(p.id, p.name);
+                                } : undefined}
+                                data-testid={`account-card-${p.id}`}
                             >
                                 <div className="flex items-center justify-between gap-2">
-                                    <span className="truncate text-xs font-semibold text-gray-700" title={p.name}>{p.name}</span>
+                                    <span className="flex min-w-0 items-center gap-1.5">
+                                        {onToggleAccount && (
+                                            <input
+                                                type="checkbox"
+                                                checked={selected}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onChange={() => onToggleAccount(p.id, p.name)}
+                                                className="shrink-0 accent-blue-500"
+                                                aria-label={`Include ${p.name} in scope`}
+                                            />
+                                        )}
+                                        <span className="truncate text-xs font-semibold text-gray-700" title={p.name}>{p.name}</span>
+                                    </span>
                                     <span className="shrink-0 text-[10px] tabular-nums text-gray-500">{weight.toFixed(1)}%</span>
                                 </div>
                                 <div className="h-1 w-full bg-slate-100">
@@ -219,6 +250,16 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
                                         baseCurrency={baseCurrency}
                                         height={4}
                                     />
+                                )}
+                                {accTwr != null && (
+                                    <div className="flex items-center justify-between text-[10px] text-gray-500" title="Time-weighted return over the period (weekly points)">
+                                        <span>TWR <span className={`font-semibold tabular-nums ${accTwr >= 0 ? 'text-green-600' : 'text-red-600'}`}>{accTwr >= 0 ? '+' : ''}{accTwr.toFixed(1)}%</span></span>
+                                        {benchmark?.returnPct != null && (
+                                            <span className={`tabular-nums ${accTwr - benchmark.returnPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                vs {benchmark.label} {accTwr - benchmark.returnPct >= 0 ? '+' : ''}{(accTwr - benchmark.returnPct).toFixed(1)} pp
+                                            </span>
+                                        )}
+                                    </div>
                                 )}
                                 <div className="flex flex-wrap gap-x-2 text-[10px] tabular-nums text-gray-500">
                                     <span>Unr. <span className={p.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}>{fmtCurrencySigned(p.unrealized_pnl, baseCurrency)}</span></span>

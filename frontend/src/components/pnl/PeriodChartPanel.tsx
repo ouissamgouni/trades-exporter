@@ -6,14 +6,14 @@
  * Auto-syncs to the selected period range.
  * Includes a fullscreen button that opens a modal with zoom controls.
  */
-import React, { useMemo, useState } from 'react';
-import { FiAlertTriangle, FiMaximize2 } from 'react-icons/fi';
-import type { TimelinePoint } from '../../hooks/useChartData';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { FiAlertTriangle, FiChevronDown, FiMaximize2 } from 'react-icons/fi';
+import { BENCHMARK_PRESETS, type TimelinePoint } from '../../hooks/useChartData';
 import { usePriceGaps } from '../../hooks/usePriceGaps';
 import type { Range } from './TotalReturnScorecard';
 import type { AssetPnLRow } from './types';
 import { rangeToZoom, ZOOM_PRESETS, type ZoomPreset } from './chartUtils';
-import { PortfolioPerformanceChart } from './PortfolioPerformanceChart';
+import { PortfolioPerformanceChart, type PerformanceBasis } from './PortfolioPerformanceChart';
 import { CostBasisVsMarketValueChart } from './CostBasisVsMarketValueChart';
 import { AssetPerformanceComparison } from './AssetPerformanceComparison';
 import { ChartFullscreenModal } from './ChartFullscreenModal';
@@ -39,6 +39,20 @@ interface PeriodChartPanelProps {
     assetId?: number;
     /** Asset symbol — used as the price chart series label */
     assetSymbol?: string;
+    /** Page-wide main benchmark: shaded against the portfolio line */
+    mainBenchmark?: string;
+}
+
+const BENCHMARKS_KEY = 'pnl.chartBenchmarks';
+const BASIS_KEY = 'pnl.chartBasis';
+
+function loadBenchmarks(): string[] | null {
+    try {
+        const v = JSON.parse(localStorage.getItem(BENCHMARKS_KEY) ?? 'null');
+        return Array.isArray(v) ? v.filter((t: unknown) => BENCHMARK_PRESETS.some(b => b.ticker === t)) : null;
+    } catch {
+        return null;
+    }
 }
 
 export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
@@ -52,8 +66,28 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
     error,
     assetId,
     assetSymbol,
+    mainBenchmark = '^GSPC',
 }) => {
     const [chartMode, setChartMode] = useState<ChartMode>('performance');
+    const [basis, setBasis] = useState<PerformanceBasis>(() => (localStorage.getItem(BASIS_KEY) === 'roi' ? 'roi' : 'twr'));
+    const [storedBenchmarks, setStoredBenchmarks] = useState<string[] | null>(loadBenchmarks);
+    const benchmarks = storedBenchmarks ?? [mainBenchmark];
+    const [benchOpen, setBenchOpen] = useState(false);
+    const benchRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => { localStorage.setItem(BASIS_KEY, basis); }, [basis]);
+    useEffect(() => {
+        if (storedBenchmarks) localStorage.setItem(BENCHMARKS_KEY, JSON.stringify(storedBenchmarks));
+    }, [storedBenchmarks]);
+    useEffect(() => {
+        if (!benchOpen) return;
+        const close = (e: MouseEvent) => { if (!benchRef.current?.contains(e.target as Node)) setBenchOpen(false); };
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, [benchOpen]);
+
+    const toggleBenchmark = (ticker: string) =>
+        setStoredBenchmarks(benchmarks.includes(ticker) ? benchmarks.filter(t => t !== ticker) : [...benchmarks, ticker]);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [fsZoom, setFsZoom] = useState<ZoomPreset>(rangeToZoom(range));
 
@@ -111,12 +145,55 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                             </Badge>
                         ))}
                     </div>
-                    <div
-                        className="cursor-pointer text-slate-400 hover:text-blue-500"
-                        onClick={handleOpenFullscreen}
-                        title="Fullscreen"
-                    >
-                        <FiMaximize2 size={12} />
+                    <div className="flex items-center gap-1.5">
+                        {chartMode === 'performance' && (
+                            <>
+                                <div className="flex">
+                                    {(['twr', 'roi'] as PerformanceBasis[]).map(b => (
+                                        <button
+                                            key={b}
+                                            type="button"
+                                            onClick={() => setBasis(b)}
+                                            title={b === 'twr' ? 'Time-weighted return: unaffected by deposits/withdrawals' : 'Return on cost (moves with deposits)'}
+                                            className={`h-5 border px-1.5 text-[10px] font-semibold ${basis === b ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                                        >
+                                            {b.toUpperCase()}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="relative" ref={benchRef}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBenchOpen(v => !v)}
+                                        className="flex h-5 items-center gap-1 border border-slate-200 bg-white px-1.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                                        aria-expanded={benchOpen}
+                                    >
+                                        Benchmarks ({benchmarks.length}) <FiChevronDown size={10} />
+                                    </button>
+                                    {benchOpen && (
+                                        <div className="absolute right-0 top-6 z-30 w-[200px] border border-slate-200 bg-white p-2 shadow-lg">
+                                            {BENCHMARK_PRESETS.map(b => (
+                                                <label key={b.ticker} className="flex cursor-pointer items-center gap-1.5 py-0.5 text-[11px] text-gray-700">
+                                                    <input type="checkbox" checked={benchmarks.includes(b.ticker)} onChange={() => toggleBenchmark(b.ticker)} className="accent-blue-500" />
+                                                    {b.label}
+                                                    {b.ticker === mainBenchmark && <span className="ml-auto text-[9px] text-gray-400">main</span>}
+                                                </label>
+                                            ))}
+                                            <div className="mt-1 border-t border-slate-100 pt-1 text-[9px] text-gray-400">Converted to {baseCurrency}</div>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                        <button
+                            type="button"
+                            className="text-slate-400 hover:text-blue-500"
+                            onClick={handleOpenFullscreen}
+                            title="Fullscreen"
+                            aria-label="Fullscreen chart"
+                        >
+                            <FiMaximize2 size={12} />
+                        </button>
                     </div>
                 </div>
 
@@ -138,8 +215,11 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                         isLoading={isLoading}
                         zoom={periodZoom}
                         hideControls
-                        height="200px"
+                        height="220px"
                         contextLabel={contextLabel}
+                        benchmarks={benchmarks}
+                        mainBenchmark={mainBenchmark}
+                        basis={basis}
                     />
                 ) : chartMode === 'cost-vs-value' ? (
                     <CostBasisVsMarketValueChart
@@ -220,6 +300,9 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                             onZoomChange={setFsZoom}
                             height="calc(90vh - 200px)"
                             contextLabel={contextLabel}
+                            benchmarks={benchmarks}
+                            mainBenchmark={mainBenchmark}
+                            basis={basis}
                         />
                     )
                 ) : chartMode === 'cost-vs-value' ? (

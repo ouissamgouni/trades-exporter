@@ -414,6 +414,13 @@ class DatabaseConnectorHub(BaseHubConnector):
                     "error": detailed_error,
                 })
             finally:
+                if connector_id:
+                    queue.put({
+                        "connector_name": connector_key,
+                        "_connector_id": connector_id,
+                        "_master_source": connector_key,
+                        "_fetch_complete": True,
+                    })
                 queue.put(None)  # Signal this connector is done
 
         # Start all connector threads with lazy initialization

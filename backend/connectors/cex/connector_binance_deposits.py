@@ -19,6 +19,7 @@ from backend.connectors.base.connector_exceptions import (
 from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction
 from backend.core.network_normalizer import normalize_network
+from backend.connectors.cex.binance_common import iter_transfer_history
 
 log = configure_logging("binance_deposits")
 
@@ -95,7 +96,7 @@ class ConnectorBinanceDeposits(BaseConnector):
             raise
 
     def get_deposits(
-        self, since: int = None, limit: int = None
+        self, since: int = None, limit: int = None, params: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
         """
         Fetch deposit history from Binance using CCXT.
@@ -111,8 +112,10 @@ class ConnectorBinanceDeposits(BaseConnector):
             ConnectorAPIError: On API failures
         """
         try:
-            deposits = self.exchange.fetch_deposits(code=None, since=since, limit=limit)
-            log.info(f"✅ Fetched {len(deposits)} deposits from Binance")
+            deposits = self.exchange.fetch_deposits(
+                code=None, since=since, limit=limit, params=params or {}
+            )
+            log.debug(f"Fetched {len(deposits)} deposits from Binance (since={since})")
             return deposits
         except Exception as e:
             error_str = str(e).lower()
@@ -202,9 +205,8 @@ class ConnectorBinanceDeposits(BaseConnector):
         """
         from backend.db.models import NormalizedTransaction
 
-        status = str(raw_item.get("status", "")).lower()
-        if status != "ok":
-            raise ValueError(f"Deposit status is not 'ok': {status}")
+        if not self.is_settled_transfer(raw_item, "Deposit"):
+            return None
 
         # Extract deposit data from CCXT format
         deposit_id = str(raw_item.get("id", ""))
@@ -273,12 +275,10 @@ class ConnectorBinanceDeposits(BaseConnector):
         from typing import Generator
         
         log.info("🔄 Fetching deposits from Binance API using CCXT...")
-        all_deposits = self.get_deposits(since=self.since_timestamp_ms)
-        if not all_deposits:
-            log.warning("⚠️ No deposits fetched from Binance")
-            return
-        
-        for deposit in all_deposits:
-            yield deposit
+        total = 0
+        for item in iter_transfer_history(self.get_deposits, self.since_timestamp_ms):
+            total += 1
+            yield item
+        log.info(f"✅ Fetched {total} deposits from Binance")
 
     # Inherits yield_normalized from BaseConnector

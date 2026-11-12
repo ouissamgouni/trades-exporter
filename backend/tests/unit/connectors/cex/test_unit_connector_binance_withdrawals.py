@@ -131,7 +131,7 @@ class TestBinanceWithdrawalsConnector:
     @patch("backend.connectors.cex.connector_binance_withdrawals.load_credentials")
     @patch("ccxt.binance")
     def test_raw_to_normalized_skips_failed_status(self, mock_ccxt, mock_creds):
-        """Test that failed withdrawals are rejected."""
+        """Failed withdrawals moved no funds: dropped silently, not reported as errors."""
         mock_creds.return_value = {"api_key": "test_key", "api_secret": "test_secret"}
         mock_exchange = MagicMock()
         mock_ccxt.return_value = mock_exchange
@@ -149,8 +149,8 @@ class TestBinanceWithdrawalsConnector:
             "network": "eth",
         }
 
-        with pytest.raises(ValueError, match="Withdrawal status is not 'ok': failed"):
-            connector.raw_to_normalized(ccxt_withdrawal)
+        assert connector.raw_to_normalized(ccxt_withdrawal) is None
+        assert connector.raw_to_normalized({**ccxt_withdrawal, "status": "canceled"}) is None
 
     @patch("backend.connectors.cex.connector_binance_withdrawals.load_credentials")
     @patch("ccxt.binance")

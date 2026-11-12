@@ -183,7 +183,9 @@ class TestAccountSparklines:
             pt, "compute_portfolio_timeline_cached", side_effect=[[point], [empty]]
         ) as compute:
             out = pt.compute_account_sparklines(MagicMock(), 1, [4, 5])
-        assert out[4] == [{"date": "2026-11-02", "value": 120.0, "roi": 25.0}]
+        assert out[4] == [
+            {"date": "2026-11-02", "value": 120.0, "roi": 25.0, "pnl": 25.0}
+        ]
         assert out[5][0]["roi"] is None
         assert compute.call_args_list[0].kwargs["account_ids"] == [4]
         assert compute.call_args_list[0].kwargs["granularity"] == "weekly"

@@ -359,3 +359,42 @@ class TestMetricsVersionConsistency:
         assert version_resp["current_value"] == 0.0
         assert version_resp["unrealized_pnl"] == 0.0
         assert version_resp["cost_basis"] == 0.0
+
+
+class TestReturnAndBenchmarkEndpoints:
+    TIMELINE = "backend.services.pnl.portfolio_timeline.compute_portfolio_timeline_cached"
+
+    @staticmethod
+    def _timeline():
+        from backend.services.pnl.portfolio_timeline import TimelinePoint
+
+        return [
+            TimelinePoint(date="2025-01-01", total_value_in_base=100.0, cost_basis_in_base=100.0,
+                          unrealized_pnl=0.0, cumulative_realized_pnl=0.0),
+            TimelinePoint(date="2026-01-01", total_value_in_base=110.0, cost_basis_in_base=100.0,
+                          unrealized_pnl=10.0, cumulative_realized_pnl=0.0),
+        ]
+
+    def test_return_metrics_per_range(self, client, mock_session):
+        with patch(self.TIMELINE, return_value=self._timeline()):
+            resp = client.get("/pnl/versions/1/return-metrics")
+        assert resp.status_code == 200
+        assert abs(resp.json()["ranges"]["all"]["twr_pct"] - 10.0) < 1e-6
+
+    def test_return_metrics_unknown_version(self, client, mock_session):
+        mock_session.get.return_value = None
+        assert client.get("/pnl/versions/999/return-metrics").status_code == 404
+
+    def test_benchmark_comparison(self, client, mock_session):
+        bench = [{"date": "2025-01-01", "close": 50.0}, {"date": "2026-01-01", "close": 52.5}]
+        with patch(self.TIMELINE, return_value=self._timeline()), \
+                patch("backend.api.routes.pnl._load_benchmark_points", return_value=bench):
+            resp = client.get("/pnl/versions/1/benchmark-comparison?ticker=^STOXX50E&base_currency=EUR")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["converted"] is True
+        assert abs(data["benchmark_return_pct"] - 5.0) < 1e-6
+        assert abs(data["excess_pp"] - 5.0) < 1e-6
+
+    def test_benchmark_comparison_rejects_unknown_ticker(self, client, mock_session):
+        assert client.get("/pnl/versions/1/benchmark-comparison?ticker=EVIL").status_code == 400
