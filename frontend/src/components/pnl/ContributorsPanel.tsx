@@ -1,11 +1,12 @@
 /**
  * ContributorsPanel — Best and Worst side by side, ranked by the chosen metric.
- * Header shows the net of the current grouping with total gains and losses.
+ * For Return / Unrealized, a Net + Gains│Losses bar sits under the selectors.
  */
 import React, { useContext, useMemo, useState } from 'react';
 import { FiTrendingDown, FiTrendingUp } from 'react-icons/fi';
 import { LuInfo } from 'react-icons/lu';
 import { Tooltip } from '../ui/tooltip';
+import { GainsLossesBar } from './GainsLossesBar';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import type { GroupBy, PerformerItem } from '../../hooks/useChartData';
@@ -97,7 +98,6 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
 
     const totalCost = items.reduce((acc, p) => acc + (p.cost_basis ?? 0), 0);
     const pctOfCost = (v: number) => (totalCost > 0 ? fmtPct((v / totalCost) * 100) : null);
-    const summable = metric !== 'Eff';
     const showPct = display === '%' && metric === 'TR';
 
     const renderRow = (p: PerformerItem, rank: number, positive: boolean) => {
@@ -140,7 +140,6 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
 
     const column = (positive: boolean) => {
         const list = positive ? positives : negatives;
-        const total = positive ? gains : losses;
         return (
             <div className="min-w-0">
                 <div className="mb-1 flex items-center justify-between gap-2 border-b border-slate-100 pb-1">
@@ -149,11 +148,6 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
                         {positive ? 'Best' : 'Worst'}
                         <span className="text-[10px] font-normal text-gray-400">{list.length}</span>
                     </span>
-                    {summable && list.length > 0 && (
-                        <span className="text-[10px] text-gray-500">
-                            Total <span className={`font-semibold tabular-nums ${positive ? 'text-green-600' : 'text-red-600'}`}>{showPct ? pctOfCost(total) : fmtMetric(total, metric, baseCurrency)}</span>
-                        </span>
-                    )}
                 </div>
                 {list.length === 0 ? (
                     <div className="py-2 text-[11px] text-gray-400">{positive ? 'No positive contributions' : 'No negative contributions'}</div>
@@ -168,27 +162,8 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
 
     return (
         <div className="border border-slate-200 bg-white p-3" data-testid="contributors-panel">
-            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-semibold text-gray-700">Contributors</span>
-                    <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
-                </div>
-                {summable && !isLoading && (
-                    <div className="flex flex-wrap items-baseline gap-x-4" data-testid="contributors-totals">
-                        <span className="text-xs text-gray-500">
-                            Gains <span className="font-bold tabular-nums text-green-600">{showPct ? pctOfCost(gains) : fmtMetric(gains, metric, baseCurrency)}</span>
-                        </span>
-                        <span className="text-xs text-gray-500">
-                            Losses <span className="font-bold tabular-nums text-red-600">{showPct ? pctOfCost(losses) : fmtMetric(losses, metric, baseCurrency)}</span>
-                        </span>
-                        <span className="border-l border-slate-200 pl-4 text-xs text-gray-500">
-                            Net <span className={`text-lg font-bold tabular-nums ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>{showPct ? pctOfCost(net) : fmtMetric(net, metric, baseCurrency)}</span>
-                        </span>
-                    </div>
-                )}
-            </div>
-
             <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
                 <div className="flex flex-wrap">
                     <Seg active={groupBy === 'asset'} onClick={() => onGroupByChange?.('asset')}>Asset</Seg>
                     <Seg active={groupBy === 'account'} onClick={() => onGroupByChange?.('account')}>Account</Seg>
@@ -225,6 +200,21 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
                     />
                 </label>
             </div>
+
+            {(metric === 'TR' || metric === 'U') && !isLoading && positives.length + negatives.length > 0 && (
+                <div className="mb-3 flex items-center gap-3" data-testid="contributors-totals">
+                    <span className="whitespace-nowrap text-xs text-gray-500">
+                        Net <span className={`text-lg font-bold tabular-nums ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>{showPct ? pctOfCost(net) : fmtMetric(net, metric, baseCurrency)}</span>
+                    </span>
+                    <GainsLossesBar
+                        gains={gains}
+                        losses={losses}
+                        gainCount={positives.length}
+                        lossCount={negatives.length}
+                        format={(v) => (showPct ? pctOfCost(v) ?? '—' : fmtMetric(v, metric, baseCurrency))}
+                    />
+                </div>
+            )}
 
             {isLoading ? (
                 <div className="py-6 text-center text-xs text-gray-400">Loading contributors…</div>

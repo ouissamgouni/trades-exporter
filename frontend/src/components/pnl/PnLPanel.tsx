@@ -425,7 +425,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                                 onTransactionClick={handleTransactionClick}
                                 onUnitClick={handleUnitClick}
                                 onPerformerClick={handlePerformerDrill}
-                                onToggleAccountScope={(accountId, name) => dispatch({ type: 'TOGGLE_ACCOUNT_SCOPE', accountId, name })}
+                                onSetAccountScope={(accounts) => dispatch({ type: 'SET_ACCOUNT_SCOPE', accounts })}
                                 onRefreshPrices={handleRefreshPrices}
                                 isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
                                 onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}

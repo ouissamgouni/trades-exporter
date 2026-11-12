@@ -454,6 +454,7 @@ export type PnLAction =
     | { type: 'DRILL_RESET' }
     | { type: 'DRILL_SET_ACCOUNT_FILTER'; accountId: number | undefined }
     | { type: 'TOGGLE_ACCOUNT_SCOPE'; accountId: number; name: string }
+    | { type: 'SET_ACCOUNT_SCOPE'; accounts: { id: number; name: string }[] }
 
     // ── Reset ──
     | { type: 'RESET_RESULTS' };
@@ -861,6 +862,12 @@ export function pnlReducer(state: PnLState, action: PnLAction): PnLState {
             const at = ids.indexOf(action.accountId);
             const nextIds = at >= 0 ? ids.filter((_, i) => i !== at) : [...ids, action.accountId];
             const nextNames = at >= 0 ? names.filter((_, i) => i !== at) : [...names, action.name];
+            return pnlReducer(state, { type: 'SET_ACCOUNT_SCOPE', accounts: nextIds.map((id, i) => ({ id, name: nextNames[i] })) });
+        }
+
+        case 'SET_ACCOUNT_SCOPE': {
+            const nextIds = action.accounts.map(a => a.id);
+            const nextNames = action.accounts.map(a => a.name);
             if (!nextIds.length) return { ...state, drill: createInitialDrillState() };
             const multi = nextIds.length > 1;
             const newDrill: DrillDownState = {

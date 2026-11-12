@@ -73,7 +73,7 @@ export interface ContextViewProps {
     onTransactionClick: (txId: number) => void;
     onUnitClick: (unitId: number) => void;
     onPerformerClick: (id: number, groupType: string, name: string) => void;
-    onToggleAccountScope: (accountId: number, name: string) => void;
+    onSetAccountScope: (accounts: { id: number; name: string }[]) => void;
     onRefreshPrices: () => void;
     isRefreshingPrices: boolean;
     onLoadAccountBalances: () => void;
@@ -89,7 +89,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
     onTransactionClick,
     onUnitClick,
     onPerformerClick,
-    onToggleAccountScope,
+    onSetAccountScope,
     onRefreshPrices,
     isRefreshingPrices,
     onLoadAccountBalances,
@@ -509,10 +509,11 @@ export const ContextView: React.FC<ContextViewProps> = ({
                         ))}
                     </div>
                     {tab === 'performance' && isMultiAsset && (
-                        <div className="flex items-center gap-2 pb-2.5 text-xs text-gray-500">
-                            <button type="button" className="hover:text-blue-600 hover:underline" onClick={() => scrollTo(overviewRef)}>Overview</button>
-                            <span>·</span>
-                            <button type="button" className="hover:text-blue-600 hover:underline" onClick={() => scrollTo(assetsRef)}>Assets ({scopedDisplayAssets.length}) ↓</button>
+                        <div className="mb-2 flex items-center gap-1 border-l border-slate-300 pl-3 text-[11px] text-gray-400" aria-label="Jump to section">
+                            <span className="mr-0.5">Jump to</span>
+                            <button type="button" className="border border-slate-200 bg-white px-1.5 py-0.5 text-gray-600 hover:border-blue-300 hover:text-blue-600" onClick={() => scrollTo(overviewRef)}>Overview</button>
+                            <button type="button" className="border border-slate-200 bg-white px-1.5 py-0.5 text-gray-600 hover:border-blue-300 hover:text-blue-600" onClick={() => document.getElementById('pnl-contributors')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Contributors</button>
+                            <button type="button" className="border border-slate-200 bg-white px-1.5 py-0.5 text-gray-600 hover:border-blue-300 hover:text-blue-600" onClick={() => scrollTo(assetsRef)}>Assets ({scopedDisplayAssets.length})</button>
                         </div>
                     )}
                     <div className="ml-auto pb-2">
@@ -582,7 +583,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                     sparklines={accountSparklines.data?.accounts}
                                     onAccountClick={(id, name) => onPerformerClick(id, 'account', name)}
                                     selectedIds={isAccountScope ? scope.accountIds : []}
-                                    onToggleAccount={onToggleAccountScope}
+                                    onApplySelection={onSetAccountScope}
                                     twr={accountSparklines.data?.twr}
                                     benchmark={{ label: mainBenchmarkLabel, returnPct: benchmarkReturns[timeframeRange] }}
                                 />

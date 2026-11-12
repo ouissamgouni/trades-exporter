@@ -236,6 +236,13 @@ export function computeMetricsForRange(
 
 // AllTimeIndicators removed — merged into TimeframeIndicators with range="all"
 
+const SectionDivider: React.FC<{ title: string }> = ({ title }) => (
+    <div className="mb-2 mt-5 flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</span>
+        <div className="h-px flex-1 bg-slate-300" />
+    </div>
+);
+
 // ═══════════════════════════════════════════════════════════════════
 // TimeframeIndicators — unified period overview (Level 0)
 // ═══════════════════════════════════════════════════════════════════
@@ -543,12 +550,21 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                         benchmarkSlot={benchmarkSlot}
                         onFeesClick={onFeesClick}
                         onIncomeClick={onIncomeClick}
+                        onContributorsClick={hidePerformers ? undefined : () => document.getElementById('pnl-contributors')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                     />
 
-                    {accountsSlot && <div className="mt-3">{accountsSlot}</div>}
+                    {accountsSlot && (
+                        <>
+                            <SectionDivider title="Accounts" />
+                            {accountsSlot}
+                        </>
+                    )}
 
+                    <div id="pnl-contributors" className="scroll-mt-32">
+                        <SectionDivider title={hidePerformers ? 'Performance chart' : 'Contributors & performance chart'} />
+                    </div>
                     {/* Contributors (3/5) + chart (2/5) */}
-                    <div className={`mt-3 grid grid-cols-1 items-start gap-3 ${sideContent ? 'lg:grid-cols-5' : ''}`}>
+                    <div className={`grid grid-cols-1 items-start gap-3 ${sideContent ? 'lg:grid-cols-5' : ''}`}>
                         {sideContent && <div className="lg:col-span-3">{sideContent}</div>}
                         <div className={`border border-slate-200 bg-white p-2 ${sideContent ? 'lg:col-span-2' : ''}`}>
                             <PeriodChartPanel
