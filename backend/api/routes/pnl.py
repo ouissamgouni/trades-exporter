@@ -11,8 +11,8 @@ Provides endpoints for:
 from collections import defaultdict
 from decimal import Decimal
 import re
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Optional, List, Dict, Any, Tuple
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
@@ -7187,10 +7187,19 @@ def get_account_sparklines(
         category_ids=parsed_category_ids,
         include_unsettled_negative=include_unsettled_negative,
     )
+    from backend.services.pnl.return_metrics import SeriesPoint, compute_return_metrics
+
+    twr = {
+        str(k): compute_return_metrics(
+            [SeriesPoint(pt["date"], pt["value"] or 0.0, pt["pnl"] or 0.0) for pt in v]
+        ).twr_pct
+        for k, v in series.items()
+    }
     return {
         "version_id": version_id,
         "period": period,
         "accounts": {str(k): v for k, v in series.items()},
+        "twr": twr,
     }
 
 
@@ -7445,6 +7454,21 @@ BENCHMARK_PRESETS: Dict[str, str] = {
     "BTC-USD": "Bitcoin",
     "ETH-USD": "Ethereum",
     "GC=F": "Gold",
+    "IWDA.AS": "MSCI World (IWDA)",
+    "URTH": "MSCI World (URTH)",
+    "^FCHI": "CAC 40",
+}
+
+BENCHMARK_CURRENCY: Dict[str, str] = {
+    "^GSPC": "USD",
+    "^IXIC": "USD",
+    "^STOXX50E": "EUR",
+    "BTC-USD": "USD",
+    "ETH-USD": "USD",
+    "GC=F": "USD",
+    "IWDA.AS": "EUR",
+    "URTH": "USD",
+    "^FCHI": "EUR",
 }
 
 # Map a Yahoo benchmark ticker to the seeded (mock) Asset symbol that provides
@@ -7496,22 +7520,62 @@ def _seeded_benchmark_points(
     return points or None
 
 
-@router.get("/benchmark-series")
-def get_benchmark_series(
-    ticker: str = Query(..., description="Yahoo Finance ticker (e.g., ^GSPC)"),
-    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
-    end_date: str = Query(..., description="End date YYYY-MM-DD"),
-    session: Session = Depends(get_session_dependency),
-):
-    """
-    Fetch daily close prices for an external benchmark index.
-
-    Returns rebased-ready daily price series. When mock mode is enabled and a
-    seeded series exists for the ticker, that deterministic series is returned
-    (demo / QA); otherwise the data is fetched live from Yahoo Finance.
-    Only whitelisted tickers are allowed.
-    """
+def _load_benchmark_points(
+    session: Session, ticker: str, start, end
+) -> List[Dict[str, Any]]:
+    """Native-currency daily closes (seeded in mock mode, else Yahoo); cached 5 min."""
     import time as _time
+
+    cache_key = (ticker, start.isoformat(), end.isoformat())
+    now = _time.time()
+    cached = _benchmark_cache.get(cache_key)
+    if cached and now - cached[0] < _BENCHMARK_CACHE_TTL:
+        return cached[1]
+
+    points = _seeded_benchmark_points(session, ticker, start, end)
+    if points is None:
+        from backend.services.price_getters.registry import get_price_getter
+
+        points = get_price_getter("yahoo_direct").get_daily_series(ticker, start, end)
+    _benchmark_cache[cache_key] = (now, points)
+    return points
+
+
+def _benchmark_in_base(
+    session: Session, ticker: str, start, end, base_currency: Optional[str]
+) -> Tuple[List[Dict[str, Any]], str, bool]:
+    """Closes converted to base currency via Yahoo FX ("{BASE}{NATIVE}=X", forward-filled)."""
+    from backend.services.price_getters.base import PriceGetterError
+
+    native = BENCHMARK_CURRENCY.get(ticker, "USD")
+    points = _load_benchmark_points(session, ticker, start, end)
+    base = (base_currency or "").upper()
+    if not base or base == native:
+        return points, native, base == native
+    try:
+        # Small lookback so the first benchmark day has a rate.
+        fx = _load_benchmark_points(
+            session, f"{base}{native}=X", start - timedelta(days=7), end
+        )
+    except PriceGetterError as e:
+        log.warning(f"Benchmark FX fetch failed for {base}{native}: {e}")
+        return points, native, False
+    if not fx:
+        return points, native, False
+
+    fx_sorted = sorted((f["date"], f["close"]) for f in fx if f.get("close"))
+    converted: List[Dict[str, Any]] = []
+    idx, rate = 0, None
+    for pt in points:
+        while idx < len(fx_sorted) and fx_sorted[idx][0] <= pt["date"]:
+            rate = fx_sorted[idx][1]
+            idx += 1
+        if rate:
+            converted.append({"date": pt["date"], "close": round(pt["close"] / rate, 4)})
+    return converted, base, True
+
+
+def _parse_benchmark_request(ticker: str, start_date: str, end_date: str):
     from datetime import date as date_cls
 
     if ticker not in BENCHMARK_PRESETS:
@@ -7520,62 +7584,201 @@ def get_benchmark_series(
             detail=f"Ticker '{ticker}' not in allowed benchmarks. "
             f"Available: {list(BENCHMARK_PRESETS.keys())}",
         )
-
     try:
-        parsed_start = date_cls.fromisoformat(start_date)
-        parsed_end = date_cls.fromisoformat(end_date)
+        return date_cls.fromisoformat(start_date), date_cls.fromisoformat(end_date)
     except ValueError:
         raise HTTPException(
             status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
         )
 
-    # Check cache
-    cache_key = (ticker, start_date, end_date)
-    now = _time.time()
-    if cache_key in _benchmark_cache:
-        cached_at, cached_data = _benchmark_cache[cache_key]
-        if now - cached_at < _BENCHMARK_CACHE_TTL:
-            return cached_data
 
-    # Deterministic seeded series (demo / mock mode) takes precedence.
-    seeded = _seeded_benchmark_points(session, ticker, parsed_start, parsed_end)
-    if seeded is not None:
-        response = {
-            "ticker": ticker,
-            "label": BENCHMARK_PRESETS[ticker],
-            "points": seeded,
-        }
-        _benchmark_cache[cache_key] = (now, response)
-        return response
+def _validate_currency(base_currency: Optional[str]) -> Optional[str]:
+    if base_currency and not (len(base_currency) == 3 and base_currency.isalpha()):
+        raise HTTPException(status_code=400, detail="base_currency must be a 3-letter code")
+    return base_currency
 
-    # Fetch from Yahoo Direct
-    from backend.services.price_getters.registry import get_price_getter
+
+@router.get("/benchmark-series")
+def get_benchmark_series(
+    ticker: str = Query(..., description="Yahoo Finance ticker (e.g., ^GSPC)"),
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    base_currency: Optional[str] = Query(None, description="Convert closes to this currency"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Fetch daily close prices for an external benchmark index.
+
+    Seeded series in mock mode, otherwise Yahoo Finance. Only whitelisted tickers.
+    With base_currency, closes are converted using the Yahoo FX rate.
+    """
     from backend.services.price_getters.base import PriceGetterError
 
+    parsed_start, parsed_end = _parse_benchmark_request(ticker, start_date, end_date)
+    _validate_currency(base_currency)
     try:
-        getter = get_price_getter("yahoo_direct")
-        points = getter.get_daily_series(ticker, parsed_start, parsed_end)
+        points, currency, converted = _benchmark_in_base(
+            session, ticker, parsed_start, parsed_end, base_currency
+        )
     except PriceGetterError as e:
         log.warning(f"Benchmark fetch failed for {ticker}: {e}")
         raise HTTPException(
             status_code=502, detail=f"Failed to fetch benchmark data: {e.message}"
         )
-    except Exception as e:
-        log.error(f"Unexpected error fetching benchmark {ticker}: {e}")
-        raise HTTPException(
-            status_code=500, detail="Internal error fetching benchmark data."
-        )
-
-    response = {
+    return {
         "ticker": ticker,
         "label": BENCHMARK_PRESETS[ticker],
+        "currency": currency,
+        "converted": converted,
         "points": points,
     }
 
-    # Store in cache
-    _benchmark_cache[cache_key] = (now, response)
 
-    return response
+def _scope_series(
+    session: Session,
+    version_id: int,
+    asset_ids: Optional[str],
+    account_ids: Optional[str],
+    category_ids: Optional[str],
+    include_unsettled_negative: bool,
+):
+    from backend.services.pnl.portfolio_timeline import compute_portfolio_timeline_cached
+    from backend.services.pnl.return_metrics import timeline_to_series
+
+    def ids(raw: Optional[str]) -> Optional[List[int]]:
+        try:
+            return [int(x) for x in raw.split(",") if x.strip()] if raw else None
+        except ValueError:
+            raise HTTPException(status_code=422, detail="ids must be comma-separated integers")
+
+    if session.get(CalculationVersion, version_id) is None:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+    points = compute_portfolio_timeline_cached(
+        session=session,
+        version_id=version_id,
+        granularity="daily",
+        asset_ids=ids(asset_ids),
+        account_ids=ids(account_ids),
+        category_ids=ids(category_ids),
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    return timeline_to_series(points)
+
+
+def _return_metrics_dict(m) -> Dict[str, Any]:
+    return {
+        "days": m.days,
+        "twr_pct": m.twr_pct,
+        "twr_annualized_pct": m.twr_annualized_pct,
+        "irr_pct": m.irr_pct,
+        "irr_period_pct": m.irr_period_pct,
+    }
+
+
+@router.get("/versions/{version_id}/return-metrics")
+def get_return_metrics(
+    version_id: int,
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    include_unsettled_negative: bool = Query(False),
+    session: Session = Depends(get_session_dependency),
+):
+    """TWR / IRR per period range, from the daily portfolio timeline."""
+    from datetime import date as date_cls
+
+    from backend.services.pnl.metrics_service import PERIOD_RANGES
+    from backend.services.pnl.return_metrics import (
+        compute_return_metrics,
+        range_start_dates,
+        slice_period,
+    )
+
+    series = _scope_series(
+        session, version_id, asset_ids, account_ids, category_ids, include_unsettled_negative
+    )
+    starts = range_start_dates(date_cls.today(), PERIOD_RANGES)
+    return {
+        "version_id": version_id,
+        "ranges": {
+            key: _return_metrics_dict(compute_return_metrics(slice_period(series, start)))
+            for key, start in starts.items()
+        },
+    }
+
+
+@router.get("/versions/{version_id}/benchmark-comparison")
+def get_benchmark_comparison(
+    version_id: int,
+    ticker: str = Query(...),
+    period: str = Query("all"),
+    base_currency: Optional[str] = Query(None),
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    include_unsettled_negative: bool = Query(False),
+    session: Session = Depends(get_session_dependency),
+):
+    """Portfolio TWR vs a benchmark over a period, plus the same-flows (PME) value."""
+    from datetime import date as date_cls
+
+    from backend.services.pnl.metrics_service import PERIOD_RANGES
+    from backend.services.pnl.return_metrics import (
+        compare_to_benchmark,
+        compute_return_metrics,
+        range_start_dates,
+        slice_period,
+    )
+    from backend.services.price_getters.base import PriceGetterError
+
+    if period not in PERIOD_RANGES:
+        raise HTTPException(status_code=400, detail=f"Unknown period '{period}'")
+    _validate_currency(base_currency)
+    if ticker not in BENCHMARK_PRESETS:
+        raise HTTPException(status_code=400, detail=f"Ticker '{ticker}' not in allowed benchmarks")
+
+    series = slice_period(
+        _scope_series(
+            session, version_id, asset_ids, account_ids, category_ids, include_unsettled_negative
+        ),
+        range_start_dates(date_cls.today(), PERIOD_RANGES)[period],
+    )
+    portfolio = compute_return_metrics(series)
+    bench_points: List[Dict[str, Any]] = []
+    currency, converted = BENCHMARK_CURRENCY.get(ticker, "USD"), False
+    if len(series) >= 2:
+        start = date_cls.fromisoformat(series[0].date[:10]) - timedelta(days=7)
+        end = date_cls.fromisoformat(series[-1].date[:10])
+        try:
+            bench_points, currency, converted = _benchmark_in_base(
+                session, ticker, start, end, base_currency
+            )
+        except PriceGetterError as e:
+            raise HTTPException(
+                status_code=502, detail=f"Failed to fetch benchmark data: {e.message}"
+            )
+    cmp = compare_to_benchmark(
+        series, [(b["date"], b["close"]) for b in bench_points], portfolio
+    )
+    return {
+        "version_id": version_id,
+        "ticker": ticker,
+        "label": BENCHMARK_PRESETS[ticker],
+        "period": period,
+        "currency": currency,
+        "converted": converted,
+        "portfolio": _return_metrics_dict(portfolio),
+        "benchmark_return_pct": cmp.benchmark_return_pct,
+        "benchmark_annualized_pct": cmp.benchmark_annualized_pct,
+        "excess_pp": cmp.excess_pp,
+        "excess_annualized_pp": cmp.excess_annualized_pp,
+        "pme_value": cmp.pme_value,
+        "actual_value": cmp.actual_value,
+        "series": {
+            "portfolio": [{"date": d, "pct": v} for d, v in portfolio.series],
+            "benchmark": [{"date": d, "pct": v} for d, v in cmp.series],
+        },
+    }
 
 
 # =============================================================================

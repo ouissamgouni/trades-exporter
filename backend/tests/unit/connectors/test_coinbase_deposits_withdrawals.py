@@ -384,8 +384,7 @@ class TestCoinbaseWithdrawalsConnector:
             "network": "ethereum",
         }
 
-        with pytest.raises(ValueError, match="Withdrawal status is not 'ok': failed"):
-            connector.raw_to_normalized(ccxt_withdrawal)
+        assert connector.raw_to_normalized(ccxt_withdrawal) is None
 
     @patch("backend.connectors.cex.connector_coinbase_withdrawals.load_credentials")
     @patch("ccxt.coinbase")

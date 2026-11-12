@@ -1,28 +1,26 @@
 /**
  * ContextView — Unified scoped view for all drill levels.
  *
- * Layout (top to bottom):
- *   1. Breadcrumb row + period cards (scoped ROI%) — always visible
- *   2. Tree-style section toggles:
- *      ├── [±] Overview   — hero metrics, charts, best/worst (scoped)
- *      ├── [±] Assets     — asset list + treemap/pie (scoped, with local filters)
- *      └── [±] PnL Audit  — investigation view (scoped)
+ * Layout:
+ *   Sticky bar: breadcrumb · [Performance | P&L audit] tabs · period presets
+ *   Performance: overview (cards, accounts, contributors + chart) then Assets
+ *   P&L audit: investigation view
  *
- * The ContextScope (derived from navigation) drives ALL sections uniformly.
- * Period cards show ROI% scoped to the current breadcrumb context.
- * Clicking best/worst item or asset name updates scope for the whole view.
+ * The ContextScope (derived from navigation) drives every section.
  */
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { hasLocateInUrl } from '../../utils/pnlLocate';
 import { Badge } from '../ui/primitives';
-import { FiChevronDown, FiChevronRight, FiAlertTriangle, FiCheck } from 'react-icons/fi';
+import { FiChevronRight, FiX } from 'react-icons/fi';
 import { LuInfo } from 'react-icons/lu';
 import { usePnL } from './PnLContext';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
-import { SectionToggle } from './PnLDetailPanel';
-import { TimeframeIndicators, RANGES, OverviewHeader, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
+import { TimeframeIndicators, RANGES, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import { AccountsStrip } from './AccountsStrip';
 import { AssetsSection } from './AssetsSection';
+import { PeriodPresets, type PeriodMetric } from './PeriodPresets';
+import { BenchmarkSummary } from './BenchmarkSummary';
+import { seriesReturnBetween } from './chartUtils';
 import { AccountBadge } from '../AccountBadge';
 import { formatQuantity } from '../../utils/numberUtils';
 import type { PnlStatusFilter, BalanceStatusFilter } from './AssetPnLTable';
@@ -31,6 +29,7 @@ import { MarketValuePieChart } from './MarketValuePieChart';
 import { InvestigationView } from './InvestigationView';
 import { useCategoryMaps } from '../../hooks/useCategoryMaps';
 import {
+    BENCHMARK_PRESETS,
     useVersionMetrics,
     useBookMetrics,
     useLiveMetrics,
@@ -38,35 +37,31 @@ import {
     usePortfolioTimeline,
     useAssetPeriodDeltas,
     useAccountSparklines,
+    useReturnMetrics,
+    useMultiBenchmarkSeries,
 } from '../../hooks/useChartData';
 import type { ContextScope } from './pnlState';
 import type { Range } from './TotalReturnScorecard';
 import type { TransactionFilterState } from '../TransactionFilters';
 import type { AssetPnLRow, AccountBalanceBreakdown } from './types';
-import type { GroupBy, RangeKey, TimelinePoint, PerformerItem } from '../../hooks/useChartData';
+import type { GroupBy, RangeKey, PerformerItem } from '../../hooks/useChartData';
 
-// ─── Tiny sparkline for collapsed overview ──────────────────────────────────
+type ContextTab = 'performance' | 'audit';
+const BENCHMARK_KEY = 'pnl.benchmark';
+const PERIOD_METRIC_KEY = 'pnl.periodMetric';
 
-const MiniSparkline: React.FC<{ points: TimelinePoint[]; width?: number; height?: number }> = ({ points, width = 80, height = 20 }) => {
-    if (points.length < 2) return null;
-    const values = points.map(p => {
-        const cb = p.cost_basis_in_base;
-        if (cb <= 0) return 0;
-        return ((p.unrealized_pnl + p.cumulative_realized_pnl) / cb) * 100;
-    });
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = max - min || 1;
-    const coords = values.map((v, i) =>
-        `${(i / (values.length - 1)) * width},${height - ((v - min) / range) * (height - 2) - 1}`
-    ).join(' ');
-    const isPositive = values[values.length - 1] >= values[0];
-    return (
-        <svg width={width} height={height} style={{ display: 'block', flexShrink: 0, border: '1px solid #E2E8F0' }}>
-            <polyline fill="none" stroke={isPositive ? '#38A169' : '#E53E3E'} strokeWidth={1.5} points={coords} />
-        </svg>
-    );
-};
+function initialTab(): ContextTab {
+    if (hasLocateInUrl()) return 'audit';
+    return new URLSearchParams(window.location.search).get('tab') === 'audit' ? 'audit' : 'performance';
+}
+
+function rangeStartDate(range: Range): string | null {
+    const days = RANGES.find(r => r.key === range)?.days;
+    if (!days) return null;
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+}
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -78,7 +73,7 @@ export interface ContextViewProps {
     onTransactionClick: (txId: number) => void;
     onUnitClick: (unitId: number) => void;
     onPerformerClick: (id: number, groupType: string, name: string) => void;
-    onWarningsClick: () => void;
+    onToggleAccountScope: (accountId: number, name: string) => void;
     onRefreshPrices: () => void;
     isRefreshingPrices: boolean;
     onLoadAccountBalances: () => void;
@@ -94,7 +89,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
     onTransactionClick,
     onUnitClick,
     onPerformerClick,
-    onWarningsClick,
+    onToggleAccountScope,
     onRefreshPrices,
     isRefreshingPrices,
     onLoadAccountBalances,
@@ -140,22 +135,20 @@ export const ContextView: React.FC<ContextViewProps> = ({
     const isMultiAsset = !isAsset;
     const periodLabel = RANGES.find(r => r.key === timeframeRange)?.label ?? 'All';
 
-    // ── Section open state ──
-    const [overviewOpen, setOverviewOpen] = useState(true);
-    const [assetsOpen, setAssetsOpen] = useState(true);
-    const [auditOpen, setAuditOpen] = useState(() => hasLocateInUrl());
+    // ── Tabs / page-wide preferences ──
+    const [tab, setTab] = useState<ContextTab>(initialTab);
+    const [periodMetric, setPeriodMetric] = useState<PeriodMetric>(() => (localStorage.getItem(PERIOD_METRIC_KEY) === 'twr' ? 'twr' : 'roi'));
+    const [mainBenchmark, setMainBenchmark] = useState<string>(() => {
+        const v = localStorage.getItem(BENCHMARK_KEY);
+        return v && BENCHMARK_PRESETS.some(b => b.ticker === v) ? v : '^GSPC';
+    });
+    useEffect(() => { localStorage.setItem(PERIOD_METRIC_KEY, periodMetric); }, [periodMetric]);
+    useEffect(() => { localStorage.setItem(BENCHMARK_KEY, mainBenchmark); }, [mainBenchmark]);
 
-    // ── Section refs for scroll-to-section ──
     const overviewRef = useRef<HTMLDivElement>(null);
     const assetsRef = useRef<HTMLDivElement>(null);
-    const auditRef = useRef<HTMLDivElement>(null);
-
-    // Reset on scope change
-    useEffect(() => {
-        setOverviewOpen(true);
-        setAssetsOpen(true);
-        setAuditOpen(hasLocateInUrl());
-    }, [scope.level, scope.entityId]);
+    const scrollTo = (ref: React.RefObject<HTMLDivElement | null>) =>
+        setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
 
     // Reset best/worst groupBy to 'asset' on scope change
     useEffect(() => {
@@ -186,14 +179,15 @@ export const ContextView: React.FC<ContextViewProps> = ({
         if (timeframeRange === 'all') params.delete('period'); else params.set('period', timeframeRange);
         if (performerGroupBy === 'asset') params.delete('contrib'); else params.set('contrib', performerGroupBy);
         if (performerGroupBy === 'category' && performerDimensionId != null) params.set('dim', String(performerDimensionId)); else params.delete('dim');
+        if (tab === 'audit') params.set('tab', 'audit'); else params.delete('tab');
         const qs = params.toString();
         window.history.replaceState(window.history.state, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
-    }, [timeframeRange, performerGroupBy, performerDimensionId]);
+    }, [timeframeRange, performerGroupBy, performerDimensionId, tab]);
 
-    // When auditDefaultPanel is set, open audit section
+    // When auditDefaultPanel is set, open the audit tab
     const auditDefaultPanel = state.auditDefaultPanel;
     useEffect(() => {
-        if (auditDefaultPanel) setAuditOpen(true);
+        if (auditDefaultPanel) setTab('audit');
     }, [auditDefaultPanel]);
 
     // ── Scope-based API filters ──
@@ -249,14 +243,15 @@ export const ContextView: React.FC<ContextViewProps> = ({
     const scopedTimeline = usePortfolioTimeline(currentVersionId, timelineFilters, !!currentVersionId && hasScope);
 
     // ── Per-account cards (strip) ──
-    const showAccountsStrip = !isAsset && !isAccountScope;
+    const showAccountsStrip = !isAsset;
     const accountPerformers = useVersionPerformers(
         currentVersionId,
         {
             period: timeframeRange,
             groupBy: 'account',
             topN: 500,
-            ...scopeApiFilters,
+            assetIds: scope.assetIds,
+            categoryIds: scope.categoryIds,
             pricesReady,
         },
         !!currentVersionId && showAccountsStrip,
@@ -272,6 +267,9 @@ export const ContextView: React.FC<ContextViewProps> = ({
         { assetIds: scope.assetIds, categoryIds: scope.categoryIds },
         !!currentVersionId && showAccountsStrip,
     );
+
+    // ── TWR / IRR per period, and main benchmark returns per period ──
+    const returnMetrics = useReturnMetrics(currentVersionId, scopeApiFilters, !!currentVersionId);
 
     // ── Asset period deltas (period columns + income) ──
     const assetPeriodDeltas = useAssetPeriodDeltas(
@@ -393,6 +391,23 @@ export const ContextView: React.FC<ContextViewProps> = ({
         return result;
     }, [effectiveLive.data]);
 
+    const allRangeTwrs = useMemo(() => {
+        const result: Record<Range, number | null> = { all: null, '3y': null, '1y': null, '6m': null, '3m': null, '1m': null, '1w': null };
+        for (const r of RANGES) result[r.key] = returnMetrics.data?.ranges?.[r.key]?.twr_pct ?? null;
+        return result;
+    }, [returnMetrics.data]);
+
+    const timelineStart = effectiveTimeline.data?.points?.[0]?.date ?? null;
+    const today = new Date().toISOString().slice(0, 10);
+    const [mainBenchmarkSeries] = useMultiBenchmarkSeries([mainBenchmark], timelineStart, today, !!timelineStart, baseCurrency);
+    const mainBenchmarkLabel = BENCHMARK_PRESETS.find(b => b.ticker === mainBenchmark)?.label ?? mainBenchmark;
+    const benchmarkReturns = useMemo(() => {
+        const result: Record<Range, number | null> = { all: null, '3y': null, '1y': null, '6m': null, '3m': null, '1m': null, '1w': null };
+        const pts = mainBenchmarkSeries?.data?.points ?? [];
+        for (const r of RANGES) result[r.key] = seriesReturnBetween(pts, rangeStartDate(r.key));
+        return result;
+    }, [mainBenchmarkSeries?.data]);
+
     // ── Tax status (on-demand) ──
     // Tax tab is always visible when a version exists — no longer gated by jurisdiction
 
@@ -411,12 +426,6 @@ export const ContextView: React.FC<ContextViewProps> = ({
         });
     }, [isAsset, scope.assetIds, accountBalances, scopedAssets]);
 
-    // ── Data quality ──
-    const warningCount = Object.values(warningTypeCounts ?? {}).reduce((acc: number, n) => acc + (n as number), 0);
-    const priceIssueCount = scopedAssets.filter(a =>
-        a.has_lots && (!!a.price_error || (a.unit_value == null && !a.price_loading) || (a.price_state != null && !['live', 'cached'].includes(a.price_state)))
-    ).length;
-
     // ── Breadcrumb data ──
     const { breadcrumbs } = state.drill;
 
@@ -426,35 +435,45 @@ export const ContextView: React.FC<ContextViewProps> = ({
     // Render
     // ═══════════════════════════════════════════════════════════════════
 
+    const tabs: { key: ContextTab; label: string }[] = [
+        { key: 'performance', label: 'Performance' },
+        ...(currentVersionId ? [{ key: 'audit' as const, label: 'P&L audit' }] : []),
+    ];
+
     return (
         <div>
-            {/* ─── 1. Breadcrumb + Period Cards row ─── */}
-            <div className="sticky top-0 z-20 mb-0 flex flex-wrap items-center gap-2 border border-gray-200 bg-gray-50/95 px-3 py-2 backdrop-blur">
-                {/* Breadcrumb trail */}
+            {/* ─── Sticky bar: breadcrumb, tabs, period ─── */}
+            <div className="sticky top-0 z-20 border border-gray-200 bg-gray-50/95 px-3 pt-2 backdrop-blur">
                 <div className="flex flex-wrap items-center gap-1.5">
                     {breadcrumbs.map((crumb, idx) => {
                         const isLast = idx === breadcrumbs.length - 1;
                         const label = idx === 0 ? firstCrumbLabel : crumb.label;
                         return (
                             <React.Fragment key={idx}>
-                                {idx > 0 && (
-                                    <FiChevronRight
-                                        size={14}
-                                        className="shrink-0"
-                                        color="#A0AEC0"
-                                    />
-                                )}
+                                {idx > 0 && <FiChevronRight size={14} className="shrink-0" color="#A0AEC0" />}
                                 {isLast ? (
                                     <div className="flex items-center gap-1">
                                         <Badge colorScheme="blue" className="px-2 py-0.5 font-semibold">
                                             {label}
                                         </Badge>
+                                        {isAccountScope && idx > 0 && (
+                                            <button
+                                                type="button"
+                                                className="text-gray-400 hover:text-blue-500"
+                                                onClick={() => dispatch({ type: 'DRILL_RESET' })}
+                                                title="Clear account scope"
+                                                aria-label="Clear account scope"
+                                            >
+                                                <FiX size={13} />
+                                            </button>
+                                        )}
                                         {isAsset && scope.assetIds?.[0] != null && assetPanelCtx && (
                                             <button
                                                 type="button"
                                                 className="cursor-pointer text-gray-400 hover:text-blue-500"
                                                 onClick={() => assetPanelCtx.openAssetPanel(scope.assetIds![0], { pnlVersionId: currentVersionId ?? undefined })}
                                                 title="Asset details"
+                                                aria-label="Asset details"
                                             >
                                                 <LuInfo size={14} />
                                             </button>
@@ -473,130 +492,47 @@ export const ContextView: React.FC<ContextViewProps> = ({
                     })}
                 </div>
 
-                {/* Data quality */}
-                {warningCount + priceIssueCount > 0 ? (
-                    <button
-                        type="button"
-                        onClick={onWarningsClick}
-                        className="inline-flex items-center gap-1 border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700 hover:bg-orange-100"
-                        title="Open data quality details"
-                    >
-                        <FiAlertTriangle size={11} />
-                        {warningCount > 0 && <span>{warningCount} warning{warningCount !== 1 ? 's' : ''}</span>}
-                        {warningCount > 0 && priceIssueCount > 0 && <span>·</span>}
-                        {priceIssueCount > 0 && <span>{priceIssueCount} price issue{priceIssueCount !== 1 ? 's' : ''}</span>}
-                    </button>
-                ) : (
-                    <span className="inline-flex items-center gap-1 border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500">
-                        <FiCheck size={11} /> Data OK
-                    </span>
-                )}
-
-                {/* Period span */}
-                <span className="ml-auto whitespace-nowrap text-[11px] text-gray-500" data-testid="period-span">
-                    {timeframeRange === 'all' || !scope.dateFrom ? 'All time' : `${scope.dateFrom} → today`}
-                </span>
-
-                {/* Period cards (scoped ROI%) */}
-                <div className="flex shrink-0 gap-1 overflow-x-auto">
-                    {RANGES.map(r => {
-                        const roi = allRangeRois[r.key];
-                        const isActive = timeframeRange === r.key;
-                        return (
-                            <div
-                                key={r.key}
-                                onClick={() => dispatch({ type: 'SET_TIMEFRAME_RANGE', range: r.key })}
-                                className={`min-w-[52px] cursor-pointer border-2 px-1.5 py-1 text-center transition-colors ${isActive ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'}`}
+                <div className="mt-1 flex flex-wrap items-end gap-x-4 gap-y-2">
+                    <div className="flex items-end" role="tablist" aria-label="P&L sections">
+                        {tabs.map(t => (
+                            <button
+                                key={t.key}
+                                type="button"
+                                role="tab"
+                                aria-selected={tab === t.key}
+                                onClick={() => setTab(t.key)}
+                                className={`-mb-px h-10 border-b-2 px-4 text-sm transition-colors ${tab === t.key ? 'border-blue-500 font-semibold text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                                data-testid={`context-tab-${t.key}`}
                             >
-                                <div className={`text-[10px] font-bold ${isActive ? 'text-blue-700' : 'text-gray-500'}`}>
-                                    {r.label}
-                                </div>
-                                {roi !== null ? (
-                                    <div className={`text-[10px] font-bold ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                        {roi >= 0 ? '+' : ''}{roi.toFixed(1)}%
-                                    </div>
-                                ) : (
-                                    <div className="text-[10px] text-gray-300">—</div>
-                                )}
-                            </div>
-                        );
-                    })}
-                </div>
-
-                {/* Separator + section nav pills */}
-                <div className="mx-2 h-5 w-px shrink-0 bg-gray-300" />
-                <div className="flex shrink-0 gap-1">
-                    {([
-                        { key: 'overview', label: 'Overview', open: overviewOpen, ref: overviewRef },
-                        ...(isMultiAsset || currentVersionId ? [{ key: 'assets', label: 'Assets', open: assetsOpen, ref: assetsRef }] : []),
-                        ...(currentVersionId ? [{ key: 'audit', label: 'Audit', open: auditOpen, ref: auditRef }] : []),
-                    ] as { key: string; label: string; open: boolean; ref: React.RefObject<HTMLDivElement | null> }[]).map(s => (
-                        <div
-                            key={s.key}
-                            className={`min-w-[52px] cursor-pointer border-2 px-1.5 py-1 text-center transition-colors ${s.open ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'}`}
-                            onClick={() => {
-                                setOverviewOpen(s.key === 'overview');
-                                setAssetsOpen(s.key === 'assets');
-                                setAuditOpen(s.key === 'audit');
-                                setTimeout(() => s.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-                            }}
-                        >
-                            <div className={`text-[10px] font-bold ${s.open ? 'text-blue-700' : 'text-gray-500'}`}>
-                                {s.label}
-                            </div>
+                                {t.label}
+                            </button>
+                        ))}
+                    </div>
+                    {tab === 'performance' && isMultiAsset && (
+                        <div className="flex items-center gap-2 pb-2.5 text-xs text-gray-500">
+                            <button type="button" className="hover:text-blue-600 hover:underline" onClick={() => scrollTo(overviewRef)}>Overview</button>
+                            <span>·</span>
+                            <button type="button" className="hover:text-blue-600 hover:underline" onClick={() => scrollTo(assetsRef)}>Assets ({scopedDisplayAssets.length}) ↓</button>
                         </div>
-                    ))}
+                    )}
+                    <div className="ml-auto pb-2">
+                        <PeriodPresets
+                            range={timeframeRange}
+                            onChange={(r) => dispatch({ type: 'SET_TIMEFRAME_RANGE', range: r })}
+                            metric={periodMetric}
+                            onMetricChange={setPeriodMetric}
+                            roi={allRangeRois}
+                            twr={allRangeTwrs}
+                            benchmark={{ label: mainBenchmarkLabel, returns: benchmarkReturns }}
+                            periodSpan={timeframeRange === 'all' || !scope.dateFrom ? 'All time' : `${scope.dateFrom} → today`}
+                        />
+                    </div>
                 </div>
             </div>
 
-            {/* ─── 2. Tree-style sections ─── */}
-            <div className="mt-0 ml-4 border-l-2 border-gray-200 pl-3">
-                {/* ── Overview Section ── */}
-                <div ref={overviewRef}>
-                    <TreeSection
-                        label="Overview"
-                        open={overviewOpen}
-                        onToggle={() => setOverviewOpen(v => !v)}
-                        isLast={!isMultiAsset && !currentVersionId}
-                        sectionBg="bg-blue-50"
-                        headerRight={isAsset && scope.assetIds?.[0] != null && assetPanelCtx ? (
-                            <button
-                                type="button"
-                                onClick={() => assetPanelCtx.openAssetPanel(scope.assetIds![0], { pnlVersionId: currentVersionId ?? undefined })}
-                                className="p-0.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500"
-                                title="Asset details"
-                            >
-                                <LuInfo size={12} />
-                            </button>
-                        ) : undefined}
-                        periodChip={periodLabel}
-                        summary={!overviewOpen && effectiveSummary ? (() => {
-                            const settled = effectiveBook.data?.ranges?.[timeframeRange as RangeKey];
-                            const market = effectiveLive.data?.ranges?.[timeframeRange as RangeKey];
-                            const isPeriod = timeframeRange !== 'all' && (settled || market);
-                            const realizedVal = isPeriod ? (settled?.realized_in_period ?? 0) : effectiveSummary.realizedPnl;
-                            const unrealizedVal = isPeriod ? (market?.unrealized_in_period ?? 0) : effectiveSummary.unrealizedPnl;
-                            const totalReturn = market?.total_return ?? unrealizedVal + realizedVal;
-                            const roi = market?.roi_pct ?? 0;
-                            return (
-                                <div className="flex min-w-0 flex-1 items-center gap-3">
-                                    <OverviewHeader
-                                        compact
-                                        totalReturn={totalReturn}
-                                        roi={roi}
-                                        baseCurrency={baseCurrency}
-                                        periodLabel={periodLabel}
-                                        isLiveLoading={effectiveLive.isLoading}
-                                        gains={effectivePerformers.data?.gains_total}
-                                        losses={effectivePerformers.data?.losses_total}
-                                        net={effectivePerformers.data?.net_total}
-                                    />
-                                    <MiniSparkline points={effectiveTimeline.data?.points || []} />
-                                </div>
-                            );
-                        })() : undefined}
-                    >
-                        {/* TimeframeIndicators provides hero metrics, chart, PnL bar, best/worst — all scoped */}
+            {tab === 'performance' ? (
+                <div className="mt-3 flex flex-col gap-4">
+                    <div ref={overviewRef} className="scroll-mt-32">
                         <TimeframeIndicators
                             points={effectiveTimeline.data?.points || []}
                             baseCurrency={baseCurrency}
@@ -616,8 +552,6 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             groupBy={performerGroupBy}
                             onGroupByChange={(g: GroupBy) => dispatch({ type: 'SET_PERFORMER_GROUP_BY', groupBy: g })}
                             onPerformerClick={onPerformerClick}
-                            onFeesClick={() => { }}
-                            onIncomeClick={() => { }}
                             dimensions={dimensions}
                             selectedDimensionId={performerDimensionId}
                             onDimensionChange={(id: number | null) => dispatch({ type: 'SET_PERFORMER_DIMENSION_ID', id })}
@@ -625,6 +559,18 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             assets={scopedAssets}
                             hidePeriodCards
                             hidePerformers={isAsset}
+                            returnMetrics={returnMetrics.data?.ranges?.[timeframeRange] ?? null}
+                            mainBenchmark={mainBenchmark}
+                            benchmarkSlot={currentVersionId ? (
+                                <BenchmarkSummary
+                                    versionId={currentVersionId}
+                                    ticker={mainBenchmark}
+                                    onTickerChange={setMainBenchmark}
+                                    period={timeframeRange}
+                                    baseCurrency={baseCurrency}
+                                    scope={scopeApiFilters}
+                                />
+                            ) : undefined}
                             accountsSlot={showAccountsStrip ? (
                                 <AccountsStrip
                                     items={accountItems}
@@ -632,9 +578,13 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                     periodLabel={periodLabel}
                                     isPeriod={timeframeRange !== 'all'}
                                     isLoading={accountPerformers.isLoading}
-                                    overviewValue={effectiveLive.data?.ranges?.[timeframeRange as RangeKey]?.current_value ?? null}
+                                    overviewValue={isAccountScope ? null : effectiveLive.data?.ranges?.[timeframeRange as RangeKey]?.current_value ?? null}
                                     sparklines={accountSparklines.data?.accounts}
                                     onAccountClick={(id, name) => onPerformerClick(id, 'account', name)}
+                                    selectedIds={isAccountScope ? scope.accountIds : []}
+                                    onToggleAccount={onToggleAccountScope}
+                                    twr={accountSparklines.data?.twr}
+                                    benchmark={{ label: mainBenchmarkLabel, returnPct: benchmarkReturns[timeframeRange] }}
                                 />
                             ) : isAsset && accountBreakdowns.length > 0 ? (
                                 <div>
@@ -671,23 +621,16 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 </div>
                             ) : undefined}
                         />
-                    </TreeSection>
-                </div>
+                    </div>
 
-                {/* ── Assets Section (multi-asset only) ── */}
-                {isMultiAsset && (
-                    <div ref={assetsRef}>
-                        <TreeSection
-                            label="Assets"
-                            open={assetsOpen}
-                            onToggle={() => setAssetsOpen(v => !v)}
-                            isLast={!currentVersionId}
-                            badge={`${scopedDisplayAssets.length}`}
-                            periodChip={periodLabel}
-                            sectionBg="bg-green-50"
-                        >
-                            <div className="p-2">
-                                <AssetsSection
+                    {isMultiAsset && (
+                        <div ref={assetsRef} className="scroll-mt-32">
+                            <div className="mb-2 flex items-center gap-2 border-b border-slate-200 pb-1">
+                                <span className="text-base font-semibold text-gray-800">Assets</span>
+                                <Badge colorScheme="gray">{scopedDisplayAssets.length}</Badge>
+                                <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
+                            </div>
+                            <AssetsSection
                                     assets={scopedDisplayAssets}
                                     baseCurrency={baseCurrency}
                                     onAssetClick={onAssetClick}
@@ -738,24 +681,12 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                         />
                                     )}
                                 />
-                            </div>
-                        </TreeSection>
-                    </div>
-                )}
-
-                {/* ── PnL Audit Section ── */}
-                {currentVersionId && (
-                    <div ref={auditRef}>
-                        <TreeSection
-                            label="PnL Audit"
-                            open={auditOpen}
-                            onToggle={() => setAuditOpen(v => !v)}
-                            isLast
-                            periodChip={periodLabel}
-                            sectionBg="bg-orange-50"
-                        >
-                            <div className="p-3">
-                                <InvestigationView
+                        </div>
+                    )}
+                </div>
+            ) : currentVersionId ? (
+                <div className="mt-3 border border-slate-200 bg-white p-3">
+                    <InvestigationView
                                     versionId={currentVersionId}
                                     baseCurrency={baseCurrency}
                                     onTransactionClick={onTransactionClick}
@@ -772,80 +703,8 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                         label: a.asset.label ?? undefined,
                                     }))}
                                 />
-                            </div>
-                        </TreeSection>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// ─── TreeSection — tree-style collapsible section toggle ────────────────────
-
-interface TreeSectionProps {
-    label: string;
-    open: boolean;
-    onToggle: () => void;
-    isLast?: boolean;
-    badge?: string;
-    /** Global period echoed in the section header */
-    periodChip?: string;
-    summary?: React.ReactNode;
-    headerRight?: React.ReactNode;
-    children: React.ReactNode;
-    sectionBg?: string;
-}
-
-/**
- * A section toggle that looks like a tree branch with highlighted border:
- *   ├── [±] Label
- *   │   content...
- *   └── [±] Last Label
- */
-const TreeSection: React.FC<TreeSectionProps> = ({
-    label, open, onToggle, isLast = false, badge, periodChip, summary, headerRight, children, sectionBg,
-}) => {
-    return (
-        <div className="relative">
-            {/* Vertical connector to next sibling section */}
-            {!isLast && (
-                <div className="absolute bottom-0 left-[-15px] top-0 w-0.5 bg-gray-200" />
-            )}
-
-            {/* Branch connector */}
-            <div className="absolute left-[-15px] top-3 h-0.5 w-3.5 bg-gray-200" />
-
-            {/* Section wrapper with highlighted border */}
-            <div
-                className={`mb-1 border transition-colors ${open ? `border-blue-300 ${sectionBg ?? 'bg-white'}` : 'border-gray-200 bg-transparent'}`}
-            >
-                {/* Header */}
-                <div
-                    className="flex cursor-pointer select-none items-center gap-1.5 px-2 py-1.5 hover:bg-gray-50"
-                    onClick={onToggle}
-                >
-                    {open ? <FiChevronDown size={14} color="#3182CE" /> : <FiChevronRight size={14} />}
-                    <span className={`text-sm font-semibold ${open ? 'text-blue-700' : 'text-gray-700'}`}>{label}</span>
-                    {badge && <Badge colorScheme="gray">{badge}</Badge>}
-                    {periodChip && (
-                        <span className="border border-blue-200 bg-white px-1.5 text-[10px] font-semibold text-blue-700">{periodChip}</span>
-                    )}
-                    {summary && <div className="ml-1 min-w-0 flex-1">{summary}</div>}
-                    {headerRight && (
-                        <div className="ml-auto" onClick={(e) => e.stopPropagation()}>
-                            {headerRight}
-                        </div>
-                    )}
                 </div>
-
-                {/* Content */}
-                {open && (
-                    <div className="border-t border-gray-100 pt-1 pb-2">
-                        {children}
-                    </div>
-                )}
-            </div>
+            ) : null}
         </div>
     );
 };

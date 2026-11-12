@@ -44,9 +44,8 @@ class OKXWithdrawalsConnector(OKXBaseConnector):
         """
         from backend.db.models import NormalizedTransaction
 
-        status = str(raw_item.get("status", "")).lower()
-        if status != "ok":
-            raise ValueError(f"Withdrawal status is not 'ok': {status}")
+        if not self.is_settled_transfer(raw_item, "Withdrawal"):
+            return None
 
         # Extract withdrawal data from CCXT format
         withdrawal_id = str(raw_item.get("id", ""))

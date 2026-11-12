@@ -382,12 +382,15 @@ export interface SparklinePoint {
     date: string;
     value: number;
     roi: number | null;
+    pnl?: number;
 }
 
 export interface AccountSparklinesResponse {
     version_id: number;
     period: string;
     accounts: Record<string, SparklinePoint[]>;
+    /** TWR % per account over the period (weekly points) */
+    twr?: Record<string, number | null>;
 }
 
 export function useAccountSparklines(
@@ -659,6 +662,9 @@ export const BENCHMARK_PRESETS: BenchmarkPreset[] = [
     { ticker: 'BTC-USD', label: 'Bitcoin' },
     { ticker: 'ETH-USD', label: 'Ethereum' },
     { ticker: 'GC=F', label: 'Gold' },
+    { ticker: 'IWDA.AS', label: 'MSCI World (IWDA)' },
+    { ticker: 'URTH', label: 'MSCI World (URTH)' },
+    { ticker: '^FCHI', label: 'CAC 40' },
 ];
 
 export interface BenchmarkPoint {
@@ -669,6 +675,8 @@ export interface BenchmarkPoint {
 export interface BenchmarkSeriesResponse {
     ticker: string;
     label: string;
+    currency?: string;
+    converted?: boolean;
     points: BenchmarkPoint[];
 }
 
@@ -720,15 +728,17 @@ export function useMultiBenchmarkSeries(
     startDate: string | null,
     endDate: string | null,
     enabled = true,
+    baseCurrency?: string,
 ) {
     const results = useQueries({
         queries: tickers.map(ticker => ({
-            queryKey: ['benchmark-series', ticker, startDate, endDate],
+            queryKey: ['benchmark-series', ticker, startDate, endDate, baseCurrency],
             queryFn: async ({ signal }: { signal: AbortSignal }) => {
                 const sp = new URLSearchParams();
                 sp.set('ticker', ticker);
                 sp.set('start_date', startDate!);
                 sp.set('end_date', endDate!);
+                if (baseCurrency) sp.set('base_currency', baseCurrency);
                 const res = await fetch(`${API_URL}/pnl/benchmark-series?${sp.toString()}`, { signal });
                 if (!res.ok) {
                     const body = await res.text().catch(() => '');
@@ -873,6 +883,98 @@ export function useIncomeFilterOptions(
         staleTime: 5 * 60_000,
     });
 
+    return {
+        data: result.data ?? null,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Return metrics (TWR / IRR) and benchmark comparison
+// ---------------------------------------------------------------------------
+
+export interface ReturnMetricsRange {
+    days: number;
+    twr_pct: number | null;
+    twr_annualized_pct: number | null;
+    irr_pct: number | null;
+    irr_period_pct: number | null;
+}
+
+export interface ReturnMetricsResponse {
+    version_id: number;
+    ranges: Record<string, ReturnMetricsRange>;
+}
+
+type ScopeIds = { assetIds?: number[]; accountIds?: number[]; categoryIds?: number[] };
+
+function scopeParams(scope: ScopeIds, sp: URLSearchParams) {
+    if (scope.assetIds?.length) sp.set('asset_ids', scope.assetIds.join(','));
+    if (scope.accountIds?.length) sp.set('account_ids', scope.accountIds.join(','));
+    if (scope.categoryIds?.length) sp.set('category_ids', scope.categoryIds.join(','));
+}
+
+export function useReturnMetrics(versionId: number | null, scope: ScopeIds = {}, enabled = true) {
+    const result = useQuery<ReturnMetricsResponse>({
+        queryKey: ['return-metrics', versionId, scope.assetIds?.join(','), scope.accountIds?.join(','), scope.categoryIds?.join(',')],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            scopeParams(scope, sp);
+            const res = await fetch(`${API_URL}/pnl/versions/${versionId}/return-metrics?${sp.toString()}`, { signal });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId,
+        staleTime: 5 * 60_000,
+    });
+    return { data: result.data ?? null, isLoading: result.isLoading };
+}
+
+export interface BenchmarkComparisonResponse {
+    version_id: number;
+    ticker: string;
+    label: string;
+    period: string;
+    currency: string;
+    converted: boolean;
+    portfolio: ReturnMetricsRange;
+    benchmark_return_pct: number | null;
+    benchmark_annualized_pct: number | null;
+    excess_pp: number | null;
+    excess_annualized_pp: number | null;
+    pme_value: number | null;
+    actual_value: number;
+    series: {
+        portfolio: { date: string; pct: number }[];
+        benchmark: { date: string; pct: number }[];
+    };
+}
+
+export function useBenchmarkComparison(
+    versionId: number | null,
+    ticker: string | null,
+    period: string,
+    baseCurrency: string | undefined,
+    scope: ScopeIds = {},
+    enabled = true,
+) {
+    const result = useQuery<BenchmarkComparisonResponse>({
+        queryKey: ['benchmark-comparison', versionId, ticker, period, baseCurrency, scope.assetIds?.join(','), scope.accountIds?.join(','), scope.categoryIds?.join(',')],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            sp.set('ticker', ticker!);
+            sp.set('period', period);
+            if (baseCurrency) sp.set('base_currency', baseCurrency);
+            scopeParams(scope, sp);
+            const res = await fetch(`${API_URL}/pnl/versions/${versionId}/benchmark-comparison?${sp.toString()}`, { signal });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId && !!ticker,
+        staleTime: 10 * 60_000,
+        retry: 1,
+    });
     return {
         data: result.data ?? null,
         isLoading: result.isLoading,

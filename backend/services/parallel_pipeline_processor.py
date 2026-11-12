@@ -87,6 +87,8 @@ class ParallelPipelineProcessor:
         # Per-connector tracking
         self.connector_pending: Dict[int, int] = {}  # connector_id -> pending count
         self.connector_completion_callbacks: Dict[int, Callable] = {}  # connector_id -> callback
+        # A connector is complete only once its fetch is done AND its queue is drained
+        self.connector_fetch_complete: set = set()
         self.connector_lock = threading.Lock()  # Lock for connector tracking
         
         # Renormalize mode flag
@@ -291,43 +293,45 @@ class ParallelPipelineProcessor:
             self.connector_completion_callbacks[connector_id] = callback
             log.debug(f"📝 Registered completion callback for connector {connector_id}")
     
-    def _decrement_connector_pending(self, connector_id: int) -> None:
-        """
-        Decrement pending count for a connector and trigger completion callback if done.
-        
-        Args:
-            connector_id: Connector ID
-        """
+    def mark_connector_fetch_complete(self, connector_id: int) -> None:
+        """Signal that the connector yielded its last item; completes now if nothing is pending."""
         with self.connector_lock:
-            if connector_id in self.connector_pending:
-                self.connector_pending[connector_id] -= 1
-                pending = self.connector_pending[connector_id]
-                
-                # Check if all items for this connector are processed
-                if pending == 0:
-                    log.debug(f"✅ Connector {connector_id} finished processing all items")
-                    
-                    # Trigger completion callback if registered
-                    callback = self.connector_completion_callbacks.get(connector_id)
-                    if callback:
-                        try:
-                            callback(connector_id)
-                            log.debug(f"✅ Invoked completion callback for connector {connector_id}")
-                        except Exception as e:
-                            log.error(f"❌ Error in completion callback for connector {connector_id}: {e}")
-                    else:
-                        # ⚠️ Warning: callback should have been registered when connector started
-                        log.warning(
-                            f"⚠️ Connector {connector_id} pending count reached 0, "
-                            f"but no callback was registered. This indicates a race condition "
-                            f"where items were processed before callback registration."
-                        )
-                    
-                    # Clean up
-                    del self.connector_pending[connector_id]
-                    if connector_id in self.connector_completion_callbacks:
-                        del self.connector_completion_callbacks[connector_id]
-    
+            self.connector_fetch_complete.add(connector_id)
+            callback = self._pop_completion_if_done(connector_id)
+        self._invoke_completion(connector_id, callback)
+
+    def _decrement_connector_pending(self, connector_id: int) -> None:
+        """Decrement pending count for a connector and trigger completion callback if done."""
+        with self.connector_lock:
+            if connector_id not in self.connector_pending:
+                return
+            self.connector_pending[connector_id] -= 1
+            callback = self._pop_completion_if_done(connector_id)
+        self._invoke_completion(connector_id, callback)
+
+    def _pop_completion_if_done(self, connector_id: int) -> Optional[Callable]:
+        """Caller holds connector_lock. Returns the callback to fire once fetch is done and queue drained."""
+        if self.connector_pending.get(connector_id, 0) > 0:
+            return None
+        if connector_id not in self.connector_fetch_complete:
+            # Queue drained but the connector is still fetching (e.g. slow per-currency MEXC loops)
+            return None
+        self.connector_pending.pop(connector_id, None)
+        self.connector_fetch_complete.discard(connector_id)
+        callback = self.connector_completion_callbacks.pop(connector_id, None)
+        if callback is None:
+            log.debug(f"Connector {connector_id} done but no completion callback registered")
+        return callback
+
+    def _invoke_completion(self, connector_id: int, callback: Optional[Callable]) -> None:
+        if callback is None:
+            return
+        log.debug(f"✅ Connector {connector_id} fetched and processed all items")
+        try:
+            callback(connector_id)
+        except Exception as e:
+            log.error(f"❌ Error in completion callback for connector {connector_id}: {e}")
+
     def get_connector_pending_count(self, connector_id: int) -> int:
         """
         Get the number of pending items for a connector.

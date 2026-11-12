@@ -72,3 +72,47 @@ export function filterPointsByZoom<T extends HasDate>(points: T[], zoom: ZoomPre
     const cutoffStr = cutoff.toISOString().split('T')[0];
     return points.filter(p => p.date >= cutoffStr);
 }
+
+// ---------------------------------------------------------------------------
+// Time-weighted return (mirrors backend services/pnl/return_metrics.py)
+// ---------------------------------------------------------------------------
+
+export interface ValuePnlPoint {
+    date: string;
+    total_value_in_base: number;
+    unrealized_pnl: number;
+    cumulative_realized_pnl: number;
+}
+
+/** Cumulative TWR (%) from the first point; daily flow = ΔValue − Δ(unrealized + realized). */
+export function cumulativeTwr(points: ValuePnlPoint[]): { x: string; y: number }[] {
+    if (points.length < 2) return [];
+    const pnl = (p: ValuePnlPoint) => p.unrealized_pnl + p.cumulative_realized_pnl;
+    let growth = 1;
+    const out = [{ x: points[0].date, y: 0 }];
+    for (let i = 1; i < points.length; i++) {
+        const prev = points[i - 1];
+        const cur = points[i];
+        const dPnl = pnl(cur) - pnl(prev);
+        const denom = cur.total_value_in_base - dPnl;
+        if (denom > 1e-9) growth *= 1 + dPnl / denom;
+        out.push({ x: cur.date, y: (growth - 1) * 100 });
+    }
+    return out;
+}
+
+/** Return (%) of a close series between the last closes at/before `from` and at/before `to`. */
+export function seriesReturnBetween(points: { date: string; close: number }[], from: string | null, to?: string): number | null {
+    if (!points.length) return null;
+    const at = (d: string | undefined) => {
+        let v: number | null = null;
+        for (const p of points) {
+            if (d && p.date > d) break;
+            v = p.close;
+        }
+        return v;
+    };
+    const start = from ? at(from) ?? points[0].close : points[0].close;
+    const end = at(to);
+    return start && end ? (end / start - 1) * 100 : null;
+}

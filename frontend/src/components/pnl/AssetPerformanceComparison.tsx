@@ -30,6 +30,7 @@ import {
     type ZoomPreset,
     ZOOM_PRESETS,
     filterPointsByZoom,
+    cumulativeTwr,
 } from './chartUtils';
 
 const PORTFOLIO_LINE_COLOR = '#718096'; // gray.500
@@ -176,11 +177,12 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
         dateRange.start,
         dateRange.end,
         filteredPoints.length > 0,
+        baseCurrency,
     );
     const anyBenchmarkLoading = benchmarkResults.some(r => r.isLoading);
     const benchmarkErrors = benchmarkResults.filter(r => r.error).map(r => `${r.ticker}: ${r.error}`);
 
-    const portfolioRoiLabel = contextLabel ? `${contextLabel} ROI` : 'Portfolio ROI';
+    const portfolioRoiLabel = contextLabel ? `${contextLabel} TWR` : 'Portfolio TWR';
 
     // ---- Build chart series (useMemo) ----
     const { chartData, colorMap } = useMemo(() => {
@@ -235,19 +237,9 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
             }
         }
 
-        // 2) Portfolio benchmark — ROI%: (unrealized + realized) / cost_basis, rebased to 0% at start
+        // 2) Portfolio time-weighted return (deposits/withdrawals don't move it)
         if (showPortfolio && filteredPoints.length >= 2) {
-            const data: { x: string; y: number }[] = [];
-            let roi0: number | null = null;
-            for (const pt of filteredPoints) {
-                const costBasis = pt.cost_basis_in_base;
-                if (costBasis <= 0) continue;
-                const unrealized = pt.unrealized_pnl;
-                const realized = pt.cumulative_realized_pnl;
-                const roi = ((unrealized + realized) / costBasis) * 100;
-                if (roi0 === null) roi0 = roi;
-                data.push({ x: pt.date, y: roi - roi0 });
-            }
+            const data = cumulativeTwr(filteredPoints);
             if (data.length >= 2) {
                 series.push({ id: `📊 ${portfolioRoiLabel}`, data });
                 colors[`📊 ${portfolioRoiLabel}`] = portfolioColor;
@@ -337,7 +329,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                         <h2 className="text-sm font-semibold text-gray-700">{contextLabel ? `${contextLabel} — Performance Comparison` : 'Performance Comparison'}</h2>
-                        <Tooltip content="Rebased return comparison: each line starts at 0% on the first visible date. Portfolio ROI = (unrealized + realized) / cost basis — measures actual return on invested capital. Compare against benchmarks (S&P 500, BTC) to assess relative performance. If your portfolio underperforms a benchmark, consider whether the risk you’re taking is justified by the returns." openDelay={200}>
+                        <Tooltip content="Rebased return comparison: each line starts at 0% on the first visible date. Portfolio TWR = time-weighted return: deposits and withdrawals don't move it, so it compares fairly with an index. Benchmarks are converted to your base currency. Compare against benchmarks (S&P 500, BTC) to assess relative performance. If your portfolio underperforms a benchmark, consider whether the risk you’re taking is justified by the returns." openDelay={200}>
                             <div className="cursor-help text-gray-400 hover:text-blue-500">
                                 <FiInfo size={14} />
                             </div>

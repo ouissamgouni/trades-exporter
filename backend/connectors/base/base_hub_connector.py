@@ -8,7 +8,7 @@ from queue import Queue
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from backend.connectors.base.base_connector import BaseConnector
+from backend.connectors.base.base_connector import FETCH_COMPLETE, BaseConnector
 from backend.config.loader import configure_logging
 from backend.db.models import NormalizedTransaction
 
@@ -314,6 +314,9 @@ class BaseHubConnector(BaseConnector):
         Returns:
             Normalized item with hub metadata added
         """
+        if raw_item.get("_fetch_complete"):
+            return FETCH_COMPLETE
+
         connector_name = raw_item.get("connector_name")
         normalized_item = raw_item.get("normalized_item")
         error = raw_item.get("error")

@@ -44,9 +44,8 @@ class MEXCDepositsConnector(MEXCBaseConnector):
         """
         from backend.db.models import NormalizedTransaction
 
-        status = str(raw_item.get("status", "")).lower()
-        if status != "ok":
-            raise ValueError(f"Deposit status is not 'ok': {status}")
+        if not self.is_settled_transfer(raw_item, "Deposit"):
+            return None
 
         # Extract deposit data from CCXT format
         # MEXC doesn't provide a unique 'id' field, use txid (blockchain hash) as unique identifier

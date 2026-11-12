@@ -55,6 +55,9 @@ export interface DrillSnapshot {
     entityType?: DrillEntityType;
     entityId?: number;
     entityLabel?: string;
+    /** Multi-account scope (entityType 'account'); entityId is the first one */
+    entityIds?: number[];
+    entityLabels?: string[];
     assetId?: number;
     assetSymbol?: string;
     accountFilter?: number;
@@ -70,6 +73,9 @@ export interface DrillDownState {
     entityType?: DrillEntityType;
     entityId?: number;
     entityLabel?: string;
+    /** Multi-account scope (entityType 'account'); entityId is the first one */
+    entityIds?: number[];
+    entityLabels?: string[];
     /** Asset for L2 */
     assetId?: number;
     assetSymbol?: string;
@@ -118,6 +124,8 @@ function toSnapshot(d: DrillDownState | DrillSnapshot): DrillSnapshot {
         entityType: d.entityType,
         entityId: d.entityId,
         entityLabel: d.entityLabel,
+        entityIds: d.entityIds,
+        entityLabels: d.entityLabels,
         assetId: d.assetId,
         assetSymbol: d.assetSymbol,
         accountFilter: d.accountFilter,
@@ -149,6 +157,19 @@ export interface ContextScope {
     dateTo?: string;
 }
 
+/** Account ids of the current account scope (single or multi), else []. */
+export function scopedAccountIds(drill: Pick<DrillSnapshot, 'entityType' | 'entityId' | 'entityIds'>): number[] {
+    if (drill.entityType !== 'account' || drill.entityId == null) return [];
+    return drill.entityIds ?? [drill.entityId];
+}
+
+/** Breadcrumb label for an account scope: "Binance" or "Accounts: A, B (+2)". */
+export function accountScopeLabel(names: string[]): string {
+    if (names.length <= 1) return names[0] ?? '';
+    const shown = names.slice(0, 2).join(', ');
+    return `Accounts: ${shown}${names.length > 2 ? ` (+${names.length - 2})` : ''}`;
+}
+
 /** Build a ContextScope from the current drill state and timeframe range */
 export function computeContextScope(drill: DrillDownState, timeframeRange: Range): ContextScope {
     const { dateFrom, dateTo } = computeDateRange(timeframeRange);
@@ -162,7 +183,7 @@ export function computeContextScope(drill: DrillDownState, timeframeRange: Range
                     entityId: drill.entityId,
                     entityLabel: drill.entityLabel,
                     categoryIds: drill.entityType === 'category' ? [drill.entityId] : undefined,
-                    accountIds: drill.entityType === 'account' ? [drill.entityId] : undefined,
+                    accountIds: drill.entityType === 'account' ? scopedAccountIds(drill) : undefined,
                     period: timeframeRange,
                     dateFrom,
                     dateTo,
@@ -191,7 +212,7 @@ export function computeContextScope(drill: DrillDownState, timeframeRange: Range
             entityId: drill.entityId,
             entityLabel: drill.entityLabel,
             categoryIds: drill.entityType === 'category' ? [drill.entityId] : undefined,
-            accountIds: drill.entityType === 'account' ? [drill.entityId] : undefined,
+            accountIds: drill.entityType === 'account' ? scopedAccountIds(drill) : undefined,
             period: timeframeRange,
             dateFrom,
             dateTo,
@@ -432,6 +453,7 @@ export type PnLAction =
     | { type: 'DRILL_TO_BREADCRUMB'; index: number }
     | { type: 'DRILL_RESET' }
     | { type: 'DRILL_SET_ACCOUNT_FILTER'; accountId: number | undefined }
+    | { type: 'TOGGLE_ACCOUNT_SCOPE'; accountId: number; name: string }
 
     // ── Reset ──
     | { type: 'RESET_RESULTS' };
@@ -830,6 +852,29 @@ export function pnlReducer(state: PnLState, action: PnLAction): PnLState {
 
         case 'DRILL_SET_ACCOUNT_FILTER':
             return { ...state, drill: { ...state.drill, accountFilter: action.accountId } };
+
+        case 'TOGGLE_ACCOUNT_SCOPE': {
+            const d = state.drill;
+            const inAccountScope = d.entityType === 'account' && d.assetId == null && d.entityId != null;
+            const ids = inAccountScope ? scopedAccountIds(d) : [];
+            const names = inAccountScope ? (d.entityLabels ?? [d.entityLabel ?? '']) : [];
+            const at = ids.indexOf(action.accountId);
+            const nextIds = at >= 0 ? ids.filter((_, i) => i !== at) : [...ids, action.accountId];
+            const nextNames = at >= 0 ? names.filter((_, i) => i !== at) : [...names, action.name];
+            if (!nextIds.length) return { ...state, drill: createInitialDrillState() };
+            const multi = nextIds.length > 1;
+            const newDrill: DrillDownState = {
+                level: 1,
+                entityType: 'account',
+                entityId: nextIds[0],
+                entityIds: multi ? nextIds : undefined,
+                entityLabels: multi ? nextNames : undefined,
+                entityLabel: accountScopeLabel(nextNames),
+                breadcrumbs: [{ label: 'Portfolio', drillSnapshot: { level: 0 } }],
+            };
+            newDrill.breadcrumbs.push({ label: newDrill.entityLabel!, drillSnapshot: toSnapshot(newDrill) });
+            return { ...state, drill: newDrill };
+        }
 
         // ── Tabs ──
         case 'SET_PNL_ACTIVE_TAB':

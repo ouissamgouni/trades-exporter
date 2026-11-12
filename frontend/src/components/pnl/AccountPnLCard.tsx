@@ -46,6 +46,72 @@ export interface AccountAssetDetail {
     lot_count: number;
 }
 
+type AssetLike = {
+    asset: { id?: number | null; symbol?: string | null };
+    unit_value?: number | null;
+    cost_basis: number;
+    market_value: number;
+    unrealized_pnl: number;
+    lot_count: number;
+};
+type BreakdownLike = { account_id: number; account_name: string; qty: number; cost_basis_in_base: number; avg_unit_cost_in_base: number; lot_count: number };
+
+/** One aggregate per account (assets without a breakdown yet go to account 0 "—"), by value desc. */
+export function aggregateByAccount(assets: AssetLike[], accountBalances?: Map<number, BreakdownLike[]>): AggregatedAccountRow[] {
+    const map = new Map<number, AggregatedAccountRow>();
+    const add = (id: number, name: string, cost: number, mv: number, lots: number) => {
+        const row = map.get(id) ?? { account_id: id, account_name: name, asset_count: 0, total_cost_basis: 0, total_market_value: 0, total_unrealized_pnl: 0, total_lot_count: 0 };
+        row.asset_count++;
+        row.total_cost_basis += cost;
+        row.total_market_value += mv;
+        row.total_unrealized_pnl += mv - cost;
+        row.total_lot_count += lots;
+        map.set(id, row);
+    };
+    for (const a of assets) {
+        const breakdowns = a.asset.id != null ? accountBalances?.get(a.asset.id) : undefined;
+        if (breakdowns?.length) {
+            for (const b of breakdowns) add(b.account_id, b.account_name, b.cost_basis_in_base, a.unit_value != null ? b.qty * a.unit_value : 0, b.lot_count);
+        } else {
+            add(0, '—', a.cost_basis, a.market_value, a.lot_count);
+        }
+    }
+    return Array.from(map.values()).sort((x, y) => Math.abs(y.total_market_value) - Math.abs(x.total_market_value));
+}
+
+export function accountAssetDetails(accountId: number, assets: AssetLike[], accountBalances?: Map<number, BreakdownLike[]>): AccountAssetDetail[] {
+    const details: AccountAssetDetail[] = [];
+    for (const a of assets) {
+        const match = a.asset.id != null ? accountBalances?.get(a.asset.id)?.find(b => b.account_id === accountId) : undefined;
+        if (!match) continue;
+        const mv = a.unit_value != null ? match.qty * a.unit_value : 0;
+        details.push({
+            asset_symbol: a.asset.symbol ?? '?',
+            asset_id: a.asset.id ?? null,
+            qty: match.qty,
+            cost_basis: match.cost_basis_in_base,
+            unit_cost: match.avg_unit_cost_in_base,
+            market_value: mv,
+            unrealized_pnl: mv - match.cost_basis_in_base,
+            lot_count: match.lot_count,
+        });
+    }
+    return details.sort((x, y) => Math.abs(y.market_value) - Math.abs(x.market_value));
+}
+
+/** Live value per account: Σ live qty × unit value over symbols (symbol → account → qty). */
+export function liveValueByAccount(liveAccountBalances: Map<string, Map<number, number>> | undefined, assets: AssetLike[]): Map<number, number> {
+    const result = new Map<number, number>();
+    if (!liveAccountBalances) return result;
+    const priceBySymbol = new Map(assets.map(a => [a.asset.symbol?.toUpperCase() ?? '', a.unit_value]));
+    for (const [sym, accountMap] of liveAccountBalances.entries()) {
+        const price = priceBySymbol.get(sym);
+        if (price == null) continue;
+        for (const [accountId, qty] of accountMap.entries()) result.set(accountId, (result.get(accountId) ?? 0) + qty * price);
+    }
+    return result;
+}
+
 // ------------------------------------------------------------------
 // Props
 // ------------------------------------------------------------------

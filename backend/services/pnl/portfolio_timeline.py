@@ -578,7 +578,12 @@ def compute_account_sparklines(
                 if cost > 0
                 else None
             )
-            series.append({"date": pt.date, "value": pt.total_value_in_base, "roi": roi})
+            series.append({
+                "date": pt.date,
+                "value": pt.total_value_in_base,
+                "roi": roi,
+                "pnl": pt.unrealized_pnl + pt.cumulative_realized_pnl,
+            })
         result[account_id] = series
     return result
 

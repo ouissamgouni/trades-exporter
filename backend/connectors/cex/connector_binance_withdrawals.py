@@ -20,6 +20,7 @@ from backend.connectors.base.connector_exceptions import (
 from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction
 from backend.core.network_normalizer import normalize_network
+from backend.connectors.cex.binance_common import iter_transfer_history
 
 log = configure_logging("binance_withdrawals")
 
@@ -96,7 +97,7 @@ class BinanceWithdrawalsConnector(BaseConnector):
             raise
 
     def get_withdrawals(
-        self, since: int = None, limit: int = None
+        self, since: int = None, limit: int = None, params: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
         """
         Fetch withdrawal history from Binance using CCXT.
@@ -113,9 +114,9 @@ class BinanceWithdrawalsConnector(BaseConnector):
         """
         try:
             withdrawals = self.exchange.fetch_withdrawals(
-                code=None, since=since, limit=limit
+                code=None, since=since, limit=limit, params=params or {}
             )
-            log.info(f"✅ Fetched {len(withdrawals)} withdrawals from Binance")
+            log.debug(f"Fetched {len(withdrawals)} withdrawals from Binance (since={since})")
             return withdrawals
         except Exception as e:
             error_str = str(e).lower()
@@ -205,9 +206,8 @@ class BinanceWithdrawalsConnector(BaseConnector):
         """
         from backend.db.models import NormalizedTransaction
 
-        status = str(raw_item.get("status", "")).lower()
-        if status != "ok":
-            raise ValueError(f"Withdrawal status is not 'ok': {status}")
+        if not self.is_settled_transfer(raw_item, "Withdrawal"):
+            return None
 
         # Extract withdrawal data from CCXT format
         withdrawal_id = str(raw_item.get("id", ""))
@@ -289,13 +289,11 @@ class BinanceWithdrawalsConnector(BaseConnector):
         from typing import Generator
         
         log.info("🔄 Fetching withdrawals from Binance API using CCXT...")
-        all_withdrawals = self.get_withdrawals(since=self.since_timestamp_ms)
-        if not all_withdrawals:
-            log.warning("⚠️ No withdrawals fetched from Binance")
-            return
-
-        for withdrawal in all_withdrawals:
-            yield withdrawal
+        total = 0
+        for item in iter_transfer_history(self.get_withdrawals, self.since_timestamp_ms):
+            total += 1
+            yield item
+        log.info(f"✅ Fetched {total} withdrawals from Binance")
 
     # Inherits yield_normalized from BaseConnector
 

@@ -17,6 +17,7 @@ from backend.config.loader import (
     load_settings,
     get_connectors_output_path,
 )
+from backend.connectors.base.base_connector import FETCH_COMPLETE
 from backend.connectors.base.connector_exceptions import ConnectorAPIError
 from backend.connectors.hub.connector_hub import ConnectorHub
 from backend.core.utils import is_test_mode
@@ -338,6 +339,7 @@ class SyncJobService:
         self._worker_lock = threading.Lock()
         self._start_lock = threading.Lock()
         self._retry_threads: Dict[int, threading.Thread] = {}  # connector_id -> Thread
+        self._fetching_connectors: set = set()  # connector ids whose fetch thread is still yielding
 
     def get_status(self) -> Dict[str, Any]:
         """Get the current job status and progress."""
@@ -742,6 +744,29 @@ class SyncJobService:
                     cstatus.error_count += 1
                     cstatus.add_log("ERROR", err)
 
+    def _handle_fetch_complete(self, connector_id: Optional[int], processor: Any) -> None:
+        """Connector yielded its last item: complete it once its queued items are persisted."""
+        if not connector_id:
+            return
+        self._fetching_connectors.discard(connector_id)
+        cstatus = self.progress.connector_statuses.get(connector_id)
+        if cstatus is not None and cstatus.status == ConnectorSyncStatus.RUNNING:
+            pending = processor.get_connector_pending_count(connector_id)
+            cstatus.current_operation = "Finishing processing..."
+            cstatus.add_log(
+                "INFO",
+                f"Finished fetching: {cstatus.fetched_count} fetched, {cstatus.processed} to persist"
+                + (f", {pending} still queued" if pending else ""),
+            )
+            self.logger.info(
+                f"📥 Connector {connector_id} finished fetching "
+                f"(fetched={cstatus.fetched_count}, processed={cstatus.processed}, queued={pending})"
+            )
+        processor.register_connector_completion_callback(
+            connector_id, self._handle_connector_completion
+        )
+        processor.mark_connector_fetch_complete(connector_id)
+
     def _handle_connector_completion(self, connector_id: int) -> None:
         """
         Handle completion of all items for a connector (called from worker thread via callback).
@@ -802,6 +827,7 @@ class SyncJobService:
                     db_connector_runs = self._run_job_db_connector_runs
                     if connector_id in db_connector_runs:
                         run_id = db_connector_runs[connector_id]
+                        self._update_connector_run_metrics(run_id, cstatus)
                         db_status = (
                             SyncJobConnectorStatus.WARNING
                             if cstatus.error_count > 0
@@ -1354,6 +1380,11 @@ class SyncJobService:
                 f"only 'failed' or 'warning' connectors can be retried"
             )
 
+        if connector_id in self._fetching_connectors:
+            raise RuntimeError(
+                f"Connector {connector_id} is still fetching in the current job; retry once it finishes"
+            )
+
         # Check if retry already in progress for this connector
         if connector_id in self._retry_threads:
             thread = self._retry_threads[connector_id]
@@ -1597,6 +1628,10 @@ class SyncJobService:
                     normalized_item,
                     error,
                 ) in connector_hub.yield_normalized():
+                    if normalized_item is FETCH_COMPLETE:
+                        self._handle_fetch_complete(connector_id, processor)
+                        continue
+
                     # Check for abort
                     if self._abort_event.is_set():
                         self.logger.info(
@@ -1626,13 +1661,10 @@ class SyncJobService:
                             run_id, DBConnStatus.RUNNING, started_at=cstatus.started_at
                         )
                         session.commit()
-
-                        # Register completion callback
-                        def on_complete(cid: int):
-                            self._handle_connector_completion(cid)
+                        self._fetching_connectors.add(connector_id)
 
                         processor.register_connector_completion_callback(
-                            connector_id, on_complete
+                            connector_id, self._handle_connector_completion
                         )
 
                     # Handle errors
@@ -1689,6 +1721,7 @@ class SyncJobService:
                 cstatus.add_log("ERROR", f"Unexpected error: {e}")
                 self._persist_connector_status(connector_id, "failed", str(e))
             finally:
+                self._fetching_connectors.discard(connector_id)
                 # Stop processor and wait for workers
                 processor.stop(timeout=60)
 
@@ -2055,6 +2088,13 @@ class SyncJobService:
                     normalized_item,
                     error,
                 ) in connector_hub.yield_normalized():
+                    if normalized_item is FETCH_COMPLETE:
+                        self._handle_fetch_complete(
+                            raw_item.get("_connector_id") if isinstance(raw_item, dict) else None,
+                            processor,
+                        )
+                        continue
+
                     item_count += 1
                     # Log first few items for debugging
                     if item_count <= 3:
@@ -2102,46 +2142,6 @@ class SyncJobService:
                     if raw_item and "_master_source" in raw_item:
                         current = raw_item["_master_source"]
                         if current != self.progress.current_connector:
-                            # Previous connector finished YIELDING items (not yet fully processed)
-                            if self.progress.current_connector and current_connector_id:
-                                if (
-                                    current_connector_id
-                                    in self.progress.connector_statuses
-                                ):
-                                    cstatus = self.progress.connector_statuses[
-                                        current_connector_id
-                                    ]
-                                    if cstatus.status == ConnectorSyncStatus.RUNNING:
-                                        # Mark as finishing (items still being processed in queue)
-                                        cstatus.current_operation = (
-                                            "Finishing processing..."
-                                        )
-                                        cstatus.add_log(
-                                            "INFO",
-                                            f"Finished fetching {cstatus.fetched_count} items, processing queue...",
-                                        )
-                                        self.logger.info(
-                                            f"📥 Connector {current_connector_id} finished fetching, waiting for queue processing"
-                                        )
-
-                                        # Note: Completion callback already registered when connector started (QUEUED→RUNNING)
-                                        # Check for special case: 0 items fetched means completion is immediate
-                                        pending_count = (
-                                            processor.get_connector_pending_count(
-                                                current_connector_id
-                                            )
-                                        )
-                                        if (
-                                            pending_count == 0
-                                            and cstatus.fetched_count == 0
-                                        ):
-                                            self.logger.info(
-                                                f"ℹ️ Connector {current_connector_id} fetched 0 items - completing immediately"
-                                            )
-                                            self._handle_connector_completion(
-                                                current_connector_id
-                                            )
-
                             self.progress.current_connector = current
 
                             # Try to extract connector_id from raw_item or master_source
@@ -2192,14 +2192,11 @@ class SyncJobService:
                                         f"▶️ Connector {current_connector_id} ({current}) started: QUEUED → RUNNING"
                                     )
 
-                                # ✅ Register completion callback for ANY connector entering the main loop,
-                                # regardless of whether status was QUEUED or already RUNNING from
-                                # lazy initialization in DatabaseConnectorHub worker threads.
-                                def on_complete(connector_id: int):
-                                    self._handle_connector_completion(connector_id)
-
+                                # Register for ANY connector entering the loop, even if lazy init already set RUNNING;
+                                # it only fires after the hub's FETCH_COMPLETE marker and a drained queue.
+                                self._fetching_connectors.add(current_connector_id)
                                 processor.register_connector_completion_callback(
-                                    current_connector_id, on_complete
+                                    current_connector_id, self._handle_connector_completion
                                 )
                                 self.logger.debug(
                                     f"📝 Registered completion callback for connector {current_connector_id}"
@@ -2306,6 +2303,7 @@ class SyncJobService:
                 raise
 
             finally:
+                self._fetching_connectors.intersection_update(self._retry_threads)
                 # Stop processor and wait for workers to finish
                 processor.stop(timeout=60)
                 self.logger.info(f"📊 Processor stats: {processor.get_stats()}")
