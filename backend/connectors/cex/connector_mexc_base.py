@@ -13,7 +13,8 @@ from requests.adapters import HTTPAdapter
 from typing import Dict, Any, Generator, List, Callable, Optional
 from urllib3.util.retry import Retry
 
-from backend.connectors.base.base_connector import BaseConnector
+from backend.connectors.base.base_connector import FETCH_ERROR_KEY, BaseConnector
+from backend.connectors.base.ccxt_errors import to_connector_error
 from backend.connectors.base.connector_exceptions import (
     ConnectorAPIError,
     ErrorReason,
@@ -22,6 +23,12 @@ from backend.config.loader import configure_logging, load_credentials
 
 # Maximum concurrent workers for API requests (balances rate limits vs speed)
 MAX_WORKERS = 10
+
+DAY_MS = 24 * 60 * 60 * 1000
+WINDOW_MS = 7 * DAY_MS  # MEXC: startTime/endTime span must not exceed 7 days
+MAX_LOOKBACK_MS = 89 * DAY_MS  # MEXC: at most 90 days of deposit/withdraw history
+PAGE_LIMIT = 1000  # MEXC deposit/withdraw history max page size
+MIN_SPLIT_WINDOW_MS = 60 * 60 * 1000
 
 
 class MEXCBaseConnector(BaseConnector):
@@ -186,7 +193,7 @@ class MEXCBaseConnector(BaseConnector):
                 error_str = str(e).lower()
                 
                 # Handle rate limiting (429)
-                if "429" in error_str or "too many requests" in error_str:
+                if isinstance(e, ccxt.RateLimitExceeded) or "429" in error_str or "too many requests" in error_str:
                     retry_count += 1
                     if retry_count < max_retries:
                         # Exponential backoff with jitter: prevents all threads from retrying simultaneously
@@ -215,51 +222,16 @@ class MEXCBaseConnector(BaseConnector):
                 if "703" in error_str or ("权限" in error_str and "permission" in error_str):
                     log.debug(f"ℹ️ No {entity_type}s available for {entity_name} (code 703 - legitimate empty)")
                     return []
-                
+
                 # Legitimate empty result
                 if f"no {entity_type}s" in error_str or "empty" in error_str:
                     log.debug(f"ℹ️ No {entity_type}s found for {entity_name}")
                     return []
-                
-                # Authentication errors - non-retryable
-                if "401" in error_str or "unauthorized" in error_str or "invalid api key" in error_str:
-                    log.error(f"❌ Authentication failed for {entity_name}: {e}")
-                    raise ConnectorAPIError(
-                        message="Authentication failed - check API credentials",
-                        connector_name=self.connector_name,
-                        operation=f"fetch_{entity_type}s",
-                        reason=ErrorReason.AUTHENTICATION_FAILED,
-                        http_status_code=401,
-                        retryable=False,
-                        original_error=e,
-                        details=entity_name,
-                    )
-                
-                if "403" in error_str or "forbidden" in error_str:
-                    log.error(f"❌ Permission denied for {entity_name}: {e}")
-                    raise ConnectorAPIError(
-                        message="Permission denied - insufficient API key permissions",
-                        connector_name=self.connector_name,
-                        operation=f"fetch_{entity_type}s",
-                        reason=ErrorReason.PERMISSION_DENIED,
-                        http_status_code=403,
-                        retryable=False,
-                        original_error=e,
-                        details=entity_name,
-                    )
-                
-                # Other errors - fatal
-                log.error(f"❌ API error fetching {entity_type}s for {entity_name}: {e}")
-                raise ConnectorAPIError(
-                    message="API request failed",
-                    connector_name=self.connector_name,
-                    operation=f"fetch_{entity_type}s",
-                    reason=ErrorReason.API_ERROR,
-                    retryable=False,
-                    original_error=e,
-                    details=entity_name,
-                )
-        
+
+                err = to_connector_error(e, self.connector_name, f"fetch_{entity_type}s", details=entity_name)
+                log.error(f"❌ {err.reason.value} fetching {entity_type}s for {entity_name}: {err.details}")
+                raise err from e
+
         # Should not reach here, but handle edge case
         log.error(f"❌ Max retries ({max_retries}) exhausted for {entity_name}")
         raise ConnectorAPIError(
@@ -394,7 +366,115 @@ class MEXCBaseConnector(BaseConnector):
         
         return all_transactions
 
+    def _lookback_start(self, now_ms: int) -> int:
+        """Effective start (MEXC only serves ~90 days); warn when the requested history is older."""
+        log = self._get_logger()
+        max_lookback = now_ms - MAX_LOOKBACK_MS
+        since = self.since_timestamp_ms
+        if since is None:
+            return max_lookback
+        if since < max_lookback:
+            fmt = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+            log.warning(
+                f"⚠️ MEXC API only returns the last 90 days of {self._get_transaction_type()}s: "
+                f"requested since {fmt(since)}, fetching from {fmt(max_lookback)}. "
+                f"Import older history with the MEXC file connector."
+            )
+            return max_lookback
+        return since
+
+    def _fetch_window_all_coins(self, start: int, end: int) -> List[Dict[str, Any]]:
+        """Fetch one time window for all coins; split it when the page limit is hit."""
+        transaction_type = self._get_transaction_type()
+        label = (
+            f"all coins {datetime.fromtimestamp(start / 1000, tz=timezone.utc):%Y-%m-%d %H:%M}"
+            f" → {datetime.fromtimestamp(end / 1000, tz=timezone.utc):%Y-%m-%d %H:%M}"
+        )
+        items = self._fetch_with_retry(
+            lambda: self._fetch_transactions(
+                code=None,
+                since=start,
+                limit=PAGE_LIMIT,
+                params={"startTime": start, "endTime": end},
+            ),
+            label,
+            entity_type=transaction_type,
+        )
+        if len(items) >= PAGE_LIMIT and end - start > MIN_SPLIT_WINDOW_MS:
+            mid = start + (end - start) // 2
+            self._get_logger().info(f"↔️ {label}: page limit reached, splitting window")
+            return self._fetch_window_all_coins(start, mid) + self._fetch_window_all_coins(mid, end)
+        return items
+
+    def _yield_all_coins(self) -> Generator[Dict[str, Any], None, None]:
+        """One request per 7-day window (coin is optional on MEXC history endpoints)."""
+        log = self._get_logger()
+        transaction_type = self._get_transaction_type()
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        since = self._lookback_start(now_ms)
+        total_windows = max(1, -(-(now_ms - since) // WINDOW_MS))
+        log.info(
+            f"🔄 Fetching MEXC {transaction_type}s for all coins in {total_windows} 7-day window(s) "
+            f"since {datetime.fromtimestamp(since / 1000, tz=timezone.utc).isoformat()}"
+        )
+
+        seen = set()
+        total = 0
+        failed_windows = 0
+        window_end = now_ms
+        window = 0
+        while window_end > since and not self.is_abort_requested():
+            window += 1
+            window_start = max(window_end - WINDOW_MS, since)
+            try:
+                items = self._fetch_window_all_coins(window_start, window_end)
+            except ConnectorAPIError as e:
+                if window == 1 and e.reason == ErrorReason.BAD_REQUEST:
+                    raise
+                failed_windows += 1
+                yield {FETCH_ERROR_KEY: f"Window {window}/{total_windows} failed: {e}"}
+                items = []
+            new_items = 0
+            for item in items:
+                key = item.get("id") or item.get("txid")
+                if key and key in seen:
+                    continue
+                if key:
+                    seen.add(key)
+                new_items += 1
+                total += 1
+                yield item
+            self.update_progress(
+                operation=f"Fetching {transaction_type}s (window {window}/{total_windows})",
+                current=window,
+                total=total_windows,
+                log_message=f"Window {window}/{total_windows}: {new_items} {transaction_type}s" if new_items else None,
+                fetched_count=total,
+            )
+            window_end = window_start
+
+        log.info(
+            f"✅ Fetched {total} MEXC {transaction_type}s across {window} window(s)"
+            + (f", {failed_windows} window(s) failed" if failed_windows else "")
+        )
+
     def yield_raws(self) -> "Generator[Dict[str, Any], None, None]":
+        """Coin-less windowed fetch by default; per-currency fetch when a currencies filter is configured."""
+        if self._currencies_filter:
+            yield from self._yield_per_currency()
+            return
+        try:
+            yield from self._yield_all_coins()
+        except ConnectorAPIError as e:
+            if e.reason != ErrorReason.BAD_REQUEST:
+                raise
+            self._get_logger().warning(
+                f"⚠️ MEXC rejected coin-less {self._get_transaction_type()} history ({e.details}); "
+                f"falling back to per-currency fetching"
+            )
+            yield from self._yield_per_currency()
+
+    def _yield_per_currency(self) -> "Generator[Dict[str, Any], None, None]":
         """
         Fetch transactions from MEXC using CCXT with queue-based streaming.
         Yields transactions as they are fetched from each currency in parallel.
@@ -441,7 +521,7 @@ class MEXCBaseConnector(BaseConnector):
             idx, currency = indexed_currency
             prefix = f"[{idx + 1}/{len(currencies)}]"
             try:
-                transactions = self.fetch_with_7day_windows(currency)
+                transactions = self.fetch_with_7day_windows(currency, since=self.since_timestamp_ms)
                 
                 # Put each transaction in the queue immediately
                 if transactions:
@@ -468,6 +548,7 @@ class MEXCBaseConnector(BaseConnector):
                         log.debug(f"{prefix} ✅ Found {len(transactions)} {transaction_type}s for {currency}")
             except Exception as e:
                 log.error(f"{prefix} ❌ Error fetching {transaction_type}s for {currency}: {e}")
+                queue.put({FETCH_ERROR_KEY: f"{currency}: {e}"})
             finally:
                 # Signal this worker is done
                 queue.put(None)
@@ -501,7 +582,8 @@ class MEXCBaseConnector(BaseConnector):
                         if completed_workers % max(1, total_workers // 10) == 0:
                             log.info(f"📊 Progress: {completed_workers}/{total_workers} currencies processed")
                     else:
-                        total_yielded += 1
+                        if FETCH_ERROR_KEY not in item:
+                            total_yielded += 1
                         yield item
                 except Exception as e:
                     # Timeout - log warning

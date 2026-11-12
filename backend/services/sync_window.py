@@ -1,6 +1,6 @@
 """Effective "fetch from" window of a connector, shared by the sync job and the UI."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from sqlmodel import Session
@@ -59,12 +59,19 @@ def resolve_sync_window(
 
     since: Optional[datetime] = None
     source = "full_history"
+    overlap_days = 0
     if incremental:
         if override_since is not NO_OVERRIDE:
             since = override_since
             source = "override" if override_since else "full_history"
         elif last_tx:
             since, source = last_tx, "last_transaction"
+            overlap_days = info.incremental_overlap_days if info else 0
+            if overlap_days:
+                since = last_tx - timedelta(days=overlap_days)
+                config_start = _parse_dt(config.get("start_datetime"))
+                if config_start and ensure_utc(since) < ensure_utc(config_start):
+                    since = config_start
         elif _parse_dt(config.get("start_datetime")):
             since, source = _parse_dt(config.get("start_datetime")), "config_start"
         if cutoff and (since is None or ensure_utc(since) < ensure_utc(cutoff)):
@@ -79,6 +86,7 @@ def resolve_sync_window(
         "last_transaction_at": last_tx,
         "history_cutoff": cutoff,
         "default_start": default_start,
+        "overlap_days": overlap_days,
     }
 
 
@@ -91,6 +99,7 @@ def sync_window_to_dict(window: Dict[str, Any]) -> Dict[str, Any]:
         "last_transaction_at": _iso(window["last_transaction_at"]),
         "history_cutoff": _iso(window["history_cutoff"]),
         "default_start": _iso(window["default_start"]),
+        "overlap_days": window.get("overlap_days", 0),
     }
 
 
@@ -102,7 +111,10 @@ def describe_sync_window(window: Dict[str, Any]) -> str:
 
     source = window["source"]
     if window["since"]:
-        text = f"from {fmt(window['since'])} ({SOURCE_LABELS[source]})"
+        text = f"from {fmt(window['since'])} ({SOURCE_LABELS[source]}"
+        if window.get("overlap_days") and source == "last_transaction":
+            text += f" minus {window['overlap_days']}-day overlap for late-completing transfers"
+        text += ")"
     elif source == "connector_default":
         text = f"from {fmt(window['default_start'])} ({SOURCE_LABELS[source]})"
     elif window["incremental"]:

@@ -33,6 +33,10 @@ class _FetchComplete:
 
 FETCH_COMPLETE = _FetchComplete()
 
+# yield_raws() may yield {FETCH_ERROR_KEY: message} for a partial fetch failure (e.g. one currency/window):
+# it is reported as an item error (connector ends in WARNING) instead of being swallowed.
+FETCH_ERROR_KEY = "_fetch_error"
+
 # CCXT unified transfer statuses for which no funds moved
 TERMINAL_FAILED_TRANSFER_STATUSES = frozenset({"canceled", "cancelled", "failed", "rejected"})
 
@@ -409,7 +413,8 @@ class BaseConnector(ABC):
             # Collect items for JSON dump while yielding
             collected_raws = []
             for raw_item in self.yield_raws():
-                collected_raws.append(raw_item)
+                if not (isinstance(raw_item, dict) and FETCH_ERROR_KEY in raw_item):
+                    collected_raws.append(raw_item)
                 yield raw_item
             # Dump all collected raws to JSON after streaming completes
             self.dump_trades_to_json(collected_raws)
@@ -532,6 +537,10 @@ class BaseConnector(ABC):
         item_count = 0
         # Use _yield_raws() generator which handles test mode automatically
         for raw_item in self._yield_raws():
+            if isinstance(raw_item, dict) and FETCH_ERROR_KEY in raw_item:
+                log.warning(f"⚠️ [{self.connector_name}] Partial fetch failure: {raw_item[FETCH_ERROR_KEY]}")
+                yield (raw_item, None, f"Fetch failed: {raw_item[FETCH_ERROR_KEY]}")
+                continue
             item_count += 1
             try:
                 # Map to normalized format immediately

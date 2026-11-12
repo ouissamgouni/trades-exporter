@@ -12,10 +12,7 @@ from typing import Dict, Any, Generator, List
 from urllib3.util.retry import Retry
 
 from backend.connectors.base.base_connector import BaseConnector
-from backend.connectors.base.connector_exceptions import (
-    ConnectorAPIError,
-    ErrorReason,
-)
+from backend.connectors.base.ccxt_errors import to_connector_error
 from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction, TransactionType
 from backend.core.network_normalizer import normalize_network
@@ -125,84 +122,14 @@ class ConnectorCoinbaseWithdrawals(BaseConnector):
             return withdrawals
         except Exception as e:
             error_str = str(e).lower()
-            
             # Legitimate empty result - not an error
             if "no withdrawals" in error_str or "empty" in error_str:
                 log.debug("ℹ️ No withdrawals found (legitimate empty result)")
                 return []
-            
-            # Authentication/Authorization errors - non-retryable
-            if "401" in error_str or "unauthorized" in error_str or "invalid api key" in error_str:
-                log.error(f"❌ Authentication failed for Coinbase withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Authentication failed - check API credentials",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.AUTHENTICATION_FAILED,
-                    http_status_code=401,
-                    retryable=False,
-                    original_error=e,
-                )
-            
-            if "403" in error_str or "forbidden" in error_str or "permission" in error_str:
-                log.error(f"❌ Permission denied for Coinbase withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Permission denied - insufficient API key permissions",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.PERMISSION_DENIED,
-                    http_status_code=403,
-                    retryable=False,
-                    original_error=e,
-                )
-            
-            # Rate limiting - retryable
-            if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
-                log.warning(f"⚠️ Rate limited on Coinbase withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Rate limited by Coinbase API",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.RATE_LIMITED,
-                    http_status_code=429,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            # Network/timeout errors - retryable
-            if "timeout" in error_str or "timed out" in error_str:
-                log.warning(f"⚠️ Timeout fetching Coinbase withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Request timeout",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.TIMEOUT,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            if "connection" in error_str or "network" in error_str:
-                log.warning(f"⚠️ Network error fetching Coinbase withdrawals: {e}")
-                raise ConnectorAPIError(
-                    message="Network connection error",
-                    connector_name=self.connector_name,
-                    operation="fetch_withdrawals",
-                    reason=ErrorReason.NETWORK_ERROR,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            # Generic API error
-            log.error(f"❌ API error fetching Coinbase withdrawals: {e}")
-            raise ConnectorAPIError(
-                message="API request failed",
-                connector_name=self.connector_name,
-                operation="fetch_withdrawals",
-                reason=ErrorReason.API_ERROR,
-                retryable=False,
-                original_error=e,
-                details=str(e),
-            )
+
+            err = to_connector_error(e, self.connector_name, "fetch_withdrawals")
+            log.error(f"❌ {err.reason.value} during fetch_withdrawals: {err.details}")
+            raise err from e
 
     def raw_to_normalized(self, raw_item: dict) -> "NormalizedTransaction":
         """

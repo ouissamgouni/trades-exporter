@@ -10,10 +10,7 @@ from typing import Dict, Any, List
 
 
 from backend.connectors.base.base_connector import BaseConnector
-from backend.connectors.base.connector_exceptions import (
-    ConnectorAPIError,
-    ErrorReason,
-)
+from backend.connectors.base.ccxt_errors import to_connector_error
 from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction
 
@@ -168,84 +165,14 @@ class OKXConnectorTrx(BaseConnector):
 
         except Exception as e:
             error_str = str(e).lower()
-            
             # Legitimate empty result
             if "no data" in error_str or "empty" in error_str or "no trades" in error_str:
                 log.debug("ℹ️ No trades found (legitimate empty result)")
                 return []
-            
-            # Authentication errors
-            if "401" in error_str or "unauthorized" in error_str:
-                log.error(f"❌ Authentication failed for OKX trades: {e}")
-                raise ConnectorAPIError(
-                    message="Authentication failed - check API credentials",
-                    connector_name=self.connector_name,
-                    operation="fetch_trades",
-                    reason=ErrorReason.AUTHENTICATION_FAILED,
-                    http_status_code=401,
-                    retryable=False,
-                    original_error=e,
-                )
-            
-            if "403" in error_str or "forbidden" in error_str:
-                log.error(f"❌ Permission denied for OKX trades: {e}")
-                raise ConnectorAPIError(
-                    message="Permission denied - insufficient API key permissions",
-                    connector_name=self.connector_name,
-                    operation="fetch_trades",
-                    reason=ErrorReason.PERMISSION_DENIED,
-                    http_status_code=403,
-                    retryable=False,
-                    original_error=e,
-                )
-            
-            # Rate limiting
-            if "429" in error_str or "rate limit" in error_str:
-                log.error(f"❌ Rate limited on OKX trades: {e}")
-                raise ConnectorAPIError(
-                    message="Rate limited by OKX API",
-                    connector_name=self.connector_name,
-                    operation="fetch_trades",
-                    reason=ErrorReason.RATE_LIMITED,
-                    http_status_code=429,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            # Network/timeout errors
-            if "timeout" in error_str or "timed out" in error_str:
-                log.error(f"❌ Timeout fetching OKX trades: {e}")
-                raise ConnectorAPIError(
-                    message="Request timeout",
-                    connector_name=self.connector_name,
-                    operation="fetch_trades",
-                    reason=ErrorReason.TIMEOUT,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            if "connection" in error_str or "network" in error_str:
-                log.error(f"❌ Network error fetching OKX trades: {e}")
-                raise ConnectorAPIError(
-                    message="Network connection error",
-                    connector_name=self.connector_name,
-                    operation="fetch_trades",
-                    reason=ErrorReason.NETWORK_ERROR,
-                    retryable=True,
-                    original_error=e,
-                )
-            
-            # Generic API error
-            log.error(f"❌ API error fetching OKX trades: {e}")
-            raise ConnectorAPIError(
-                message="API request failed",
-                connector_name=self.connector_name,
-                operation="fetch_trades",
-                reason=ErrorReason.API_ERROR,
-                retryable=False,
-                original_error=e,
-                details=str(e),
-            )
+
+            err = to_connector_error(e, self.connector_name, "fetch_trades")
+            log.error(f"❌ {err.reason.value} during fetch_trades: {err.details}")
+            raise err from e
 
     def raw_to_normalized(self, ccxt_trade: dict) -> "NormalizedTransaction":
         """

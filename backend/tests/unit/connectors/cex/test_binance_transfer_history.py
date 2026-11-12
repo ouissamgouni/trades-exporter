@@ -40,3 +40,42 @@ def test_pages_with_offset_and_dedupes_window_boundaries():
 
     assert len(ids) == binance_common.PAGE_LIMIT + 1
     assert ids[-1] == "last"
+
+
+def _withdrawals_connector(exchange):
+    from unittest.mock import MagicMock
+    from backend.connectors.cex.connector_binance_withdrawals import BinanceWithdrawalsConnector
+
+    with patch("backend.connectors.cex.connector_binance_withdrawals.load_credentials",
+               return_value={"api_key": "k", "api_secret": "s"}), \
+         patch("ccxt.binance", return_value=exchange):
+        return BinanceWithdrawalsConnector(account_id=1, config={"test_mode": False, "disable_file_output": True})
+
+
+def test_connector_retries_rate_limit_and_passes_offset():
+    import ccxt
+    from unittest.mock import MagicMock
+
+    exchange = MagicMock()
+    exchange.fetch_withdrawals.side_effect = [ccxt.RateLimitExceeded("-1003"), [{"id": "w1"}]]
+    connector = _withdrawals_connector(exchange)
+
+    with patch("backend.connectors.base.ccxt_errors.time.sleep"):
+        assert connector.get_withdrawals(since=1, limit=1000, params={"offset": 5}) == [{"id": "w1"}]
+    assert exchange.fetch_withdrawals.call_args.kwargs["params"] == {"offset": 5}
+
+
+def test_connector_auth_error_is_not_retried():
+    import ccxt
+    import pytest
+    from unittest.mock import MagicMock
+    from backend.connectors.base.connector_exceptions import ConnectorAPIError, ErrorReason
+
+    exchange = MagicMock()
+    exchange.fetch_withdrawals.side_effect = ccxt.AuthenticationError("Invalid API-key")
+    connector = _withdrawals_connector(exchange)
+
+    with pytest.raises(ConnectorAPIError) as exc:
+        connector.get_withdrawals(since=1)
+    assert exc.value.reason == ErrorReason.AUTHENTICATION_FAILED
+    assert exchange.fetch_withdrawals.call_count == 1

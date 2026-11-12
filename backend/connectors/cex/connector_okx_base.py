@@ -10,11 +10,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Generator, List, Optional
 
 from backend.connectors.base.base_connector import BaseConnector
-from backend.connectors.base.connector_exceptions import (
-    ConnectorAPIError,
-    ErrorReason,
-)
+from backend.connectors.base.ccxt_errors import call_with_retry
 from backend.config.loader import configure_logging, load_credentials
+
+OKX_PAGE_LIMIT = 100  # max page size of /asset/deposit-history and /asset/withdrawal-history
 
 
 class OKXBaseConnector(BaseConnector):
@@ -25,7 +24,7 @@ class OKXBaseConnector(BaseConnector):
     - CCXT exchange initialization with rate limiting
     - Credentials loading from settings.yaml
     - Balance fetching to identify user's currencies
-    - Pagination using 'after' parameter (billId-based)
+    - Timestamp-based pagination with 'after' (deposit/withdrawal records have no billId)
     - Common error handling
     
     OKX API Rate Limits:
@@ -102,168 +101,82 @@ class OKXBaseConnector(BaseConnector):
 
     def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Fetch transactions from OKX and yield them as they are fetched.
-        Uses OKX 'after' parameter (billId) for pagination.
-        
-        Yields:
-            Dict[str, Any]: Transaction objects as they are fetched
+        Page backwards through OKX deposit/withdrawal history (newest first, max 100 per page).
+
+        CCXT maps `since` to OKX `before`; older pages are requested with `after` = oldest
+        timestamp seen + 1 ms ('after' is exclusive, the +1 keeps same-ms siblings, dedup drops repeats).
         """
         log = self._get_logger()
         transaction_type = self._get_transaction_type()
-        
-        log.info(f"🔄 Fetching {transaction_type}s from OKX API using CCXT...")
-        
         since_ms = self.since_timestamp_ms
-        after = None
-        limit = None#100
-        total_count = 0
+        since_str = (
+            datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc).isoformat() if since_ms else "beginning"
+        )
+        log.info(f"🔄 Fetching {transaction_type}s from OKX since {since_str}...")
+
+        after: Optional[int] = None
         seen_ids = set()
-        
+        total_count = 0
+        page = 0
+
         self.update_progress(
             operation=f"Fetching {transaction_type}s",
             current=0,
             total=1,
-            log_message=f"Fetching {transaction_type}s from OKX...",
+            log_message=f"Fetching {transaction_type}s from OKX since {since_str}...",
             fetched_count=0,
         )
-        
-        while True:
-            # Check for abort
-            if self.is_abort_requested():
-                log.info(f"⚠️ Abort requested, stopping OKX {transaction_type} fetching")
+
+        while not self.is_abort_requested():
+            page += 1
+            params = {"after": after} if after else {}
+            transactions = call_with_retry(
+                lambda: self._fetch_transactions(
+                    code=None, since=since_ms, limit=OKX_PAGE_LIMIT, params=params
+                ),
+                self.connector_name,
+                f"fetch_{transaction_type}s",
+                log,
+                details=f"page={page} after={after}",
+            )
+            if not transactions:
                 break
-            
-            try:
-                params = {}
-                if after:
-                    params["after"] = after
-                
-                # Fetch transactions (currency is optional for deposits/withdrawals)
-                transactions = self._fetch_transactions(
-                    code=None, 
-                    since=since_ms, 
-                    limit=limit, 
-                    params=params
-                )
-                
-                # Handle None or empty result
-                if not transactions:
-                    log.debug(f"No more {transaction_type}s to fetch")
-                    break
-                
-                first_trx = transactions[0]
-                last_trx = transactions[-1]
-                
-                # Update 'after' parameter for next page using billId from first transaction
-                after = first_trx.get("info", {}).get("billId")
-                
-                # Yield new transactions
-                fetched_new_trxs = False
-                for trx in transactions:
-                    trx_id = trx.get("id")
-                    trx_timestamp = trx.get("timestamp")
-                    
-                    # Skip transactions before since timestamp if incremental sync
-                    if since_ms and trx_timestamp and trx_timestamp < since_ms:
-                        continue
-                    
-                    # Skip duplicates
-                    if trx_id and trx_id not in seen_ids:
-                        fetched_new_trxs = True
-                        seen_ids.add(trx_id)
-                        total_count += 1
-                        yield trx
-                
-                # If all transactions in batch are before since timestamp, we can stop
-                if since_ms and last_trx.get("timestamp", 0) < since_ms:
-                    log.debug(f"Reached {transaction_type}s before since datetime, stopping pagination")
-                    break
-                
-                if not fetched_new_trxs:
-                    log.debug(f"No new {transaction_type}s found")
-                    break
-                    
-            except Exception as e:
-                error_str = str(e).lower()
-                
-                # Legitimate empty result
-                if "no data" in error_str or "empty" in error_str:
-                    log.debug(f"ℹ️ No {transaction_type}s found (legitimate empty result)")
-                    break
-                
-                # Authentication errors - non-retryable
-                if "401" in error_str or "unauthorized" in error_str or "invalid api key" in error_str:
-                    log.error(f"❌ Authentication failed for OKX {transaction_type}s: {e}")
-                    raise ConnectorAPIError(
-                        message="Authentication failed - check API credentials",
-                        connector_name=self.connector_name,
-                        operation=f"fetch_{transaction_type}s",
-                        reason=ErrorReason.AUTHENTICATION_FAILED,
-                        http_status_code=401,
-                        retryable=False,
-                        original_error=e,
-                    )
-                
-                if "403" in error_str or "forbidden" in error_str or "permission" in error_str:
-                    log.error(f"❌ Permission denied for OKX {transaction_type}s: {e}")
-                    raise ConnectorAPIError(
-                        message="Permission denied - insufficient API key permissions",
-                        connector_name=self.connector_name,
-                        operation=f"fetch_{transaction_type}s",
-                        reason=ErrorReason.PERMISSION_DENIED,
-                        http_status_code=403,
-                        retryable=False,
-                        original_error=e,
-                    )
-                
-                # Rate limiting
-                if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
-                    log.error(f"❌ Rate limited on OKX {transaction_type}s: {e}")
-                    raise ConnectorAPIError(
-                        message="Rate limited by OKX API",
-                        connector_name=self.connector_name,
-                        operation=f"fetch_{transaction_type}s",
-                        reason=ErrorReason.RATE_LIMITED,
-                        http_status_code=429,
-                        retryable=True,
-                        original_error=e,
-                    )
-                
-                # Network/timeout errors
-                if "timeout" in error_str or "timed out" in error_str:
-                    log.error(f"❌ Timeout fetching OKX {transaction_type}s: {e}")
-                    raise ConnectorAPIError(
-                        message="Request timeout",
-                        connector_name=self.connector_name,
-                        operation=f"fetch_{transaction_type}s",
-                        reason=ErrorReason.TIMEOUT,
-                        retryable=True,
-                        original_error=e,
-                    )
-                
-                if "connection" in error_str or "network" in error_str:
-                    log.error(f"❌ Network error fetching OKX {transaction_type}s: {e}")
-                    raise ConnectorAPIError(
-                        message="Network connection error",
-                        connector_name=self.connector_name,
-                        operation=f"fetch_{transaction_type}s",
-                        reason=ErrorReason.NETWORK_ERROR,
-                        retryable=True,
-                        original_error=e,
-                    )
-                
-                # Generic API error
-                log.error(f"❌ API error fetching OKX {transaction_type}s: {e}")
-                raise ConnectorAPIError(
-                    message="API request failed",
-                    connector_name=self.connector_name,
-                    operation=f"fetch_{transaction_type}s",
-                    reason=ErrorReason.API_ERROR,
-                    retryable=False,
-                    original_error=e,
-                    details=str(e),
-                )
-        
+
+            new_in_page = 0
+            for trx in transactions:
+                trx_id = trx.get("id")
+                trx_timestamp = trx.get("timestamp")
+                if since_ms and trx_timestamp and trx_timestamp < since_ms:
+                    continue
+                if not trx_id or trx_id in seen_ids:
+                    continue
+                seen_ids.add(trx_id)
+                new_in_page += 1
+                total_count += 1
+                yield trx
+
+            timestamps = [t.get("timestamp") for t in transactions if t.get("timestamp")]
+            oldest_ts = min(timestamps) if timestamps else None
+            log.info(
+                f"📄 OKX {transaction_type}s page {page}: {len(transactions)} records, {new_in_page} new"
+                + (f", oldest {datetime.fromtimestamp(oldest_ts / 1000, tz=timezone.utc).isoformat()}" if oldest_ts else "")
+            )
+            self.update_progress(
+                operation=f"Fetching {transaction_type}s (page {page})",
+                current=0,
+                total=1,
+                fetched_count=total_count,
+            )
+
+            if len(transactions) < OKX_PAGE_LIMIT or new_in_page == 0 or oldest_ts is None:
+                break
+            if since_ms and oldest_ts < since_ms:
+                break
+            after = oldest_ts + 1
+        else:
+            log.info(f"⚠️ Abort requested, stopping OKX {transaction_type} fetching")
+
+        log.info(f"✅ Fetched {total_count} {transaction_type}s from OKX in {page} page(s)")
         self.update_progress(
             operation="Completed",
             current=1,
