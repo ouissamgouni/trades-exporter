@@ -21,7 +21,9 @@ def iter_transfer_history(
         offset = 0
         while True:
             page = fetch(
-                since=start, limit=PAGE_LIMIT, params={"offset": offset} if offset else {}
+                since=start,
+                limit=PAGE_LIMIT,
+                params={"offset": offset} if offset else {},
             )
             for item in page:
                 key = item.get("id")

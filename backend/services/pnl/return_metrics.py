@@ -24,7 +24,9 @@ class ReturnMetrics:
     twr_annualized_pct: Optional[float]
     irr_pct: Optional[float]  # annualized
     irr_period_pct: Optional[float]
-    series: List[Tuple[str, float]] = field(default_factory=list)  # cumulative TWR % per date
+    series: List[Tuple[str, float]] = field(
+        default_factory=list
+    )  # cumulative TWR % per date
 
 
 @dataclass
@@ -35,14 +37,18 @@ class BenchmarkComparison:
     excess_annualized_pp: Optional[float]
     pme_value: Optional[float]
     actual_value: float
-    series: List[Tuple[str, float]] = field(default_factory=list)  # rebased benchmark % per date
+    series: List[Tuple[str, float]] = field(
+        default_factory=list
+    )  # rebased benchmark % per date
 
 
 def _days_between(a: str, b: str) -> int:
     return (date.fromisoformat(b[:10]) - date.fromisoformat(a[:10])).days
 
 
-def slice_period(points: Sequence[SeriesPoint], start: Optional[str]) -> List[SeriesPoint]:
+def slice_period(
+    points: Sequence[SeriesPoint], start: Optional[str]
+) -> List[SeriesPoint]:
     """Points from the last one at/before `start` (the baseline) to the end."""
     if start is None:
         return list(points)
@@ -125,7 +131,9 @@ def compute_return_metrics(points: Sequence[SeriesPoint]) -> ReturnMetrics:
     return ReturnMetrics(
         days=days,
         twr_pct=round(twr * 100, 4) if has_capital else None,
-        twr_annualized_pct=round(ann * 100, 4) if ann is not None and has_capital else None,
+        twr_annualized_pct=round(ann * 100, 4)
+        if ann is not None and has_capital
+        else None,
         irr_pct=round(irr * 100, 4) if irr is not None else None,
         irr_period_pct=(
             round(((1 + irr) ** (days / 365) - 1) * 100, 4) if irr is not None else None
@@ -134,7 +142,9 @@ def compute_return_metrics(points: Sequence[SeriesPoint]) -> ReturnMetrics:
     )
 
 
-def _price_on(prices: List[Tuple[str, float]], day: str, start_idx: int) -> Tuple[Optional[float], int]:
+def _price_on(
+    prices: List[Tuple[str, float]], day: str, start_idx: int
+) -> Tuple[Optional[float], int]:
     """Last price at/before `day` (forward-fill); returns (price, next search index)."""
     idx = start_idx
     last: Optional[float] = prices[idx - 1][1] if idx > 0 else None
@@ -191,7 +201,9 @@ def compare_to_benchmark(
     )
     return BenchmarkComparison(
         benchmark_return_pct=round(bench_ret * 100, 4),
-        benchmark_annualized_pct=round(bench_ann * 100, 4) if bench_ann is not None else None,
+        benchmark_annualized_pct=round(bench_ann * 100, 4)
+        if bench_ann is not None
+        else None,
         excess_pp=round(excess, 4) if excess is not None else None,
         excess_annualized_pp=round(excess_ann, 4) if excess_ann is not None else None,
         pme_value=round(pme, 2),
@@ -211,7 +223,9 @@ def timeline_to_series(timeline_points) -> List[SeriesPoint]:
     ]
 
 
-def range_start_dates(today: date, period_days: Dict[str, Optional[int]]) -> Dict[str, Optional[str]]:
+def range_start_dates(
+    today: date, period_days: Dict[str, Optional[int]]
+) -> Dict[str, Optional[str]]:
     from datetime import timedelta
 
     return {

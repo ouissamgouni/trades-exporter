@@ -631,78 +631,78 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
                             </div>
                             <AssetsSection
-                                    assets={scopedDisplayAssets}
-                                    baseCurrency={baseCurrency}
-                                    onAssetClick={onAssetClick}
-                                    onAccountClick={onAccountClick}
-                                    accountBalances={accountBalances}
-                                    accounts={accounts}
-                                    dimensions={dimensions}
-                                    availableAccountIds={availableAccountIds}
-                                    availableCategoryIds={availableCategoryIds}
-                                    onLoadAccountBalances={onLoadAccountBalances}
-                                    liveBalances={liveBalanceMap}
-                                    liveAccountBalances={liveAccountBalanceMap}
-                                    liveBalanceLoading={liveBalanceLoading}
-                                    liveAccountErrors={liveAccountErrors}
-                                    search={search}
-                                    onSearchChange={setSearch}
-                                    minMarketValue={minMarketValue}
-                                    onMinMarketValueChange={setMinMarketValue}
-                                    pnlStatus={pnlStatus}
-                                    onPnlStatusChange={setPnlStatus}
-                                    balanceStatus={balanceStatus}
-                                    onBalanceStatusChange={setBalanceStatus}
-                                    selectedAccountIds={localAccountIds}
-                                    onSelectedAccountIdsChange={setLocalAccountIds}
-                                    selectedCategoryIds={localCategoryIds}
-                                    onSelectedCategoryIdsChange={setLocalCategoryIds}
-                                    periodDeltaMap={assetPeriodDeltas.deltaMap}
-                                    periodLabel={timeframeRange !== 'all' ? periodLabel : undefined}
-                                    accountPerformers={accountItems}
-                                    pnlVersionId={currentVersionId ?? undefined}
-                                    renderAllocation={(mode) => mode === 'treemap' ? (
-                                        <AllocationTreemap
-                                            points={effectiveTimeline.data?.points || []}
-                                            assetCategoryMaps={assetCategoryMaps}
-                                            dimensions={dimensions}
-                                            accounts={accounts}
-                                            assets={filteredTreemapAssets}
-                                            baseCurrency={baseCurrency}
-                                            isLoading={effectiveTimeline.isLoading}
-                                            accountBalances={accountBalances}
-                                            onAssetNavigate={onAssetNavigate}
-                                        />
-                                    ) : (
-                                        <MarketValuePieChart
-                                            assets={filteredTreemapAssets}
-                                            dimensions={dimensions}
-                                            baseCurrency={baseCurrency}
-                                        />
-                                    )}
-                                />
+                                assets={scopedDisplayAssets}
+                                baseCurrency={baseCurrency}
+                                onAssetClick={onAssetClick}
+                                onAccountClick={onAccountClick}
+                                accountBalances={accountBalances}
+                                accounts={accounts}
+                                dimensions={dimensions}
+                                availableAccountIds={availableAccountIds}
+                                availableCategoryIds={availableCategoryIds}
+                                onLoadAccountBalances={onLoadAccountBalances}
+                                liveBalances={liveBalanceMap}
+                                liveAccountBalances={liveAccountBalanceMap}
+                                liveBalanceLoading={liveBalanceLoading}
+                                liveAccountErrors={liveAccountErrors}
+                                search={search}
+                                onSearchChange={setSearch}
+                                minMarketValue={minMarketValue}
+                                onMinMarketValueChange={setMinMarketValue}
+                                pnlStatus={pnlStatus}
+                                onPnlStatusChange={setPnlStatus}
+                                balanceStatus={balanceStatus}
+                                onBalanceStatusChange={setBalanceStatus}
+                                selectedAccountIds={localAccountIds}
+                                onSelectedAccountIdsChange={setLocalAccountIds}
+                                selectedCategoryIds={localCategoryIds}
+                                onSelectedCategoryIdsChange={setLocalCategoryIds}
+                                periodDeltaMap={assetPeriodDeltas.deltaMap}
+                                periodLabel={timeframeRange !== 'all' ? periodLabel : undefined}
+                                accountPerformers={accountItems}
+                                pnlVersionId={currentVersionId ?? undefined}
+                                renderAllocation={(mode) => mode === 'treemap' ? (
+                                    <AllocationTreemap
+                                        points={effectiveTimeline.data?.points || []}
+                                        assetCategoryMaps={assetCategoryMaps}
+                                        dimensions={dimensions}
+                                        accounts={accounts}
+                                        assets={filteredTreemapAssets}
+                                        baseCurrency={baseCurrency}
+                                        isLoading={effectiveTimeline.isLoading}
+                                        accountBalances={accountBalances}
+                                        onAssetNavigate={onAssetNavigate}
+                                    />
+                                ) : (
+                                    <MarketValuePieChart
+                                        assets={filteredTreemapAssets}
+                                        dimensions={dimensions}
+                                        baseCurrency={baseCurrency}
+                                    />
+                                )}
+                            />
                         </div>
                     )}
                 </div>
             ) : currentVersionId ? (
                 <div className="mt-3 border border-slate-200 bg-white p-3">
                     <InvestigationView
-                                    versionId={currentVersionId}
-                                    baseCurrency={baseCurrency}
-                                    onTransactionClick={onTransactionClick}
-                                    onAssetClick={(id) => onAssetClick(id)}
-                                    onUnitClick={onUnitClick}
-                                    initialFilters={auditFilters}
-                                    defaultPanel={auditDefaultPanel}
-                                    onPanelChange={() => {
-                                        if (auditDefaultPanel) dispatch({ type: 'SET_AUDIT_DEFAULT_PANEL', panel: null });
-                                    }}
-                                    assets={scopedAssets.map(a => ({
-                                        id: a.asset.id ?? 0,
-                                        symbol: a.asset.symbol ?? '',
-                                        label: a.asset.label ?? undefined,
-                                    }))}
-                                />
+                        versionId={currentVersionId}
+                        baseCurrency={baseCurrency}
+                        onTransactionClick={onTransactionClick}
+                        onAssetClick={(id) => onAssetClick(id)}
+                        onUnitClick={onUnitClick}
+                        initialFilters={auditFilters}
+                        defaultPanel={auditDefaultPanel}
+                        onPanelChange={() => {
+                            if (auditDefaultPanel) dispatch({ type: 'SET_AUDIT_DEFAULT_PANEL', panel: null });
+                        }}
+                        assets={scopedAssets.map(a => ({
+                            id: a.asset.id ?? 0,
+                            symbol: a.asset.symbol ?? '',
+                            label: a.asset.label ?? undefined,
+                        }))}
+                    />
                 </div>
             ) : null}
         </div>
