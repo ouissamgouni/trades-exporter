@@ -1,5 +1,8 @@
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { useInRouterContext, useNavigate } from 'react-router-dom';
+import { AssetDetailPanelContext } from '../contexts/AssetDetailPanelContext';
+import { AccountDetailPanelContext } from '../contexts/AccountDetailPanelContext';
+import { TransactionDetailPanelContext } from '../contexts/TransactionDetailPanelContext';
 
 export const SHOW_IN_CONTEXT_WINDOW_DAYS = 3;
 
@@ -43,9 +46,15 @@ export function useShowInAllTransactions(): (txId: number, dateTime?: string | n
     // inRouter never changes for a mounted component, so the conditional hook call is stable.
     // eslint-disable-next-line react-hooks/rules-of-hooks
     const navigate = inRouter ? useNavigate() : null;
+    const closeAsset = useContext(AssetDetailPanelContext)?.closeAssetPanel;
+    const closeAccount = useContext(AccountDetailPanelContext)?.closeAccountPanel;
+    const closeTransaction = useContext(TransactionDetailPanelContext)?.closeTransactionPanel;
     return useCallback((txId, dateTime) => {
         const path = showInAllTransactionsPath(txId, dateTime);
+        closeAsset?.();
+        closeAccount?.();
+        closeTransaction?.();
         if (navigate) navigate(path);
         else window.location.assign(path);
-    }, [navigate]);
+    }, [navigate, closeAsset, closeAccount, closeTransaction]);
 }

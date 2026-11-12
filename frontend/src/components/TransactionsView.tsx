@@ -214,6 +214,7 @@ const TransactionsViewInner: React.FC<TransactionsViewProps & { focus?: FocusCon
                         showSuggestions={preset.showSuggestions}
                         focusTransactionId={focus?.txId}
                         defaultExpandAllDays={preset.expandAllDays}
+                        showInContext={preset.tableId === 'all-transactions' ? 'locate' : true}
                     />
                 </TabsContent>
 

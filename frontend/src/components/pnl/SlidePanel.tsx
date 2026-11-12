@@ -48,6 +48,7 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
              * sm+ = right-side panel with the configured width.
              */}
             <div
+                data-slide-panel
                 className={
                     'fixed inset-x-0 bottom-0 top-auto flex max-h-[90vh] w-full max-w-full flex-col ' +
                     'overflow-hidden border-t border-slate-200 bg-white shadow-xl animate-slide-up ' +

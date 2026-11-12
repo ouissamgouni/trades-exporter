@@ -10,11 +10,11 @@
  */
 
 import React, { useContext } from 'react';
-import { LuInfo } from 'react-icons/lu';
 import { Badge, type BadgeColorScheme } from './ui/primitives';
 import { Tooltip } from './ui/tooltip';
 import { AssetRef } from '../types';
 import { AssetDetailPanelContext } from '../contexts/AssetDetailPanelContext';
+import { EntityInfoButton } from './EntityInfoButton';
 
 const BADGE_SCHEMES = ['gray', 'blue', 'green', 'red', 'yellow', 'purple', 'orange'];
 const toScheme = (c?: string, fallback: BadgeColorScheme = 'gray'): BadgeColorScheme =>
@@ -186,18 +186,7 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
                 </Badge>
             </Tooltip>
             {showInfoBtn && (
-                <Tooltip content="View asset details" openDelay={100}>
-                    <button
-                        type="button"
-                        className="ml-0.5 inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 opacity-0 transition hover:bg-blue-50 hover:text-blue-500 group-hover:opacity-100"
-                        onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            openAssetPanel!(asset!.id!);
-                        }}
-                    >
-                        <LuInfo size={12} />
-                    </button>
-                </Tooltip>
+                <EntityInfoButton kind="asset" id={asset!.id} label={asset!.label || asset!.symbol} className="ml-0.5" />
             )}
         </span>
     );

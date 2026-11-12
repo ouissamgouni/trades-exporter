@@ -12,6 +12,9 @@ import { AssetDetailPanelProvider } from './contexts/AssetDetailPanelContext';
 import { AssetDetailSlidePanel } from './components/AssetDetailSlidePanel';
 import { AccountDetailPanelProvider } from './contexts/AccountDetailPanelContext';
 import { AccountDetailSlidePanel } from './components/AccountDetailSlidePanel';
+import { TransactionDetailPanelProvider } from './contexts/TransactionDetailPanelContext';
+import { GlobalTransactionDrawer } from './components/GlobalTransactionDrawer';
+import { GlobalSearch } from './components/search/GlobalSearch';
 import { QaTestPlanProvider, useQaPinnedWidth } from './components/QaTestPlanPanel';
 import { StatusBar, STATUS_BAR_HEIGHT_PX } from './components/StatusBar';
 import { Toaster } from './components/ui/toaster';
@@ -251,89 +254,92 @@ const AppContent = () => {
                 </div>
 
                 <Tabs value={activeTab} onValueChange={handleTabChange}>
-                    <TabsList>
-                        {/* Step 1: Configuration */}
-                        <TabsTrigger value="setup">
-                            <span className="inline-flex items-center gap-1">
-                                ⚙️ Setup
-                                {hasSetupIssues && (
-                                    <Badge colorScheme="orange" className="ml-1">
-                                        ⚠
-                                    </Badge>
-                                )}
-                            </span>
-                        </TabsTrigger>
+                    <div className="flex items-center gap-2 border-b border-slate-200">
+                        <TabsList className="min-w-0 flex-1 border-b-0">
+                            {/* Step 1: Configuration */}
+                            <TabsTrigger value="setup">
+                                <span className="inline-flex items-center gap-1">
+                                    ⚙️ Setup
+                                    {hasSetupIssues && (
+                                        <Badge colorScheme="orange" className="ml-1">
+                                            ⚠
+                                        </Badge>
+                                    )}
+                                </span>
+                            </TabsTrigger>
 
-                        {/* Step 2: Data Import */}
-                        <TabsTrigger value="sync">
-                            <span className="inline-flex items-center gap-1">
-                                🔄 Sync
-                                {syncStatus?.blocking_job && (
-                                    <Badge colorScheme="red" className="ml-1" title={`Job #${syncStatus.blocking_job.id} is stuck and blocks new syncs`}>
-                                        stuck
-                                    </Badge>
-                                )}
-                                {hasSyncFailures && (
-                                    <Badge colorScheme="red" className="ml-1">
-                                        {failedConnectorsCount > 0 ? `${failedConnectorsCount} failed` : '⚠'}
-                                    </Badge>
-                                )}
-                            </span>
-                        </TabsTrigger>
-                        <TabsTrigger value="add-transaction">➕ Add / Import</TabsTrigger>
+                            {/* Step 2: Data Import */}
+                            <TabsTrigger value="sync">
+                                <span className="inline-flex items-center gap-1">
+                                    🔄 Sync
+                                    {syncStatus?.blocking_job && (
+                                        <Badge colorScheme="red" className="ml-1" title={`Job #${syncStatus.blocking_job.id} is stuck and blocks new syncs`}>
+                                            stuck
+                                        </Badge>
+                                    )}
+                                    {hasSyncFailures && (
+                                        <Badge colorScheme="red" className="ml-1">
+                                            {failedConnectorsCount > 0 ? `${failedConnectorsCount} failed` : '⚠'}
+                                        </Badge>
+                                    )}
+                                </span>
+                            </TabsTrigger>
+                            <TabsTrigger value="add-transaction">➕ Add / Import</TabsTrigger>
 
-                        {/* Step 3: Review */}
-                        <TabsTrigger value="inbox">
-                            <span className="inline-flex items-center gap-1">
-                                📥 Inbox
-                                {validationSummary && validationSummary.pending_count > 0 && (
-                                    <Badge colorScheme="blue" className="ml-1">
-                                        {validationSummary.pending_count}
-                                    </Badge>
-                                )}
-                                {bundleHintCount > 0 && (
-                                    <Badge colorScheme="green" className="ml-1" title="Bundle suggestions and bundles that can be completed">
-                                        {bundleHintCount} 💡
-                                    </Badge>
-                                )}
-                                {suspectedSpamCount > 0 && (
-                                    <Badge colorScheme="orange" className="ml-1" title="Suspected spam to review">
-                                        {suspectedSpamCount} 🚫
-                                    </Badge>
-                                )}
-                            </span>
-                        </TabsTrigger>
-                        <TabsTrigger value="health">
-                            <span className="inline-flex items-center gap-1">
-                                🩺 Health
-                                {validationSummary?.has_issues && (
-                                    <Badge colorScheme="orange" className="ml-1">
-                                        {validationSummary.total_issues}
-                                    </Badge>
-                                )}
-                            </span>
-                        </TabsTrigger>
-                        <TabsTrigger value="all-transactions">
-                            📋 All
-                        </TabsTrigger>
-                        <TabsTrigger value="positions">🎯 Positions</TabsTrigger>
+                            {/* Step 3: Review */}
+                            <TabsTrigger value="inbox">
+                                <span className="inline-flex items-center gap-1">
+                                    📥 Inbox
+                                    {validationSummary && validationSummary.pending_count > 0 && (
+                                        <Badge colorScheme="blue" className="ml-1">
+                                            {validationSummary.pending_count}
+                                        </Badge>
+                                    )}
+                                    {bundleHintCount > 0 && (
+                                        <Badge colorScheme="green" className="ml-1" title="Bundle suggestions and bundles that can be completed">
+                                            {bundleHintCount} 💡
+                                        </Badge>
+                                    )}
+                                    {suspectedSpamCount > 0 && (
+                                        <Badge colorScheme="orange" className="ml-1" title="Suspected spam to review">
+                                            {suspectedSpamCount} 🚫
+                                        </Badge>
+                                    )}
+                                </span>
+                            </TabsTrigger>
+                            <TabsTrigger value="health">
+                                <span className="inline-flex items-center gap-1">
+                                    🩺 Health
+                                    {validationSummary?.has_issues && (
+                                        <Badge colorScheme="orange" className="ml-1">
+                                            {validationSummary.total_issues}
+                                        </Badge>
+                                    )}
+                                </span>
+                            </TabsTrigger>
+                            <TabsTrigger value="all-transactions">
+                                📋 All
+                            </TabsTrigger>
+                            <TabsTrigger value="positions">🎯 Positions</TabsTrigger>
 
-                        {/* Step 4: Analysis */}
-                        <TabsTrigger value="pnl">
-                            <span className="inline-flex items-center gap-1">
-                                📊 P&L
-                                {pnlCalcStatus === 'stale' && (
-                                    <span className="h-2 w-2 rounded-full bg-orange-400" />
-                                )}
-                                {pnlCalcStatus === 'calculating' && (
-                                    <Spinner size="xs" />
-                                )}
-                            </span>
-                        </TabsTrigger>
+                            {/* Step 4: Analysis */}
+                            <TabsTrigger value="pnl">
+                                <span className="inline-flex items-center gap-1">
+                                    📊 P&L
+                                    {pnlCalcStatus === 'stale' && (
+                                        <span className="h-2 w-2 rounded-full bg-orange-400" />
+                                    )}
+                                    {pnlCalcStatus === 'calculating' && (
+                                        <Spinner size="xs" />
+                                    )}
+                                </span>
+                            </TabsTrigger>
 
-                        {/* Reference */}
-                        <TabsTrigger value="prices">📈 Prices</TabsTrigger>
-                    </TabsList>
+                            {/* Reference */}
+                            <TabsTrigger value="prices">📈 Prices</TabsTrigger>
+                        </TabsList>
+                        <GlobalSearch />
+                    </div>
 
                     {/* Step 1: Configuration */}
                     <TabsContent value="setup">
@@ -423,20 +429,23 @@ const App = () => {
         <QueryClientProvider client={queryClient}>
             <AssetDetailPanelProvider>
                 <AccountDetailPanelProvider>
-                    <DataHealthProvider>
-                        <QaTestPlanProvider>
-                            <Routes>
-                                <Route path="/" element={<Navigate to={DEFAULT_ROUTE} replace />} />
-                                <Route path="/timeline/*" element={<TimelineRedirect />} />
-                                <Route path="/:tab" element={<AppContent />} />
-                                <Route path="/:tab/:subtab" element={<AppContent />} />
-                                <Route path="*" element={<Navigate to={DEFAULT_ROUTE} replace />} />
-                            </Routes>
-                            <AssetDetailSlidePanel />
-                            <AccountDetailSlidePanel />
-                            <Toaster />
-                        </QaTestPlanProvider>
-                    </DataHealthProvider>
+                    <TransactionDetailPanelProvider>
+                        <DataHealthProvider>
+                            <QaTestPlanProvider>
+                                <Routes>
+                                    <Route path="/" element={<Navigate to={DEFAULT_ROUTE} replace />} />
+                                    <Route path="/timeline/*" element={<TimelineRedirect />} />
+                                    <Route path="/:tab" element={<AppContent />} />
+                                    <Route path="/:tab/:subtab" element={<AppContent />} />
+                                    <Route path="*" element={<Navigate to={DEFAULT_ROUTE} replace />} />
+                                </Routes>
+                                <AssetDetailSlidePanel />
+                                <AccountDetailSlidePanel />
+                                <GlobalTransactionDrawer />
+                                <Toaster />
+                            </QaTestPlanProvider>
+                        </DataHealthProvider>
+                    </TransactionDetailPanelProvider>
                 </AccountDetailPanelProvider>
             </AssetDetailPanelProvider>
         </QueryClientProvider>

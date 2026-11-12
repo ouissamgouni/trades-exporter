@@ -43,7 +43,7 @@ import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
 import { BundleCreateDialog, BundleCreateDefaults } from './bundles/BundleCreateDialog';
 import { TransactionTableRow, TransactionRowCallbacks, EditableField } from './TransactionTableRow';
 import { buildTransactionFilterParams } from '../utils/transactionFilterParams';
-import { contextDateWindow } from '../hooks/useShowInAllTransactions';
+import { contextDateWindow, useShowInAllTransactions } from '../hooks/useShowInAllTransactions';
 import {
     GroupedTransactionsBody,
     PageDayGroupedRows,
@@ -186,6 +186,8 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     focusDateTime?: string;
     /** Open every month and day group on mount (review tables) */
     defaultExpandAllDays?: boolean;
+    /** Row action next to the TX id showing the transaction among its neighbours: in All transactions, or 'locate' in this table */
+    showInContext?: boolean | 'locate';
 
     // ============== Plugin Architecture Props ==============
 
@@ -257,6 +259,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     focusTransactionId,
     focusDateTime,
     defaultExpandAllDays = false,
+    showInContext = true,
     // Plugin architecture props
     tableId = 'default',
     initialColumnVisibility: initialVisibilityProp,
@@ -302,8 +305,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
         try {
             const stored = localStorage.getItem(visibilityStorageKey);
+            const migrationKey = `${visibilityStorageKey}:accountsDefault`;
+            const needsMigration = !localStorage.getItem(migrationKey);
+            localStorage.setItem(migrationKey, '1');
             if (stored) {
-                return withPluginDefaults(JSON.parse(stored));
+                const parsed: VisibilityState = JSON.parse(stored);
+                // One-time: From/To became a default column after users had saved prefs.
+                if (needsMigration && !tableConfig.hiddenColumns?.includes('accounts')) parsed.accounts = true;
+                return withPluginDefaults(parsed);
             }
         } catch { }
         // Fall back to preset-based visibility
@@ -1701,6 +1710,25 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         });
     }, [selectedIds, paginatedTransactions]);
 
+    const showInAllTransactions = useShowInAllTransactions();
+    const handleLocateRef = useRef<(txId: number) => void>(() => { });
+    const rowActions = useMemo<RowAction[]>(() => {
+        const extra = additionalRowActions as RowAction[];
+        if (!showInContext || extra.some(a => a.id === 'show-in-context')) return extra;
+        const action: RowAction = {
+            id: 'show-in-context',
+            icon: <LuLocateFixed size={11} />,
+            label: 'Show in context (All transactions around this one)',
+            placement: 'id',
+            colorPalette: 'blue',
+            onClick: (tx: Transaction) => {
+                if (showInContext === 'locate') handleLocateRef.current(tx.id);
+                else showInAllTransactions(tx.id, tx.date_time);
+            },
+        };
+        return [action, ...extra];
+    }, [additionalRowActions, showInContext, showInAllTransactions]);
+
     const renderRow = (tx: Transaction) => (
         <TransactionTableRow
             key={tx.id}
@@ -1722,7 +1750,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             showSelectionInEmbedded={showSelectionInEmbedded}
             additionalColumns={visiblePlugins as ColumnPlugin[]}
             pinDate={pinDateColumn}
-            additionalRowActions={additionalRowActions as RowAction[]}
+            additionalRowActions={rowActions}
             editingCell={editingCell}
             editValues={editValues}
             selectedIds={selectedIds}
@@ -1865,6 +1893,13 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         });
         setLocate({ txId, dateTime: info.date_time, temp: true, nonce: Date.now() });
     };
+
+    handleLocateRef.current = handleLocate;
+
+    const [slidePanelEl, setSlidePanelEl] = useState<HTMLElement | null>(null);
+    useEffect(() => {
+        setSlidePanelEl(tableRootRef.current?.closest<HTMLElement>('[data-slide-panel]') ?? null);
+    }, []);
 
     const exitLocate = () => {
         if (locate?.temp && preLocateFiltersRef.current) setFilters(preLocateFiltersRef.current);
@@ -2203,10 +2238,13 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 </div>
             )}
 
-            {/* Floating Bulk Actions Bar - pinned to viewport bottom */}
+            {/* Floating Bulk Actions Bar - pinned to the viewport bottom, or to the bottom of the enclosing slide panel */}
             {selectedIds.size > 0 && !embeddedMode && createPortal(
                 <div
-                    className="fixed inset-x-0 bottom-0 z-[1000] animate-slide-up border-t border-slate-200 bg-white/85 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] backdrop-blur-sm"
+                    className={cn(
+                        'inset-x-0 bottom-0 animate-slide-up border-t border-slate-200 bg-white/85 shadow-[0_-2px_8px_rgba(0,0,0,0.08)] backdrop-blur-sm',
+                        slidePanelEl ? 'absolute z-[3]' : 'fixed z-[1000]',
+                    )}
                 >
                     <div className="mx-auto max-w-[1400px] px-4 py-2">
                         <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -2390,7 +2428,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                         </div>
                     </div>
                 </div>,
-                document.body
+                slidePanelEl ?? document.body
             )}
 
             {/* Transactions content */}
