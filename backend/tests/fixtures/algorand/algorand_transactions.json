@@ -1,0 +1,103 @@
+{
+  "transactions": [
+    {
+      "id": "7YZ7THNT62R4EZH2FLG2TEN4P7TNPPBUUKRI7RF5SZPQH6F3MTJQ",
+      "tx-type": "pay",
+      "sender": "EXCHANGEHOTWALLETAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "fee": 1000,
+      "confirmed-round": 66827923,
+      "round-time": 1794300000,
+      "closing-amount": 0,
+      "receiver-rewards": 0,
+      "sender-rewards": 0,
+      "payment-transaction": {
+        "amount": 785730000,
+        "close-amount": 0,
+        "receiver": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI"
+      }
+    },
+    {
+      "id": "OUTPAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "tx-type": "pay",
+      "sender": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI",
+      "fee": 1000,
+      "confirmed-round": 66830000,
+      "round-time": 1794310000,
+      "sender-rewards": 0,
+      "payment-transaction": {
+        "amount": 100000000,
+        "close-amount": 0,
+        "receiver": "FRIENDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "id": "OPTINAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "tx-type": "axfer",
+      "sender": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI",
+      "fee": 1000,
+      "confirmed-round": 66830100,
+      "round-time": 1794310500,
+      "asset-transfer-transaction": {
+        "asset-id": 31566704,
+        "amount": 0,
+        "close-amount": 0,
+        "receiver": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI"
+      }
+    },
+    {
+      "id": "SWAPPAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "tx-type": "pay",
+      "group": "R1JPVVBBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=",
+      "sender": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI",
+      "fee": 1000,
+      "confirmed-round": 66830200,
+      "round-time": 1794311000,
+      "payment-transaction": {
+        "amount": 10000000,
+        "close-amount": 0,
+        "receiver": "TINYMANPOOLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "id": "SWAPAPPLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "tx-type": "appl",
+      "group": "R1JPVVBBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=",
+      "sender": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI",
+      "fee": 2000,
+      "confirmed-round": 66830200,
+      "round-time": 1794311000,
+      "application-transaction": {"application-id": 1002541853},
+      "inner-txns": [
+        {
+          "tx-type": "axfer",
+          "sender": "TINYMANPOOLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "fee": 0,
+          "confirmed-round": 66830200,
+          "round-time": 1794311000,
+          "asset-transfer-transaction": {
+            "asset-id": 31566704,
+            "amount": 1850000,
+            "close-amount": 0,
+            "receiver": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CLOSEOUTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "tx-type": "pay",
+      "sender": "5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI",
+      "fee": 1000,
+      "confirmed-round": 66840000,
+      "round-time": 1794400000,
+      "sender-rewards": 1500,
+      "closing-amount": 675719000,
+      "payment-transaction": {
+        "amount": 0,
+        "close-amount": 675719000,
+        "close-remainder-to": "EXCHANGEDEPOSITAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "receiver": "EXCHANGEDEPOSITAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    }
+  ]
+}

@@ -639,6 +639,20 @@ class ConnectorRegistry:
 
         self._register(
             ConnectorInfo(
+                type="algorand",
+                category="onchain",
+                display_name="Algorand (Nodely Indexer)",
+                hub_key="on-chain",
+                recommended_for=["algorand"],
+                supported_chains=["algorand"],
+                required_config=["address"],
+                optional_config=[],
+                supports_balance=True,
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
                 type="cardano_scan",
                 category="onchain",
                 display_name="Cardano (Cardanoscan)",
@@ -813,6 +827,17 @@ class ConnectorRegistry:
             ),
         }
 
+        # Algorand
+        self._chain_configs["algorand"] = {
+            "algorand": ChainConfig(
+                explorer_type="algorand_indexer",
+                base_url="https://mainnet-idx.4160.nodely.dev/v2",
+                chain_id=None,
+                native_currency="ALGO",
+                native_token_decimals=6,
+            ),
+        }
+
         # Solana
         self._chain_configs["solana"] = {
             "solana": ChainConfig(
@@ -954,6 +979,7 @@ class ConnectorRegistry:
         from backend.connectors.onchain.connector_cardano_scan import (
             ConnectorCardanoScan,
         )
+        from backend.connectors.onchain.connector_algorand import ConnectorAlgorand
         from backend.connectors.onchain.connector_sui import (
             ConnectorSui,
         )
@@ -1004,6 +1030,7 @@ class ConnectorRegistry:
             "moralis": ConnectorMoralisWalletHistory,
             "ankr": ConnectorAnkr,
             "xrp": ConnectorXRPLedger,
+            "algorand": ConnectorAlgorand,
             "cardano_scan": ConnectorCardanoScan,
             "sui": ConnectorSui,
             "bitcoin_esplora": ConnectorBitcoinEsplora,

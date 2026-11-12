@@ -458,6 +458,11 @@ class GroupingEngine:
             "NORMAL-TX",  # Blockscout normal transactions
             "TOKEN-TRANSFER",  # Blockscout token transfers
             "TRANSFER",  # Helius bridge/transfer legs
+            "PAY",  # Algorand
+            "PAY_CLOSE",
+            "AXFER",
+            "AXFER_CLOSE",
+            "APPL",
         }
 
         eligible = [
@@ -471,7 +476,7 @@ class GroupingEngine:
         # Group by network_transaction_id
         by_net_tx: Dict[str, List[NormalizedTransaction]] = {}
         for tx in eligible:
-            by_net_tx.setdefault(tx.network_transaction_id, []).append(tx)
+            by_net_tx.setdefault(self._onchain_swap_key(tx), []).append(tx)
 
         for net_tx_id, group_txs in by_net_tx.items():
             if len(group_txs) < 2:
@@ -531,6 +536,15 @@ class GroupingEngine:
             )
 
         return suggestions
+
+    @staticmethod
+    def _onchain_swap_key(tx: NormalizedTransaction) -> str:
+        # Algorand DEX swaps span several tx ids within one atomic group
+        if tx.network == "algorand":
+            for tag in tx.tags or []:
+                if isinstance(tag, dict) and tag.get("group"):
+                    return f"algorand-group:{tag['group']}"
+        return tx.network_transaction_id
 
     def _rule4_swap_detection(
         self,
