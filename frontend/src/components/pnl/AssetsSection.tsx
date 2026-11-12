@@ -250,6 +250,29 @@ function useOutsideClose(open: boolean, onClose: () => void) {
 }
 
 const PAGE_SIZES = [25, 50, 100, 0] as const; // 0 = all
+const CARD_ROWS = [5, 10, 0] as const; // rows of cards per page, 0 = all
+
+type Breakpoint = 'sm' | 'md' | 'lg' | 'xl';
+
+function currentBreakpoint(): Breakpoint {
+    const w = window.innerWidth;
+    return w >= 1280 ? 'xl' : w >= 1024 ? 'lg' : w >= 768 ? 'md' : 'sm';
+}
+
+/** Tailwind viewport breakpoint, so card page sizes can be a whole number of grid rows. */
+function useBreakpoint(): Breakpoint {
+    const [bp, setBp] = useState<Breakpoint>(currentBreakpoint);
+    useEffect(() => {
+        const onResize = () => setBp(currentBreakpoint());
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
+    return bp;
+}
+
+const CARD_COLS: Record<Breakpoint, number> = { sm: 1, md: 2, lg: 4, xl: 5 };
+/** Columns per half in split view (md+ halves sit side by side in one shared grid). */
+const SPLIT_CARD_COLS: Record<Breakpoint, number> = { sm: 1, md: 1, lg: 2, xl: 3 };
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -335,6 +358,10 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     const [expandedAssets, setExpandedAssets] = useState<Set<number>>(new Set());
     const [page, setPage] = useState(0);
     const [pageSize, setPageSize] = useState<number>(25);
+    const [cardRows, setCardRows] = useState<number>(5);
+    const breakpoint = useBreakpoint();
+    const cardCols = CARD_COLS[breakpoint];
+    const splitCardCols = SPLIT_CARD_COLS[breakpoint];
     const [split, setSplit] = useState<boolean>(() => localStorage.getItem(SPLIT_STORAGE_KEY) !== '0');
     const [splitPages, setSplitPages] = useState<[number, number]>([0, 0]);
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
@@ -467,17 +494,20 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
 
     useEffect(() => { setPage(0); setSplitPages([0, 0]); }, [search, minMarketValue, pnlStatus, balanceStatus, positionFilter, selectedAccountIds, selectedCategoryIds, effectiveSort, effectiveGroupKey, view, split]);
 
-    const pageCount = pageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedFlat.length / pageSize));
+    const isCards = view === 'cards';
+    const flatPageSize = isCards ? cardRows * cardCols : pageSize;
+    const halfPageSize = isCards ? cardRows * splitCardCols : pageSize;
+    const pageCount = flatPageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedFlat.length / flatPageSize));
     const safePage = Math.min(page, pageCount - 1);
-    const pagedFlat = pageSize === 0 ? sortedFlat : sortedFlat.slice(safePage * pageSize, (safePage + 1) * pageSize);
+    const pagedFlat = flatPageSize === 0 ? sortedFlat : sortedFlat.slice(safePage * flatPageSize, (safePage + 1) * flatPageSize);
 
     const splitActive = split && effectiveGroupKey === 'none' && view !== 'allocation' && sortedFlat.length > 1;
     const halves = useMemo(() => splitHalves(sortedFlat), [sortedFlat]);
     const pageOf = (rows: HoldingRow[], idx: 0 | 1) => {
-        if (pageSize === 0) return { rows, page: 0, count: 1 };
-        const count = Math.max(1, Math.ceil(rows.length / pageSize));
+        if (halfPageSize === 0) return { rows, page: 0, count: 1 };
+        const count = Math.max(1, Math.ceil(rows.length / halfPageSize));
         const pg = Math.min(splitPages[idx], count - 1);
-        return { rows: rows.slice(pg * pageSize, (pg + 1) * pageSize), page: pg, count };
+        return { rows: rows.slice(pg * halfPageSize, (pg + 1) * halfPageSize), page: pg, count };
     };
 
     // ── Totals bar (filtered assets) ──
@@ -964,35 +994,73 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
         </div>
     );
 
-    const halfPager = (idx: 0 | 1, total: number, page: number, count: number) => pageSize !== 0 && count > 1 && (
+    const halfPager = (idx: 0 | 1, total: number, page: number, count: number) => halfPageSize !== 0 && count > 1 && (
         <div className="mt-2 flex items-center justify-end gap-2 text-[11px] text-gray-500">
-            <span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total}</span>
+            <span>{page * halfPageSize + 1}–{Math.min((page + 1) * halfPageSize, total)} of {total}</span>
             <Seg active={false} onClick={() => setSplitPages(p => (idx === 0 ? [Math.max(0, p[0] - 1), p[1]] : [p[0], Math.max(0, p[1] - 1)]))}>‹</Seg>
             <Seg active={false} onClick={() => setSplitPages(p => (idx === 0 ? [Math.min(count - 1, p[0] + 1), p[1]] : [p[0], Math.min(count - 1, p[1] + 1)]))}>›</Seg>
         </div>
     );
 
+    const splitHeader = (idx: 0 | 1, total: number) => {
+        const desc = effectiveSort.dir === 'desc';
+        const best = idx === 0 ? desc : !desc;
+        return (
+            <div className="mb-2 flex items-center gap-2">
+                <span className={`text-sm font-semibold ${best ? 'text-green-700' : 'text-red-700'}`}>
+                    {idx === 0 ? '↓' : '↑'} {sortLabel} · {best ? 'top half' : 'bottom half'}
+                </span>
+                <Badge colorScheme="gray">{total}</Badge>
+            </div>
+        );
+    };
+
+    /** Split cards in one shared grid so both halves' rows line up and cards share sizes. */
+    const renderSplitCards = () => {
+        const top = pageOf(halves.top, 0);
+        const bottom = pageOf(halves.bottom, 1);
+        const cols = splitCardCols;
+        const rowCount = Math.max(Math.ceil(top.rows.length / cols), Math.ceil(bottom.rows.length / cols));
+        const cells: React.ReactNode[] = [];
+        const span = { gridColumn: `span ${cols} / span ${cols}` };
+        cells.push(<div key="h0" style={span}>{splitHeader(0, halves.top.length)}</div>, <div key="hd" className="bg-slate-200" />, <div key="h1" style={span}>{splitHeader(1, halves.bottom.length)}</div>);
+        for (let r = 0; r < rowCount; r++) {
+            for (const [half, side] of [[top.rows, 't'], [bottom.rows, 'b']] as const) {
+                for (let c = 0; c < cols; c++) {
+                    const row = half[r * cols + c];
+                    cells.push(row ? renderCard(row) : <div key={`${side}-empty-${r}-${c}`} />);
+                }
+                if (side === 't') cells.push(<div key={`d-${r}`} className="bg-slate-200" />);
+            }
+        }
+        cells.push(
+            <div key="p0" style={span}>{halfPager(0, halves.top.length, top.page, top.count)}</div>,
+            <div key="pd" className="bg-slate-200" />,
+            <div key="p1" style={span}>{halfPager(1, halves.bottom.length, bottom.page, bottom.count)}</div>,
+        );
+        return (
+            <div
+                className="grid gap-x-3 gap-y-3"
+                style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr)) 1px repeat(${cols}, minmax(0, 1fr))` }}
+                data-testid="assets-split"
+            >
+                {cells}
+            </div>
+        );
+    };
+
     const renderSplit = (renderHalf: (rows: HoldingRow[]) => React.ReactNode, vertical: boolean) => {
         const top = pageOf(halves.top, 0);
         const bottom = pageOf(halves.bottom, 1);
-        const desc = effectiveSort.dir === 'desc';
         return (
             <div className={vertical ? 'flex flex-col gap-4' : 'flex flex-col gap-3 md:flex-row'} data-testid="assets-split">
-                {([[top, halves.top.length, 0], [bottom, halves.bottom.length, 1]] as const).map(([half, total, idx]) => {
-                    const best = idx === 0 ? desc : !desc;
-                    return (
-                        <div key={idx} className={`min-w-0 flex-1 ${!vertical && idx === 0 ? 'border-b border-slate-200 pb-3 md:border-b-0 md:border-r md:pb-0 md:pr-3' : ''}`}>
-                            <div className="mb-2 flex items-center gap-2">
-                                <span className={`text-sm font-semibold ${best ? 'text-green-700' : 'text-red-700'}`}>
-                                    {idx === 0 ? '↓' : '↑'} {sortLabel} · {best ? 'top half' : 'bottom half'}
-                                </span>
-                                <Badge colorScheme="gray">{total}</Badge>
-                            </div>
-                            {renderHalf(half.rows as HoldingRow[])}
-                            {halfPager(idx, total, half.page, half.count)}
-                        </div>
-                    );
-                })}
+                {([[top, halves.top.length, 0], [bottom, halves.bottom.length, 1]] as const).map(([half, total, idx]) => (
+                    <div key={idx} className={`min-w-0 flex-1 ${!vertical && idx === 0 ? 'border-b border-slate-200 pb-3 md:border-b-0 md:border-r md:pb-0 md:pr-3' : ''}`}>
+                        {splitHeader(idx, total)}
+                        {renderHalf(half.rows as HoldingRow[])}
+                        {halfPager(idx, total, half.page, half.count)}
+                    </div>
+                ))}
             </div>
         );
     };
@@ -1051,17 +1119,22 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
         });
     }, [effectiveGroupKey, groups, periodDeltaMap]);
 
-    const pagination = view !== 'allocation' && effectiveGroupKey === 'none' && !splitActive && sortedFlat.length > 25 && (
+    const minPaged = isCards ? CARD_ROWS[0] * (splitActive ? splitCardCols * 2 : cardCols) : PAGE_SIZES[0];
+    const pagination = view !== 'allocation' && effectiveGroupKey === 'none' && sortedFlat.length > minPaged && (
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 text-[11px] text-gray-500">
             <div className="flex items-center gap-1">
-                Rows
-                {PAGE_SIZES.map(size => (
-                    <Seg key={size} active={pageSize === size} onClick={() => { setPageSize(size); setPage(0); }}>{size === 0 ? 'All' : size}</Seg>
-                ))}
+                {isCards ? 'Card rows' : 'Rows'}
+                {isCards
+                    ? CARD_ROWS.map(n => (
+                        <Seg key={n} active={cardRows === n} onClick={() => { setCardRows(n); setPage(0); setSplitPages([0, 0]); }}>{n === 0 ? 'All' : n}</Seg>
+                    ))
+                    : PAGE_SIZES.map(size => (
+                        <Seg key={size} active={pageSize === size} onClick={() => { setPageSize(size); setPage(0); setSplitPages([0, 0]); }}>{size === 0 ? 'All' : size}</Seg>
+                    ))}
             </div>
-            {pageSize !== 0 && (
+            {flatPageSize !== 0 && !splitActive && (
                 <div className="flex items-center gap-2">
-                    <span>{safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, sortedFlat.length)} of {sortedFlat.length}</span>
+                    <span>{safePage * flatPageSize + 1}–{Math.min((safePage + 1) * flatPageSize, sortedFlat.length)} of {sortedFlat.length}</span>
                     <Seg active={false} onClick={() => setPage(p => Math.max(0, p - 1))}>‹</Seg>
                     <Seg active={false} onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}>›</Seg>
                 </div>
@@ -1167,7 +1240,9 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                             </div>
                         )
                     ) : splitActive ? (
-                        renderSplit(rows => <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">{rows.map(renderCard)}</div>, false)
+                        breakpoint === 'sm'
+                            ? renderSplit(rows => <div className="grid grid-cols-1 gap-3">{rows.map(renderCard)}</div>, true)
+                            : renderSplitCards()
                     ) : effectiveGroupKey === 'none' ? (
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">{pagedFlat.map(renderCard)}</div>
                     ) : cardGroups.map(g => (
