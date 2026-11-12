@@ -95,8 +95,8 @@ interface AccountsStripProps {
     onAccountClick?: (accountId: number, name: string) => void;
     /** Accounts in the current (multi-)account scope */
     selectedIds?: number[];
-    /** Checkbox / Cmd-Ctrl-click: add or remove the account from the scope */
-    onToggleAccount?: (accountId: number, name: string) => void;
+    /** Ticked accounts are only applied to the scope on confirm */
+    onApplySelection?: (accounts: { id: number; name: string }[]) => void;
     /** TWR % per account (keyed by id) */
     twr?: Record<string, number | null>;
     benchmark?: { label: string; returnPct: number | null };
@@ -112,7 +112,7 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
     sparklines,
     onAccountClick,
     selectedIds = [],
-    onToggleAccount,
+    onApplySelection,
     twr,
     benchmark,
 }) => {
@@ -120,6 +120,21 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
     useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)); } catch { /* storage unavailable */ }
     }, [prefs]);
+
+    const selectedKey = selectedIds.join(',');
+    const [pending, setPending] = useState<number[] | null>(null);
+    useEffect(() => { setPending(null); }, [selectedKey]);
+    const ticked = pending ?? selectedIds;
+    const togglePending = (id: number) => setPending(prev => {
+        const base = prev ?? selectedIds;
+        return base.includes(id) ? base.filter(x => x !== id) : [...base, id];
+    });
+    const dirty = pending != null && (pending.length !== selectedIds.length || pending.some(id => !selectedIds.includes(id)));
+    const applySelection = () => {
+        if (!pending) return;
+        onApplySelection?.(pending.map(id => ({ id, name: items.find(p => p.id === id)?.name ?? String(id) })));
+        setPending(null);
+    };
 
     const closedCount = items.filter(isClosedAccount).length;
     const visible = useMemo(() => {
@@ -135,8 +150,6 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
     return (
         <div className="border border-slate-200 bg-white p-3" data-testid="accounts-strip">
             <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-gray-700">Accounts</span>
-                {onToggleAccount && <span className="text-[10px] text-gray-400">Tick or ⌘/Ctrl-click to combine accounts</span>}
                 <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
                 <span className="text-xs text-gray-500">
                     {visible.length} account{visible.length !== 1 ? 's' : ''} · <span className="font-semibold tabular-nums text-gray-700">{fmtCurrency(totalValue, baseCurrency)}</span>
@@ -149,6 +162,15 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
                         <FiAlertTriangle size={10} /> Σ accounts {fmtCurrencySigned(mismatch, baseCurrency)} vs overview
                     </span>
                 )}
+                {onApplySelection && (dirty ? (
+                    <span className="inline-flex items-center gap-1.5 border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700" data-testid="accounts-selection-bar">
+                        {pending!.length === 0 ? 'Clear selection' : `${pending!.length} account${pending!.length !== 1 ? 's' : ''} ticked`}
+                        <button type="button" onClick={applySelection} className="bg-blue-600 px-2 py-0.5 font-semibold text-white hover:bg-blue-700">Apply</button>
+                        <button type="button" onClick={() => setPending(null)} className="px-1 text-blue-600 hover:underline">Cancel</button>
+                    </span>
+                ) : (
+                    <span className="text-[10px] text-gray-400">Click a card to open it · tick to combine</span>
+                ))}
                 <div className="ml-auto flex items-center gap-2">
                     {closedCount > 0 && (
                         <label className="flex cursor-pointer items-center gap-1 text-[11px] text-gray-500">
@@ -197,27 +219,28 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
                         const positive = p.total_return >= 0;
                         const series = sparklines?.[String(p.id)] ?? [];
                         const selected = selectedIds.includes(p.id);
+                        const isTicked = ticked.includes(p.id);
                         const accTwr = twr?.[String(p.id)];
-                        const clickable = !!onAccountClick || !!onToggleAccount;
+                        const clickable = !!onAccountClick || !!onApplySelection;
                         return (
                             <div
                                 key={p.id}
-                                className={`flex w-[230px] shrink-0 flex-col gap-1.5 border p-2.5 transition-colors ${selected ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'} ${clickable ? 'cursor-pointer hover:border-blue-300' : ''} ${isClosedAccount(p) ? 'opacity-70' : ''}`}
+                                className={`flex w-[230px] shrink-0 flex-col gap-1.5 border p-2.5 transition-colors ${selected ? 'border-blue-500 bg-blue-50' : isTicked ? 'border-blue-300 bg-blue-50/40' : 'border-slate-200 bg-white'} ${clickable ? 'cursor-pointer hover:border-blue-300' : ''} ${isClosedAccount(p) ? 'opacity-70' : ''}`}
                                 style={{ borderLeft: `3px solid ${color}` }}
                                 onClick={clickable ? (e) => {
-                                    if (onToggleAccount && (e.metaKey || e.ctrlKey)) onToggleAccount(p.id, p.name);
+                                    if (onApplySelection && (e.metaKey || e.ctrlKey)) togglePending(p.id);
                                     else onAccountClick?.(p.id, p.name);
                                 } : undefined}
                                 data-testid={`account-card-${p.id}`}
                             >
                                 <div className="flex items-center justify-between gap-2">
                                     <span className="flex min-w-0 items-center gap-1.5">
-                                        {onToggleAccount && (
+                                        {onApplySelection && (
                                             <input
                                                 type="checkbox"
-                                                checked={selected}
+                                                checked={isTicked}
                                                 onClick={(e) => e.stopPropagation()}
-                                                onChange={() => onToggleAccount(p.id, p.name)}
+                                                onChange={() => togglePending(p.id)}
                                                 className="shrink-0 accent-blue-500"
                                                 aria-label={`Include ${p.name} in scope`}
                                             />

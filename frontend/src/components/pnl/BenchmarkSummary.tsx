@@ -5,6 +5,9 @@
 import React from 'react';
 import { BENCHMARK_PRESETS, useBenchmarkComparison } from '../../hooks/useChartData';
 import { fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
+import { InfoTip } from './pnlTerms';
+
+const PME_HELP = 'Replays every deposit and withdrawal you made, on the same days and amounts, into the benchmark instead. Shows what that portfolio would be worth today and how far your actual value is from it.';
 
 interface BenchmarkSummaryProps {
     versionId: number | null;
@@ -55,9 +58,10 @@ export const BenchmarkSummary: React.FC<BenchmarkSummaryProps> = ({ versionId, t
                 )}
             </div>
             {!isLoading && data?.pme_value != null && pmeDiff != null && (
-                <div title="What your actual deposits and withdrawals would be worth if they had gone into the benchmark on the same days">
-                    Same flows in {label} → <span className="font-semibold tabular-nums text-gray-700">{fmtCurrency(data.pme_value, baseCurrency)}</span>{' '}
-                    <span className={`tabular-nums ${pmeDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>(you {fmtCurrencySigned(pmeDiff, baseCurrency)})</span>
+                <div className="inline-flex flex-wrap items-center gap-x-1">
+                    Your deposits in {label} instead would be worth <span className="font-semibold tabular-nums text-gray-700">{fmtCurrency(data.pme_value, baseCurrency)}</span>
+                    <span className={`tabular-nums ${pmeDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>· you {pmeDiff >= 0 ? 'are ahead by' : 'are behind by'} {fmtCurrency(Math.abs(pmeDiff), baseCurrency)}</span>
+                    <InfoTip text={PME_HELP} size={10} />
                 </div>
             )}
         </div>

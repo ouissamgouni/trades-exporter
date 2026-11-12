@@ -150,4 +150,12 @@ describe('Multi-account scope (critical)', () => {
         st = pnlReducer(st, { type: 'TOGGLE_ACCOUNT_SCOPE', accountId: 5, name: 'Degiro' })
         expect(computeContextScope(st.drill, 'all').level).toBe('portfolio')
     })
+
+    it('applies a confirmed selection at once; empty selection resets', () => {
+        let st = createInitialPnLState('EUR', 1, [])
+        st = pnlReducer(st, { type: 'SET_ACCOUNT_SCOPE', accounts: [{ id: 3, name: 'Binance' }, { id: 5, name: 'Degiro' }] })
+        expect(computeContextScope(st.drill, 'all').accountIds).toEqual([3, 5])
+        st = pnlReducer(st, { type: 'SET_ACCOUNT_SCOPE', accounts: [] })
+        expect(computeContextScope(st.drill, 'all').level).toBe('portfolio')
+    })
 })
