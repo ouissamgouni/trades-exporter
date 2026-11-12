@@ -403,17 +403,17 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
 
                 <TabsContent value="synced">
                     <TransactionsTable
+                        key={detail.id}
                         defaultExpandAllDays
                         tableId="jobDetail-synced"
                         expandInvalidRows
                         title=""
                         subtitle=""
-                        showFilters={false}
                         showBundles={false}
-                        showSuggestions={false}
+                        showSuggestions
                         compact={true}
                         emptyMessage="No new transactions"
-                        filters={{
+                        resetFilters={{
                             ...defaultFilterState,
                             reviewStatus: [],
                             connectorRunIds: [String(detail.id)],
@@ -425,17 +425,17 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
 
                 <TabsContent value="updated">
                     <TransactionsTable
+                        key={detail.id}
                         defaultExpandAllDays
                         tableId="jobDetail-updated"
                         expandInvalidRows
                         title=""
                         subtitle=""
-                        showFilters={false}
                         showBundles={false}
-                        showSuggestions={false}
+                        showSuggestions
                         compact={true}
                         emptyMessage="No updated transactions"
-                        filters={{
+                        resetFilters={{
                             ...defaultFilterState,
                             reviewStatus: [],
                             connectorRunIds: [String(detail.id)],
@@ -447,17 +447,17 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
 
                 <TabsContent value="skipped">
                     <TransactionsTable
+                        key={detail.id}
                         defaultExpandAllDays
                         tableId="jobDetail-skipped"
                         expandInvalidRows
                         title=""
                         subtitle=""
-                        showFilters={false}
                         showBundles={false}
-                        showSuggestions={false}
+                        showSuggestions
                         compact={true}
                         emptyMessage="No skipped transactions"
-                        filters={{
+                        resetFilters={{
                             ...defaultFilterState,
                             reviewStatus: [],
                             connectorRunIds: [String(detail.id)],

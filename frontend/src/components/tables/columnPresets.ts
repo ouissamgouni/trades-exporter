@@ -24,6 +24,7 @@ export const COLUMN_PRESETS: Record<ColumnPresetName, TransactionColumnKey[]> = 
     full: [
         'date',
         'source',
+        'accounts',
         'direction',
         'type',
         'asset',
@@ -43,6 +44,7 @@ export const COLUMN_PRESETS: Record<ColumnPresetName, TransactionColumnKey[]> = 
     compact: [
         'date',
         'source',
+        'accounts',
         'direction',
         'type',
         'asset',
@@ -61,6 +63,7 @@ export const COLUMN_PRESETS: Record<ColumnPresetName, TransactionColumnKey[]> = 
     minimal: [
         'date',
         'source',
+        'accounts',
         'direction',
         'asset',
         'qty',

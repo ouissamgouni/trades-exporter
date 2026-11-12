@@ -4,10 +4,18 @@ interface AccountDetailPanelState {
     isOpen: boolean;
     accountId: number | null;
     pnlVersionId: number | null;
+    initialTab?: string;
+    /** Bumped on every open so the panel re-applies initialTab when reopened on the same account */
+    openNonce: number;
+}
+
+interface AccountDetailPanelOptions {
+    pnlVersionId?: number;
+    initialTab?: string;
 }
 
 interface AccountDetailPanelContextValue {
-    openAccountPanel: (accountId: number, opts?: { pnlVersionId?: number }) => void;
+    openAccountPanel: (accountId: number, opts?: AccountDetailPanelOptions) => void;
     closeAccountPanel: () => void;
     panelState: AccountDetailPanelState;
 }
@@ -20,10 +28,17 @@ export const AccountDetailPanelProvider: React.FC<{ children: React.ReactNode }>
         isOpen: false,
         accountId: null,
         pnlVersionId: null,
+        openNonce: 0,
     });
 
-    const openAccountPanel = useCallback((accountId: number, opts?: { pnlVersionId?: number }) => {
-        setPanelState({ isOpen: true, accountId, pnlVersionId: opts?.pnlVersionId ?? null });
+    const openAccountPanel = useCallback((accountId: number, opts?: AccountDetailPanelOptions) => {
+        setPanelState(prev => ({
+            isOpen: true,
+            accountId,
+            pnlVersionId: opts?.pnlVersionId ?? null,
+            initialTab: opts?.initialTab,
+            openNonce: prev.openNonce + 1,
+        }));
     }, []);
 
     const closeAccountPanel = useCallback(() => {

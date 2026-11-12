@@ -346,17 +346,17 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="synced">
                     <TransactionsTable
+                        key={detail.id}
                         defaultExpandAllDays
                         tableId="connectorRun-synced"
                         expandInvalidRows
                         title=""
                         subtitle=""
-                        showFilters={false}
                         showBundles={false}
-                        showSuggestions={false}
+                        showSuggestions
                         compact={true}
                         emptyMessage="No new transactions"
-                        filters={{
+                        resetFilters={{
                             ...defaultFilterState,
                             connectorRunIds: [String(detail.id)],
                             connectorRunOutcome: 'synced',
@@ -367,17 +367,17 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="updated">
                     <TransactionsTable
+                        key={detail.id}
                         defaultExpandAllDays
                         tableId="connectorRun-updated"
                         expandInvalidRows
                         title=""
                         subtitle=""
-                        showFilters={false}
                         showBundles={false}
-                        showSuggestions={false}
+                        showSuggestions
                         compact={true}
                         emptyMessage="No updated transactions"
-                        filters={{
+                        resetFilters={{
                             ...defaultFilterState,
                             connectorRunIds: [String(detail.id)],
                             connectorRunOutcome: 'updated',
@@ -388,17 +388,17 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="skipped">
                     <TransactionsTable
+                        key={detail.id}
                         defaultExpandAllDays
                         tableId="connectorRun-skipped"
                         expandInvalidRows
                         title=""
                         subtitle=""
-                        showFilters={false}
                         showBundles={false}
-                        showSuggestions={false}
+                        showSuggestions
                         compact={true}
                         emptyMessage="No skipped transactions"
-                        filters={{
+                        resetFilters={{
                             ...defaultFilterState,
                             connectorRunIds: [String(detail.id)],
                             connectorRunOutcome: 'skipped',
@@ -409,17 +409,17 @@ export const ConnectorRunDetailPanel: React.FC<ConnectorRunDetailPanelProps> = (
 
                 <TabsContent value="invalid">
                     <TransactionsTable
+                        key={detail.id}
                         defaultExpandAllDays
                         tableId="connectorRun-invalid"
                         title=""
                         subtitle=""
-                        showFilters={false}
                         showBundles={false}
-                        showSuggestions={false}
+                        showSuggestions
                         compact={true}
                         expandInvalidRows
                         emptyMessage="No rejected transactions"
-                        filters={{
+                        resetFilters={{
                             ...defaultFilterState,
                             reviewStatus: ['invalid'],
                             connectorRunIds: [String(detail.id)],

@@ -13,7 +13,9 @@
 
 import React, { createContext, useContext, useReducer, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQueryClient, useQuery, type UseQueryResult, type RefetchOptions, type QueryObserverResult } from '@tanstack/react-query';
+import { useInRouterContext, useLocation, useNavigate } from 'react-router-dom';
 import { useBaseCurrency } from '../BaseCurrencySelector';
+import { parsePnLFocus } from '../../utils/pnlFocus';
 import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance, liveEntryKey } from '../../types';
 import { useBalance } from '../../hooks/useBalance';
 import { useAssets } from '../../hooks/useAssets';
@@ -162,6 +164,25 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
         { baseCurrency, baseCurrencyId, initialAccountIds: getInitialAccountIds() },
         (args) => createInitialPnLState(args.baseCurrency, args.baseCurrencyId, args.initialAccountIds, subtab),
     );
+
+    // Apply ?focus_asset= / ?focus_account= deep links (global search "Open in P&L"), then drop them from the URL.
+    const inRouter = useInRouterContext();
+    // inRouter never changes for a mounted component, so the conditional hook calls are stable.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const location = inRouter ? useLocation() : null;
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const navigate = inRouter ? useNavigate() : null;
+    useEffect(() => {
+        if (!location || !navigate) return;
+        const { focus, rest } = parsePnLFocus(location.search);
+        if (!focus) return;
+        if (focus.kind === 'asset') {
+            dispatch({ type: 'DRILL_INTO', assetId: focus.id, assetSymbol: focus.symbol, assetLabel: focus.label ?? undefined });
+        } else {
+            dispatch({ type: 'SET_ACCOUNT_SCOPE', accounts: [{ id: focus.id, name: focus.name }] });
+        }
+        navigate(`${location.pathname}${rest ? `?${rest}` : ''}`, { replace: true });
+    }, [location, navigate]);
 
     // Keep pnlActiveTab in sync when the `subtab` prop changes externally
     // (route navigation, browser back/forward) after initial mount.
