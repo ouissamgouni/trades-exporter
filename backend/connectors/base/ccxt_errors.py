@@ -26,7 +26,12 @@ _CCXT_ERROR_MAP = [
 
 # Fallback for non-CCXT exceptions (requests, raw HTTP errors)
 _TEXT_ERROR_MAP = [
-    (("401", "unauthorized", "invalid api key"), ErrorReason.AUTHENTICATION_FAILED, False, 401),
+    (
+        ("401", "unauthorized", "invalid api key"),
+        ErrorReason.AUTHENTICATION_FAILED,
+        False,
+        401,
+    ),
     (("403", "forbidden"), ErrorReason.PERMISSION_DENIED, False, 403),
     (("429", "rate limit", "too many requests"), ErrorReason.RATE_LIMITED, True, 429),
     (("timeout", "timed out"), ErrorReason.TIMEOUT, True, None),
