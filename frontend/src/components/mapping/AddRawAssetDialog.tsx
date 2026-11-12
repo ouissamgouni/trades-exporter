@@ -9,7 +9,7 @@ import { createRawAsset, lookupRawAsset, RawAssetLookup } from '../../utils/mapp
 import { SuggestionChip } from './mappingUi';
 
 const EVM_NETWORKS = ['ethereum', 'base', 'arbitrum', 'optimism', 'polygon', 'bsc', 'avalanche', 'hyperevm'];
-const DEFAULT_NETWORKS = [...EVM_NETWORKS, 'solana', 'sui', 'near', 'cardano'];
+const DEFAULT_NETWORKS = [...EVM_NETWORKS, 'solana', 'sui', 'near', 'cardano', 'algorand'];
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 type Kind = 'symbol' | 'token';

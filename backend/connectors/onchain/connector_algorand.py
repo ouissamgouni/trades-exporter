@@ -55,7 +55,9 @@ class ConnectorAlgorand(BaseConnector):
 
         registry = get_connector_registry()
         self.native_token = registry.get_native_token("algorand", "algorand")
-        self.native_decimals = registry.get_native_token_decimals("algorand", "algorand")
+        self.native_decimals = registry.get_native_token_decimals(
+            "algorand", "algorand"
+        )
         if not self.native_token or self.native_decimals is None:
             raise ValueError("Chain configuration not found for algorand")
 
@@ -84,16 +86,22 @@ class ConnectorAlgorand(BaseConnector):
                 delay *= 2
                 continue
             if response.status_code >= 400:
-                raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
+                raise RuntimeError(
+                    f"HTTP {response.status_code}: {response.text[:200]}"
+                )
             return response.json()
-        raise RuntimeError(f"Algorand request failed after {self.max_retries} retries: {url}")
+        raise RuntimeError(
+            f"Algorand request failed after {self.max_retries} retries: {url}"
+        )
 
     # ------------------------------------------------------------------
     # Fixtures
     # ------------------------------------------------------------------
 
     def _fixture_dir(self) -> str:
-        return os.path.join(os.path.dirname(__file__), "..", "..", "tests", "fixtures", "algorand")
+        return os.path.join(
+            os.path.dirname(__file__), "..", "..", "tests", "fixtures", "algorand"
+        )
 
     def _get_default_test_file(self) -> str:
         return os.path.join(self._fixture_dir(), "algorand_transactions.json")
@@ -114,7 +122,11 @@ class ConnectorAlgorand(BaseConnector):
                     params = json.load(f).get(str(asset_id), {})
         else:
             try:
-                params = self.safe_request(f"{self.indexer_url}/assets/{asset_id}").get("asset", {}).get("params", {})
+                params = (
+                    self.safe_request(f"{self.indexer_url}/assets/{asset_id}")
+                    .get("asset", {})
+                    .get("params", {})
+                )
             except RuntimeError as e:
                 log.warning(f"Failed to fetch ASA {asset_id} metadata: {e}")
 
@@ -131,7 +143,9 @@ class ConnectorAlgorand(BaseConnector):
 
     def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
         if self.test_mode:
-            test_file = self.config.get("test_file_path") or self._get_default_test_file()
+            test_file = (
+                self.config.get("test_file_path") or self._get_default_test_file()
+            )
             log.info(f"🧪 [TEST MODE] Loading test data from {test_file}")
             if not os.path.exists(test_file):
                 log.warning(f"Test file not found: {test_file}")
@@ -176,14 +190,18 @@ class ConnectorAlgorand(BaseConnector):
     # Normalize
     # ------------------------------------------------------------------
 
-    def raw_to_normalized(self, tx: Dict) -> Generator[NormalizedTransaction, None, None]:
+    def raw_to_normalized(
+        self, tx: Dict
+    ) -> Generator[NormalizedTransaction, None, None]:
         tx_id = tx.get("id")
         if not tx_id:
             raise ValueError(f"Cannot determine Algorand transaction id from '{tx}'")
 
         round_time = tx.get("round-time")
         date_time = (
-            datetime.fromtimestamp(round_time, tz=timezone.utc) if round_time else datetime.now(timezone.utc)
+            datetime.fromtimestamp(round_time, tz=timezone.utc)
+            if round_time
+            else datetime.now(timezone.utc)
         )
         tags = [{"round": tx.get("confirmed-round")}]
         if tx.get("group"):
@@ -215,7 +233,7 @@ class ConnectorAlgorand(BaseConnector):
                 tags=tags,
             )
 
-        fee = Decimal(tx.get("fee", 0)) / Decimal(10 ** self.native_decimals)
+        fee = Decimal(tx.get("fee", 0)) / Decimal(10**self.native_decimals)
         if tx.get("sender") == self.wallet_address and fee > 0:
             yield NormalizedTransaction(
                 source=self.connector_name,
@@ -244,22 +262,57 @@ class ConnectorAlgorand(BaseConnector):
             pay = tx.get("payment-transaction", {})
             sender = tx.get("sender", "")
             close_amount = pay.get("close-amount", tx.get("closing-amount", 0))
-            self._add_leg(legs, f"{path}_pay", "PAY", sender, pay.get("receiver", ""), pay.get("amount", 0), None)
-            self._add_leg(legs, f"{path}_close", "PAY_CLOSE", sender, pay.get("close-remainder-to", ""), close_amount, None)
+            self._add_leg(
+                legs,
+                f"{path}_pay",
+                "PAY",
+                sender,
+                pay.get("receiver", ""),
+                pay.get("amount", 0),
+                None,
+            )
+            self._add_leg(
+                legs,
+                f"{path}_close",
+                "PAY_CLOSE",
+                sender,
+                pay.get("close-remainder-to", ""),
+                close_amount,
+                None,
+            )
         elif tx.get("tx-type") == "axfer":
             xfer = tx.get("asset-transfer-transaction", {})
             # Clawback transfers carry the debited account in asset-transfer-transaction.sender
             sender = xfer.get("sender") or tx.get("sender", "")
             asset_id = xfer.get("asset-id")
-            self._add_leg(legs, f"{path}_axfer", "AXFER", sender, xfer.get("receiver", ""), xfer.get("amount", 0), asset_id)
-            self._add_leg(legs, f"{path}_aclose", "AXFER_CLOSE", sender, xfer.get("close-to", ""), xfer.get("close-amount", 0), asset_id)
+            self._add_leg(
+                legs,
+                f"{path}_axfer",
+                "AXFER",
+                sender,
+                xfer.get("receiver", ""),
+                xfer.get("amount", 0),
+                asset_id,
+            )
+            self._add_leg(
+                legs,
+                f"{path}_aclose",
+                "AXFER_CLOSE",
+                sender,
+                xfer.get("close-to", ""),
+                xfer.get("close-amount", 0),
+                asset_id,
+            )
 
         # Pre-2022 participation rewards are credited on any tx touching the account
         if tx.get("sender") == self.wallet_address:
             self._add_reward(legs, f"{path}_srew", tx.get("sender-rewards", 0))
         if tx.get("payment-transaction", {}).get("receiver") == self.wallet_address:
             self._add_reward(legs, f"{path}_rrew", tx.get("receiver-rewards", 0))
-        if tx.get("payment-transaction", {}).get("close-remainder-to") == self.wallet_address:
+        if (
+            tx.get("payment-transaction", {}).get("close-remainder-to")
+            == self.wallet_address
+        ):
             self._add_reward(legs, f"{path}_crew", tx.get("close-rewards", 0))
 
         for idx, inner in enumerate(tx.get("inner-txns") or []):
@@ -277,30 +330,34 @@ class ConnectorAlgorand(BaseConnector):
         else:
             meta = self._get_asset(asset_id)
             symbol, decimals, contract = meta["symbol"], meta["decimals"], str(asset_id)
-        legs.append({
-            "key": key,
-            "type": tx_type,
-            "direction": "outflow" if outgoing else "inflow",
-            "symbol": symbol,
-            "quantity": Decimal(amount) / Decimal(10 ** decimals),
-            "from": sender,
-            "to": receiver,
-            "contract": contract,
-        })
+        legs.append(
+            {
+                "key": key,
+                "type": tx_type,
+                "direction": "outflow" if outgoing else "inflow",
+                "symbol": symbol,
+                "quantity": Decimal(amount) / Decimal(10**decimals),
+                "from": sender,
+                "to": receiver,
+                "contract": contract,
+            }
+        )
 
     def _add_reward(self, legs, key, amount) -> None:
         if not amount:
             return
-        legs.append({
-            "key": key,
-            "type": "REWARD",
-            "direction": "inflow",
-            "symbol": self.native_token,
-            "quantity": Decimal(amount) / Decimal(10 ** self.native_decimals),
-            "from": None,
-            "to": self.wallet_address,
-            "contract": None,
-        })
+        legs.append(
+            {
+                "key": key,
+                "type": "REWARD",
+                "direction": "inflow",
+                "symbol": self.native_token,
+                "quantity": Decimal(amount) / Decimal(10**self.native_decimals),
+                "from": None,
+                "to": self.wallet_address,
+                "contract": None,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Balance API
@@ -318,17 +375,21 @@ class ConnectorAlgorand(BaseConnector):
             return []
 
         entries: List[BalanceEntry] = []
-        algo = Decimal(data.get("amount", 0)) / Decimal(10 ** self.native_decimals)
+        algo = Decimal(data.get("amount", 0)) / Decimal(10**self.native_decimals)
         if algo > 0:
-            min_balance = Decimal(data.get("min-balance", 0)) / Decimal(10 ** self.native_decimals)
-            entries.append(BalanceEntry(
-                asset_symbol=self.native_token,
-                total=algo,
-                available=max(algo - min_balance, Decimal(0)),
-                locked=min(min_balance, algo),
-                chain="algorand",
-                raw={k: v for k, v in data.items() if k != "assets"},
-            ))
+            min_balance = Decimal(data.get("min-balance", 0)) / Decimal(
+                10**self.native_decimals
+            )
+            entries.append(
+                BalanceEntry(
+                    asset_symbol=self.native_token,
+                    total=algo,
+                    available=max(algo - min_balance, Decimal(0)),
+                    locked=min(min_balance, algo),
+                    chain="algorand",
+                    raw={k: v for k, v in data.items() if k != "assets"},
+                )
+            )
         for holding in data.get("assets") or []:
             amount = holding.get("amount", 0)
             if not amount:
@@ -336,12 +397,14 @@ class ConnectorAlgorand(BaseConnector):
             asset_id = holding.get("asset-id")
             meta = self._get_asset(asset_id)
             total = Decimal(amount) / Decimal(10 ** meta["decimals"])
-            entries.append(BalanceEntry(
-                asset_symbol=meta["symbol"],
-                total=total,
-                available=total,
-                chain="algorand",
-                contract_address=str(asset_id),
-                raw=holding,
-            ))
+            entries.append(
+                BalanceEntry(
+                    asset_symbol=meta["symbol"],
+                    total=total,
+                    available=total,
+                    chain="algorand",
+                    contract_address=str(asset_id),
+                    raw=holding,
+                )
+            )
         return entries

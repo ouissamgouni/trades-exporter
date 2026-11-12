@@ -1,3 +1,7 @@
 {
-  "31566704": {"name": "USDC", "unit-name": "USDC", "decimals": 6}
+    "31566704": {
+        "name": "USDC",
+        "unit-name": "USDC",
+        "decimals": 6
+    }
 }

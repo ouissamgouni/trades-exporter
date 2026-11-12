@@ -121,6 +121,7 @@ describe('connectorTypes (major)', () => {
     it('detects address families', () => {
         expect(detectChainFromAddress('0xabc')).toBe('evm');
         expect(detectChainFromAddress('rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH')).toBe('xrp');
+        expect(detectChainFromAddress('5SNZVDHT7UJPJ2HOFGWO5L3GMV4YFVDDWBLPQY6OLRPANPHRPJWFMXH7DI')).toBe('algorand');
         expect(detectChainFromAddress('playwright_e2e_wallet')).toBeNull();
     });
 
