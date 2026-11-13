@@ -12,7 +12,9 @@ import { useLatestPnLVersion } from '../hooks/useLatestPnLVersion';
 import { InvestigationView } from './pnl/InvestigationView';
 
 interface AssetPnLAuditSectionProps {
-    assetId: number;
+    assetId?: number;
+    /** Scopes the audit to an account instead of an asset */
+    accountId?: number;
     assetSymbol?: string;
     assetLabel?: string;
     /** Explicit PnL version ID (skips latest-version fetch when provided) */
@@ -21,6 +23,7 @@ interface AssetPnLAuditSectionProps {
 
 export const AssetPnLAuditSection: React.FC<AssetPnLAuditSectionProps> = ({
     assetId,
+    accountId,
     assetSymbol,
     assetLabel,
     versionId: explicitVersionId,
@@ -68,8 +71,8 @@ export const AssetPnLAuditSection: React.FC<AssetPnLAuditSectionProps> = ({
             <InvestigationView
                 versionId={versionId}
                 baseCurrency={baseCurrency}
-                initialFilters={{ relatedAssetIds: [String(assetId)] }}
-                assets={assetSymbol ? [{ id: assetId, symbol: assetSymbol, label: assetLabel }] : undefined}
+                initialFilters={assetId != null ? { relatedAssetIds: [String(assetId)] } : { relatedAccountIds: [String(accountId)] }}
+                assets={assetSymbol && assetId != null ? [{ id: assetId, symbol: assetSymbol, label: assetLabel }] : undefined}
             />
         </>
     );

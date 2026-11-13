@@ -469,7 +469,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                     baseCurrency={config.base_currency_symbol}
                     quoteAssetId={config.base_currency_id ?? undefined}
                     pnlAssets={pnlAssets}
-                    naAssets={displayAssets.filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id))}
+                    naAssets={displayAssets.filter(da => !prices.some(p => p.asset.id === da.asset.id) && !loadingPriceAssetIds.has(da.asset.id ?? -1))}
                     totalAssetCount={displayAssets.length}
                     loadingAssetIds={loadingPriceAssetIds}
                     pnlVersionId={currentVersionId ?? undefined}
@@ -521,8 +521,8 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                 onOpenChange={(open) => { if (!open) dispatch({ type: 'SET_SHOW_HEALTH_CONFIRM', value: false }); }}
             >
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-gray-200 px-5 py-3">
                             <RadixDialog.Title className="text-sm font-semibold">Data Health Issues Detected</RadixDialog.Title>
                         </div>

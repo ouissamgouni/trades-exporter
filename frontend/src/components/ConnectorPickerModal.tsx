@@ -297,8 +297,8 @@ export const ConnectorPickerModal: React.FC<ConnectorPickerModalProps> = ({
             }}
         >
             <RadixDialog.Portal>
-                <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
-                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] flex max-h-[85vh] w-full max-w-[950px] -translate-x-1/2 -translate-y-1/2 flex-col bg-white shadow-xl">
+                <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] flex max-h-[85vh] w-full max-w-[950px] -translate-x-1/2 -translate-y-1/2 flex-col bg-white shadow-xl">
                     {/* ── Header ─────────────────────────────── */}
                     <div className="flex items-center justify-between px-6 pb-2 pt-4">
                         <RadixDialog.Title className="text-base font-semibold">

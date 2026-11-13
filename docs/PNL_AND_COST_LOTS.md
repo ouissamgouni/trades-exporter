@@ -76,6 +76,23 @@ Example: BTC bought for 30 000 is swapped for 16 ETH worth 40 000 (Realized +10 
 
 To see how one entry was computed, click its ID in the Realized P&L panel (or its value in the audit table): the entry panel shows both calculations, the lots consumed and the cost chain back to the original purchase. The P&L section of a transaction's side panel shows the same for one transaction, for the latest or any earlier calculation.
 
+## Return Ratios and Position Counts
+
+The Total return card shows three rates for the selected period:
+
+- **ROI**: total return ÷ cost of what you still hold. Deposits dilute it.
+- **TWR**: time-weighted, not moved by deposits and withdrawals. Benchmarks are only compared against TWR (the performance chart hides benchmark lines when ROI is selected).
+- **MWR**: money-weighted (IRR) — the rate earned by your actual flows. Yearly from one year on.
+
+The period selector can show any of the three, and each account card shows its TWR and MWR. The "vs benchmark" section of the card compares your TWR with the chosen index and replays your deposits into it ("same deposits").
+
+Position counts in the cards:
+
+- **Held · sold out** (Value card): assets with quantity left, and assets fully sold with realized P&L.
+- **In gain · in loss** (Unrealized card): held assets whose value is above / below their cost.
+
+Each count is clickable and filters the Assets section accordingly.
+
 ## Fees
 
 Fees can affect both economic P&L and tax reporting. A fee may be paid in fiat, the disposed asset, the acquired asset, a platform token, or another asset.

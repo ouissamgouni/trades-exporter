@@ -91,8 +91,8 @@ export const DefaultFilePreviewModal: React.FC<DefaultFilePreviewModalProps> = (
     return (
         <RadixDialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
             <RadixDialog.Portal>
-                <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
-                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] flex max-h-[92vh] w-full max-w-[95vw] -translate-x-1/2 -translate-y-1/2 flex-col border border-slate-200 bg-white shadow-xl">
+                <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] flex max-h-[92vh] w-full max-w-[95vw] -translate-x-1/2 -translate-y-1/2 flex-col border border-slate-200 bg-white shadow-xl">
                     <div className="border-b border-slate-100 px-5 py-4">
                         <RadixDialog.Title className="text-base font-semibold text-slate-900">Default File Preview</RadixDialog.Title>
                     </div>

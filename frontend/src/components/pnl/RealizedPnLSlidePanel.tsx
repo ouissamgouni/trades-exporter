@@ -612,8 +612,8 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                 onOpenChange={(open) => { if (!open) { setOverrideEntry(null); setOverridePrice(''); setOverrideError(null); } }}
             >
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-gray-200 px-5 py-3">
                             <RadixDialog.Title className="text-sm font-semibold">Override FMV Price</RadixDialog.Title>
                         </div>

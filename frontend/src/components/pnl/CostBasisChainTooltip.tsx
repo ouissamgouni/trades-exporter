@@ -194,7 +194,7 @@ export const CostBasisChainTooltip: React.FC<CostBasisChainTooltipProps> = ({
             <RadixPopover.Portal>
                 <RadixPopover.Content
                     sideOffset={4}
-                    className="z-[3000] w-[580px] max-h-[420px] overflow-hidden border border-slate-200 bg-white shadow-xl"
+                    className="z-[2600] w-[580px] max-h-[420px] overflow-hidden border border-slate-200 bg-white shadow-xl"
                 >
                     {/* Header */}
                     <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-2">

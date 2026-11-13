@@ -27,6 +27,9 @@ ASSET_TIME_BUDGET_SECONDS = 300
 DAY_FETCH_TIMEOUT_SECONDS = 15
 MAX_LOG_ENTRIES = 200
 
+# (asset_id, date_from, date_to): only gaps inside the range are fetched; None bounds = full history
+GapRangeRequest = Tuple[int, Optional[date], Optional[date]]
+
 
 def missing_dates_for_gaps(gaps: List[GapRange], is_crypto: bool) -> List[date]:
     dates: set[date] = set()
@@ -94,7 +97,9 @@ def prefill_with_ranges(
         if asset is not None:
             assets[aid] = asset
             skip = (already_tried or {}).get(aid, set())
-            plans[aid] = [p for p in _range_plan(session, svc, asset) if p[0] not in skip]
+            plans[aid] = [
+                p for p in _range_plan(session, svc, asset) if p[0] not in skip
+            ]
 
     filled: Dict[int, Dict[date, PriceResult]] = {}
     tried: Dict[int, Set[str]] = {}
@@ -138,6 +143,9 @@ class GapFixJobService:
         self._skip: set[int] = set()
         self._thread: Optional[threading.Thread] = None
         self._state: Dict[str, Any] = self._initial_state()
+        # Requests received while a job runs; the worker picks them up before finishing
+        self._pending: List[Tuple[Optional[List[int]], List[GapRangeRequest]]] = []
+        self._quote_asset_id: Optional[int] = None
 
     @staticmethod
     def _initial_state() -> Dict[str, Any]:
@@ -157,6 +165,7 @@ class GapFixJobService:
             "error": None,
             "assets": [],
             "log": [],
+            "queued_requests": 0,
         }
 
     # -- public API -------------------------------------------------------
@@ -169,24 +178,69 @@ class GapFixJobService:
             return copy.deepcopy(self._state)
 
     def start(
-        self, asset_ids: Optional[List[int]], quote_asset_id: Optional[int]
+        self,
+        asset_ids: Optional[List[int]],
+        quote_asset_id: Optional[int],
+        ranges: Optional[List[GapRangeRequest]] = None,
     ) -> Dict[str, Any]:
         with self._lock:
             if self.is_running():
                 raise RuntimeError("A gap fix job is already running")
-            self._cancel.clear()
-            self._skip = set()
-            self._state = self._initial_state()
-            self._state.update(
-                status="scanning",
-                scope_asset_ids=asset_ids,
-                started_at=_now_iso(),
-            )
+            self._start_locked(asset_ids, quote_asset_id, ranges or [])
+        return self.get_status()
+
+    def enqueue(
+        self,
+        asset_ids: Optional[List[int]],
+        quote_asset_id: Optional[int],
+        ranges: Optional[List[GapRangeRequest]] = None,
+    ) -> Dict[str, Any]:
+        """Start a job, or add the request to the running one (single job, progressive scope)."""
+        with self._lock:
+            if self.is_running():
+                self._pending.append((asset_ids, list(ranges or [])))
+                scope = self._state.get("scope_asset_ids")
+                if scope is not None:
+                    added = (
+                        list(asset_ids or []) + [r[0] for r in ranges or []]
+                        if asset_ids is not None
+                        else None
+                    )
+                    self._state["scope_asset_ids"] = (
+                        None if added is None else sorted(set(scope) | set(added))
+                    )
+                n = len(asset_ids or []) + len(ranges or [])
+                self._log(
+                    "info", f"Queued {n or 'all'} more asset(s) into the running job"
+                )
+                self._state["queued_requests"] = len(self._pending)
+            else:
+                self._start_locked(asset_ids, quote_asset_id, list(ranges or []))
+        return self.get_status()
+
+    def _start_locked(
+        self,
+        asset_ids: Optional[List[int]],
+        quote_asset_id: Optional[int],
+        ranges: List[GapRangeRequest],
+    ) -> None:
+        self._cancel.clear()
+        self._skip = set()
+        self._pending = []
+        self._quote_asset_id = quote_asset_id
+        self._state = self._initial_state()
+        scope = (
+            None
+            if asset_ids is None and not ranges
+            else sorted(set(asset_ids or []) | {r[0] for r in ranges})
+        )
+        self._state.update(
+            status="scanning", scope_asset_ids=scope, started_at=_now_iso()
+        )
         self._thread = threading.Thread(
-            target=self._run, args=(asset_ids, quote_asset_id), daemon=True
+            target=self._run, args=(asset_ids, quote_asset_id, ranges), daemon=True
         )
         self._thread.start()
-        return self.get_status()
 
     def cancel(self) -> Dict[str, Any]:
         self._cancel.set()
@@ -199,10 +253,15 @@ class GapFixJobService:
 
     # -- worker -----------------------------------------------------------
 
-    def _run(self, asset_ids: Optional[List[int]], quote_asset_id: Optional[int]):
+    def _run(
+        self,
+        asset_ids: Optional[List[int]],
+        quote_asset_id: Optional[int],
+        ranges: Optional[List[GapRangeRequest]] = None,
+    ):
         session = self._session_factory()
         try:
-            self.execute(session, asset_ids, quote_asset_id)
+            self.execute(session, asset_ids, quote_asset_id, ranges)
         except Exception as e:  # keep the job state consistent if the worker crashes
             log.exception("gap_fix_job_crashed")
             with self._lock:
@@ -218,13 +277,16 @@ class GapFixJobService:
         if len(entries) > MAX_LOG_ENTRIES:
             del entries[: len(entries) - MAX_LOG_ENTRIES]
 
-    def execute(
+    def _scan(
         self,
         session: Session,
         asset_ids: Optional[List[int]],
         quote_asset_id: Optional[int],
-    ) -> None:
-        if asset_ids is None:
+        ranges: Optional[List[GapRangeRequest]],
+        exclude: Optional[Dict[int, Set[date]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Work items (one per asset with missing days); `exclude` drops days already queued."""
+        if asset_ids is None and not ranges:
             rows = session.exec(
                 select(NormalizedTransaction.asset_id)
                 .where(NormalizedTransaction.asset_id.isnot(None))
@@ -232,34 +294,61 @@ class GapFixJobService:
             ).all()
             asset_ids = sorted({r[0] if isinstance(r, tuple) else r for r in rows})
 
-        work: List[Dict[str, Any]] = []
-        for aid in asset_ids:
+        targets: List[GapRangeRequest] = [(aid, None, None) for aid in asset_ids or []]
+        targets += list(ranges or [])
+
+        by_asset: Dict[int, Dict[str, Any]] = {}
+        for aid, d_from, d_to in targets:
             if self._cancel.is_set():
                 break
             try:
-                result = detect_gaps(session, aid, quote_asset_id=quote_asset_id)
+                if d_from is None and d_to is None:
+                    result = detect_gaps(session, aid, quote_asset_id=quote_asset_id)
+                else:
+                    result = detect_gaps(
+                        session, aid, d_from, d_to, quote_asset_id=quote_asset_id
+                    )
             except ValueError:
                 continue
             if not result.gaps:
                 continue
-            asset = session.get(Asset, aid)
             is_crypto = ((result.price_type or "crypto").lower()) == "crypto"
-            dates = missing_dates_for_gaps(result.gaps, is_crypto)
-            work.append(
-                {
+            dates = set(missing_dates_for_gaps(result.gaps, is_crypto))
+            dates -= (exclude or {}).get(aid, set())
+            if not dates:
+                continue
+            item = by_asset.get(aid)
+            if item is None:
+                asset = session.get(Asset, aid)
+                item = by_asset[aid] = {
                     "asset_id": aid,
                     "symbol": result.symbol,
                     "label": asset.label if asset else None,
-                    "gap_count": len(result.gaps),
-                    "missing_days": len(dates),
+                    "gap_count": 0,
+                    "missing_days": 0,
                     "status": "pending",
                     "fetched": 0,
                     "failed": 0,
                     "last_error": None,
                     "note": None,
-                    "_dates": dates,
+                    "_dates": set(),
                 }
-            )
+            item["gap_count"] += len(result.gaps)
+            item["_dates"] |= dates
+        work = list(by_asset.values())
+        for item in work:
+            item["_dates"] = sorted(item["_dates"])
+            item["missing_days"] = len(item["_dates"])
+        return work
+
+    def execute(
+        self,
+        session: Session,
+        asset_ids: Optional[List[int]],
+        quote_asset_id: Optional[int],
+        ranges: Optional[List[GapRangeRequest]] = None,
+    ) -> None:
+        work = self._scan(session, asset_ids, quote_asset_id, ranges)
 
         with self._lock:
             self._state.update(
@@ -273,14 +362,46 @@ class GapFixJobService:
         svc = PriceService(
             session=session, base_currency=load_settings().get("base_currency", "EUR")
         )
-        if not self._cancel.is_set():
-            self._prefill(session, svc, work)
-        for index, item in enumerate(work):
-            if self._cancel.is_set():
-                break
-            self._process_asset(svc, index, item)
+        offset = 0
+        while True:
+            batch = work[offset:]
+            if batch and not self._cancel.is_set():
+                self._prefill(session, svc, batch, offset)
+            for i, item in enumerate(batch):
+                if self._cancel.is_set():
+                    break
+                self._process_asset(svc, offset + i, item)
+                with self._lock:
+                    self._state["completed_assets"] += 1
+            offset = len(work)
+
             with self._lock:
-                self._state["completed_assets"] += 1
+                if self._cancel.is_set() or not self._pending:
+                    break
+                pending, self._pending = self._pending, []
+                self._state["queued_requests"] = 0
+            # Earlier work is finished here; only dedupe days between the queued requests
+            queued: Dict[int, Set[date]] = {}
+            new_work: List[Dict[str, Any]] = []
+            for p_ids, p_ranges in pending:
+                new_work += self._scan(
+                    session, p_ids, quote_asset_id, p_ranges, exclude=queued
+                )
+                for w in new_work:
+                    queued.setdefault(w["asset_id"], set()).update(w["_dates"])
+            with self._lock:
+                work += new_work
+                self._state["total_assets"] += len(new_work)
+                self._state["total_missing_days"] += sum(
+                    w["missing_days"] for w in new_work
+                )
+                self._state["assets"] += [
+                    {k: v for k, v in w.items() if k != "_dates"} for w in new_work
+                ]
+                if new_work:
+                    self._log(
+                        "info", f"Added {len(new_work)} queued asset(s) with gaps"
+                    )
 
         with self._lock:
             cancelled = self._cancel.is_set()
@@ -296,7 +417,13 @@ class GapFixJobService:
             )
             self._log("info", "Cancelled" if cancelled else "Complete")
 
-    def _prefill(self, session: Session, svc: PriceService, work: List[Dict[str, Any]]):
+    def _prefill(
+        self,
+        session: Session,
+        svc: PriceService,
+        work: List[Dict[str, Any]],
+        offset: int = 0,
+    ):
         filled, tried = prefill_with_ranges(
             session, svc, {w["asset_id"]: w["_dates"] for w in work}
         )
@@ -308,7 +435,7 @@ class GapFixJobService:
                 if not got:
                     continue
                 item["_dates"] = [d for d in item["_dates"] if d not in got]
-                row = self._state["assets"][index]
+                row = self._state["assets"][offset + index]
                 row["fetched"] += len(got)
                 self._state["fetched_count"] += len(got)
                 self._state["processed_days"] += len(got)

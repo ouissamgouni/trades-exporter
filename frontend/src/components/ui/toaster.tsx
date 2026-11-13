@@ -135,7 +135,7 @@ export const Toaster = () => {
           </RadixToast.Close>
         </RadixToast.Root>
       ))}
-      <RadixToast.Viewport className="fixed right-4 top-4 z-[2000] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none" />
+      <RadixToast.Viewport className="fixed right-4 top-4 z-[2700] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none" />
     </RadixToast.Provider>
   )
 }

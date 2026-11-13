@@ -12,22 +12,19 @@ import { SlidePanel } from './pnl/SlidePanel';
 import { useAsset } from '../hooks/useAsset';
 import { useLatestPnLVersion } from '../hooks/useLatestPnLVersion';
 import { useAssetDetailPanel } from '../contexts/AssetDetailPanelContext';
-import { AssetDetailsForm } from './AssetDetailsForm';
+import { AssetDetailsForm, SettingsSection } from './AssetDetailsForm';
 import { AssetPriceGettersEditor } from './AssetPriceGettersEditor';
 import { AssetCategoriesEditor } from './AssetCategoriesEditor';
 import { GapFixPanel } from './GapFixPanel';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
-import { useAccountBalances } from './AssetPnLOverviewSection';
 import { ScopedPnLOverview } from './pnl/ScopedPnLOverview';
-import { AccountBadge } from './AccountBadge';
-import { fmtCurrency } from './pnl/TotalReturnScorecard';
-import { formatQuantity } from '../utils/numberUtils';
+import { DeleteAssetDialog } from './DeleteAssetDialog';
 import { AssetPnLAuditSection } from './AssetPnLAuditSection';
 import { AssetIncomeSection } from './pnl/AssetIncomeSection';
 import { AssetSummaryHeader } from './AssetSummaryHeader';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, type TransactionFilterState } from './TransactionFilters';
-import { Badge, Spinner } from './ui/primitives';
+import { Badge, Button, Spinner } from './ui/primitives';
 
 type AssetTab = 'overview' | 'pnl' | 'transactions' | 'prices' | 'settings';
 
@@ -70,6 +67,7 @@ export const AssetDetailSlidePanel: React.FC = () => {
 
     const [tab, setTab] = useState<AssetTab>('overview');
     const [wide, setWide] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     useEffect(() => {
         if (isOpen) setTab(toTab(panelState.initialTab));
     }, [isOpen, assetId, panelState.initialTab]);
@@ -92,7 +90,7 @@ export const AssetDetailSlidePanel: React.FC = () => {
             onClose={closeAssetPanel}
             title="Asset"
             headerActions={expandToggle}
-            width={wide || tab === 'transactions' || tab === 'overview' ? '1100px' : '720px'}
+            width={wide ? '1400px' : '1100px'}
             zIndex={1500}
         >
             {isLoading && !asset && (
@@ -134,8 +132,6 @@ export const AssetDetailSlidePanel: React.FC = () => {
                             versionId ? (
                                 <>
                                     <ScopedPnLOverview versionId={versionId} baseCurrency={baseCurrency} assetIds={[asset.asset_id!]} contextLabel={asset.symbol} defaultGroupBy="account" />
-                                    <SubHeading>Holdings by account</SubHeading>
-                                    <AssetHoldingsByAccount assetId={asset.asset_id!} versionId={versionId} baseCurrency={baseCurrency} />
                                 </>
                             ) : <p className="py-6 text-center text-xs text-slate-400">No P&L calculation yet — run one to see position and performance.</p>
                         )}
@@ -167,47 +163,33 @@ export const AssetDetailSlidePanel: React.FC = () => {
                         )}
 
                         {tab === 'settings' && (
-                            <>
-                                <SubHeading>Details</SubHeading>
+                            <div className="flex flex-col gap-3" data-testid="asset-settings">
                                 <AssetDetailsForm asset={asset} onSaved={invalidate} />
-                                <SubHeading badge={(asset.categories?.length ?? 0) > 0 ? <Badge colorScheme="blue">{asset.categories!.length}</Badge> : undefined}>
-                                    Categories
-                                </SubHeading>
-                                <AssetCategoriesEditor asset={asset} onSaved={invalidate} />
-                            </>
+                                <SettingsSection
+                                    title="Categories"
+                                    hint="Group the asset by dimension (sector, region, risk…) for filters, allocation charts and contributors."
+                                    aside={(asset.categories?.length ?? 0) > 0 ? <Badge colorScheme="blue">{asset.categories!.length}</Badge> : undefined}
+                                >
+                                    <AssetCategoriesEditor asset={asset} onSaved={invalidate} />
+                                </SettingsSection>
+                                <SettingsSection title="Danger zone" tone="danger" hint="Deleting removes the asset and everything linked to it. The impact is listed before you confirm.">
+                                    <Button size="sm" className="bg-red-600 text-white hover:bg-red-700" onClick={() => setDeleting(true)}>
+                                        Delete asset…
+                                    </Button>
+                                </SettingsSection>
+                                <DeleteAssetDialog
+                                    isOpen={deleting}
+                                    onClose={() => setDeleting(false)}
+                                    assetId={asset.asset_id ?? null}
+                                    assetSymbol={asset.symbol}
+                                    onDeleted={() => { setDeleting(false); closeAssetPanel(); }}
+                                />
+                            </div>
                         )}
                     </div>
                 </div>
             )}
         </SlidePanel>
-    );
-};
-
-/* ── Per-account position of this asset ── */
-
-const AssetHoldingsByAccount: React.FC<{ assetId: number; versionId: number; baseCurrency: string }> = ({ assetId, versionId, baseCurrency }) => {
-    const { breakdowns, isLoading } = useAccountBalances(versionId, assetId);
-    if (isLoading) return <div className="flex justify-center py-3"><Spinner size="sm" /></div>;
-    if (!breakdowns.length) return <p className="py-3 text-center text-xs text-slate-400">Not held in any account.</p>;
-    const totalQty = breakdowns.reduce((s, b) => s + Math.max(b.qty, 0), 0);
-    return (
-        <table className="w-full text-xs">
-            <thead className="text-left text-[10px] uppercase text-slate-500">
-                <tr><th className="py-1">Account</th><th className="text-right">Qty</th><th className="text-right">Share</th><th className="text-right">Cost</th><th className="text-right">Avg cost</th><th className="text-right">Lots</th></tr>
-            </thead>
-            <tbody>
-                {[...breakdowns].sort((a, b) => b.qty - a.qty).map(b => (
-                    <tr key={b.account_id} className="border-t border-slate-100">
-                        <td className="py-1"><AccountBadge accountId={b.account_id} accountName={b.account_name} size="xs" /></td>
-                        <td className={`text-right tabular-nums ${b.qty < 0 ? 'text-red-700' : ''}`}>{formatQuantity(b.qty)}</td>
-                        <td className="text-right tabular-nums">{totalQty > 0 && b.qty > 0 ? `${((b.qty / totalQty) * 100).toFixed(1)}%` : '—'}</td>
-                        <td className="text-right tabular-nums">{fmtCurrency(b.cost_basis_in_base, baseCurrency)}</td>
-                        <td className="text-right tabular-nums">{b.avg_unit_cost_in_base ? fmtCurrency(b.avg_unit_cost_in_base, baseCurrency) : '—'}</td>
-                        <td className="text-right tabular-nums">{b.lot_count}</td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
     );
 };
 

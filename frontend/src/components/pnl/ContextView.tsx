@@ -17,8 +17,8 @@ import { usePnL } from './PnLContext';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { TimeframeIndicators, RANGES, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import { AccountsStrip } from './AccountsStrip';
-import { AssetsSection } from './AssetsSection';
-import { PeriodPresets, type PeriodMetric } from './PeriodPresets';
+import { AssetsSection, type PositionFilter } from './AssetsSection';
+import { PeriodPresets, PERIOD_METRICS, type PeriodMetric } from './PeriodPresets';
 import { BenchmarkSummary } from './BenchmarkSummary';
 import { seriesReturnBetween } from './chartUtils';
 import { AccountBadge } from '../AccountBadge';
@@ -139,7 +139,10 @@ export const ContextView: React.FC<ContextViewProps> = ({
 
     // ── Tabs / page-wide preferences ──
     const [tab, setTab] = useState<ContextTab>(initialTab);
-    const [periodMetric, setPeriodMetric] = useState<PeriodMetric>(() => (localStorage.getItem(PERIOD_METRIC_KEY) === 'twr' ? 'twr' : 'roi'));
+    const [periodMetric, setPeriodMetric] = useState<PeriodMetric>(() => {
+        const v = localStorage.getItem(PERIOD_METRIC_KEY) as PeriodMetric | null;
+        return v && PERIOD_METRICS.includes(v) ? v : 'roi';
+    });
     const [mainBenchmark, setMainBenchmark] = useState<string>(() => {
         const v = localStorage.getItem(BENCHMARK_KEY);
         return v && BENCHMARK_PRESETS.some(b => b.ticker === v) ? v : '^GSPC';
@@ -331,6 +334,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
     const [minMarketValue, setMinMarketValue] = useState(0);
     const [pnlStatus, setPnlStatus] = useState<PnlStatusFilter>('with_pnl');
     const [balanceStatus, setBalanceStatus] = useState<BalanceStatusFilter>('all');
+    const [positionRequest, setPositionRequest] = useState<{ filter: PositionFilter; nonce: number }>();
 
     // Context-derived filter values for AssetPnLTable (scope shown as active filters)
     const [localAccountIds, setLocalAccountIds] = useState<number[]>([]);
@@ -410,6 +414,15 @@ export const ContextView: React.FC<ContextViewProps> = ({
         return result;
     }, [returnMetrics.data]);
 
+    const allRangeMwrs = useMemo(() => {
+        const result: Record<Range, number | null> = { all: null, '3y': null, '1y': null, '6m': null, '3m': null, '1m': null, '1w': null };
+        for (const r of RANGES) {
+            const m = returnMetrics.data?.ranges?.[r.key];
+            result[r.key] = m ? ((m.days ?? 0) >= 365 ? m.irr_pct : m.irr_period_pct) ?? null : null;
+        }
+        return result;
+    }, [returnMetrics.data]);
+
     const timelineStart = effectiveTimeline.data?.points?.[0]?.date ?? null;
     const today = new Date().toISOString().slice(0, 10);
     const [mainBenchmarkSeries] = useMultiBenchmarkSeries([mainBenchmark], timelineStart, today, !!timelineStart, baseCurrency);
@@ -456,7 +469,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
     return (
         <div>
             {/* ─── Sticky bar: breadcrumb, tabs, period ─── */}
-            <div className="sticky top-0 z-20 border border-gray-200 bg-gray-50/95 px-3 pt-2 backdrop-blur">
+            <div className="sticky top-[var(--app-header-h,0px)] z-30 border border-slate-300 bg-slate-100 px-3 pt-2 shadow-sm">
                 <div className="flex flex-wrap items-center gap-1.5">
                     {breadcrumbs.map((crumb, idx) => {
                         const isLast = idx === breadcrumbs.length - 1;
@@ -537,6 +550,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             onMetricChange={setPeriodMetric}
                             roi={allRangeRois}
                             twr={allRangeTwrs}
+                            mwr={allRangeMwrs}
                             benchmark={{ label: mainBenchmarkLabel, returns: benchmarkReturns }}
                             periodSpan={timeframeRange === 'all' || !scope.dateFrom ? 'All time' : `${scope.dateFrom} → today`}
                         />
@@ -546,7 +560,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
 
             {tab === 'performance' ? (
                 <div className="mt-3 flex flex-col gap-4">
-                    <div ref={overviewRef} className="scroll-mt-32">
+                    <div ref={overviewRef} className="scroll-mt-[calc(var(--app-header-h,0px)+8rem)]">
                         <TimeframeIndicators
                             points={effectiveTimeline.data?.points || []}
                             baseCurrency={baseCurrency}
@@ -575,6 +589,11 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             hidePerformers={isAsset}
                             returnMetrics={returnMetrics.data?.ranges?.[timeframeRange] ?? null}
                             mainBenchmark={mainBenchmark}
+                            onPositionsClick={isMultiAsset ? (filter) => {
+                                setPositionRequest(prev => ({ filter, nonce: (prev?.nonce ?? 0) + 1 }));
+                                if (pnlStatus === 'no_pnl') setPnlStatus('all');
+                                scrollTo(assetsRef);
+                            } : undefined}
                             benchmarkSlot={currentVersionId ? (
                                 <BenchmarkSummary
                                     versionId={currentVersionId}
@@ -598,6 +617,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                     selectedIds={isAccountScope ? scope.accountIds : []}
                                     onApplySelection={onSetAccountScope}
                                     twr={accountSparklines.data?.twr}
+                                    mwr={accountSparklines.data?.mwr}
                                     benchmark={{ label: mainBenchmarkLabel, returnPct: benchmarkReturns[timeframeRange] }}
                                     accounts={accounts}
                                     pnlVersionId={currentVersionId ?? undefined}
@@ -640,7 +660,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                     </div>
 
                     {isMultiAsset && (
-                        <div ref={assetsRef} className="scroll-mt-32">
+                        <div ref={assetsRef} className="scroll-mt-[calc(var(--app-header-h,0px)+8rem)]">
                             <div className="mb-2 flex items-center gap-2 border-b border-slate-200 pb-1">
                                 <span className="text-base font-semibold text-gray-800">Assets</span>
                                 <Badge colorScheme="gray">{scopedDisplayAssets.length}</Badge>
@@ -678,6 +698,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 periodLabel={timeframeRange !== 'all' ? periodLabel : undefined}
                                 accountPerformers={accountItems}
                                 pnlVersionId={currentVersionId ?? undefined}
+                                positionRequest={positionRequest}
                                 renderAllocation={(mode) => mode === 'treemap' ? (
                                     <AllocationTreemap
                                         points={effectiveTimeline.data?.points || []}

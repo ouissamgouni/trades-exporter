@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiActivity, FiCheckCircle, FiClipboard, FiDatabase, FiMonitor, FiServer } from 'react-icons/fi';
+import { FiActivity, FiCheckCircle, FiClipboard, FiDatabase, FiDownloadCloud, FiMonitor, FiServer } from 'react-icons/fi';
+import { useGapFixJob } from '../hooks/usePriceGaps';
 import { useDataHealth } from '../contexts/DataHealthContext';
 import { useQaContext } from './QaTestPlanPanel';
 
@@ -58,6 +59,26 @@ const InfoPill: React.FC<{ kind: InfoKind; icon: React.ReactNode; label: string;
     </span>
 );
 
+/** Shared price-fetch job, visible from any page while it runs (also refreshes prices/P&L when it ends). */
+const PriceJobSegment: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+    const { job, isActive } = useGapFixJob();
+    if (!job || !isActive) return null;
+    const pct = job.total_missing_days > 0 ? Math.round((job.processed_days / job.total_missing_days) * 100) : 0;
+    const title = `Price fetch job: ${job.completed_assets}/${job.total_assets} assets, ${job.fetched_count} fetched, ${job.failed_count} failed`;
+    return (
+        <>
+            <Segment onClick={onClick}>
+                <span className="flex items-center gap-1 text-blue-700" title={title} aria-label={title} data-testid="status-price-job">
+                    <FiDownloadCloud size={11} />
+                    <span className="font-semibold">Prices {job.status === 'scanning' ? 'scanning…' : `${pct}%`}</span>
+                    <span className="opacity-75">{job.completed_assets}/{job.total_assets}</span>
+                </span>
+            </Segment>
+            <Divider />
+        </>
+    );
+};
+
 export const StatusBar: React.FC = () => {
     const { validationSummary, refreshHealthData } = useDataHealth();
     const { appInfo, isOpen: qaIsOpen, setIsOpen: setQaIsOpen, doneCount, totalSteps } = useQaContext();
@@ -88,7 +109,8 @@ export const StatusBar: React.FC = () => {
                     fontFamily: 'system-ui, -apple-system, sans-serif',
                 }}
             >
-                {/* ── Right-aligned segments: Data Health | QA | Env ── */}
+                {/* ── Right-aligned segments: Price job | Data Health | QA | Env ── */}
+                <PriceJobSegment onClick={() => navigate('/prices')} />
 
                 {/* Data Health segment */}
                 {validationSummary && (

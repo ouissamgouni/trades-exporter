@@ -1,29 +1,23 @@
 /**
  * AccountDetailSlidePanel — Right-side slide panel for one account: sticky summary header
- * (identity, value, return, positions) + tabs (Overview / Holdings / P&L / Transactions / Health / Settings).
+ * (identity, value, return, positions) + tabs (Overview / Holdings / P&L audit / Transactions / Health / Settings).
  * Mounted once in App.tsx; driven by AccountDetailPanelContext.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { LuChartLine, LuTriangleAlert } from 'react-icons/lu';
 import { SlidePanel } from './pnl/SlidePanel';
 import { useAccountDetailPanel } from '../contexts/AccountDetailPanelContext';
+import { AssetDetailPanelContext } from '../contexts/AssetDetailPanelContext';
 import { useAccounts } from '../hooks/useAccounts';
 import { useEntityColors } from '../hooks/useEntityColors';
 import { useLatestPnLVersion } from '../hooks/useLatestPnLVersion';
-import { useFlatBalances } from '../hooks/useFlatBalances';
-import {
-    useBookMetrics,
-    useFeeSummaryByPeriod,
-    useIncomeEvents,
-    useLiveMetrics,
-    useVersionPerformers,
-    type PerformerItem,
-} from '../hooks/useChartData';
+import { useScopedAssetRows } from '../hooks/useScopedAssetRows';
+import { useLiveBalanceSnapshot } from '../hooks/useLiveBalanceSnapshot';
+import { useBookMetrics, useIncomeEvents, useLiveMetrics } from '../hooks/useChartData';
 import { API_URL } from '../types';
 import type { Account, TransactionStatusResponse } from '../types';
-import type { PerAccountBalanceItem } from './pnl/types';
 import { Badge, Button, Spinner } from './ui/primitives';
 import AccountConnectors from './AccountConnectors';
 import AccountFormDialog from './AccountFormDialog';
@@ -31,24 +25,31 @@ import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, type TransactionFilterState } from './TransactionFilters';
 import { EntityInfoButton } from './EntityInfoButton';
 import { ScopedPnLOverview } from './pnl/ScopedPnLOverview';
+import { AssetsSection } from './pnl/AssetsSection';
+import type { BalanceStatusFilter, PnlStatusFilter } from './pnl/AssetPnLTable';
+import { sumLiveBalancesForAccounts } from './pnl/pnlCalculations';
+import { AssetPnLAuditSection } from './AssetPnLAuditSection';
+import { DataHealthView } from './DataHealthView';
 import { fmtCurrency, fmtCurrencySigned } from './pnl/TotalReturnScorecard';
-import { TERM_HELP, InfoTip } from './pnl/pnlTerms';
-import { formatQuantity } from '../utils/numberUtils';
+import { InfoTip } from './pnl/pnlTerms';
 import { formatDateTimeCompact } from '../utils/dateUtils';
 import { pnlFocusPath } from '../utils/pnlFocus';
 
-type AccountTab = 'overview' | 'holdings' | 'pnl' | 'transactions' | 'health' | 'settings';
+type AccountTab = 'overview' | 'holdings' | 'audit' | 'transactions' | 'health' | 'settings';
 
 const TABS: { id: AccountTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'holdings', label: 'Holdings' },
-    { id: 'pnl', label: 'P&L details' },
+    { id: 'audit', label: 'P&L audit' },
     { id: 'transactions', label: 'Transactions' },
     { id: 'health', label: 'Health' },
     { id: 'settings', label: 'Settings' },
 ];
 
-const toTab = (t: string | undefined): AccountTab => (TABS.some(x => x.id === t) ? (t as AccountTab) : 'overview');
+const TAB_ALIASES: Record<string, AccountTab> = { pnl: 'audit' };
+
+const toTab = (t: string | undefined): AccountTab =>
+    TAB_ALIASES[t ?? ''] ?? (TABS.some(x => x.id === t) ? (t as AccountTab) : 'overview');
 
 const signClass = (v: number) => (v >= 0 ? 'text-green-700' : 'text-red-700');
 const pctText = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
@@ -68,17 +69,23 @@ const DetailRow: React.FC<{ label: string; value: React.ReactNode }> = ({ label,
     </div>
 );
 
-const Stat: React.FC<{ label: string; value: React.ReactNode; tone?: number; info?: string }> = ({ label, value, tone, info }) => (
-    <div className="border-l-[3px] border-l-slate-200 bg-slate-50 px-2 py-1">
-        <span className="flex items-center gap-1 text-[10px] uppercase text-slate-500">{label}{info && <InfoTip text={info} size={9} />}</span>
-        <span className={`block text-sm font-semibold tabular-nums ${tone == null ? 'text-slate-800' : signClass(tone)}`}>{value}</span>
-    </div>
-);
-
 const Loading = () => <div className="flex justify-center py-6"><Spinner size="sm" /></div>;
 const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <p className="py-6 text-center text-xs text-slate-400">{children}</p>
 );
+
+/** Same query key as DataHealthView so the tab badge and the tab content share one request. */
+function useAccountHealthStatus(accountId: number | null) {
+    return useQuery<TransactionStatusResponse>({
+        queryKey: ['dataHealthStatus', String(accountId ?? '')],
+        queryFn: async () => {
+            const res = await fetch(`${API_URL}/transactions/data-health-check/status?account_ids=${accountId}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: accountId != null,
+    });
+}
 
 export const AccountDetailSlidePanel: React.FC = () => {
     const { panelState, closeAccountPanel } = useAccountDetailPanel();
@@ -91,6 +98,8 @@ export const AccountDetailSlidePanel: React.FC = () => {
     const navigate = useNavigate();
     const [editing, setEditing] = useState(false);
     const [tab, setTab] = useState<AccountTab>('overview');
+    const health = useAccountHealthStatus(isOpen ? accountId : null);
+    const issues = health.data?.total_issues ?? 0;
 
     useEffect(() => {
         if (isOpen) setTab(toTab(panelState.initialTab));
@@ -145,10 +154,13 @@ export const AccountDetailSlidePanel: React.FC = () => {
                                     aria-selected={tab === id}
                                     onClick={() => setTab(id)}
                                     className={tab === id
-                                        ? '-mb-px shrink-0 border-b-2 border-blue-600 px-3 py-2 text-sm font-semibold text-blue-700'
-                                        : '-mb-px shrink-0 border-b-2 border-transparent px-3 py-2 text-sm text-slate-600 hover:text-slate-900'}
+                                        ? '-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 border-blue-600 px-3 py-2 text-sm font-semibold text-blue-700'
+                                        : '-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 py-2 text-sm text-slate-600 hover:text-slate-900'}
                                 >
                                     {label}
+                                    {id === 'health' && issues > 0 && (
+                                        <Badge colorScheme="orange" title={`${issues} data health issue${issues === 1 ? '' : 's'} on this account`}>{issues}</Badge>
+                                    )}
                                 </button>
                             ))}
                         </div>
@@ -159,13 +171,18 @@ export const AccountDetailSlidePanel: React.FC = () => {
                             ? <ScopedPnLOverview versionId={versionId} baseCurrency={baseCurrency} accountIds={[account.id]} contextLabel={account.name} defaultGroupBy="asset" />
                             : <Empty>No P&L calculation yet — run one to see performance.</Empty>)}
                         {tab === 'holdings' && (versionId
-                            ? <AccountHoldings accountId={account.id} versionId={versionId} baseCurrency={baseCurrency} />
+                            ? <AccountHoldings account={account} accounts={accounts} versionId={versionId} baseCurrency={baseCurrency} />
                             : <Empty>No P&L calculation yet.</Empty>)}
-                        {tab === 'pnl' && (versionId
-                            ? <AccountPnLDetails accountId={account.id} versionId={versionId} baseCurrency={baseCurrency} />
+                        {tab === 'audit' && (versionId
+                            ? (
+                                <>
+                                    <AssetPnLAuditSection accountId={account.id} versionId={versionId} />
+                                    <AccountIncome accountId={account.id} versionId={versionId} baseCurrency={baseCurrency} />
+                                </>
+                            )
                             : <Empty>No P&L calculation yet.</Empty>)}
                         {tab === 'transactions' && <RelatedTransactions accountId={account.id} />}
-                        {tab === 'health' && <AccountHealth accountId={account.id} />}
+                        {tab === 'health' && <DataHealthView accountIds={[account.id]} />}
                         {tab === 'settings' && (
                             <>
                                 <SubHeading>Details</SubHeading>
@@ -206,10 +223,10 @@ const AccountSummaryHeader: React.FC<{ account: Account; versionId: number | nul
     const scope = useMemo(() => ({ accountIds: [account.id] }), [account.id]);
     const book = useBookMetrics(versionId, scope, !!versionId);
     const live = useLiveMetrics(versionId, scope, !!versionId);
-    const balances = useFlatBalances(versionId);
-    const rows = (balances.data ?? []).filter(b => b.account_id === account.id);
-    const openCount = rows.filter(b => Math.abs(b.qty) > 0).length;
-    const warnings = rows.reduce((s, b) => s + b.warning_count + b.unsettled_negative_count, 0);
+    const { rows } = useScopedAssetRows(versionId, scope.accountIds, baseCurrency);
+    const openCount = rows ? rows.filter(r => r.has_open_position ?? Math.abs(r.quantity) > 0).length : null;
+    // Open P&L warnings only (same source as the P&L page); unsettled negative cash lots are not warnings
+    const warnings = (rows ?? []).reduce((s, r) => s + (r.warning_count ?? 0), 0);
     const all = live.data?.ranges?.all;
     const meta = [account.account_type, account.group, account.envelope].filter(Boolean).join(' · ');
 
@@ -231,9 +248,9 @@ const AccountSummaryHeader: React.FC<{ account: Account; versionId: number | nul
                         value={all ? <span className={signClass(all.total_return)}>{fmtCurrencySigned(all.total_return, baseCurrency)} <span className="text-[11px]">{pctText(all.roi_pct)}</span></span> : '…'}
                     />
                     <HeaderFigure label="Realized" value={book.data ? <span className={signClass(book.data.summary.realized_pnl)}>{fmtCurrencySigned(book.data.summary.realized_pnl, baseCurrency)}</span> : '…'} />
-                    <HeaderFigure label="Open positions" value={balances.data ? openCount : '…'} />
+                    <HeaderFigure label="Held assets" value={openCount ?? '…'} />
                     {warnings > 0 && (
-                        <span className="inline-flex items-center gap-1 bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700" title="P&L warnings / unsettled negative lots on this account">
+                        <span className="inline-flex items-center gap-1 bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700" title="Open P&L warnings on this account">
                             <LuTriangleAlert size={11} aria-hidden /> {warnings} warning{warnings === 1 ? '' : 's'}
                         </span>
                     )}
@@ -250,202 +267,59 @@ const HeaderFigure: React.FC<{ label: string; value: React.ReactNode }> = ({ lab
     </div>
 );
 
-/* ── Holdings ── */
+/* ── Holdings: the P&L page's assets section, scoped to this account ── */
 
-interface HoldingRow {
-    balance: PerAccountBalanceItem;
-    perf?: PerformerItem;
-    marketValue: number | null;
-}
+const AccountHoldings: React.FC<{ account: Account; accounts: Account[]; versionId: number; baseCurrency: string }> = ({ account, accounts, versionId, baseCurrency }) => {
+    const accountIds = useMemo(() => [account.id], [account.id]);
+    const { rows, isLoading } = useScopedAssetRows(versionId, accountIds, baseCurrency);
+    const assetPanel = useContext(AssetDetailPanelContext);
+    const live = useLiveBalanceSnapshot();
+    const liveBalances = useMemo(
+        () => (live && live.fetchedAccountIds.has(account.id) ? sumLiveBalancesForAccounts(live.byAccount, accountIds) : undefined),
+        [live, account.id, accountIds],
+    );
 
-const AccountHoldings: React.FC<{ accountId: number; versionId: number; baseCurrency: string }> = ({ accountId, versionId, baseCurrency }) => {
-    const [showClosed, setShowClosed] = useState(false);
-    const balances = useFlatBalances(versionId);
-    const performers = useVersionPerformers(versionId, { accountIds: [accountId], groupBy: 'asset', topN: 500, period: 'all' });
+    const [search, setSearch] = useState('');
+    const [minMarketValue, setMinMarketValue] = useState(0);
+    const [pnlStatus, setPnlStatus] = useState<PnlStatusFilter>('with_pnl');
+    const [balanceStatus, setBalanceStatus] = useState<BalanceStatusFilter>('all');
+    const [categoryIds, setCategoryIds] = useState<number[]>([]);
 
-    const perfByAsset = useMemo(() => {
-        const map = new Map<number, PerformerItem>();
-        for (const p of [...(performers.data?.top_performers ?? []), ...(performers.data?.flop_performers ?? [])]) map.set(p.id, p);
-        return map;
-    }, [performers.data]);
-
-    const { open, closed, totalValue } = useMemo(() => {
-        const rows: HoldingRow[] = (balances.data ?? [])
-            .filter(b => b.account_id === accountId)
-            .map(b => {
-                const perf = b.asset.id != null ? perfByAsset.get(b.asset.id) : undefined;
-                return { balance: b, perf, marketValue: perf ? perf.market_value : null };
-            });
-        const openRows = rows.filter(r => Math.abs(r.balance.qty) > 0)
-            .sort((a, b) => (b.marketValue ?? b.balance.cost_basis_in_base) - (a.marketValue ?? a.balance.cost_basis_in_base));
-        const closedRows = rows.filter(r => Math.abs(r.balance.qty) === 0 && (r.balance.realized_event_count > 0 || Math.abs(r.balance.realized_pnl_in_base) >= 0.01))
-            .sort((a, b) => Math.abs(b.balance.realized_pnl_in_base) - Math.abs(a.balance.realized_pnl_in_base));
-        const total = openRows.reduce((s, r) => s + Math.max(r.marketValue ?? 0, 0), 0);
-        return { open: openRows, closed: closedRows, totalValue: total };
-    }, [balances.data, perfByAsset, accountId]);
-
-    if (balances.isLoading) return <Loading />;
-    if (!open.length && !closed.length) return <Empty>No positions on this account.</Empty>;
-
-    const rows = showClosed ? [...open, ...closed] : open;
-    const sum = (f: (r: HoldingRow) => number) => open.reduce((s, r) => s + f(r), 0);
+    if (isLoading && !rows) return <Loading />;
+    if (!rows?.length) return <Empty>No positions on this account.</Empty>;
 
     return (
-        <div className="flex flex-col gap-2">
-            <AllocationBar rows={open} total={totalValue} />
-            <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>{open.length} open · {closed.length} closed</span>
-                <label className="inline-flex cursor-pointer items-center gap-1">
-                    <input type="checkbox" className="accent-blue-500" checked={showClosed} onChange={e => setShowClosed(e.target.checked)} />
-                    Show closed positions
-                </label>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                    <thead className="bg-slate-50 text-left text-[10px] uppercase text-slate-500">
-                        <tr>
-                            <th className="px-1 py-1">Asset</th>
-                            <th className="px-1 text-right">Qty</th>
-                            <th className="px-1 text-right">Value</th>
-                            <th className="px-1 text-right">Cost</th>
-                            <th className="px-1 text-right">Unrealized</th>
-                            <th className="px-1 text-right">Realized</th>
-                            <th className="px-1 text-right">Total return</th>
-                            <th className="px-1 text-right">ROI</th>
-                            <th className="px-1 text-right">Weight</th>
-                            <th className="px-1 text-right">Lots</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {rows.map(({ balance: b, perf, marketValue }) => {
-                            const isClosed = Math.abs(b.qty) === 0;
-                            const weight = !isClosed && marketValue != null && totalValue > 0 ? (marketValue / totalValue) * 100 : null;
-                            const warn = b.warning_count + b.unsettled_negative_count;
-                            return (
-                                <tr key={b.asset.id ?? b.asset.symbol} className={`border-t border-slate-100 ${isClosed ? 'text-slate-400' : ''}`}>
-                                    <td className="px-1 py-1">
-                                        <span className="inline-flex items-center gap-1">
-                                            <span className="font-semibold">{b.asset.symbol}</span>
-                                            <EntityInfoButton kind="asset" id={b.asset.id} label={b.asset.symbol} pnlVersionId={versionId} />
-                                            {warn > 0 && <span title={`${warn} warning(s)`} className="text-orange-600"><LuTriangleAlert size={11} aria-label={`${warn} warnings`} /></span>}
-                                        </span>
-                                    </td>
-                                    <td className="px-1 text-right tabular-nums">{formatQuantity(b.qty)}</td>
-                                    <td className="px-1 text-right tabular-nums">{marketValue != null && !isClosed ? fmtCurrency(marketValue, baseCurrency) : '—'}</td>
-                                    <td className="px-1 text-right tabular-nums">{isClosed ? '—' : fmtCurrency(b.cost_basis_in_base, baseCurrency)}</td>
-                                    <td className={`px-1 text-right tabular-nums ${perf ? signClass(perf.unrealized_pnl) : ''}`}>{perf && !isClosed ? fmtCurrencySigned(perf.unrealized_pnl, baseCurrency) : '—'}</td>
-                                    <td className={`px-1 text-right tabular-nums ${signClass(b.realized_pnl_in_base)}`}>{fmtCurrencySigned(b.realized_pnl_in_base, baseCurrency)}</td>
-                                    <td className={`px-1 text-right tabular-nums ${perf ? signClass(perf.total_return) : ''}`}>{perf ? fmtCurrencySigned(perf.total_return, baseCurrency) : '—'}</td>
-                                    <td className={`px-1 text-right tabular-nums ${perf ? signClass(perf.roi_pct) : ''}`}>{perf ? pctText(perf.roi_pct) : '—'}</td>
-                                    <td className="px-1 text-right tabular-nums">{weight != null ? `${weight.toFixed(1)}%` : '—'}</td>
-                                    <td className="px-1 text-right tabular-nums">{b.lot_count}</td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                    <tfoot className="border-t-2 border-slate-200 font-semibold">
-                        <tr>
-                            <td className="px-1 py-1">Open total</td>
-                            <td />
-                            <td className="px-1 text-right tabular-nums">{fmtCurrency(totalValue, baseCurrency)}</td>
-                            <td className="px-1 text-right tabular-nums">{fmtCurrency(sum(r => r.balance.cost_basis_in_base), baseCurrency)}</td>
-                            <td className={`px-1 text-right tabular-nums ${signClass(sum(r => r.perf?.unrealized_pnl ?? 0))}`}>{fmtCurrencySigned(sum(r => r.perf?.unrealized_pnl ?? 0), baseCurrency)}</td>
-                            <td colSpan={5} />
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        </div>
+        <AssetsSection
+            assets={rows}
+            loading={isLoading}
+            baseCurrency={baseCurrency}
+            onAssetClick={(id) => assetPanel?.openAssetPanel(id, { pnlVersionId: versionId })}
+            accounts={accounts}
+            liveBalances={liveBalances}
+            search={search}
+            onSearchChange={setSearch}
+            minMarketValue={minMarketValue}
+            onMinMarketValueChange={setMinMarketValue}
+            pnlStatus={pnlStatus}
+            onPnlStatusChange={setPnlStatus}
+            balanceStatus={balanceStatus}
+            onBalanceStatusChange={setBalanceStatus}
+            selectedAccountIds={[]}
+            onSelectedAccountIdsChange={() => undefined}
+            selectedCategoryIds={categoryIds}
+            onSelectedCategoryIdsChange={setCategoryIds}
+            pnlVersionId={versionId}
+            persistToUrl={false}
+        />
     );
 };
 
-const ALLOCATION_COLORS = ['bg-blue-600', 'bg-sky-500', 'bg-teal-500', 'bg-violet-500', 'bg-amber-500', 'bg-fuchsia-400', 'bg-lime-500', 'bg-slate-400'];
+/* ── Income (dividends, interest, rewards) ── */
 
-const AllocationBar: React.FC<{ rows: HoldingRow[]; total: number }> = ({ rows, total }) => {
-    if (total <= 0) return null;
-    const top = rows.filter(r => (r.marketValue ?? 0) > 0).slice(0, ALLOCATION_COLORS.length - 1);
-    const rest = total - top.reduce((s, r) => s + (r.marketValue ?? 0), 0);
-    const parts = [
-        ...top.map((r, i) => ({ key: r.balance.asset.symbol, value: r.marketValue ?? 0, color: ALLOCATION_COLORS[i] })),
-        ...(rest / total > 0.001 ? [{ key: 'Other', value: rest, color: ALLOCATION_COLORS[ALLOCATION_COLORS.length - 1] }] : []),
-    ];
-    return (
-        <div>
-            <div className="flex h-3 w-full overflow-hidden" role="img" aria-label="Allocation by asset">
-                {parts.map(p => <div key={p.key} className={p.color} style={{ width: `${(p.value / total) * 100}%` }} title={`${p.key}: ${((p.value / total) * 100).toFixed(1)}%`} />)}
-            </div>
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-600">
-                {parts.map(p => (
-                    <span key={p.key} className="inline-flex items-center gap-1">
-                        <span aria-hidden className={`h-2 w-2 ${p.color}`} />{p.key} {((p.value / total) * 100).toFixed(1)}%
-                    </span>
-                ))}
-            </div>
-        </div>
-    );
-};
-
-/* ── P&L details: flows, tax, realized by asset, income, fees, warnings ── */
-
-const AccountPnLDetails: React.FC<{ accountId: number; versionId: number; baseCurrency: string }> = ({ accountId, versionId, baseCurrency }) => {
-    const scope = useMemo(() => ({ accountIds: [accountId] }), [accountId]);
-    const book = useBookMetrics(versionId, scope);
-    const balances = useFlatBalances(versionId);
+const AccountIncome: React.FC<{ accountId: number; versionId: number; baseCurrency: string }> = ({ accountId, versionId, baseCurrency }) => {
     const income = useIncomeEvents(versionId, { accountId, sortBy: 'date', order: 'desc', limit: 15, page: 1 });
-    const fees = useFeeSummaryByPeriod(versionId, { ...scope, granularity: 'monthly', groupBy: 'none' });
-
-    const rows = useMemo(() => (balances.data ?? []).filter(b => b.account_id === accountId), [balances.data, accountId]);
-    const realizedRows = useMemo(
-        () => rows.filter(b => b.realized_event_count > 0 || Math.abs(b.realized_pnl_in_base) >= 0.01)
-            .sort((a, b) => Math.abs(b.realized_pnl_in_base) - Math.abs(a.realized_pnl_in_base)),
-        [rows],
-    );
-    const warningRows = useMemo(() => rows.filter(b => b.warning_count + b.unsettled_negative_count > 0), [rows]);
-    const feePeriods = useMemo(() => (fees.data?.periods ?? []).filter(p => p.total_fees_in_base > 0).slice(-12).reverse(), [fees.data]);
-    const maxFee = Math.max(0, ...feePeriods.map(p => p.total_fees_in_base));
-
-    const s = book.data?.summary;
-
     return (
-        <div>
-            <SubHeading>Flows, fees & tax</SubHeading>
-            {book.isLoading ? <Loading /> : s ? (
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                    <Stat label="Total bought" info={TERM_HELP.totalBought} value={fmtCurrency(s.total_invested, baseCurrency)} />
-                    <Stat label="Net deposits" info={TERM_HELP.netDeposits} value={fmtCurrencySigned(s.net_deposits ?? 0, baseCurrency)} />
-                    <Stat label="Cost (open)" info={TERM_HELP.cost} value={fmtCurrency(s.cost_basis, baseCurrency)} />
-                    <Stat label="Unfunded spend" value={fmtCurrency(s.unfunded_spend ?? 0, baseCurrency)} />
-                    <Stat label="Realized" info={TERM_HELP.realized} value={fmtCurrencySigned(s.realized_pnl, baseCurrency)} tone={s.realized_pnl} />
-                    <Stat label="Taxable realized" info={TERM_HELP.taxable} value={fmtCurrencySigned(s.taxable_realized_pnl, baseCurrency)} tone={s.taxable_realized_pnl} />
-                    <Stat label="Deferred gain" info={TERM_HELP.deferred} value={fmtCurrencySigned(s.deferred_gain ?? 0, baseCurrency)} />
-                    <Stat label="Fees" value={`${fmtCurrency(s.total_fees, baseCurrency)} · ${s.fee_entry_count}`} />
-                    <Stat label="Income (net)" value={fmtCurrencySigned(s.total_income - s.total_withholding, baseCurrency)} tone={s.total_income - s.total_withholding} />
-                    <Stat label="Withholding" value={fmtCurrency(s.total_withholding, baseCurrency)} />
-                    <Stat label="Income events" value={s.income_event_count} />
-                </div>
-            ) : <Empty>No P&L data for this account.</Empty>}
-
-            <SubHeading badge={realizedRows.length ? <Badge colorScheme="purple">{realizedRows.length}</Badge> : undefined}>Realized by asset</SubHeading>
-            {balances.isLoading ? <Loading /> : realizedRows.length === 0 ? <Empty>Nothing realized yet.</Empty> : (
-                <table className="w-full text-xs">
-                    <thead className="text-left text-[10px] uppercase text-slate-500">
-                        <tr><th className="py-1">Asset</th><th className="text-right">Disposals</th><th className="text-right">Realized</th><th className="text-right">Fees</th></tr>
-                    </thead>
-                    <tbody>
-                        {realizedRows.map(b => (
-                            <tr key={b.asset.id ?? b.asset.symbol} className="border-t border-slate-100">
-                                <td className="py-1">
-                                    <span className="inline-flex items-center gap-1">{b.asset.symbol}<EntityInfoButton kind="asset" id={b.asset.id} label={b.asset.symbol} pnlVersionId={versionId} /></span>
-                                </td>
-                                <td className="text-right tabular-nums">{b.realized_event_count}</td>
-                                <td className={`text-right tabular-nums ${signClass(b.realized_pnl_in_base)}`}>{fmtCurrencySigned(b.realized_pnl_in_base, baseCurrency)}</td>
-                                <td className="text-right tabular-nums">{b.total_fees_in_base != null ? fmtCurrency(b.total_fees_in_base, baseCurrency) : '—'}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            )}
-
+        <>
             <SubHeading badge={income.data?.total ? <Badge colorScheme="green">{income.data.total}</Badge> : undefined}>Income</SubHeading>
             {income.isLoading ? <Loading /> : !income.data?.items.length ? <Empty>No dividends, interest or rewards.</Empty> : (
                 <table className="w-full text-xs">
@@ -474,74 +348,7 @@ const AccountPnLDetails: React.FC<{ accountId: number; versionId: number; baseCu
             {(income.data?.total ?? 0) > (income.data?.items.length ?? 0) && (
                 <p className="mt-1 text-[11px] text-slate-400">Showing the latest {income.data!.items.length} of {income.data!.total}.</p>
             )}
-
-            <SubHeading>Fees by month</SubHeading>
-            {fees.isLoading ? <Loading /> : feePeriods.length === 0 ? <Empty>No fees.</Empty> : (
-                <div className="flex flex-col gap-0.5">
-                    {feePeriods.map(p => (
-                        <div key={p.period} className="flex items-center gap-2 text-xs">
-                            <span className="w-16 shrink-0 tabular-nums text-slate-500">{p.period.slice(0, 7)}</span>
-                            <div className="h-2.5 flex-1 bg-slate-100">
-                                <div className="h-full bg-orange-400" style={{ width: `${maxFee > 0 ? (p.total_fees_in_base / maxFee) * 100 : 0}%` }} />
-                            </div>
-                            <span className="w-24 shrink-0 text-right tabular-nums text-orange-700">{fmtCurrency(p.total_fees_in_base, baseCurrency)}</span>
-                            <span className="w-10 shrink-0 text-right tabular-nums text-slate-400">{p.count}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {warningRows.length > 0 && (
-                <>
-                    <SubHeading badge={<Badge colorScheme="orange">{warningRows.length}</Badge>}>Warnings</SubHeading>
-                    <ul className="flex flex-col gap-0.5 text-xs">
-                        {warningRows.map(b => (
-                            <li key={b.asset.id ?? b.asset.symbol} className="flex items-center gap-2">
-                                <LuTriangleAlert size={11} className="text-orange-600" aria-hidden />
-                                <span className="inline-flex items-center gap-1 font-semibold">{b.asset.symbol}<EntityInfoButton kind="asset" id={b.asset.id} label={b.asset.symbol} pnlVersionId={versionId} /></span>
-                                <span className="text-slate-500">
-                                    {b.warning_count > 0 && `${b.warning_count} warning${b.warning_count === 1 ? '' : 's'}`}
-                                    {b.warning_count > 0 && b.unsettled_negative_count > 0 && ' · '}
-                                    {b.unsettled_negative_count > 0 && `${b.unsettled_negative_count} unsettled negative lot${b.unsettled_negative_count === 1 ? '' : 's'}`}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
-                </>
-            )}
-        </div>
-    );
-};
-
-/* ── Health ── */
-
-const AccountHealth: React.FC<{ accountId: number }> = ({ accountId }) => {
-    const { data, isLoading } = useQuery<TransactionStatusResponse>({
-        queryKey: ['account-health', accountId],
-        queryFn: async () => {
-            const res = await fetch(`${API_URL}/transactions/data-health-check/status?account_ids=${accountId}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
-        },
-    });
-    if (isLoading || !data) return <Loading />;
-    const rows: [string, number][] = [
-        ['Pending review', data.pending_count],
-        ['Missing data', data.missing_data_issues_count],
-        ['Unlinked', data.linkage_issues_count],
-        ['Transfer issues', data.transfer_issues_count],
-        ['Possible duplicates', data.duplicate_count],
-    ];
-    return (
-        <div className="flex max-w-md flex-col gap-1 p-1 text-xs">
-            <span className="text-slate-500">{data.total_count} transactions ({data.valid_count} valid)</span>
-            {rows.map(([label, count]) => (
-                <div key={label} className="flex justify-between">
-                    <span className="text-slate-600">{label}</span>
-                    <span className={count > 0 ? 'font-semibold text-orange-700' : 'text-slate-400'}>{count}</span>
-                </div>
-            ))}
-        </div>
+        </>
     );
 };
 

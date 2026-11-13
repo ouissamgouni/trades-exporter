@@ -7189,17 +7189,22 @@ def get_account_sparklines(
     )
     from backend.services.pnl.return_metrics import SeriesPoint, compute_return_metrics
 
-    twr = {
+    metrics = {
         str(k): compute_return_metrics(
             [SeriesPoint(pt["date"], pt["value"] or 0.0, pt["pnl"] or 0.0) for pt in v]
-        ).twr_pct
+        )
         for k, v in series.items()
     }
     return {
         "version_id": version_id,
         "period": period,
         "accounts": {str(k): v for k, v in series.items()},
-        "twr": twr,
+        "twr": {k: m.twr_pct for k, m in metrics.items()},
+        # Money-weighted (IRR): yearly from one year on, plain period rate below
+        "mwr": {
+            k: (m.irr_pct if (m.days or 0) >= 365 else m.irr_period_pct)
+            for k, m in metrics.items()
+        },
     }
 
 
@@ -7571,7 +7576,9 @@ def _benchmark_in_base(
             rate = fx_sorted[idx][1]
             idx += 1
         if rate:
-            converted.append({"date": pt["date"], "close": round(pt["close"] / rate, 4)})
+            converted.append(
+                {"date": pt["date"], "close": round(pt["close"] / rate, 4)}
+            )
     return converted, base, True
 
 
@@ -7594,7 +7601,9 @@ def _parse_benchmark_request(ticker: str, start_date: str, end_date: str):
 
 def _validate_currency(base_currency: Optional[str]) -> Optional[str]:
     if base_currency and not (len(base_currency) == 3 and base_currency.isalpha()):
-        raise HTTPException(status_code=400, detail="base_currency must be a 3-letter code")
+        raise HTTPException(
+            status_code=400, detail="base_currency must be a 3-letter code"
+        )
     return base_currency
 
 
@@ -7603,7 +7612,9 @@ def get_benchmark_series(
     ticker: str = Query(..., description="Yahoo Finance ticker (e.g., ^GSPC)"),
     start_date: str = Query(..., description="Start date YYYY-MM-DD"),
     end_date: str = Query(..., description="End date YYYY-MM-DD"),
-    base_currency: Optional[str] = Query(None, description="Convert closes to this currency"),
+    base_currency: Optional[str] = Query(
+        None, description="Convert closes to this currency"
+    ),
     session: Session = Depends(get_session_dependency),
 ):
     """
@@ -7642,14 +7653,18 @@ def _scope_series(
     category_ids: Optional[str],
     include_unsettled_negative: bool,
 ):
-    from backend.services.pnl.portfolio_timeline import compute_portfolio_timeline_cached
+    from backend.services.pnl.portfolio_timeline import (
+        compute_portfolio_timeline_cached,
+    )
     from backend.services.pnl.return_metrics import timeline_to_series
 
     def ids(raw: Optional[str]) -> Optional[List[int]]:
         try:
             return [int(x) for x in raw.split(",") if x.strip()] if raw else None
         except ValueError:
-            raise HTTPException(status_code=422, detail="ids must be comma-separated integers")
+            raise HTTPException(
+                status_code=422, detail="ids must be comma-separated integers"
+            )
 
     if session.get(CalculationVersion, version_id) is None:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
@@ -7695,13 +7710,20 @@ def get_return_metrics(
     )
 
     series = _scope_series(
-        session, version_id, asset_ids, account_ids, category_ids, include_unsettled_negative
+        session,
+        version_id,
+        asset_ids,
+        account_ids,
+        category_ids,
+        include_unsettled_negative,
     )
     starts = range_start_dates(date_cls.today(), PERIOD_RANGES)
     return {
         "version_id": version_id,
         "ranges": {
-            key: _return_metrics_dict(compute_return_metrics(slice_period(series, start)))
+            key: _return_metrics_dict(
+                compute_return_metrics(slice_period(series, start))
+            )
             for key, start in starts.items()
         },
     }
@@ -7735,11 +7757,18 @@ def get_benchmark_comparison(
         raise HTTPException(status_code=400, detail=f"Unknown period '{period}'")
     _validate_currency(base_currency)
     if ticker not in BENCHMARK_PRESETS:
-        raise HTTPException(status_code=400, detail=f"Ticker '{ticker}' not in allowed benchmarks")
+        raise HTTPException(
+            status_code=400, detail=f"Ticker '{ticker}' not in allowed benchmarks"
+        )
 
     series = slice_period(
         _scope_series(
-            session, version_id, asset_ids, account_ids, category_ids, include_unsettled_negative
+            session,
+            version_id,
+            asset_ids,
+            account_ids,
+            category_ids,
+            include_unsettled_negative,
         ),
         range_start_dates(date_cls.today(), PERIOD_RANGES)[period],
     )

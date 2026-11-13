@@ -198,8 +198,8 @@ export const BundleCreateDialog: React.FC<BundleCreateDialogProps> = ({
     return (
         <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
             <RadixDialog.Portal>
-                <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                     <div className="border-b border-slate-100 px-5 py-4">
                         <RadixDialog.Title className="text-base font-semibold text-slate-900">Create Bundle</RadixDialog.Title>
                     </div>

@@ -27,9 +27,8 @@ export const BenchmarkSummary: React.FC<BenchmarkSummaryProps> = ({ versionId, t
     const pmeDiff = data?.pme_value != null ? data.actual_value - data.pme_value : null;
 
     return (
-        <div className="mt-1.5 flex flex-col gap-0.5 text-[11px] text-gray-500" data-testid="benchmark-summary">
+        <div className="mt-1 flex flex-col gap-0.5 text-[11px] text-gray-500" data-testid="benchmark-summary">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span>vs</span>
                 <select
                     value={ticker}
                     onChange={(e) => onTickerChange(e.target.value)}

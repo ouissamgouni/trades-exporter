@@ -1747,8 +1747,8 @@ export const AssetsEditor: React.FC = () => {
             {/* Price Getters Dialog */}
             <RadixDialog.Root open={showGettersDialog} onOpenChange={(open) => setShowGettersDialog(open)}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[750px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] max-h-[85vh] w-full max-w-[750px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">
                                 Price Getters for {selectedAsset?.symbol}
@@ -2080,8 +2080,8 @@ export const AssetsEditor: React.FC = () => {
             {/* Test Price Getter Modal */}
             <RadixDialog.Root open={showTestModal} onOpenChange={(open) => { setShowTestModal(open); if (!open) { setTestResult(null); setTestModalGetter(null); } }}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">
                                 🧪 Test: {testModalGetter?.price_getter}
@@ -2148,8 +2148,8 @@ export const AssetsEditor: React.FC = () => {
                 if (open) setCategoriesDialogTab(String(dimensionData[0]?.id ?? ''));
             }}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[650px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] max-h-[85vh] w-full max-w-[650px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">
                                 🏷️ Categories for {selectedAsset?.symbol}
@@ -2270,8 +2270,8 @@ export const AssetsEditor: React.FC = () => {
             {/* CSV Import Dialog */}
             <RadixDialog.Root open={showImportDialog} onOpenChange={(open) => { setShowImportDialog(open); if (!open) resetImportDialog(); }}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[800px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] max-h-[85vh] w-full max-w-[800px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">
                                 📥 Import Assets from CSV
@@ -2602,8 +2602,8 @@ export const AssetsEditor: React.FC = () => {
             {/* Bulk Status Dialog */}
             <RadixDialog.Root open={showBulkStatusDialog} onOpenChange={(open) => setShowBulkStatusDialog(open)}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">Set Status for {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
                         </div>
@@ -2636,8 +2636,8 @@ export const AssetsEditor: React.FC = () => {
             {/* Bulk Type Dialog */}
             <RadixDialog.Root open={showBulkTypeDialog} onOpenChange={(open) => setShowBulkTypeDialog(open)}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">Set Type for {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
                         </div>
@@ -2675,8 +2675,8 @@ export const AssetsEditor: React.FC = () => {
                 if (open) setBulkCategoriesDialogTab(String(dimensionData[0]?.id ?? ''));
             }}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[650px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] max-h-[85vh] w-full max-w-[650px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">Assign Categories to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
                         </div>
@@ -2834,8 +2834,8 @@ export const AssetsEditor: React.FC = () => {
             {/* Bulk Price Getters Dialog */}
             <RadixDialog.Root open={showBulkPriceGettersDialog} onOpenChange={(open) => setShowBulkPriceGettersDialog(open)}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[500px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[500px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">Assign Price Getter to {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}</RadixDialog.Title>
                         </div>
@@ -2910,8 +2910,8 @@ export const AssetsEditor: React.FC = () => {
                 }}
             >
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-5 py-4">
                             <RadixDialog.Title className="text-base font-semibold">Delete {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}?</RadixDialog.Title>
                         </div>

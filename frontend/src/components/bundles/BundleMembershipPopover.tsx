@@ -173,7 +173,7 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
                     side="right"
                     align="start"
                     sideOffset={4}
-                    className="z-[2100] w-[680px] border border-purple-200 bg-white p-0 shadow-lg"
+                    className="z-[2600] w-[680px] border border-purple-200 bg-white p-0 shadow-lg"
                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                 >
                     <RadixPopover.Arrow className="fill-white" />

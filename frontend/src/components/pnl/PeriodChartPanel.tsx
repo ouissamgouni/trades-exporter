@@ -10,6 +10,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FiAlertTriangle, FiChevronDown, FiMaximize2 } from 'react-icons/fi';
 import { BENCHMARK_PRESETS, type TimelinePoint } from '../../hooks/useChartData';
 import { usePriceGaps } from '../../hooks/usePriceGaps';
+import { useAsset } from '../../hooks/useAsset';
 import type { Range } from './TotalReturnScorecard';
 import type { AssetPnLRow } from './types';
 import { rangeToZoom, ZOOM_PRESETS, type ZoomPreset } from './chartUtils';
@@ -56,7 +57,7 @@ function loadBenchmarks(): string[] | null {
 }
 
 export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
-    points,
+    points: rawPoints,
     baseCurrency,
     range,
     isLoading,
@@ -68,6 +69,12 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
     assetSymbol,
     mainBenchmark = '^GSPC',
 }) => {
+    const { asset: scopedAsset } = useAsset(assetId ?? null, assetId != null);
+    const firstTxDate = scopedAsset?.first_transaction_date ?? null;
+    const points = useMemo(
+        () => (firstTxDate ? rawPoints.filter(p => p.date >= firstTxDate) : rawPoints),
+        [rawPoints, firstTxDate],
+    );
     const [chartMode, setChartMode] = useState<ChartMode>('performance');
     const [basis, setBasis] = useState<PerformanceBasis>(() => (localStorage.getItem(BASIS_KEY) === 'roi' ? 'roi' : 'twr'));
     const [storedBenchmarks, setStoredBenchmarks] = useState<string[] | null>(loadBenchmarks);

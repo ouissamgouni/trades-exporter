@@ -392,6 +392,8 @@ export interface Asset {
     categories?: Category[];  // Categories assigned to this asset
     /** (network, token contract) pairs seen in the asset's non-rejected transactions (single-asset GET only) */
     contracts?: { network: string; contract_address: string; tx_count: number }[];
+    /** Earliest transaction date (YYYY-MM-DD); asset charts start there */
+    first_transaction_date?: string | null;
 }
 
 export interface PriceSnapshot {
@@ -452,6 +454,8 @@ export interface PriceTimeseriesAsset {
     symbol: string;
     label?: string | null;
     points: PriceTimeseriesPoint[];
+    /** Earliest transaction of the asset (YYYY-MM-DD); charts start there */
+    first_transaction_date?: string | null;
 }
 
 export interface PriceTimeseriesResponse {
@@ -530,6 +534,8 @@ export interface GapFixJobState {
     error: string | null;
     assets: GapFixJobAsset[];
     log: GapFixJobLogEntry[];
+    /** Requests waiting to be added to the running job */
+    queued_requests?: number;
 }
 
 export interface GapCandidatesResponse {

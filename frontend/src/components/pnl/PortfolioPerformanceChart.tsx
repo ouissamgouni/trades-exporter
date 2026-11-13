@@ -139,18 +139,20 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
         };
     }, [filteredPoints]);
 
+    // ROI moves with deposits, an index return does not: benchmarks are only drawn against TWR
+    const showBenchmarks = basis === 'twr';
     const benchmarkResults = useMultiBenchmarkSeries(
         benchmarks,
         dateRange.start,
         dateRange.end,
-        filteredPoints.length > 0,
+        filteredPoints.length > 0 && showBenchmarks,
         baseCurrency,
     );
 
     const portfolioLabel = `${contextLabel || 'Portfolio'} ${basis === 'twr' ? 'TWR' : 'ROI'}`;
     const labelOf = (ticker: string) => BENCHMARK_PRESETS.find(b => b.ticker === ticker)?.label ?? ticker;
     const shadeTicker = mainBenchmark && benchmarks.includes(mainBenchmark) ? mainBenchmark : benchmarks[0];
-    const shadeWithId = shadeTicker ? labelOf(shadeTicker) : null;
+    const shadeWithId = showBenchmarks && shadeTicker ? labelOf(shadeTicker) : null;
     const lineLayer = useMemo(() => makeLineLayer(portfolioLabel, shadeWithId), [portfolioLabel, shadeWithId]);
 
     // ---- Build chart series ----
@@ -180,7 +182,7 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
             colors[portfolioLabel] = PORTFOLIO_COLOR;
         }
 
-        benchmarkResults.forEach((br, idx) => {
+        if (showBenchmarks) benchmarkResults.forEach((br, idx) => {
             if (!br.data || br.data.points.length < 2) return;
             const close0 = br.data.points[0].close;
             if (close0 <= 0) return;
@@ -190,7 +192,7 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
         });
 
         return { chartData: series, colorMap: colors };
-    }, [filteredPoints, benchmarkResults, portfolioLabel, basis]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [filteredPoints, benchmarkResults, portfolioLabel, basis, showBenchmarks]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const totalDays = filteredPoints.length > 1
         ? Math.ceil(
@@ -217,6 +219,11 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                 </div>
             )}
 
+            {!showBenchmarks && benchmarks.length > 0 && (
+                <div className="mb-1 text-[10px] text-slate-400" data-testid="benchmarks-twr-only">
+                    Benchmarks are compared against TWR — ROI moves with deposits and withdrawals, an index does not.
+                </div>
+            )}
             {isLoading ? (
                 <div className="flex items-center justify-center" style={{ height }}>
                     <span className="text-sm text-slate-400">Loading...</span>

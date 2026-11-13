@@ -583,7 +583,7 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
 
     return (
         <div
-            className={`bg-white p-4 ${isFullscreen ? 'fixed inset-0 z-[1500] overflow-auto' : 'border border-gray-200'}`}
+            className={`bg-white p-4 ${isFullscreen ? 'fixed inset-0 z-[2500] overflow-auto' : 'border border-gray-200'}`}
         >
             {/* Controls row */}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

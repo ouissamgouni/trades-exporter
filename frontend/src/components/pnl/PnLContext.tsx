@@ -283,10 +283,6 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
         return map;
     }, [liveAccountBalancesRaw]);
 
-    useEffect(() => {
-        if (liveBalanceMap.size > 0) publishLiveBalanceSnapshot(liveBalanceMap);
-    }, [liveBalanceMap]);
-
     const liveAccountBalanceMap = useMemo(() => {
         if (liveAccountBalancesRaw.length === 0) return new Map<string, Map<number, number>>();
         const map = new Map<string, Map<number, number>>();
@@ -306,6 +302,10 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, subtab, chil
     const liveFetchedAccountIds = useMemo(() => {
         return new Set(liveAccountBalancesRaw.map(ab => ab.account_id));
     }, [liveAccountBalancesRaw]);
+
+    useEffect(() => {
+        if (liveBalanceMap.size > 0) publishLiveBalanceSnapshot(liveBalanceMap, liveAccountBalanceMap, liveFetchedAccountIds);
+    }, [liveBalanceMap, liveAccountBalanceMap, liveFetchedAccountIds]);
 
     const liveAccountErrors = useMemo(() => {
         const map = new Map<number, string[]>();

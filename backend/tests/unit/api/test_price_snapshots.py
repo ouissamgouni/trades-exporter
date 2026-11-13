@@ -139,3 +139,54 @@ def test_gap_job_start_rejects_concurrent_run(monkeypatch):
     except RuntimeError:
         raised = True
     assert raised
+
+
+def test_gap_job_enqueue_appends_to_running_job(monkeypatch):
+    from datetime import date
+
+    from backend.services import price_gap_job_service as job_mod
+
+    calls = []
+
+    def fake_detect(session_arg, asset_id, *args, quote_asset_id=None):
+        calls.append((asset_id, args))
+        if args:
+            return _job_gap_result(asset_id, "RANGE", "2024-02-01", "2024-02-02", 2)
+        return _job_gap_result(asset_id, "FULL", "2024-01-01", "2024-01-03", 3)
+
+    holder = {}
+
+    def fetch(svc, asset_id, d, **kwargs):
+        # A request arriving while the job runs is picked up before it finishes
+        if not holder.get("queued"):
+            holder["queued"] = True
+            holder["svc"].enqueue([], None, [(7, date(2024, 2, 1), date(2024, 2, 2))])
+        return MagicMock()
+
+    monkeypatch.setattr(job_mod, "detect_gaps", fake_detect)
+    monkeypatch.setattr(job_mod, "fetch_day_price", fetch)
+    monkeypatch.setattr(job_mod, "PriceService", MagicMock())
+    monkeypatch.setattr(job_mod, "prefill_with_ranges", lambda *a, **k: ({}, {}))
+    session = MagicMock()
+    session.get.return_value = None
+    svc = job_mod.GapFixJobService(session_factory=lambda: session)
+    holder["svc"] = svc
+    svc._state["status"] = "running"
+    svc.execute(session, [1], quote_asset_id=99)
+    state = svc.get_status()
+
+    assert state["status"] == "complete"
+    assert [a["asset_id"] for a in state["assets"]] == [1, 7]
+    assert state["total_missing_days"] == 5
+    assert state["processed_days"] == 5
+    assert (7, (date(2024, 2, 1), date(2024, 2, 2))) in calls
+
+
+def test_gap_job_enqueue_starts_when_idle(monkeypatch):
+    from backend.services import price_gap_job_service as job_mod
+
+    svc = job_mod.GapFixJobService(session_factory=MagicMock())
+    started = {}
+    monkeypatch.setattr(svc, "_start_locked", lambda ids, q, r: started.update(ids=ids, q=q, r=r))
+    svc.enqueue([3], 99, [])
+    assert started == {"ids": [3], "q": 99, "r": []}

@@ -3,7 +3,7 @@
  *
  * - usePriceGaps: full gap ranges for a single asset
  * - usePriceGapsSummary: lightweight gap counts for multiple assets (badges)
- * - useBackfillPrices: mutation to auto-fetch missing prices
+ * - useEnqueuePriceFetch: queue a date-range fetch into the gap-fix job (one path for every price fetch)
  * - useGapFixJob: server-side job that fixes gaps for many assets, polled for progress
  * - useBulkManualPrices: mutation to create flat-price snapshots for a range
  */
@@ -16,8 +16,6 @@ import type {
     GapDetectionResponse,
     GapFixJobState,
     GapSummaryResponse,
-    BackfillRequest,
-    BackfillResponse,
     BulkManualRequest,
     BulkManualResponse,
 } from '../types';
@@ -30,11 +28,18 @@ import { PRICE_TIMESERIES_QUERY_KEY, PRICE_HEALTH_QUERY_KEY } from './usePriceHe
 export const PRICE_GAPS_QUERY_KEY = ['price-gaps'] as const;
 export const PRICE_GAPS_SUMMARY_QUERY_KEY = ['price-gaps-summary'] as const;
 
+/** P&L queries valued with stored prices (they change once missing prices are filled). */
+const PRICE_DEPENDENT_PNL_KEYS = [
+    'portfolio-timeline', 'version-metrics', 'live-metrics', 'version-performers', 'return-metrics',
+    'benchmark-comparison', 'asset-period-deltas', 'account-sparklines',
+] as const;
+
 function invalidatePriceGapQueries(qc: ReturnType<typeof useQueryClient>) {
     qc.invalidateQueries({ queryKey: PRICE_GAPS_QUERY_KEY });
     qc.invalidateQueries({ queryKey: PRICE_GAPS_SUMMARY_QUERY_KEY });
     qc.invalidateQueries({ queryKey: PRICE_TIMESERIES_QUERY_KEY });
     qc.invalidateQueries({ queryKey: PRICE_HEALTH_QUERY_KEY });
+    for (const key of PRICE_DEPENDENT_PNL_KEYS) qc.invalidateQueries({ queryKey: [key] });
 }
 
 // ---------------------------------------------------------------------------
@@ -117,33 +122,6 @@ export function usePriceGapsSummary(
 }
 
 // ---------------------------------------------------------------------------
-// Backfill mutation (auto-fetch missing prices)
-// ---------------------------------------------------------------------------
-
-async function postBackfill(req: BackfillRequest): Promise<BackfillResponse> {
-    const res = await fetch(`${API_URL}/price-snapshots/backfill`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
-    });
-    if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${body}`);
-    }
-    return res.json();
-}
-
-export function useBackfillPrices() {
-    const qc = useQueryClient();
-    return useMutation<BackfillResponse, Error, BackfillRequest>({
-        mutationFn: postBackfill,
-        onSuccess: () => {
-            invalidatePriceGapQueries(qc);
-        },
-    });
-}
-
-// ---------------------------------------------------------------------------
 // Gap-fix background job (server-side, polled)
 // ---------------------------------------------------------------------------
 
@@ -197,6 +175,7 @@ export function useGapFixJob(onFinished?: (job: GapFixJobState) => void) {
         }),
         onSuccess: setJob,
     });
+    const enqueue = useEnqueuePriceFetch();
     const cancel = useMutation<GapFixJobState, Error, void>({
         mutationFn: () => jobRequest('/current/cancel', { method: 'POST' }),
         onSuccess: setJob,
@@ -210,9 +189,34 @@ export function useGapFixJob(onFinished?: (job: GapFixJobState) => void) {
         job,
         isActive: isGapFixJobActive(job),
         start,
+        enqueue,
         cancel,
         skip,
     };
+}
+
+export interface PriceFetchItem {
+    asset_id: number;
+    /** ISO date; omitted = from the first transaction */
+    date_from?: string;
+    /** ISO date; omitted = today / position close */
+    date_to?: string;
+}
+
+/**
+ * Queue a price fetch (one gap, a range, or a whole asset) into the gap-fix job: starts it,
+ * or adds the request to the running one. Progress and logs come from useGapFixJob.
+ */
+export function useEnqueuePriceFetch() {
+    const qc = useQueryClient();
+    return useMutation<GapFixJobState, Error, { items: PriceFetchItem[]; quoteAssetId?: number | null }>({
+        mutationFn: ({ items, quoteAssetId }) => jobRequest('', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_ids: null, items, quote_asset_id: quoteAssetId ?? null }),
+        }),
+        onSuccess: (data) => qc.setQueryData(GAP_FIX_JOB_QUERY_KEY, data),
+    });
 }
 
 // ---------------------------------------------------------------------------
