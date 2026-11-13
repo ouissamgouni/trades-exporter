@@ -55,6 +55,7 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
     const zoom = externalZoom ?? internalZoom;
     const setZoom = onZoomChange ?? setInternalZoom;
     const baseCurrency = useBaseCurrency();
+    const [firstTxDate, setFirstTxDate] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -71,8 +72,9 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
             })
             .then(data => {
                 if (cancelled) return;
-                const assetData = data.assets?.find((a: any) => a.asset_id === assetId);
+                const assetData = data.assets?.find((a: { asset_id: number }) => a.asset_id === assetId);
                 setPoints(assetData?.points ?? []);
+                setFirstTxDate(assetData?.first_transaction_date ?? null);
             })
             .catch(err => {
                 if (cancelled) return;
@@ -86,12 +88,13 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
     }, [assetId, baseCurrency.assetId]);
 
     const filteredPoints = useMemo(() => {
-        if (zoom === 'ALL' || points.length === 0) return points;
+        const fromTx = firstTxDate ? points.filter(p => p.date >= firstTxDate) : points;
+        if (zoom === 'ALL' || fromTx.length === 0) return fromTx;
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - ZOOM_PRESETS[zoom].days);
         const cutoffStr = cutoff.toISOString().slice(0, 10);
-        return points.filter(p => p.date >= cutoffStr);
-    }, [points, zoom]);
+        return fromTx.filter(p => p.date >= cutoffStr);
+    }, [points, zoom, firstTxDate]);
 
     const chartData: ChartSerie[] = useMemo(() => {
         if (filteredPoints.length === 0) return [];

@@ -27,13 +27,13 @@ export const ChartFullscreenModal: React.FC<ChartFullscreenModalProps> = ({
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 z-[99] bg-black/50"
+                className="fixed inset-0 z-[2500] bg-black/50"
                 onClick={(e) => { e.stopPropagation(); onClose(); }}
             />
 
             {/* Panel */}
             <div
-                className="fixed z-[100] flex flex-col bg-white shadow-2xl"
+                className="fixed z-[2501] flex flex-col bg-white shadow-2xl"
                 style={{ top: '5vh', left: '5vw', right: '5vw', bottom: '5vh' }}
                 onClick={(e) => e.stopPropagation()}
             >

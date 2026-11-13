@@ -498,8 +498,8 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
             {/* Test Price Getter Modal */}
             <RadixDialog.Root open={showTestModal} onOpenChange={(open) => { setShowTestModal(open); if (!open) { setTestResult(null); setTestModalGetter(null); } }}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-[1600] bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[1600] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 bg-white shadow-xl">
                         <div className="border-b border-gray-100 px-4 py-3">
                             <RadixDialog.Title className="text-base font-semibold">
                                 🧪 Test: {testModalGetter?.price_getter}

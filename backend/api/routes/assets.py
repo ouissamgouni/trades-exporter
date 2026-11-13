@@ -167,6 +167,8 @@ class AssetResponse(BaseModel):
     price_getters: Optional[List[AssetPriceGetterResponse]] = None
     categories: Optional[List[CategoryResponse]] = None
     contracts: Optional[List[AssetContractRef]] = None
+    # Date of the asset's earliest transaction (charts start there); single-asset GET only
+    first_transaction_date: Optional[str] = None
 
 
 # ============================================================================
@@ -397,6 +399,13 @@ def get_asset(
             session=session,
         )
         response.contracts = _asset_contracts(session, asset_id)
+        first_tx = session.exec(
+            select(func.min(NormalizedTransaction.date_time)).where(
+                NormalizedTransaction.asset_id == asset_id
+            )
+        ).one()
+        if first_tx is not None:
+            response.first_transaction_date = str(first_tx)[:10]
         return response
 
     except HTTPException:

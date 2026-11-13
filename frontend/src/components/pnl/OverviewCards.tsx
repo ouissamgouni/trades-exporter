@@ -13,7 +13,11 @@ import type { AssetPnLRow } from './types';
 
 const ROI_HELP = 'Return on investment: total return ÷ cost of what you hold now. Not annualized, and it moves whenever you add or withdraw money, so recent deposits dilute it.';
 const TWR_HELP = 'Time-weighted return: chains the daily returns, whatever the amount invested each day. Deposits and withdrawals do not affect it, so it is the fair comparison with an index. It is higher than ROI when gains were made on a smaller amount before later deposits. /y = annualized.';
-const IRR_HELP = 'Money-weighted return (IRR): the yearly rate that turns your actual deposits and withdrawals into today\'s value. Above TWR/y means good timing of deposits; below means bad timing.';
+export const MWR_HELP = 'Money-weighted return (MWR, computed as an IRR): the rate that turns your actual deposits and withdrawals into today\'s value. Yearly (/y) from one year on, plain period rate below. Above TWR means good timing of deposits; below means bad timing. "—" when there were no flows or the period is too short.';
+
+export type PositionFilterKey = 'open' | 'closed' | 'gain' | 'loss';
+
+export const isOpenPosition = (a: AssetPnLRow) => a.has_open_position ?? Math.abs(a.quantity) > 1e-12;
 
 /** Accent classes shared by cards and composition-bar segments (full literals for Tailwind). */
 export const ACCENT = {
@@ -89,6 +93,10 @@ interface OverviewCardsProps {
     onIncomeClick?: () => void;
     /** Scrolls to the Contributors section */
     onContributorsClick?: () => void;
+    /** Held / sold-out / in gain / in loss counts are clickable when set */
+    onPositionsClick?: (filter: PositionFilterKey) => void;
+    /** 'assets': totals of a filtered asset list (no TWR/MWR, benchmark or income; position insights instead) */
+    variant?: 'overview' | 'assets';
 }
 
 const pctText = (v: number | null | undefined, digits = 1) => v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`;
@@ -117,6 +125,12 @@ const Card: React.FC<{ title: string; accent: { border: string; tint: string }; 
     </div>
 );
 
+const CountLink: React.FC<{ onClick?: () => void; className?: string; title: string; children: React.ReactNode }> = ({ onClick, className, title, children }) => (
+    onClick ? (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onClick(); }} title={title} className={`tabular-nums hover:underline ${className ?? ''}`}>{children}</button>
+    ) : <span title={title} className={`tabular-nums ${className ?? ''}`}>{children}</span>
+);
+
 const Ratio: React.FC<{ label: string; help: string; children: React.ReactNode }> = ({ label, help, children }) => (
     <span className="inline-flex items-center gap-1 border border-slate-200 bg-white px-1.5 py-0.5">
         <span className="text-gray-500">{label}</span>
@@ -128,7 +142,10 @@ const Ratio: React.FC<{ label: string; help: string; children: React.ReactNode }
 export const OverviewCards: React.FC<OverviewCardsProps> = ({
     metrics: m, isPeriod, periodLabel, baseCurrency, isLiveLoading, returnMetrics, gains, losses, gainCount, lossCount,
     isTotalsLoading, startValue, assets = [], benchmarkSlot, onFeesClick, onIncomeClick, onContributorsClick,
+    onPositionsClick, variant = 'overview',
 }) => {
+    const isAssets = variant === 'assets';
+    const pos = (f: PositionFilterKey) => (onPositionsClick ? () => onPositionsClick(f) : undefined);
     const sfx = isPeriod ? ' Δ' : '';
     const unrealized = isPeriod ? m.unrealizedInPeriod : m.unrealizedPnl;
     const realized = isPeriod ? m.realizedInPeriod : m.realizedPnl;
@@ -138,8 +155,15 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
     const live = (node: React.ReactNode) => (isLiveLoading ? <span className="text-gray-300">…</span> : node);
 
     const withLots = assets.filter(a => a.has_lots);
-    const open = withLots.filter(a => a.quantity > 0);
+    const open = withLots.filter(isOpenPosition);
     const closed = withLots.length - open.length;
+    const byValue = [...open].filter(a => a.unit_value != null).sort((a, b) => b.market_value - a.market_value);
+    const openValue = byValue.reduce((s, a) => s + Math.max(a.market_value, 0), 0);
+    const top5Share = openValue > 0 ? (byValue.slice(0, 5).reduce((s, a) => s + Math.max(a.market_value, 0), 0) / openValue) * 100 : null;
+    const byUnrealized = [...open].filter(a => a.unit_value != null).sort((a, b) => b.unrealized_pnl - a.unrealized_pnl);
+    const best = byUnrealized[0];
+    const worst = byUnrealized.length > 1 ? byUnrealized[byUnrealized.length - 1] : undefined;
+    const assetName = (a: AssetPnLRow) => a.asset.label || a.asset.symbol || `#${a.asset.id}`;
     const upCount = open.filter(a => a.unrealized_pnl > 0).length;
     const downCount = open.filter(a => a.unrealized_pnl < 0).length;
 
@@ -175,23 +199,36 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
                             <Ratio label="ROI" help={ROI_HELP}>
                                 <span className={`font-bold tabular-nums ${signClass(m.roi)}`}>{live(pctText(m.roi, 2))}</span>
                             </Ratio>
-                            <Ratio label="TWR" help={TWR_HELP}>
-                                <span className={`font-bold tabular-nums ${signClass(returnMetrics?.twr_pct ?? 0)}`}>{pctText(returnMetrics?.twr_pct)}</span>
-                                {yearly && twrAnn != null && <span className="text-[10px] text-gray-400">{pctText(twrAnn)}/y</span>}
-                            </Ratio>
-                            <Ratio label="IRR" help={IRR_HELP}>
-                                <span className={`font-bold tabular-nums ${signClass((yearly ? irr : irrPeriod) ?? 0)}`}>{pctText(yearly ? irr : irrPeriod)}{yearly && irr != null ? '/y' : ''}</span>
-                            </Ratio>
+                            {!isAssets && (
+                                <>
+                                    <Ratio label="TWR" help={TWR_HELP}>
+                                        <span className={`font-bold tabular-nums ${signClass(returnMetrics?.twr_pct ?? 0)}`}>{pctText(returnMetrics?.twr_pct)}</span>
+                                        {yearly && twrAnn != null && <span className="text-[10px] text-gray-400">{pctText(twrAnn)}/y</span>}
+                                    </Ratio>
+                                    <Ratio label="MWR" help={MWR_HELP}>
+                                        <span className={`font-bold tabular-nums ${signClass((yearly ? irr : irrPeriod) ?? 0)}`} data-testid="ratio-mwr">{pctText(yearly ? irr : irrPeriod)}{yearly && irr != null ? '/y' : ''}</span>
+                                    </Ratio>
+                                </>
+                            )}
                         </div>
                     </div>
-                    {benchmarkSlot}
-                    {(Math.abs(income) >= 0.01 || m.incomeEventCount > 0) && (
+                    {!isAssets && benchmarkSlot && (
+                        <div className="mt-2 border border-slate-200 bg-white/70 px-2 py-1.5" data-testid="benchmark-section">
+                            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">vs benchmark</div>
+                            {benchmarkSlot}
+                        </div>
+                    )}
+                    {!isAssets && (Math.abs(income) >= 0.01 || m.incomeEventCount > 0) && (
                         <div
                             className={`mt-1 text-[11px] text-gray-500 ${onIncomeClick ? 'cursor-pointer hover:text-blue-600' : ''}`}
                             onClick={onIncomeClick}
                             title="Dividends, interest and rewards (net of withholding). Not included in Total return."
                         >
                             Income{sfx} <span className="font-semibold tabular-nums text-teal-700">{fmtCurrencySigned(income, baseCurrency)}</span> <span className="text-gray-400">(separate)</span>
+                            {!isPeriod && m.incomeEventCount > 0 && <span className="text-gray-400"> · {m.incomeEventCount} event{m.incomeEventCount === 1 ? '' : 's'}</span>}
+                            {Math.abs(isPeriod ? m.withholdingInPeriod : m.totalWithholding) >= 0.01 && (
+                                <span className="text-gray-400"> · withheld {fmtCurrency(isPeriod ? m.withholdingInPeriod : m.totalWithholding, baseCurrency)}</span>
+                            )}
                         </div>
                     )}
                     <div className="mt-auto flex pt-2" data-testid="gains-losses-bar">
@@ -209,7 +246,15 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
                         aside={<span className={`text-base font-bold tabular-nums ${isLiveLoading ? 'text-gray-300' : signClass(unrealized)}`}>{live(fmtCurrencySigned(unrealized, baseCurrency))}</span>}
                     >
                         <Line label="On cost" value={live(pctText(m.costBasis > 0 ? (m.unrealizedPnl / m.costBasis) * 100 : null))} />
-                        {open.length > 0 && <Line label="Open positions" value={<><span className="text-green-600">{upCount}▲</span> <span className="text-red-600">{downCount}▼</span></>} />}
+                        {open.length > 0 && (
+                            <Line
+                                label="In gain · in loss"
+                                info="Held assets whose current value is above / below their cost. Click to list them."
+                                value={<><CountLink onClick={pos('gain')} className="text-green-600" title="Show held assets in gain">{upCount} ▲</CountLink> · <CountLink onClick={pos('loss')} className="text-red-600" title="Show held assets in loss">{downCount} ▼</CountLink></>}
+                            />
+                        )}
+                        {isAssets && best && best.unrealized_pnl > 0 && <Line label="Best" value={`${assetName(best)} ${fmtCurrencySigned(best.unrealized_pnl, baseCurrency)}`} className="text-green-600" />}
+                        {isAssets && worst && worst.unrealized_pnl < 0 && <Line label="Worst" value={`${assetName(worst)} ${fmtCurrencySigned(worst.unrealized_pnl, baseCurrency)}`} className="text-red-600" />}
                         {isPeriod && <Line label="Total now" value={live(fmtCurrencySigned(m.unrealizedPnl, baseCurrency))} />}
                     </Card>
                     <Card title={`Realized${sfx}`} accent={ACCENT.realized} info={TERM_HELP.realized} className="flex-1" testId="card-realized"
@@ -219,14 +264,24 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
                         {!isPeriod && m.deferredGain != null && Math.abs(m.deferredGain) >= 0.01 && (
                             <Line label="Deferred" info={TERM_HELP.deferred} value={fmtCurrencySigned(m.deferredGain, baseCurrency)} />
                         )}
-                        {closed > 0 && <Line label="Closed positions" value={closed} />}
+                        {closed > 0 && <Line label="Sold out" info="Assets fully sold (no quantity left) with realized P&L" value={<CountLink onClick={pos('closed')} title="Show sold-out assets">{closed}</CountLink>} />}
                     </Card>
                 </div>
 
                 {/* Value */}
                 <Card title="Value" accent={ACCENT.value} testId="card-value">
                     <span className={`text-2xl font-bold tabular-nums ${isLiveLoading ? 'text-gray-300' : 'text-gray-800'}`}>{live(fmtCurrency(m.currentValue, baseCurrency))}</span>
-                    {withLots.length > 0 && <Line label="Positions" value={`${open.length} open · ${closed} closed`} />}
+                    {withLots.length > 0 && (
+                        <Line
+                            label="Held · sold out"
+                            info="Assets you still hold (quantity left) · assets fully sold. Click to list them."
+                            value={<><CountLink onClick={pos('open')} title="Show held assets">{open.length}</CountLink> · <CountLink onClick={pos('closed')} title="Show sold-out assets">{closed}</CountLink></>}
+                        />
+                    )}
+                    {isAssets && byValue[0] && openValue > 0 && (
+                        <Line label="Largest" value={`${assetName(byValue[0])} ${((Math.max(byValue[0].market_value, 0) / openValue) * 100).toFixed(1)}%`} />
+                    )}
+                    {isAssets && top5Share != null && byValue.length > 5 && <Line label="Top 5 share" value={`${top5Share.toFixed(1)}%`} />}
                     {isPeriod && startValue != null && (
                         <Line label={`Δ ${periodLabel}`} value={live(fmtCurrencySigned(m.currentValue - startValue, baseCurrency))} className={signClass(m.currentValue - startValue)} />
                     )}

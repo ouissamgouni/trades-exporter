@@ -768,8 +768,8 @@ export const CategoriesEditor: React.FC = () => {
             {/* Assets Drawer (Dialog as drawer) */}
             <RadixDialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white p-4 shadow-lg">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/50" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] max-h-[85vh] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white p-4 shadow-lg">
                         <div className="mb-3 flex items-center justify-between">
                             <RadixDialog.Title className="text-base font-semibold">
                                 {drawerIsUnclassified

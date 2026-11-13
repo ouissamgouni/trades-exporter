@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { compositionSegments } from './OverviewCards'
+import { compositionSegments, isOpenPosition } from './OverviewCards'
 import { splitContributors } from './ContributorsPanel'
-import { sortAccounts, accountsMismatch, isClosedAccount, groupAccounts, UNGROUPED_LABEL } from './AccountsStrip'
+import { sortAccounts, accountsMismatch, isClosedAccount, groupAccounts, UNGROUPED_LABEL, sumSparklines, weightedRate } from './AccountsStrip'
 import { columnValue, sumColumn, splitHalves, type HoldingRow } from './AssetsSection'
 import { aggregateByAccount } from './AccountPnLCard'
 import { cumulativeTwr, seriesReturnBetween } from './chartUtils'
@@ -166,5 +166,35 @@ describe('Multi-account scope (critical)', () => {
         expect(computeContextScope(st.drill, 'all').accountIds).toEqual([3, 5])
         st = pnlReducer(st, { type: 'SET_ACCOUNT_SCOPE', accounts: [] })
         expect(computeContextScope(st.drill, 'all').level).toBe('portfolio')
+    })
+})
+
+describe('Account group cards (major)', () => {
+    it('sums member sparklines by date, carrying a member\'s last value forward', () => {
+        const a = [{ date: '2024-01-01', value: 10, roi: null }, { date: '2024-01-08', value: 12, roi: null }]
+        const b = [{ date: '2024-01-08', value: 5, roi: null }]
+        expect(sumSparklines([a, b]).map(p => [p.date, p.value])).toEqual([['2024-01-01', 10], ['2024-01-08', 17]])
+    })
+
+    it('averages member rates by value, skipping unknown rates', () => {
+        const items = [perf(1, { market_value: 300 }), perf(2, { market_value: 100 }), perf(3, { market_value: 600 })]
+        expect(weightedRate(items, { '1': 10, '2': -10, '3': null })).toBeCloseTo(5)
+        expect(weightedRate(items, {})).toBeNull()
+    })
+})
+
+describe('Period presets MWR (major)', () => {
+    it('lists MWR in the tooltip only when provided', () => {
+        expect(presetTooltip('1Y', 5, 6, undefined, 4)).toContain('MWR +4.0%')
+        expect(presetTooltip('1Y', 5, 6)).not.toContain('MWR')
+    })
+})
+
+describe('Held positions (major)', () => {
+    it('uses has_open_position when present, quantity otherwise', () => {
+        const row = (o: Partial<AssetPnLRow>) => ({ quantity: 0, ...o }) as AssetPnLRow
+        expect(isOpenPosition(row({ quantity: 2 }))).toBe(true)
+        expect(isOpenPosition(row({ quantity: 2, has_open_position: false }))).toBe(false)
+        expect(isOpenPosition(row({ quantity: 0 }))).toBe(false)
     })
 })

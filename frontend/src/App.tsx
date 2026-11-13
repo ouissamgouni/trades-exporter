@@ -1,5 +1,5 @@
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Spinner, Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/primitives';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
@@ -223,6 +223,18 @@ const AppContent = () => {
 
     const qaPinnedWidth = useQaPinnedWidth();
 
+    // Page-level sticky bars (e.g. the P&L bar) stack under the sticky tab row via --app-header-h
+    const stickyHeaderRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const el = stickyHeaderRef.current;
+        if (!el) return;
+        const publish = () => document.documentElement.style.setProperty('--app-header-h', `${el.offsetHeight}px`);
+        publish();
+        const ro = new ResizeObserver(publish);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
     return (
         <div
             className="min-h-screen bg-slate-50 transition-[margin-right] duration-200 ease-in-out"
@@ -254,7 +266,11 @@ const AppContent = () => {
                 </div>
 
                 <Tabs value={activeTab} onValueChange={handleTabChange}>
-                    <div className="flex items-center gap-2 border-b border-slate-200">
+                    <div
+                        ref={stickyHeaderRef}
+                        className="sticky top-0 z-40 -mx-4 flex items-center gap-2 border-b border-slate-300 bg-white px-4 shadow-[0_2px_6px_-2px_rgba(15,23,42,0.18)]"
+                        data-testid="app-sticky-header"
+                    >
                         <TabsList className="min-w-0 flex-1 border-b-0">
                             {/* Step 1: Configuration */}
                             <TabsTrigger value="setup">

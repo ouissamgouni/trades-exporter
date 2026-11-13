@@ -72,6 +72,10 @@ A movement between accounts you own that should generally not be treated the sam
 
 A lot condition where disposals exceed known acquisitions. It often indicates missing history, wrong mapping, duplicate records, or an edge case that needs review.
 
+## MWR (Money-Weighted Return)
+
+The rate of return of your actual deposits and withdrawals, computed as an internal rate of return (IRR). Shown yearly (/y) for periods of one year or more and as a plain period rate below. Higher than TWR when you added money before good periods; lower when you added it before bad ones. Not available ("—") when there were no flows or the period is too short.
+
 ## Normalized Transaction
 
 A cleaned transaction record using TradeTrail's internal account, asset, direction, type, and review fields.
@@ -83,6 +87,10 @@ Profit and loss. In TradeTrail this includes realized P&L, cost lots, fees, posi
 ## Price Snapshot
 
 A historical price record used by calculations.
+
+## ROI (Return on Investment)
+
+Total return divided by the cost of what you hold now. It moves when you add or withdraw money, so it is not comparable with an index return.
 
 ## Raw Account
 
@@ -115,3 +123,7 @@ The classification of an event as taxable, non-taxable, unknown, or otherwise ov
 ## Tax Override
 
 A manual classification or value adjustment used when automated tax treatment needs user correction.
+
+## TWR (Time-Weighted Return)
+
+The return of the holdings themselves, chaining the daily returns whatever the amount invested each day. Deposits and withdrawals do not move it, so it is the fair comparison with a benchmark index; benchmark lines and "vs benchmark" figures always use it.

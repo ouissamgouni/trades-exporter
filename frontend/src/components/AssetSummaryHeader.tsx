@@ -3,12 +3,17 @@
  * identity + categories, current price, position (P&L vs live qty, value, P&L) and token contracts.
  */
 
-import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FiCheck, FiCopy, FiExternalLink, FiRefreshCw } from 'react-icons/fi';
-import { API_URL, type Asset, type PriceResponse } from '../types';
+import { FiCheck, FiCopy, FiDownloadCloud, FiExternalLink, FiRefreshCw } from 'react-icons/fi';
+import { API_URL, type Account, type AccountBalance, type Asset, type PriceResponse } from '../types';
 import { useVersionMetrics } from '../hooks/useChartData';
-import { useLiveBalanceSnapshot } from '../hooks/useLiveBalanceSnapshot';
+import { mergeAccountLiveBalances, useLiveBalanceSnapshot, type LiveBalanceSnapshot } from '../hooks/useLiveBalanceSnapshot';
+import { useAccounts } from '../hooks/useAccounts';
+import { AccountDetailPanelContext } from '../contexts/AccountDetailPanelContext';
+import { getAccountColor } from '../utils/accountColors';
+import { DeltaBar } from './pnl/DeltaBar';
+import type { AccountBalanceBreakdown } from './pnl/types';
 import { useAccountBalances } from './AssetPnLOverviewSection';
 import { fmtCurrency, fmtCurrencySigned } from './pnl/TotalReturnScorecard';
 import { computeDelta, deltaColor, formatPct } from './pnl/deltaUtils';
@@ -65,6 +70,107 @@ const ContractChip: React.FC<{ network: string; address: string; txCount: number
                 </a>
             )}
         </span>
+    );
+};
+
+const MAX_CHIPS = 6;
+
+/** One chip per holding account: quantity, value, share and live-balance delta. */
+const HoldingsByAccountChips: React.FC<{
+    symbol: string;
+    breakdowns: AccountBalanceBreakdown[];
+    unitPrice: number | null;
+    baseCurrency: string;
+    live: LiveBalanceSnapshot | null;
+}> = ({ symbol, breakdowns, unitPrice, baseCurrency, live }) => {
+    const accountPanel = useContext(AccountDetailPanelContext);
+    const { accounts } = useAccounts();
+    const [showAll, setShowAll] = useState(false);
+    const [fetching, setFetching] = useState(false);
+    const rows = [...breakdowns].filter(b => Math.abs(b.qty) > 0).sort((a, b) => b.qty - a.qty);
+    if (!rows.length) return null;
+    const totalQty = rows.reduce((s, b) => s + Math.max(b.qty, 0), 0);
+    const accountById = new Map<number, Account>(accounts.map(a => [a.id, a]));
+    const eligible = rows.filter(b => {
+        const acc = accountById.get(b.account_id);
+        return acc ? acc.enabled !== false && acc.live_balance_eligible !== false : false;
+    });
+    const key = symbol.toUpperCase();
+
+    const fetchLive = async () => {
+        setFetching(true);
+        try {
+            const results = await Promise.all(eligible.map(async b => {
+                try {
+                    const res = await fetch(`${API_URL}/balance/account/${b.account_id}`);
+                    return res.ok ? (await res.json() as AccountBalance) : null;
+                } catch {
+                    return null;
+                }
+            }));
+            mergeAccountLiveBalances(results.filter((r): r is AccountBalance => r != null));
+        } finally {
+            setFetching(false);
+        }
+    };
+
+    const visible = showAll ? rows : rows.slice(0, MAX_CHIPS);
+    return (
+        <div className="mt-2" data-testid="asset-holdings-chips">
+            <div className="mb-1 flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-slate-400">By account</span>
+                {eligible.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={fetchLive}
+                        disabled={fetching}
+                        className="inline-flex items-center gap-1 border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Fetch live balances for these accounts from their connectors"
+                    >
+                        {fetching ? <Spinner size="xs" /> : <FiDownloadCloud size={11} />} Fetch live
+                    </button>
+                )}
+                {live && <span className="text-[10px] text-slate-400">live {formatRelativeTime(new Date(live.fetchedAt))}</span>}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+                {visible.map(b => {
+                    const acc = accountById.get(b.account_id);
+                    const notEligible = acc != null && (acc.enabled === false || acc.live_balance_eligible === false);
+                    const fetched = live?.fetchedAccountIds.has(b.account_id) ?? false;
+                    const liveQty = fetched ? (live!.byAccount.get(key)?.get(b.account_id) ?? 0) : undefined;
+                    const share = totalQty > 0 && b.qty > 0 ? (b.qty / totalQty) * 100 : null;
+                    return (
+                        <button
+                            key={b.account_id}
+                            type="button"
+                            onClick={() => accountPanel?.openAccountPanel(b.account_id)}
+                            className="flex min-w-[150px] flex-col items-start border border-slate-200 bg-slate-50 px-2 py-1 text-left hover:border-blue-300 hover:bg-blue-50/50"
+                            style={{ borderLeft: `3px solid ${getAccountColor(b.account_id)}` }}
+                            title={`Open ${b.account_name}`}
+                        >
+                            <span className="flex w-full items-center justify-between gap-2">
+                                <span className="max-w-[140px] truncate text-[11px] font-semibold text-slate-700">{b.account_name}</span>
+                                {share != null && <span className="text-[10px] tabular-nums text-slate-400">{share.toFixed(0)}%</span>}
+                            </span>
+                            <span className="flex items-center gap-1.5 text-[11px] tabular-nums text-slate-700">
+                                <span className={b.qty < 0 ? 'text-red-700' : ''}>{formatQuantity(b.qty)}</span>
+                                {unitPrice != null && <span className="text-slate-500">· {fmtCurrency(b.qty * unitPrice, baseCurrency)}</span>}
+                            </span>
+                            <span className="mt-0.5 text-[10px] text-slate-500">
+                                {notEligible ? 'No live data (not eligible)'
+                                    : fetched ? <DeltaBar delta={computeDelta(b.qty, liveQty)} liveQty={liveQty} pnlQty={b.qty} size="xs" />
+                                        : 'Live: not fetched'}
+                            </span>
+                        </button>
+                    );
+                })}
+                {rows.length > MAX_CHIPS && (
+                    <button type="button" onClick={() => setShowAll(v => !v)} className="border border-dashed border-slate-300 px-2 text-[11px] text-slate-600 hover:bg-slate-50">
+                        {showAll ? 'Show less' : `+${rows.length - MAX_CHIPS} more`}
+                    </button>
+                )}
+            </div>
+        </div>
     );
 };
 
@@ -192,6 +298,10 @@ export const AssetSummaryHeader: React.FC<AssetSummaryHeaderProps> = ({ asset, v
                         {range ? <span className={range.realized_pnl >= 0 ? 'text-green-700' : 'text-red-700'}>{fmtCurrencySigned(range.realized_pnl, baseCurrency)}</span> : '—'}
                     </Stat>
                 </div>
+            )}
+
+            {versionId != null && (
+                <HoldingsByAccountChips symbol={asset.symbol} breakdowns={breakdowns} unitPrice={priceValue} baseCurrency={baseCurrency} live={live} />
             )}
 
             {contracts.length > 0 && (

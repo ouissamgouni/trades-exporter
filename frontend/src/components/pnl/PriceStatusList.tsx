@@ -50,7 +50,7 @@ const CATEGORY_META: Record<Category, { label: string; scheme: BadgeColorScheme;
     cached: { label: 'Cached', scheme: 'gray', ring: 'ring-slate-400' },
     fallback: { label: 'Fallback / stale', scheme: 'orange', ring: 'ring-orange-400' },
     failed: { label: 'No price', scheme: 'red', ring: 'ring-red-400' },
-    na: { label: 'N/A', scheme: 'gray', ring: 'ring-slate-400' },
+    na: { label: 'Not priced', scheme: 'gray', ring: 'ring-slate-400' },
 };
 
 const STATE_STYLE: Record<PriceState, { icon: React.ComponentType<{ size?: number }>; color: string; bg: string; hint: string }> = {
@@ -61,7 +61,7 @@ const STATE_STYLE: Record<PriceState, { icon: React.ComponentType<{ size?: numbe
     failed_with_last_known: { icon: FiAlertTriangle, color: 'text-orange-600', bg: 'bg-orange-50 hover:bg-orange-100', hint: 'Live fetch failed — using last known price' },
     failed: { icon: FiXCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100', hint: 'Price fetch failed, no price available' },
     missing: { icon: FiAlertCircle, color: 'text-red-500', bg: 'bg-red-50 hover:bg-red-100', hint: 'No price available' },
-    skipped: { icon: FiMinusCircle, color: 'text-gray-400', bg: 'bg-gray-50 hover:bg-gray-100', hint: 'Not priced — no open position (no active cost lots)' },
+    skipped: { icon: FiMinusCircle, color: 'text-gray-400', bg: 'bg-gray-50 hover:bg-gray-100', hint: 'Not priced — no open position, or not eligible for a price fetch' },
 };
 
 const categoryOf = (state: PriceState): Category => {
@@ -181,7 +181,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                             {counts[c]} {CATEGORY_META[c].label}
                         </Badge>
                     ))}
-                    {skippedCount > 0 && <span className="text-xs text-gray-400">{skippedCount} without P&L</span>}
+                    {skippedCount > 0 && <span className="text-xs text-gray-400" title="Assets without an id cannot be listed">{skippedCount} unlisted</span>}
                     <div className="ml-auto flex items-center gap-2">
                         {failedOrFallback > 0 && onRetryFailed && (
                             <Button size="sm" variant="outline" colorScheme="gray" onClick={onRetryFailed} disabled={counts.loading > 0} className="h-7 px-2 text-xs">

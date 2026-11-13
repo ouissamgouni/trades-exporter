@@ -12,7 +12,8 @@ import React, { useState } from 'react';
 import { FiDownload, FiEdit3, FiZap } from 'react-icons/fi';
 import { AssetPriceChart } from './AssetPriceChart';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
-import { usePriceGaps, useBackfillPrices } from '../hooks/usePriceGaps';
+import { usePriceGaps, useEnqueuePriceFetch } from '../hooks/usePriceGaps';
+import { GapFixJobInline } from './GapFixJobInline';
 import { useAsset } from '../hooks/useAsset';
 import { useBaseCurrency } from '../hooks/useBaseCurrency';
 import { GapRange } from '../types';
@@ -38,7 +39,7 @@ const fmtShort = (d: string) => {
 export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol, onOpenPriceSetter }) => {
     const { data: gapData, refetch } = usePriceGaps(assetId);
     const gaps = gapData?.gaps ?? [];
-    const backfill = useBackfillPrices();
+    const enqueue = useEnqueuePriceFetch();
     const [fixingAll, setFixingAll] = useState(false);
     const [fetchingIdx, setFetchingIdx] = useState<number | null>(null);
     const [manualGap, setManualGap] = useState<GapRange | null>(null);
@@ -50,54 +51,28 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol, onOpe
     // Resolve base currency from app settings
     const baseCurrency = useBaseCurrency();
 
+    const queue = async (ranges: GapRange[]) => {
+        try {
+            await enqueue.mutateAsync({
+                items: ranges.map(g => ({ asset_id: assetId, date_from: g.start_date, date_to: g.end_date })),
+                quoteAssetId: baseCurrency.assetId ?? null,
+            });
+            toaster.info({ title: 'Price fetch queued', description: `${symbol}: progress and log below` });
+        } catch (err) {
+            toaster.error({ title: 'Could not queue price fetch', description: err instanceof Error ? err.message : 'Unknown error' });
+        }
+    };
+
     const handleFixAll = async () => {
         setFixingAll(true);
-        let totalFetched = 0;
-        let totalFailed = 0;
-        try {
-            for (const gap of gaps) {
-                const result = await backfill.mutateAsync({
-                    asset_id: assetId,
-                    date_from: gap.start_date,
-                    date_to: gap.end_date,
-                    quote_asset_id: baseCurrency.assetId ?? null,
-                });
-                totalFetched += result.fetched.length;
-                totalFailed += result.failed.length;
-            }
-            if (totalFailed === 0) {
-                toaster.success({ title: 'All gaps fixed', description: `Fetched ${totalFetched} price(s)` });
-            } else {
-                toaster.info({ title: 'Partial fix', description: `Fetched ${totalFetched}, failed ${totalFailed}` });
-            }
-            refetch();
-        } catch (err) {
-            toaster.error({ title: 'Fix all failed', description: err instanceof Error ? err.message : 'Unknown error' });
-        } finally {
-            setFixingAll(false);
-        }
+        await queue(gaps);
+        setFixingAll(false);
     };
 
     const handleFetchOne = async (gap: GapRange, idx: number) => {
         setFetchingIdx(idx);
-        try {
-            const result = await backfill.mutateAsync({
-                asset_id: assetId,
-                date_from: gap.start_date,
-                date_to: gap.end_date,
-                quote_asset_id: baseCurrency.assetId ?? null,
-            });
-            if (result.failed.length === 0) {
-                toaster.success({ title: 'Fetched', description: `${result.fetched.length} price(s)` });
-            } else {
-                toaster.info({ title: 'Partial', description: `Fetched ${result.fetched.length}, failed ${result.failed.length}` });
-            }
-            refetch();
-        } catch (err) {
-            toaster.error({ title: 'Fetch failed', description: err instanceof Error ? err.message : 'Unknown error' });
-        } finally {
-            setFetchingIdx(null);
-        }
+        await queue([gap]);
+        setFetchingIdx(null);
     };
 
     const totalMissing = gaps.reduce((s, g) => s + g.missing_days_count, 0);
@@ -107,6 +82,7 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol, onOpe
             <div className="flex items-stretch gap-3">
                 {/* Left: chart */}
                 <div className="min-w-0 flex-[2]">
+                    <GapFixJobInline assetId={assetId} className="mb-1.5" />
                     <AssetPriceChart assetId={assetId} symbol={symbol} gaps={gaps} />
                     {/* Price Setter CTA */}
                     <div className="mt-1.5 flex gap-1">

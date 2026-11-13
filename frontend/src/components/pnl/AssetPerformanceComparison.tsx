@@ -398,7 +398,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                                 side="bottom"
                                 align="start"
                                 sideOffset={4}
-                                className="w-[200px] border border-gray-200 bg-white p-2 shadow-lg"
+                                className="z-[2600] w-[200px] border border-gray-200 bg-white p-2 shadow-lg"
                             >
                                 <div className="flex flex-col gap-1">
                                     {BENCHMARK_PRESETS.map(bp => {
@@ -467,7 +467,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                                 <RadixPopover.Content
                                     side="bottom"
                                     sideOffset={4}
-                                    className="w-auto border border-gray-200 bg-white p-2 shadow-md"
+                                    className="z-[2600] w-auto border border-gray-200 bg-white p-2 shadow-md"
                                 >
                                     <div className="flex max-w-[140px] flex-wrap gap-1">
                                         {PORTFOLIO_COLOR_PRESETS.map(c => (
@@ -520,7 +520,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                                     <RadixPopover.Content
                                         side="bottom"
                                         sideOffset={4}
-                                        className="w-auto border border-gray-200 bg-white p-2 shadow-md"
+                                        className="z-[2600] w-auto border border-gray-200 bg-white p-2 shadow-md"
                                     >
                                         <div className="flex max-w-[140px] flex-wrap gap-1">
                                             {COMPARISON_PALETTE.map(c => (
@@ -573,7 +573,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                                     <RadixPopover.Content
                                         side="bottom"
                                         sideOffset={4}
-                                        className="w-auto border border-gray-200 bg-white p-2 shadow-md"
+                                        className="z-[2600] w-auto border border-gray-200 bg-white p-2 shadow-md"
                                     >
                                         <div className="flex max-w-[140px] flex-wrap gap-1">
                                             {[...BENCHMARK_COLORS, ...COMPARISON_PALETTE.slice(0, 4)].map(c => (

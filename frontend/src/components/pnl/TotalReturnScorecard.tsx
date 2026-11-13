@@ -15,7 +15,7 @@ import { Badge } from '../ui/primitives';
 import { FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import { LuBanknote } from 'react-icons/lu';
 import { InfoTip, TERM_HELP } from './pnlTerms';
-import { OverviewCards } from './OverviewCards';
+import { OverviewCards, type PositionFilterKey } from './OverviewCards';
 import { ContributorsPanel } from './ContributorsPanel';
 import { PeriodChartPanel } from './PeriodChartPanel';
 import type { TimelinePoint, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy, ReturnMetricsRange } from '../../hooks/useChartData';
@@ -321,6 +321,8 @@ interface TimeframeIndicatorsProps {
     benchmarkSlot?: React.ReactNode;
     /** Page-wide main benchmark ticker for the performance chart */
     mainBenchmark?: string;
+    /** Held / sold-out / in gain / in loss counts in the cards */
+    onPositionsClick?: (filter: PositionFilterKey) => void;
 }
 
 export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
@@ -360,6 +362,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     returnMetrics,
     benchmarkSlot,
     mainBenchmark,
+    onPositionsClick,
 }) => {
     const periodLabel = RANGES.find(r => r.key === range)?.label ?? 'All';
     const isPeriod = range !== 'all';
@@ -551,6 +554,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                         onFeesClick={onFeesClick}
                         onIncomeClick={onIncomeClick}
                         onContributorsClick={hidePerformers ? undefined : () => document.getElementById('pnl-contributors')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                        onPositionsClick={onPositionsClick}
                     />
 
                     {accountsSlot && (
@@ -560,7 +564,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                         </>
                     )}
 
-                    <div id="pnl-contributors" className="scroll-mt-32">
+                    <div id="pnl-contributors" className="scroll-mt-[calc(var(--app-header-h,0px)+8rem)]">
                         <SectionDivider title={hidePerformers ? 'Performance chart' : 'Contributors & performance chart'} />
                     </div>
                     {/* Contributors (3/5) + chart (2/5) */}

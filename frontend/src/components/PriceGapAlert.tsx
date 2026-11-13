@@ -5,17 +5,18 @@
  * - Compact mode: a single badge ("N gaps") with a popover listing ranges
  *
  * CTAs per gap range:
- *   1. "Fetch Missing Prices" → useBackfillPrices mutation for that range
+ *   1. "Fetch Missing Prices" → queues the range into the gap-fix job
  *   2. "Fill Manually" → opens PriceSetterDialog in range mode with last_known_price
  *
- * A "Fix All Gaps" button at the top triggers sequential backfill for all ranges.
+ * A "Fix All Gaps" button at the top queues every range in one job request.
  */
 
 import React, { useState } from 'react';
 import { Badge, Button, Spinner } from './ui/primitives';
 import { FiAlertTriangle, FiDownload, FiEdit3, FiZap } from 'react-icons/fi';
-import { GapRange, BackfillResponse } from '../types';
-import { useBackfillPrices } from '../hooks/usePriceGaps';
+import { GapRange } from '../types';
+import { useEnqueuePriceFetch } from '../hooks/usePriceGaps';
+import { GapFixJobInline } from './GapFixJobInline';
 import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
@@ -64,33 +65,20 @@ const GapRangeAlert: React.FC<GapRangeAlertProps> = ({
     quoteAssetName,
     onComplete,
 }) => {
-    const backfill = useBackfillPrices();
-    const [backfillResult, setBackfillResult] = useState<BackfillResponse | null>(null);
+    const enqueue = useEnqueuePriceFetch();
     const [showManual, setShowManual] = useState(false);
 
     const handleFetch = async () => {
         try {
-            const result = await backfill.mutateAsync({
-                asset_id: assetId,
-                date_from: gap.start_date,
-                date_to: gap.end_date,
+            await enqueue.mutateAsync({
+                items: [{ asset_id: assetId, date_from: gap.start_date, date_to: gap.end_date }],
+                quoteAssetId: quoteAssetId ?? null,
             });
-            setBackfillResult(result);
-            if (result.failed.length === 0) {
-                toaster.success({
-                    title: 'Backfill complete',
-                    description: `Fetched ${result.fetched.length} price(s) for ${assetName}`,
-                });
-            } else {
-                toaster.info({
-                    title: 'Partial backfill',
-                    description: `Fetched ${result.fetched.length}, failed ${result.failed.length}. Consider manual fill for remaining dates.`,
-                });
-            }
+            toaster.info({ title: 'Price fetch queued', description: `${assetName}: follow progress in the price fetch job` });
             onComplete?.();
         } catch (err) {
             toaster.error({
-                title: 'Backfill failed',
+                title: 'Could not queue price fetch',
                 description: err instanceof Error ? err.message : 'Unknown error',
             });
         }
@@ -101,10 +89,7 @@ const GapRangeAlert: React.FC<GapRangeAlertProps> = ({
         onComplete?.();
     };
 
-    const isFetching = backfill.isPending;
-
-    // After a backfill attempt, show remaining failures
-    const showFailures = backfillResult && backfillResult.failed.length > 0;
+    const isFetching = enqueue.isPending;
 
     return (
         <>
@@ -122,12 +107,6 @@ const GapRangeAlert: React.FC<GapRangeAlertProps> = ({
                             <span className="mt-0.5 block text-xs text-slate-600">
                                 Last known: {gap.last_known_price.toLocaleString()} ({gap.last_known_source ?? 'unknown'} on{' '}
                                 {gap.last_known_price_date ? fmtDate(gap.last_known_price_date) : '?'})
-                            </span>
-                        )}
-                        {showFailures && (
-                            <span className="mt-1 block text-xs text-red-600">
-                                {backfillResult!.failed.length} date(s) could not be fetched automatically.
-                                Use "Fill Manually" for remaining dates.
                             </span>
                         )}
                         <div className="mt-2 flex gap-2">
@@ -185,7 +164,7 @@ export const PriceGapAlert: React.FC<PriceGapAlertProps> = ({
     onComplete,
     compact = false,
 }) => {
-    const backfill = useBackfillPrices();
+    const enqueue = useEnqueuePriceFetch();
     const [fixingAll, setFixingAll] = useState(false);
     const [expandedCompact, setExpandedCompact] = useState(false);
 
@@ -231,29 +210,12 @@ export const PriceGapAlert: React.FC<PriceGapAlertProps> = ({
 
     const handleFixAll = async () => {
         setFixingAll(true);
-        let totalFetched = 0;
-        let totalFailed = 0;
         try {
-            for (const gap of gaps) {
-                const result = await backfill.mutateAsync({
-                    asset_id: assetId,
-                    date_from: gap.start_date,
-                    date_to: gap.end_date,
-                });
-                totalFetched += result.fetched.length;
-                totalFailed += result.failed.length;
-            }
-            if (totalFailed === 0) {
-                toaster.success({
-                    title: 'All gaps fixed',
-                    description: `Fetched ${totalFetched} price(s) for ${assetName}`,
-                });
-            } else {
-                toaster.info({
-                    title: 'Partial fix',
-                    description: `Fetched ${totalFetched}, failed ${totalFailed}. Some dates may need manual fill.`,
-                });
-            }
+            await enqueue.mutateAsync({
+                items: gaps.map(g => ({ asset_id: assetId, date_from: g.start_date, date_to: g.end_date })),
+                quoteAssetId: quoteAssetId ?? null,
+            });
+            toaster.info({ title: 'Price fetch queued', description: `${assetName}: follow progress in the price fetch job` });
             onComplete?.();
         } catch (err) {
             toaster.error({
@@ -267,6 +229,7 @@ export const PriceGapAlert: React.FC<PriceGapAlertProps> = ({
 
     return (
         <div className="flex flex-col gap-2">
+            <GapFixJobInline assetId={assetId} />
             {/* Header with bulk action */}
             {gaps.length > 1 && (
                 <div className="flex items-center justify-between">

@@ -7,6 +7,7 @@ These tests are intentionally simple and focused on:
 - Testing Pydantic validation (422 errors)
 - Checking error handling (404/500 errors)
 """
+from datetime import datetime
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -117,10 +118,11 @@ def test_get_asset_includes_contracts():
 
     session = MagicMock()
     session.get.return_value = Asset(asset_id=7, symbol="USDC")
-    categories, contracts = MagicMock(), MagicMock()
+    categories, contracts, first_tx = MagicMock(), MagicMock(), MagicMock()
     categories.all.return_value = []
     contracts.all.return_value = [("base", "0x8335", 5), ("solana", "EPjF", 3)]
-    session.exec.side_effect = [categories, contracts]
+    first_tx.one.return_value = datetime(2023, 4, 5, 10, 30)
+    session.exec.side_effect = [categories, contracts, first_tx]
     app.dependency_overrides[get_db] = lambda: session
     try:
         with patch("backend.api.main.init_db"):
@@ -132,6 +134,7 @@ def test_get_asset_includes_contracts():
         {"network": "base", "contract_address": "0x8335", "tx_count": 5},
         {"network": "solana", "contract_address": "EPjF", "tx_count": 3},
     ]
+    assert response.json()["first_transaction_date"] == "2023-04-05"
 
 
 def test_update_transaction_validation(client):

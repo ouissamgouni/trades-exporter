@@ -7189,17 +7189,22 @@ def get_account_sparklines(
     )
     from backend.services.pnl.return_metrics import SeriesPoint, compute_return_metrics
 
-    twr = {
+    metrics = {
         str(k): compute_return_metrics(
             [SeriesPoint(pt["date"], pt["value"] or 0.0, pt["pnl"] or 0.0) for pt in v]
-        ).twr_pct
+        )
         for k, v in series.items()
     }
     return {
         "version_id": version_id,
         "period": period,
         "accounts": {str(k): v for k, v in series.items()},
-        "twr": twr,
+        "twr": {k: m.twr_pct for k, m in metrics.items()},
+        # Money-weighted (IRR): yearly from one year on, plain period rate below
+        "mwr": {
+            k: (m.irr_pct if (m.days or 0) >= 365 else m.irr_period_pct)
+            for k, m in metrics.items()
+        },
     }
 
 

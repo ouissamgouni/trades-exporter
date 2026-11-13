@@ -62,6 +62,37 @@ export function groupAccounts(items: PerformerItem[], groupOf: (id: number) => s
     });
 }
 
+/** Sums member sparklines by date (dates missing in a member keep its last known value). */
+export function sumSparklines(series: SparklinePoint[][]): SparklinePoint[] {
+    const dates = [...new Set(series.flatMap(s => s.map(p => p.date)))].sort();
+    return dates.map(date => {
+        let value = 0;
+        for (const s of series) {
+            let last: number | null = null;
+            for (const p of s) {
+                if (p.date > date) break;
+                last = p.value;
+            }
+            value += last ?? 0;
+        }
+        return { date, value, roi: null };
+    });
+}
+
+/** Value-weighted average of member rates (null when none is known). */
+export function weightedRate(items: PerformerItem[], rates: Record<string, number | null> | undefined): number | null {
+    let num = 0;
+    let den = 0;
+    for (const p of items) {
+        const r = rates?.[String(p.id)];
+        if (r == null) continue;
+        const w = Math.max(p.market_value, 0) || Math.max(p.cost_basis, 0);
+        num += r * w;
+        den += w;
+    }
+    return den > 0 ? num / den : null;
+}
+
 export function isClosedAccount(p: PerformerItem): boolean {
     return Math.abs(p.market_value) < 0.01;
 }
@@ -125,6 +156,8 @@ interface AccountsStripProps {
     onApplySelection?: (accounts: { id: number; name: string }[]) => void;
     /** TWR % per account (keyed by id) */
     twr?: Record<string, number | null>;
+    /** MWR % per account (keyed by id) */
+    mwr?: Record<string, number | null>;
     benchmark?: { label: string; returnPct: number | null };
     /** Account records (for account groups) */
     accounts?: Account[];
@@ -143,6 +176,7 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
     selectedIds = [],
     onApplySelection,
     twr,
+    mwr,
     benchmark,
     accounts = [],
     pnlVersionId,
@@ -198,6 +232,7 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
         const selected = selectedIds.includes(p.id);
         const isTicked = ticked.includes(p.id);
         const accTwr = twr?.[String(p.id)];
+        const accMwr = mwr?.[String(p.id)];
         const clickable = !!onAccountClick || !!onApplySelection;
         return (
             <div
@@ -259,10 +294,13 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
                         height={4}
                     />
                 )}
-                {accTwr != null && (
-                    <div className="flex items-center justify-between text-[10px] text-gray-500" title="Time-weighted return over the period (weekly points)">
-                        <span>TWR <span className={`font-semibold tabular-nums ${accTwr >= 0 ? 'text-green-600' : 'text-red-600'}`}>{accTwr >= 0 ? '+' : ''}{accTwr.toFixed(1)}%</span></span>
-                        {benchmark?.returnPct != null && (
+                {(accTwr != null || accMwr != null) && (
+                    <div className="flex items-center justify-between text-[10px] text-gray-500" title="Time-weighted and money-weighted return over the period (weekly points)">
+                        <span className="flex gap-2">
+                            {accTwr != null && <span>TWR <span className={`font-semibold tabular-nums ${accTwr >= 0 ? 'text-green-600' : 'text-red-600'}`}>{accTwr >= 0 ? '+' : ''}{accTwr.toFixed(1)}%</span></span>}
+                            {accMwr != null && <span data-testid={`account-mwr-${p.id}`}>MWR <span className={`font-semibold tabular-nums ${accMwr >= 0 ? 'text-green-600' : 'text-red-600'}`}>{accMwr >= 0 ? '+' : ''}{accMwr.toFixed(1)}%</span></span>}
+                        </span>
+                        {accTwr != null && benchmark?.returnPct != null && (
                             <span className={`tabular-nums ${accTwr - benchmark.returnPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 vs {benchmark.label} {accTwr - benchmark.returnPct >= 0 ? '+' : ''}{(accTwr - benchmark.returnPct).toFixed(1)} pp
                             </span>
@@ -278,6 +316,96 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
                     )}
                 </div>
                 <Sparkline points={series} color={color} />
+            </div>
+        );
+    };
+
+    const renderGroupCard = (b: AccountGroupBucket) => {
+        const ids = b.items.map(p => p.id);
+        const allTicked = ids.every(id => ticked.includes(id));
+        const scoped = ids.length > 0 && ids.every(id => selectedIds.includes(id)) && selectedIds.length === ids.length;
+        const weight = totalValue > 0 ? (b.value / totalValue) * 100 : 0;
+        const cost = b.items.reduce((s, p) => s + p.cost_basis, 0);
+        const unrealized = b.items.reduce((s, p) => s + p.unrealized_pnl, 0);
+        const realized = b.items.reduce((s, p) => s + (p.realized_pnl ?? 0), 0);
+        const fees = b.items.reduce((s, p) => s + p.total_fees, 0);
+        const income = b.items.reduce((s, p) => s + (p.income ?? 0), 0);
+        const roi = cost > 0 ? (b.totalReturn / cost) * 100 : null;
+        const groupTwr = weightedRate(b.items, twr);
+        const groupMwr = weightedRate(b.items, mwr);
+        const positive = b.totalReturn >= 0;
+        const series = sumSparklines(b.items.map(p => sparklines?.[String(p.id)] ?? []));
+        const apply = () => onApplySelection?.(b.items.map(p => ({ id: p.id, name: p.name })));
+        return (
+            <div
+                key={b.key}
+                className={`flex w-[280px] shrink-0 flex-col gap-1.5 border border-l-4 border-l-slate-500 p-2.5 transition-colors ${scoped ? 'border-blue-500 bg-blue-50' : allTicked && pending ? 'border-blue-300 bg-blue-50/40' : 'border-slate-200 bg-white'} ${onApplySelection ? 'cursor-pointer hover:border-blue-300' : ''}`}
+                onClick={onApplySelection ? apply : undefined}
+                title={onApplySelection ? `Scope the page to the ${ids.length} account${ids.length === 1 ? '' : 's'} of ${b.label}` : undefined}
+                data-testid={`account-group-card-${b.key}`}
+            >
+                <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                        {onApplySelection && (
+                            <input
+                                type="checkbox"
+                                checked={allTicked}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={() => toggleGroupPending(ids, !allTicked)}
+                                className="shrink-0 accent-blue-500"
+                                aria-label={`Tick all accounts in ${b.label}`}
+                            />
+                        )}
+                        <span className="truncate text-xs font-semibold text-gray-800" title={b.label}>{b.label}</span>
+                        <span className="shrink-0 border border-slate-200 px-1 text-[10px] text-gray-500">{ids.length}</span>
+                    </span>
+                    <span className="text-[10px] tabular-nums text-gray-500">{weight.toFixed(1)}%</span>
+                </div>
+                <div className="h-1 w-full bg-slate-100">
+                    <div className="h-full bg-slate-500" style={{ width: `${Math.min(weight, 100)}%` }} />
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-lg font-bold tabular-nums text-gray-800">{fmtCurrency(b.value, baseCurrency)}</span>
+                    <span className={`text-xs font-semibold tabular-nums ${positive ? 'text-green-600' : 'text-red-600'}`}>
+                        {positive ? '▲' : '▼'} {fmtCurrencySigned(b.totalReturn, baseCurrency)}
+                    </span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-gray-500">
+                    <span>{isPeriod ? `Return ${periodLabel}` : 'Total return'}</span>
+                    {roi != null && (
+                        <span className={`font-semibold tabular-nums ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>{roi >= 0 ? '+' : ''}{roi.toFixed(1)}%</span>
+                    )}
+                </div>
+                {cost > 0 && (
+                    <PnLBreakdownBar costBasis={cost} unrealizedPnl={unrealized} realizedPnl={realized} fees={fees} baseCurrency={baseCurrency} height={4} />
+                )}
+                {(groupTwr != null || groupMwr != null) && (
+                    <div className="flex gap-2 text-[10px] text-gray-500" title="Value-weighted average of the accounts' rates">
+                        {groupTwr != null && <span>TWR ≈ <span className={`font-semibold tabular-nums ${groupTwr >= 0 ? 'text-green-600' : 'text-red-600'}`}>{groupTwr >= 0 ? '+' : ''}{groupTwr.toFixed(1)}%</span></span>}
+                        {groupMwr != null && <span>MWR ≈ <span className={`font-semibold tabular-nums ${groupMwr >= 0 ? 'text-green-600' : 'text-red-600'}`}>{groupMwr >= 0 ? '+' : ''}{groupMwr.toFixed(1)}%</span></span>}
+                    </div>
+                )}
+                <div className="flex flex-wrap gap-x-2 text-[10px] tabular-nums text-gray-500">
+                    <span>Unr. <span className={unrealized >= 0 ? 'text-green-600' : 'text-red-600'}>{fmtCurrencySigned(unrealized, baseCurrency)}</span></span>
+                    <span>Real. <span className={realized >= 0 ? 'text-green-600' : 'text-red-600'}>{fmtCurrencySigned(realized, baseCurrency)}</span></span>
+                    <span>Fees <span className="text-orange-700">{fmtCurrency(fees, baseCurrency)}</span></span>
+                    {Math.abs(income) >= 0.01 && <span>Inc. <span className="text-teal-700">{fmtCurrencySigned(income, baseCurrency)}</span></span>}
+                </div>
+                <Sparkline points={series} color="#64748b" />
+                <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-1.5">
+                    {b.items.map(p => (
+                        <button
+                            key={p.id}
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onAccountClick?.(p.id, p.name); }}
+                            className="inline-flex max-w-full items-center gap-1 border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-gray-700 hover:border-blue-300 hover:text-blue-700"
+                            title={`${p.name}: ${fmtCurrency(p.market_value, baseCurrency)} · ${fmtCurrencySigned(p.total_return, baseCurrency)}`}
+                        >
+                            <span aria-hidden className="h-2 w-2 shrink-0" style={{ backgroundColor: getAccountColor(p.id) }} />
+                            <span className="truncate">{p.name}</span>
+                        </button>
+                    ))}
+                </div>
             </div>
         );
     };
@@ -362,32 +490,8 @@ export const AccountsStrip: React.FC<AccountsStripProps> = ({
                     ))}
                 </div>
             ) : grouped ? (
-                <div className="flex flex-col gap-3" data-testid="accounts-groups">
-                    {buckets.map(b => {
-                        const ids = b.items.map(p => p.id);
-                        const allTicked = ids.every(id => ticked.includes(id));
-                        return (
-                            <div key={b.key}>
-                                <div className="mb-1 flex items-center gap-2 border-b border-slate-100 pb-1">
-                                    {onApplySelection && (
-                                        <input
-                                            type="checkbox"
-                                            checked={allTicked}
-                                            onChange={() => toggleGroupPending(ids, !allTicked)}
-                                            className="accent-blue-500"
-                                            aria-label={`Tick all accounts in ${b.label}`}
-                                        />
-                                    )}
-                                    <span className="text-xs font-semibold text-gray-700">{b.label}</span>
-                                    <span className="text-[10px] text-gray-400">{b.items.length}</span>
-                                    <span className="text-[11px] font-semibold tabular-nums text-gray-700">{fmtCurrency(b.value, baseCurrency)}</span>
-                                    <span className={`text-[11px] tabular-nums ${b.totalReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtCurrencySigned(b.totalReturn, baseCurrency)}</span>
-                                    {totalValue > 0 && <span className="text-[10px] tabular-nums text-gray-400">{((b.value / totalValue) * 100).toFixed(1)}%</span>}
-                                </div>
-                                <div className="flex gap-2 overflow-x-auto pb-1">{b.items.map(renderCard)}</div>
-                            </div>
-                        );
-                    })}
+                <div className="flex gap-2 overflow-x-auto pb-1" data-testid="accounts-groups">
+                    {buckets.map(renderGroupCard)}
                 </div>
             ) : (
                 <div className="flex gap-2 overflow-x-auto pb-1">{visible.map(renderCard)}</div>

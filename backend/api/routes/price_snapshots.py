@@ -26,12 +26,7 @@ from backend.services.price_service import (
     GapDetectionResult,
     GapRange as GapRangeData,
 )
-from backend.services.price_gap_job_service import (
-    fetch_day_price,
-    gap_fix_jobs,
-    missing_dates_for_gaps,
-    prefill_with_ranges,
-)
+from backend.services.price_gap_job_service import gap_fix_jobs
 
 router = APIRouter(prefix="/price-snapshots", tags=["Price Snapshots"])
 
@@ -174,9 +169,18 @@ class BackfillResponse(BaseModel):
     failed: List[BackfillFailedItem]
 
 
+class GapFixJobItem(BaseModel):
+    asset_id: int
+    date_from: Optional[str] = None  # ISO date; None = from the first transaction
+    date_to: Optional[str] = None  # ISO date; None = today / position close
+
+
 class GapFixJobStartRequest(BaseModel):
-    asset_ids: Optional[List[int]] = None  # None = all transaction-backed assets
+    # None = all transaction-backed assets (unless `items` is given)
+    asset_ids: Optional[List[int]] = None
     quote_asset_id: Optional[int] = None
+    # Per-asset date ranges (e.g. one gap); combined with asset_ids
+    items: Optional[List[GapFixJobItem]] = None
 
 
 class BulkManualRequest(BaseModel):
@@ -509,94 +513,45 @@ def get_price_gap_candidates(
     return GapCandidatesResponse(items=items)
 
 
-@router.post("/backfill", response_model=BackfillResponse)
+@router.post("/backfill")
 def backfill_prices(
     req: BackfillRequest,
     session: Session = Depends(get_db),
-):
+) -> Dict[str, Any]:
     """
-    Attempt to fetch missing prices for an asset in a date range.
+    Fetch missing prices for an asset in a date range through the gap-fix job
+    (one path: same logs, progress and quota handling as "fix all gaps").
+    Starts the job or adds the range to the running one; returns the job state.
+    """
+    d_from, d_to = _parse_range(req.date_from, req.date_to)
+    if not session.get(Asset, req.asset_id):
+        raise HTTPException(
+            status_code=404, detail=f"Asset ID {req.asset_id} not found"
+        )
+    return gap_fix_jobs.enqueue(
+        [], _resolve_quote_id(session, req.quote_asset_id), [(req.asset_id, d_from, d_to)]
+    )
 
-    Uses the asset's configured price getters (live only, no fallback).
-    Returns which dates succeeded and which failed.
-    """
+
+def _parse_range(date_from: Optional[str], date_to: Optional[str]):
     try:
-        d_from = date.fromisoformat(req.date_from)
-        d_to = date.fromisoformat(req.date_to)
+        return (
+            date.fromisoformat(date_from) if date_from else None,
+            date.fromisoformat(date_to) if date_to else None,
+        )
     except ValueError:
         raise HTTPException(
             status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
         )
 
-    asset = session.get(Asset, req.asset_id)
-    if not asset:
-        raise HTTPException(
-            status_code=404, detail=f"Asset ID {req.asset_id} not found"
-        )
 
-    is_crypto = (asset.price_type or "crypto").lower() == "crypto"
-
-    # Resolve quote_asset_id: use request param or fall back to base currency
-    quote_id = req.quote_asset_id
-    if quote_id is None:
-        app_settings = _get_app_settings(session)
-        base_asset = session.exec(
-            select(Asset).where(Asset.symbol == app_settings.base_currency)
-        ).first()
-        if base_asset:
-            quote_id = base_asset.asset_id
-
-    # Find which dates are actually missing
-    gap_result = detect_gaps(
-        session, req.asset_id, d_from, d_to, quote_asset_id=quote_id
-    )
-    missing_dates = missing_dates_for_gaps(gap_result.gaps, is_crypto)
-
-    if not missing_dates:
-        return BackfillResponse(asset_id=req.asset_id, fetched=[], failed=[])
-
-    # Lazy-import to avoid circular imports
-    from backend.services.price_service import PriceService
-    from backend.config.loader import load_settings as _load
-
-    config_settings = _load()
-    svc = PriceService(
-        session=session, base_currency=config_settings.get("base_currency", "EUR")
-    )
-
-    fetched: List[BackfillFetchedItem] = []
-    failed: List[BackfillFailedItem] = []
-
-    filled, tried = prefill_with_ranges(session, svc, {req.asset_id: missing_dates})
-    by_date = filled.get(req.asset_id, {})
-    exclude = tried.get(req.asset_id, set())
-
-    for d in missing_dates:
-        if d in by_date:
-            fetched.append(
-                BackfillFetchedItem(
-                    date=d.isoformat(), price=by_date[d].price, source=by_date[d].source
-                )
-            )
-            continue
-        try:
-            result = fetch_day_price(svc, req.asset_id, d, exclude_getters=exclude)
-            fetched.append(
-                BackfillFetchedItem(
-                    date=d.isoformat(),
-                    price=result.price,
-                    source=result.source,
-                )
-            )
-        except Exception as e:
-            failed.append(
-                BackfillFailedItem(
-                    date=d.isoformat(),
-                    error=str(e)[:200],
-                )
-            )
-
-    return BackfillResponse(asset_id=req.asset_id, fetched=fetched, failed=failed)
+def _resolve_quote_id(session: Session, quote_asset_id: Optional[int]) -> Optional[int]:
+    if quote_asset_id is not None:
+        return quote_asset_id
+    base_asset = session.exec(
+        select(Asset).where(Asset.symbol == _get_app_settings(session).base_currency)
+    ).first()
+    return base_asset.asset_id if base_asset else None
 
 
 # ---------------------------------------------------------------------------
@@ -609,21 +564,23 @@ def start_gap_fix_job(
     req: GapFixJobStartRequest,
     session: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    quote_id = req.quote_asset_id
-    if quote_id is None:
-        base_asset = session.exec(
-            select(Asset).where(Asset.symbol == _get_app_settings(session).base_currency)
-        ).first()
-        if base_asset:
-            quote_id = base_asset.asset_id
-    asset_ids = _price_fetchable_asset_ids(
-        session,
-        req.asset_ids if req.asset_ids is not None else _transaction_asset_ids(session),
-    )
-    try:
-        return gap_fix_jobs.start(asset_ids, quote_id)
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    """Start the gap-fix job, or add the request to the running one."""
+    quote_id = _resolve_quote_id(session, req.quote_asset_id)
+    ranges = []
+    for it in req.items or []:
+        d_from, d_to = _parse_range(it.date_from, it.date_to)
+        ranges.append((it.asset_id, d_from, d_to))
+    if ranges:
+        fetchable = set(_price_fetchable_asset_ids(session, sorted({r[0] for r in ranges})))
+        ranges = [r for r in ranges if r[0] in fetchable]
+    if req.asset_ids is None and req.items:
+        asset_ids: List[int] = []
+    else:
+        asset_ids = _price_fetchable_asset_ids(
+            session,
+            req.asset_ids if req.asset_ids is not None else _transaction_asset_ids(session),
+        )
+    return gap_fix_jobs.enqueue(asset_ids, quote_id, ranges)
 
 
 @router.get("/gaps/jobs/current")
@@ -942,6 +899,8 @@ class PriceTimeseriesAsset(BaseModel):
     symbol: str
     label: Optional[str] = None
     points: List[PriceTimeseriesPoint]
+    # Earliest transaction of the asset (YYYY-MM-DD); charts start there
+    first_transaction_date: Optional[str] = None
 
 
 class PriceTimeseriesResponse(BaseModel):
@@ -1260,6 +1219,16 @@ def get_price_timeseries(
                 )
             )
 
+        first_tx_rows = session.exec(
+            select(
+                NormalizedTransaction.asset_id,
+                func.min(NormalizedTransaction.date_time),
+            )
+            .where(col(NormalizedTransaction.asset_id).in_(ids))
+            .group_by(NormalizedTransaction.asset_id)
+        ).all()
+        first_tx = {aid: str(dt)[:10] for aid, dt in first_tx_rows if dt is not None}
+
         # Build response with asset info
         result_assets: List[PriceTimeseriesAsset] = []
         for aid in ids:
@@ -1272,6 +1241,7 @@ def get_price_timeseries(
                     symbol=asset.symbol if asset else f"ID:{aid}",
                     label=asset.label if asset else None,
                     points=grouped[aid],
+                    first_transaction_date=first_tx.get(aid),
                 )
             )
 

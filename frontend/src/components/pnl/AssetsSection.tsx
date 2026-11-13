@@ -17,11 +17,11 @@ import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext'
 import { getAccountColor } from '../../utils/accountColors';
 import { AssetPnLCard } from './AssetPnLCard';
 import { AccountPnLCard, accountAssetDetails, aggregateByAccount, liveValueByAccount } from './AccountPnLCard';
-import { HeroMetricsBar } from './HeroMetricsBar';
+import { OverviewCards } from './OverviewCards';
 import { DeltaBar } from './DeltaBar';
 import { computeDelta } from './deltaUtils';
 import { renderCost, renderValue, type BalanceStatusFilter, type PnlStatusFilter } from './AssetPnLTable';
-import { MetricItem, fmtCurrency, fmtCurrencySigned, realizedSubLines } from './TotalReturnScorecard';
+import { fmtCurrency, fmtCurrencySigned, type RangeMetrics } from './TotalReturnScorecard';
 import { TERM_HELP, InfoTip } from './pnlTerms';
 import type { AccountBalanceBreakdown, AssetPnLRow } from './types';
 import type { Account, DimensionWithCategories } from '../../types';
@@ -30,7 +30,9 @@ import type { AssetPeriodDelta, PerformerItem } from '../../hooks/useChartData';
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type AssetsViewMode = 'table' | 'cards' | 'allocation';
-export type PositionFilter = 'all' | 'open' | 'closed';
+export type PositionFilter = 'all' | 'open' | 'closed' | 'gain' | 'loss';
+
+export const POSITION_LABELS: Record<PositionFilter, string> = { all: 'All', open: 'Held', closed: 'Sold out', gain: 'In gain', loss: 'In loss' };
 
 export type ColumnId =
     | 'weight' | 'qty' | 'unitCost' | 'price' | 'value' | 'cost' | 'bought'
@@ -312,6 +314,10 @@ export interface AssetsSectionProps {
     accountPerformers?: PerformerItem[];
     pnlVersionId?: number;
     renderAllocation?: (mode: 'treemap' | 'pie') => React.ReactNode;
+    /** External request to apply a position filter (e.g. from the overview cards); nonce re-applies the same filter */
+    positionRequest?: { filter: PositionFilter; nonce: number };
+    /** Keep view/group/sort in the page URL (off when embedded in a side panel) */
+    persistToUrl?: boolean;
 }
 
 interface Group {
@@ -331,20 +337,21 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
         liveBalanceLoading = false, liveAccountErrors, search, onSearchChange, minMarketValue, onMinMarketValueChange,
         pnlStatus, onPnlStatusChange, balanceStatus, onBalanceStatusChange, selectedAccountIds, onSelectedAccountIdsChange,
         selectedCategoryIds, onSelectedCategoryIdsChange, periodDeltaMap, periodLabel, accountPerformers, pnlVersionId,
-        renderAllocation,
+        renderAllocation, positionRequest, persistToUrl = true,
     } = props;
+    const urlParam = (name: string) => (persistToUrl ? readUrlParam(name) : null);
     const assetPanelCtx = useContext(AssetDetailPanelContext);
     const isPeriod = !!periodLabel;
 
     // ── View / group / sort / columns (URL + localStorage) ──
     const [view, setView] = useState<AssetsViewMode>(() => {
-        const v = readUrlParam('aview');
+        const v = urlParam('aview');
         if (v === 'table' || v === 'cards' || v === 'allocation') return v;
         return 'cards';
     });
-    const [groupKey, setGroupKey] = useState<string>(() => readUrlParam('agroup') ?? 'none');
+    const [groupKey, setGroupKey] = useState<string>(() => urlParam('agroup') ?? 'none');
     const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(() => {
-        const raw = readUrlParam('asort');
+        const raw = urlParam('asort');
         if (!raw) return null;
         const [key, dir] = raw.split(':');
         return { key: key as SortKey, dir: dir === 'asc' ? 'asc' : 'desc' };
@@ -352,6 +359,9 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     const [columns, setColumns] = useState<ColumnId[]>(loadColumns);
     const [allocationMode, setAllocationMode] = useState<'treemap' | 'pie'>('treemap');
     const [positionFilter, setPositionFilter] = useState<PositionFilter>('all');
+    useEffect(() => {
+        if (positionRequest) setPositionFilter(positionRequest.filter);
+    }, [positionRequest]);
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [columnsOpen, setColumnsOpen] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -366,10 +376,10 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     const [splitPages, setSplitPages] = useState<[number, number]>([0, 0]);
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
 
-    useEffect(() => { writeUrlParam('aview', view === 'cards' ? null : view); }, [view]);
+    useEffect(() => { if (persistToUrl) writeUrlParam('aview', view === 'cards' ? null : view); }, [view, persistToUrl]);
     useEffect(() => { localStorage.setItem(SPLIT_STORAGE_KEY, split ? '1' : '0'); }, [split]);
-    useEffect(() => { writeUrlParam('agroup', groupKey === 'none' ? null : groupKey); }, [groupKey]);
-    useEffect(() => { writeUrlParam('asort', sort ? `${sort.key}:${sort.dir}` : null); }, [sort]);
+    useEffect(() => { if (persistToUrl) writeUrlParam('agroup', groupKey === 'none' ? null : groupKey); }, [groupKey, persistToUrl]);
+    useEffect(() => { if (persistToUrl) writeUrlParam('asort', sort ? `${sort.key}:${sort.dir}` : null); }, [sort, persistToUrl]);
     useEffect(() => {
         try { localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(columns)); } catch { /* storage unavailable */ }
     }, [columns]);
@@ -413,6 +423,8 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
             const open = a.has_open_position ?? Math.abs(a.quantity) > 1e-12;
             if (positionFilter === 'open' && !open) return false;
             if (positionFilter === 'closed' && open) return false;
+            if (positionFilter === 'gain' && !(open && a.unrealized_pnl > 0)) return false;
+            if (positionFilter === 'loss' && !(open && a.unrealized_pnl < 0)) return false;
             const liveQty = liveBalances?.get(a.asset.symbol?.toUpperCase() ?? '');
             if (balanceStatus === 'mapped' && (liveQty == null || liveQty === 0)) return false;
             if (balanceStatus === 'unmapped' && liveQty != null && liveQty > 0) return false;
@@ -512,7 +524,8 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
 
     // ── Totals bar (filtered assets) ──
     const totals = useMemo(() => {
-        let cost = 0, unrealized = 0, realized = 0, taxable = 0, deferred = 0, fees = 0, value = 0;
+        let cost = 0, unrealized = 0, realized = 0, taxable = 0, deferred = 0, fees = 0, value = 0, invested = 0;
+        let retDelta = 0, unrealDelta = 0, realDelta = 0, costDelta = 0, incomeDelta = 0;
         for (const a of filtered) {
             if (!a.has_lots) continue;
             cost += a.cost_basis;
@@ -522,9 +535,18 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
             deferred += a.tax_cost_basis != null ? a.cost_basis - a.tax_cost_basis : 0;
             fees += a.total_fees;
             value += a.market_value;
+            invested += a.total_invested ?? 0;
+            const d = a.asset.id != null ? periodDeltaMap?.get(a.asset.id) : undefined;
+            if (d) {
+                retDelta += d.total_return;
+                unrealDelta += d.unrealized_change;
+                realDelta += d.realized_in_period;
+                costDelta += d.cost_change;
+                incomeDelta += d.income_in_period ?? 0;
+            }
         }
-        return { cost, unrealized, realized, taxable, deferred, fees, value };
-    }, [filtered]);
+        return { cost, unrealized, realized, taxable, deferred, fees, value, invested, retDelta, unrealDelta, realDelta, costDelta, incomeDelta };
+    }, [filtered, periodDeltaMap]);
 
     // ── Account aggregate cards (cards view grouped by account) ──
     const accountCards = useMemo(
@@ -548,7 +570,7 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     const chips: { id: string; label: string; onRemove: () => void }[] = [];
     if (minMarketValue > 0) chips.push({ id: 'min', label: `Value ≥ ${fmtCurrency(minMarketValue, baseCurrency)}`, onRemove: () => onMinMarketValueChange(0) });
     if (pnlStatus !== 'all') chips.push({ id: 'pnl', label: pnlStatus === 'with_pnl' ? 'With P&L' : 'No P&L', onRemove: () => onPnlStatusChange('all') });
-    if (positionFilter !== 'all') chips.push({ id: 'pos', label: positionFilter === 'open' ? 'Open' : 'Closed', onRemove: () => setPositionFilter('all') });
+    if (positionFilter !== 'all') chips.push({ id: 'pos', label: POSITION_LABELS[positionFilter], onRemove: () => setPositionFilter('all') });
     if (balanceStatus !== 'all') chips.push({ id: 'bal', label: balanceStatus === 'mapped' ? 'Has live balance' : 'No live balance', onRemove: () => onBalanceStatusChange('all') });
     for (const id of selectedAccountIds) {
         chips.push({ id: `a${id}`, label: accounts.find(a => a.id === id)?.name ?? `Account ${id}`, onRemove: () => onSelectedAccountIdsChange(selectedAccountIds.filter(x => x !== id)) });
@@ -814,8 +836,8 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                             <div>
                                 <div className="mb-1 text-[10px] font-medium text-gray-500">Position</div>
                                 <div className="flex">
-                                    {(['all', 'open', 'closed'] as PositionFilter[]).map(v => (
-                                        <Seg key={v} active={positionFilter === v} onClick={() => setPositionFilter(v)}>{v === 'all' ? 'All' : v === 'open' ? 'Open' : 'Closed'}</Seg>
+                                    {(['all', 'open', 'closed', 'gain', 'loss'] as PositionFilter[]).map(v => (
+                                        <Seg key={v} active={positionFilter === v} onClick={() => setPositionFilter(v)}>{POSITION_LABELS[v]}</Seg>
                                     ))}
                                 </div>
                             </div>
@@ -970,27 +992,47 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     );
 
     const sortLabel = effectiveSort.key === 'asset' ? 'Name' : (COLUMNS.find(c => c.id === effectiveSort.key)?.label ?? '');
-    const colorFn = (v: number) => (v >= 0 ? 'green.600' : 'red.600');
     const totalReturn = totals.unrealized + totals.realized;
+    const totalsMetrics: RangeMetrics = {
+        totalReturn: isPeriod ? totals.retDelta : totalReturn,
+        roi: totals.cost > 0 ? ((isPeriod ? totals.retDelta : totalReturn) / totals.cost) * 100 : 0,
+        currentValue: totals.value,
+        costBasis: totals.cost,
+        totalInvested: totals.invested,
+        unrealizedPnl: totals.unrealized,
+        realizedPnl: totals.realized,
+        taxableRealizedPnl: totals.taxable,
+        deferredGain: totals.deferred,
+        realizedInPeriod: totals.realDelta,
+        taxableRealizedInPeriod: 0,
+        totalFees: totals.fees,
+        feeEntryCount: 0,
+        costBasisInPeriod: totals.costDelta,
+        unrealizedInPeriod: totals.unrealDelta,
+        feesInPeriod: totals.fees,
+        totalIncome: 0,
+        totalWithholding: 0,
+        incomeEventCount: 0,
+        incomeInPeriod: totals.incomeDelta,
+        withholdingInPeriod: 0,
+    };
+    const gainRows = filtered.filter(a => a.has_lots && a.unrealized_pnl + a.realized_pnl > 0);
+    const lossRows = filtered.filter(a => a.has_lots && a.unrealized_pnl + a.realized_pnl < 0);
     const totalsBar = view !== 'allocation' && filtered.length > 0 && totals.cost > 0 && (
         <div className="border-b border-slate-100 px-3 py-2" data-testid="assets-totals">
-            <HeroMetricsBar
-                totalReturn={totalReturn}
-                roi={(totalReturn / totals.cost) * 100}
+            <OverviewCards
+                variant="assets"
+                metrics={totalsMetrics}
+                isPeriod={isPeriod}
+                periodLabel={periodLabel ?? 'All'}
                 baseCurrency={baseCurrency}
-                costBasisInPeriod={totals.cost}
-                unrealizedInPeriod={totals.unrealized}
-                realizedInPeriod={totals.realized}
-                feesInPeriod={totals.fees}
-                fmtCurrencySigned={fmtCurrencySigned}
-                color={colorFn}
-            >
-                <MetricItem label="Value" value={fmtCurrency(totals.value, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} bg="blue.50" />
-                <MetricItem label="Cost" value={fmtCurrency(totals.cost, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" info={TERM_HELP.cost} />
-                <MetricItem label="Unrealized" value={fmtCurrencySigned(totals.unrealized, baseCurrency)} color={colorFn(totals.unrealized)} icon={totals.unrealized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.unrealized >= 0 ? 'green.50' : 'red.50'} />
-                <MetricItem label="Realized" value={fmtCurrencySigned(totals.realized, baseCurrency)} color={colorFn(totals.realized)} icon={totals.realized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.realized >= 0 ? 'green.50' : 'red.50'} info={TERM_HELP.realized} subLines={realizedSubLines({ taxableRealizedPnl: totals.taxable, deferredGain: totals.deferred }, baseCurrency, fmtCurrencySigned)} />
-                <MetricItem label="Fees" value={fmtCurrency(totals.fees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />
-            </HeroMetricsBar>
+                gains={gainRows.reduce((s, a) => s + a.unrealized_pnl + a.realized_pnl, 0)}
+                losses={lossRows.reduce((s, a) => s + a.unrealized_pnl + a.realized_pnl, 0)}
+                gainCount={gainRows.length}
+                lossCount={lossRows.length}
+                assets={filtered}
+                onPositionsClick={(f) => setPositionFilter(f)}
+            />
         </div>
     );
 

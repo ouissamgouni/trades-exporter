@@ -1597,8 +1597,8 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
             {/* Test Fixture Preview Dialog */}
             <RadixDialog.Root open={previewConnectorId !== null} onOpenChange={(open) => { if (!open) { setPreviewConnectorId(null); setPreviewData(null); } }}>
                 <RadixDialog.Portal>
-                    <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[80vh] w-full max-w-[600px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
+                    <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                    <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] max-h-[80vh] w-full max-w-[600px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border border-slate-200 bg-white shadow-xl">
                         <div className="border-b border-slate-200 px-4 py-3">
                             <RadixDialog.Title className="text-sm font-semibold">🧪 Test Fixture Preview</RadixDialog.Title>
                         </div>

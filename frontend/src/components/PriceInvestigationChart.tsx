@@ -154,6 +154,10 @@ export const PriceInvestigationChart: React.FC = () => {
         tsData.assets.forEach((asset) => {
             let points = asset.points;
             if (!points || points.length < 2) return;
+            if (asset.first_transaction_date) {
+                const fromTx = points.filter(p => p.date >= asset.first_transaction_date!);
+                if (fromTx.length >= 2) points = fromTx;
+            }
 
             // Apply zoom filter (anchored to last data point, not "now")
             if (zoomPreset.days) {
@@ -349,7 +353,7 @@ export const PriceInvestigationChart: React.FC = () => {
                                 </Badge>
                             </RadixPopover.Trigger>
                             <RadixPopover.Portal>
-                                <RadixPopover.Content side="bottom" className="z-20 w-auto border border-gray-200 bg-white p-2 shadow-md">
+                                <RadixPopover.Content side="bottom" className="z-[2600] w-auto border border-gray-200 bg-white p-2 shadow-md">
                                     <div className="flex max-w-[140px] flex-wrap gap-1">
                                         {COMPARISON_PALETTE.map(c => (
                                             <span

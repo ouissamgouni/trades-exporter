@@ -112,8 +112,8 @@ export const AddRawAssetDialog: React.FC<Props> = ({ isOpen, onClose, onCreated,
     return (
         <RadixDialog.Root open={isOpen} onOpenChange={(o) => !o && onClose()}>
             <RadixDialog.Portal>
-                <RadixDialog.Overlay className="fixed inset-0 z-[1000] bg-black/40" />
-                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[1000] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                     <div className="border-b border-slate-200 px-4 py-3">
                         <RadixDialog.Title className="text-base font-semibold text-slate-800">Add asset mapping</RadixDialog.Title>
                         <RadixDialog.Description className="text-xs text-slate-500">

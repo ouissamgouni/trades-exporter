@@ -698,13 +698,13 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 z-[1000] bg-black/40"
+                className="fixed inset-0 z-[1800] bg-black/40"
                 onClick={onClose}
             />
 
             {/* Drawer Panel: bottom sheet on mobile, right-side panel on sm+ */}
             <div
-                className="fixed inset-x-0 bottom-0 top-auto z-[1001] flex max-h-[90vh] w-full max-w-full flex-col overflow-hidden border-t border-slate-200 bg-white shadow-xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[var(--sheet-w)] sm:max-w-[95vw] sm:border-t-0"
+                className="fixed inset-x-0 bottom-0 top-auto z-[1801] flex max-h-[90vh] w-full max-w-full flex-col overflow-hidden border-t border-slate-200 bg-white shadow-xl sm:inset-x-auto sm:right-0 sm:top-0 sm:bottom-0 sm:max-h-none sm:w-[var(--sheet-w)] sm:max-w-[95vw] sm:border-t-0"
                 style={{ ['--sheet-w' as string]: `${drawerWidth}px` }}
             >
                 {/* Resize Handle (desktop only) */}

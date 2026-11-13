@@ -391,6 +391,8 @@ export interface AccountSparklinesResponse {
     accounts: Record<string, SparklinePoint[]>;
     /** TWR % per account over the period (weekly points) */
     twr?: Record<string, number | null>;
+    /** Money-weighted return (IRR): yearly from one year on, period rate below */
+    mwr?: Record<string, number | null>;
 }
 
 export function useAccountSparklines(

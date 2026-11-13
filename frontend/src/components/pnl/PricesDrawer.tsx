@@ -13,7 +13,7 @@ interface PricesDrawerProps {
     baseCurrency: string;
     quoteAssetId?: number;
     pnlAssets: AssetPnLRow[];
-    /** Assets shown in the P&L but without cost lots (not priced) */
+    /** Assets shown in the P&L without a price row (no open position / not price-fetch eligible) */
     naAssets: AssetPnLRow[];
     totalAssetCount: number;
     loadingAssetIds: Set<number>;

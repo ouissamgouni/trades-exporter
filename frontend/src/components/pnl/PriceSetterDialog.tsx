@@ -8,7 +8,7 @@
  * Features:
  *   - Override confirmation: warns before overwriting existing prices
  *   - Interpolation (range mode): linearly fills between a start and end price
- *   - Fetch mode: calls POST /price-snapshots/backfill (only when asset has price getters)
+ *   - Fetch mode: queues the range into the gap-fix job (only when asset has price getters)
  */
 
 import React, { useMemo, useState } from 'react';
@@ -17,7 +17,7 @@ import { Button, Input, Spinner } from '../ui/primitives';
 import { FiCheck, FiX, FiDownload, FiEdit3, FiAlertTriangle, FiToggleLeft, FiToggleRight, FiPlay } from 'react-icons/fi';
 import { API_URL, CheckExistingResponse, TestFetchResponse } from '../../types';
 import { toaster } from '../ui/toaster';
-import { useBulkManualPrices, useBackfillPrices, PRICE_GAPS_QUERY_KEY, PRICE_GAPS_SUMMARY_QUERY_KEY } from '../../hooks/usePriceGaps';
+import { useBulkManualPrices, useEnqueuePriceFetch, PRICE_GAPS_QUERY_KEY, PRICE_GAPS_SUMMARY_QUERY_KEY } from '../../hooks/usePriceGaps';
 import { PRICE_TIMESERIES_QUERY_KEY, PRICE_HEALTH_QUERY_KEY } from '../../hooks/usePriceHealth';
 import { useAssets } from '../../hooks/useAssets';
 import { useBaseCurrency } from '../../hooks/useBaseCurrency';
@@ -88,7 +88,7 @@ export const PriceSetterDialog: React.FC<PriceSetterDialogProps> = ({
     const [testError, setTestError] = useState<string | null>(null);
 
     const bulkManual = useBulkManualPrices();
-    const backfill = useBackfillPrices();
+    const enqueue = useEnqueuePriceFetch();
     const qc = useQueryClient();
     const { assets } = useAssets();
 
@@ -215,18 +215,13 @@ export const PriceSetterDialog: React.FC<PriceSetterDialogProps> = ({
         setIsSaving(true);
         try {
             if (sourceMode === 'fetch') {
-                // Fetch mode: use backfill endpoint
-                const result = await backfill.mutateAsync({
-                    asset_id: assetId,
-                    date_from: effectiveDateFrom,
-                    date_to: effectiveDateTo,
+                await enqueue.mutateAsync({
+                    items: [{ asset_id: assetId, date_from: effectiveDateFrom, date_to: effectiveDateTo }],
+                    quoteAssetId: selectedQuoteId || null,
                 });
-                const fetchedCount = result.fetched?.length ?? 0;
-                const failedCount = result.failed?.length ?? 0;
-                toaster.success({
-                    title: 'Prices fetched',
-                    description: `Fetched ${fetchedCount} price(s) for ${assetName}` +
-                        (failedCount > 0 ? ` (${failedCount} failed)` : ''),
+                toaster.info({
+                    title: 'Price fetch queued',
+                    description: `${assetName}: follow progress in the price fetch job`,
                 });
             } else if (dateMode === 'range') {
                 // Manual range
@@ -298,8 +293,8 @@ export const PriceSetterDialog: React.FC<PriceSetterDialogProps> = ({
     return (
         <RadixDialog.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
             <RadixDialog.Portal>
-                <RadixDialog.Overlay className="fixed inset-0 z-[2000] bg-black/40" />
-                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2000] w-full max-w-[460px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
+                <RadixDialog.Overlay className="fixed inset-0 z-[2500] bg-black/40" />
+                <RadixDialog.Content className="fixed left-1/2 top-1/2 z-[2500] w-full max-w-[460px] -translate-x-1/2 -translate-y-1/2 border border-slate-200 bg-white shadow-xl">
                     <div className="border-b border-slate-100 px-5 py-4">
                         <RadixDialog.Title className="text-base font-semibold text-slate-900">Price Setter</RadixDialog.Title>
                     </div>
