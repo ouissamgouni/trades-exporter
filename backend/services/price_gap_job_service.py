@@ -97,7 +97,9 @@ def prefill_with_ranges(
         if asset is not None:
             assets[aid] = asset
             skip = (already_tried or {}).get(aid, set())
-            plans[aid] = [p for p in _range_plan(session, svc, asset) if p[0] not in skip]
+            plans[aid] = [
+                p for p in _range_plan(session, svc, asset) if p[0] not in skip
+            ]
 
     filled: Dict[int, Dict[date, PriceResult]] = {}
     tried: Dict[int, Set[str]] = {}
@@ -208,7 +210,9 @@ class GapFixJobService:
                         None if added is None else sorted(set(scope) | set(added))
                     )
                 n = len(asset_ids or []) + len(ranges or [])
-                self._log("info", f"Queued {n or 'all'} more asset(s) into the running job")
+                self._log(
+                    "info", f"Queued {n or 'all'} more asset(s) into the running job"
+                )
                 self._state["queued_requests"] = len(self._pending)
             else:
                 self._start_locked(asset_ids, quote_asset_id, list(ranges or []))
@@ -230,7 +234,9 @@ class GapFixJobService:
             if asset_ids is None and not ranges
             else sorted(set(asset_ids or []) | {r[0] for r in ranges})
         )
-        self._state.update(status="scanning", scope_asset_ids=scope, started_at=_now_iso())
+        self._state.update(
+            status="scanning", scope_asset_ids=scope, started_at=_now_iso()
+        )
         self._thread = threading.Thread(
             target=self._run, args=(asset_ids, quote_asset_id, ranges), daemon=True
         )
@@ -386,12 +392,16 @@ class GapFixJobService:
             with self._lock:
                 work += new_work
                 self._state["total_assets"] += len(new_work)
-                self._state["total_missing_days"] += sum(w["missing_days"] for w in new_work)
+                self._state["total_missing_days"] += sum(
+                    w["missing_days"] for w in new_work
+                )
                 self._state["assets"] += [
                     {k: v for k, v in w.items() if k != "_dates"} for w in new_work
                 ]
                 if new_work:
-                    self._log("info", f"Added {len(new_work)} queued asset(s) with gaps")
+                    self._log(
+                        "info", f"Added {len(new_work)} queued asset(s) with gaps"
+                    )
 
         with self._lock:
             cancelled = self._cancel.is_set()
@@ -408,7 +418,11 @@ class GapFixJobService:
             self._log("info", "Cancelled" if cancelled else "Complete")
 
     def _prefill(
-        self, session: Session, svc: PriceService, work: List[Dict[str, Any]], offset: int = 0
+        self,
+        session: Session,
+        svc: PriceService,
+        work: List[Dict[str, Any]],
+        offset: int = 0,
     ):
         filled, tried = prefill_with_ranges(
             session, svc, {w["asset_id"]: w["_dates"] for w in work}

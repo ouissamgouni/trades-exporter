@@ -13,7 +13,9 @@ def test_account_sparklines_return_twr_and_mwr(monkeypatch):
             {"date": "2024-01-01", "value": 110.0, "pnl": 10.0},
         ]
     }
-    monkeypatch.setattr(portfolio_timeline, "compute_account_sparklines", lambda **kw: series)
+    monkeypatch.setattr(
+        portfolio_timeline, "compute_account_sparklines", lambda **kw: series
+    )
 
     out = pnl.get_account_sparklines(
         version_id=1,

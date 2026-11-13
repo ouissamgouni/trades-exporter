@@ -397,7 +397,9 @@ def _price_fetchable_asset_ids(session: Session, ids: List[int]) -> List[int]:
     fetchable = {
         a.asset_id
         for a in assets
-        if _classify_asset_price_policy(a, getters.get(a.asset_id))["price_fetch_eligible"]
+        if _classify_asset_price_policy(a, getters.get(a.asset_id))[
+            "price_fetch_eligible"
+        ]
     }
     return [aid for aid in ids if aid in fetchable]
 
@@ -529,7 +531,9 @@ def backfill_prices(
             status_code=404, detail=f"Asset ID {req.asset_id} not found"
         )
     return gap_fix_jobs.enqueue(
-        [], _resolve_quote_id(session, req.quote_asset_id), [(req.asset_id, d_from, d_to)]
+        [],
+        _resolve_quote_id(session, req.quote_asset_id),
+        [(req.asset_id, d_from, d_to)],
     )
 
 
@@ -571,14 +575,18 @@ def start_gap_fix_job(
         d_from, d_to = _parse_range(it.date_from, it.date_to)
         ranges.append((it.asset_id, d_from, d_to))
     if ranges:
-        fetchable = set(_price_fetchable_asset_ids(session, sorted({r[0] for r in ranges})))
+        fetchable = set(
+            _price_fetchable_asset_ids(session, sorted({r[0] for r in ranges}))
+        )
         ranges = [r for r in ranges if r[0] in fetchable]
     if req.asset_ids is None and req.items:
         asset_ids: List[int] = []
     else:
         asset_ids = _price_fetchable_asset_ids(
             session,
-            req.asset_ids if req.asset_ids is not None else _transaction_asset_ids(session),
+            req.asset_ids
+            if req.asset_ids is not None
+            else _transaction_asset_ids(session),
         )
     return gap_fix_jobs.enqueue(asset_ids, quote_id, ranges)
 
