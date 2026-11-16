@@ -61,12 +61,13 @@ class TestGetPriceAtDatesBaseCurrency:
         In practice this shouldn't happen, but setdefault is safe either way."""
         session = MagicMock()
         # Simulate a PriceSnapshot row for base_id=10
-        row = MagicMock(asset_id=10, price=1.0,
-                        snapshot_time=datetime(2025, 1, 1))
+        row = MagicMock(asset_id=10, price=1.0, snapshot_time=datetime(2025, 1, 1))
         session.exec.return_value.all.return_value = [row]
 
         result = _get_price_at_dates(
-            session, 10, [10],
+            session,
+            10,
+            [10],
             [datetime(2025, 1, 1, tzinfo=timezone.utc)],
         )
         assert result["2025-01-01"][10] == 1.0
@@ -78,7 +79,9 @@ class TestGetPriceAtDatesBaseCurrency:
         session.exec.return_value.all.return_value = []
 
         result = _get_price_at_dates(
-            session, None, [10, 20],
+            session,
+            None,
+            [10, 20],
             [datetime(2025, 1, 1, tzinfo=timezone.utc)],
         )
         # With no price rows and no base currency, result may be empty
@@ -93,7 +96,9 @@ class TestGetPriceAtDatesBaseCurrency:
         session.exec.return_value.all.return_value = []
 
         result = _get_price_at_dates(
-            session, 221, [275, 283],  # EUR not in list
+            session,
+            221,
+            [275, 283],  # EUR not in list
             [datetime(2025, 1, 1, tzinfo=timezone.utc)],
         )
         ds_prices = result.get("2025-01-01", {})
@@ -103,14 +108,13 @@ class TestGetPriceAtDatesBaseCurrency:
     def test_other_assets_still_resolved_from_snapshots(self, _mock_cls):
         """Non-base assets get prices from PriceSnapshot as before."""
         session = MagicMock()
-        row = MagicMock(asset_id=275, price=2500.0,
-                        snapshot_time=datetime(2025, 1, 1))
+        row = MagicMock(asset_id=275, price=2500.0, snapshot_time=datetime(2025, 1, 1))
         session.exec.return_value.all.return_value = [row]
 
         dates = [datetime(2025, 1, 2, tzinfo=timezone.utc)]
         result = _get_price_at_dates(session, 221, [221, 275], dates)
 
-        assert result["2025-01-02"][221] == 1.0   # injected
+        assert result["2025-01-02"][221] == 1.0  # injected
         assert result["2025-01-02"][275] == 2500.0  # from snapshot
 
     def test_empty_inputs_return_empty(self):
@@ -128,8 +132,13 @@ class TestGetPriceAtDatesBaseCurrency:
         stale: dict = {}
 
         result = _get_price_at_dates(
-            session, None, [275, 283],
-            [datetime(2025, 1, 5, tzinfo=timezone.utc), datetime(2025, 2, 1, tzinfo=timezone.utc)],
+            session,
+            None,
+            [275, 283],
+            [
+                datetime(2025, 1, 5, tzinfo=timezone.utc),
+                datetime(2025, 2, 1, tzinfo=timezone.utc),
+            ],
             stale_out=stale,
         )
 
@@ -155,8 +164,7 @@ class TestBaseCurrencyImpactOnCurrentValue:
         balances = {221: 50000.0, 275: 10.0}
         prices = {221: 1.0, 275: 2500.0}
         current_value = sum(
-            balances.get(aid, 0.0) * prices.get(aid, 0.0)
-            for aid in balances
+            balances.get(aid, 0.0) * prices.get(aid, 0.0) for aid in balances
         )
         assert current_value == pytest.approx(75000.0)
 
@@ -165,8 +173,7 @@ class TestBaseCurrencyImpactOnCurrentValue:
         balances = {221: 50000.0, 275: 10.0}
         prices = {275: 2500.0}  # EUR missing!
         current_value = sum(
-            balances.get(aid, 0.0) * prices.get(aid, 0.0)
-            for aid in balances
+            balances.get(aid, 0.0) * prices.get(aid, 0.0) for aid in balances
         )
         # Only gold counted → 25,000 instead of 75,000
         assert current_value == pytest.approx(25000.0)
@@ -185,8 +192,12 @@ class TestGetCurrentFromCostLots:
         """Multiple lots for same asset are summed correctly."""
         session = MagicMock()
         # Simulate SQL result: two assets
-        row1 = MagicMock(asset_id=221, total_qty=50000.0, total_cost=50000.0, total_invested=50000.0)  # EUR
-        row2 = MagicMock(asset_id=275, total_qty=10.0, total_cost=4000.0, total_invested=4000.0)     # Gold
+        row1 = MagicMock(
+            asset_id=221, total_qty=50000.0, total_cost=50000.0, total_invested=50000.0
+        )  # EUR
+        row2 = MagicMock(
+            asset_id=275, total_qty=10.0, total_cost=4000.0, total_invested=4000.0
+        )  # Gold
         session.exec.return_value.all.return_value = [row1, row2]
 
         balances, costs, acquired = _get_current_from_cost_lots(session, version_id=92)
@@ -199,7 +210,9 @@ class TestGetCurrentFromCostLots:
     def test_filters_near_zero(self):
         """Assets with negligible qty and cost are excluded."""
         session = MagicMock()
-        row = MagicMock(asset_id=999, total_qty=1e-15, total_cost=1e-15, total_invested=1e-15)
+        row = MagicMock(
+            asset_id=999, total_qty=1e-15, total_cost=1e-15, total_invested=1e-15
+        )
         session.exec.return_value.all.return_value = [row]
 
         balances, costs, acquired = _get_current_from_cost_lots(session, version_id=1)
@@ -307,7 +320,9 @@ class TestGetCurrentFromCostLotsUnsettledNegativeFilter:
     def test_default_excludes_unsettled_negatives(self):
         """Default (include_unsettled_negative=False) excludes them."""
         session = MagicMock()
-        row = MagicMock(asset_id=221, total_qty=50000.0, total_cost=50000.0, total_invested=50000.0)
+        row = MagicMock(
+            asset_id=221, total_qty=50000.0, total_cost=50000.0, total_invested=50000.0
+        )
         session.exec.return_value.all.return_value = [row]
 
         balances, costs, acquired = _get_current_from_cost_lots(session, version_id=92)
@@ -320,11 +335,18 @@ class TestGetCurrentFromCostLotsUnsettledNegativeFilter:
         """include_unsettled_negative=True does not add the filter clause."""
         session = MagicMock()
         # Simulate raw CostLot aggregation including unsettled negatives
-        row = MagicMock(asset_id=221, total_qty=-142000.0, total_cost=-142000.0, total_invested=-142000.0)
+        row = MagicMock(
+            asset_id=221,
+            total_qty=-142000.0,
+            total_cost=-142000.0,
+            total_invested=-142000.0,
+        )
         session.exec.return_value.all.return_value = [row]
 
         balances, costs, acquired = _get_current_from_cost_lots(
-            session, version_id=92, include_unsettled_negative=True,
+            session,
+            version_id=92,
+            include_unsettled_negative=True,
         )
         assert balances[221] == pytest.approx(-142000.0)
         assert costs[221] == pytest.approx(-142000.0)
@@ -352,7 +374,9 @@ class TestGetCurrentFromCostLotsUnsettledNegativeFilter:
         session.exec.return_value.all.return_value = []
 
         _get_current_from_cost_lots(
-            session, version_id=1, include_unsettled_negative=True,
+            session,
+            version_id=1,
+            include_unsettled_negative=True,
         )
 
         query_arg = session.exec.call_args[0][0]
@@ -377,7 +401,8 @@ class TestBalanceSnapshotsFilter:
         session.exec.return_value.all.return_value = []
 
         _get_balance_snapshots_at_dates(
-            session, version_id=1,
+            session,
+            version_id=1,
             bucket_dates=[datetime(2025, 1, 1, tzinfo=timezone.utc)],
         )
 
@@ -391,7 +416,8 @@ class TestBalanceSnapshotsFilter:
         session.exec.return_value.all.return_value = []
 
         _get_balance_snapshots_at_dates(
-            session, version_id=1,
+            session,
+            version_id=1,
             bucket_dates=[datetime(2025, 1, 1, tzinfo=timezone.utc)],
             include_unsettled_negative=True,
         )
@@ -405,12 +431,24 @@ class TestBalanceSnapshotsFilter:
         bucket = datetime(2025, 6, 1, tzinfo=timezone.utc)
 
         # Two positive lots for EUR (asset_id=221)
-        lot1 = MagicMock(timestamp=datetime(2025, 1, 1), lot_id=1, asset_id=221, qty_remaining_after=30000.0)
-        lot2 = MagicMock(timestamp=datetime(2025, 3, 1), lot_id=2, asset_id=221, qty_remaining_after=20000.0)
+        lot1 = MagicMock(
+            timestamp=datetime(2025, 1, 1),
+            lot_id=1,
+            asset_id=221,
+            qty_remaining_after=30000.0,
+        )
+        lot2 = MagicMock(
+            timestamp=datetime(2025, 3, 1),
+            lot_id=2,
+            asset_id=221,
+            qty_remaining_after=20000.0,
+        )
         session.exec.return_value.all.return_value = [lot1, lot2]
 
         result = _get_balance_snapshots_at_dates(
-            session, version_id=1, bucket_dates=[bucket],
+            session,
+            version_id=1,
+            bucket_dates=[bucket],
         )
 
         ds = "2025-06-01"
@@ -432,7 +470,8 @@ class TestCostBasisSnapshotsFilter:
         session.exec.return_value.all.return_value = []
 
         _get_cost_basis_snapshots_at_dates(
-            session, version_id=1,
+            session,
+            version_id=1,
             bucket_dates=[datetime(2025, 1, 1, tzinfo=timezone.utc)],
         )
 
@@ -446,7 +485,8 @@ class TestCostBasisSnapshotsFilter:
         session.exec.return_value.all.return_value = []
 
         _get_cost_basis_snapshots_at_dates(
-            session, version_id=1,
+            session,
+            version_id=1,
             bucket_dates=[datetime(2025, 1, 1, tzinfo=timezone.utc)],
             include_unsettled_negative=True,
         )
@@ -460,14 +500,26 @@ class TestCostBasisSnapshotsFilter:
         bucket = datetime(2025, 6, 1, tzinfo=timezone.utc)
 
         # Two lots for BTC (asset_id=275): 5 BTC @ 4000, 3 BTC @ 5000
-        lot1 = MagicMock(timestamp=datetime(2025, 1, 1), lot_id=10, asset_id=275,
-                         qty_remaining_after=5.0, unit_cost_in_base=4000.0)
-        lot2 = MagicMock(timestamp=datetime(2025, 3, 1), lot_id=11, asset_id=275,
-                         qty_remaining_after=3.0, unit_cost_in_base=5000.0)
+        lot1 = MagicMock(
+            timestamp=datetime(2025, 1, 1),
+            lot_id=10,
+            asset_id=275,
+            qty_remaining_after=5.0,
+            unit_cost_in_base=4000.0,
+        )
+        lot2 = MagicMock(
+            timestamp=datetime(2025, 3, 1),
+            lot_id=11,
+            asset_id=275,
+            qty_remaining_after=3.0,
+            unit_cost_in_base=5000.0,
+        )
         session.exec.return_value.all.return_value = [lot1, lot2]
 
         result = _get_cost_basis_snapshots_at_dates(
-            session, version_id=1, bucket_dates=[bucket],
+            session,
+            version_id=1,
+            bucket_dates=[bucket],
         )
 
         ds = "2025-06-01"
@@ -476,10 +528,11 @@ class TestCostBasisSnapshotsFilter:
 
 
 class TestPortfolioTimelineCache:
-
     @pytest.fixture(autouse=True)
     def _clear(self):
-        from backend.services.pnl.portfolio_timeline import clear_portfolio_timeline_cache
+        from backend.services.pnl.portfolio_timeline import (
+            clear_portfolio_timeline_cache,
+        )
 
         clear_portfolio_timeline_cache()
         yield
@@ -489,9 +542,17 @@ class TestPortfolioTimelineCache:
         from backend.services.pnl import portfolio_timeline as pt
 
         fingerprint = [(10, 99, 1.5)]
-        with patch.object(pt, "compute_portfolio_timeline", return_value=["p"]) as compute, \
-                patch.object(pt, "_price_fingerprint", side_effect=lambda s: fingerprint[0]):
-            assert pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1) == ["p"]
+        with (
+            patch.object(
+                pt, "compute_portfolio_timeline", return_value=["p"]
+            ) as compute,
+            patch.object(
+                pt, "_price_fingerprint", side_effect=lambda s: fingerprint[0]
+            ),
+        ):
+            assert pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1) == [
+                "p"
+            ]
             pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
             assert compute.call_count == 1
 
@@ -502,8 +563,10 @@ class TestPortfolioTimelineCache:
     def test_clear_forces_recompute(self):
         from backend.services.pnl import portfolio_timeline as pt
 
-        with patch.object(pt, "compute_portfolio_timeline", return_value=[]) as compute, \
-                patch.object(pt, "_price_fingerprint", return_value=(1, 1, 1)):
+        with (
+            patch.object(pt, "compute_portfolio_timeline", return_value=[]) as compute,
+            patch.object(pt, "_price_fingerprint", return_value=(1, 1, 1)),
+        ):
             pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
             pt.clear_portfolio_timeline_cache()
             pt.compute_portfolio_timeline_cached(MagicMock(), version_id=1)
@@ -525,14 +588,18 @@ class TestComputeSplitFactors:
         from backend.services.pnl.portfolio_timeline import _compute_split_factors
 
         prices = self._prices([100.0, 101.0, 102.0, 10.3, 10.4])
-        factors = _compute_split_factors({7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5)
+        factors = _compute_split_factors(
+            {7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5
+        )
         assert [factors[7][d] for d in self.DAYS] == [1.0, 1.0, 1.0, 10.0, 10.0]
 
     def test_price_drop_one_bucket_late_is_matched(self):
         from backend.services.pnl.portfolio_timeline import _compute_split_factors
 
         prices = self._prices([100.0, 101.0, 102.0, 103.0, 10.4])
-        factors = _compute_split_factors({7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5)
+        factors = _compute_split_factors(
+            {7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5
+        )
         assert factors[7]["2026-10-27"] == 1.0
         assert factors[7]["2026-10-28"] == 10.0
 
@@ -540,14 +607,17 @@ class TestComputeSplitFactors:
         from backend.services.pnl.portfolio_timeline import _compute_split_factors
 
         prices = self._prices([10.0, 10.1, 10.2, 10.3, 10.4])
-        factors = _compute_split_factors({7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5)
+        factors = _compute_split_factors(
+            {7: [("2026-10-27", 10.0)]}, prices, self.DAYS, window=5
+        )
         assert 7 not in factors
 
     def test_reverse_split(self):
         from backend.services.pnl.portfolio_timeline import _compute_split_factors
 
         prices = self._prices([1.0, 1.0, 1.0, 5.0, 5.1])
-        factors = _compute_split_factors({7: [("2026-10-27", 0.2)]}, prices, self.DAYS, window=5)
+        factors = _compute_split_factors(
+            {7: [("2026-10-27", 0.2)]}, prices, self.DAYS, window=5
+        )
         assert factors[7]["2026-10-26"] == 1.0
         assert factors[7]["2026-10-27"] == 0.2
-

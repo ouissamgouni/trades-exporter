@@ -38,8 +38,9 @@ def _point(day, items, unpriced_cost=0.0):
 def _run(points, rpnl, group_by="asset"):
     session = MagicMock()
     session.get.return_value = SimpleNamespace(base_currency_id=99)
-    with patch.object(gr, "compute_portfolio_timeline_cached", return_value=points), patch.object(
-        gr, "_get_cumulative_realized_pnl", return_value=rpnl
+    with (
+        patch.object(gr, "compute_portfolio_timeline_cached", return_value=points),
+        patch.object(gr, "_get_cumulative_realized_pnl", return_value=rpnl),
     ):
         return gr.compute_group_return_metrics(session, 1, group_by, "all")
 
@@ -72,7 +73,10 @@ class TestAssetReturnMetrics:
     def test_unpriced_holding_is_carried_at_cost(self):
         points = [
             _point("2024-01-01", [_item(1, 100.0, 100.0)]),
-            _point("2024-01-02", [_item(1, 100.0, 100.0), _item(2, 0.0, 50.0, priced=False)]),
+            _point(
+                "2024-01-02",
+                [_item(1, 100.0, 100.0), _item(2, 0.0, 50.0, priced=False)],
+            ),
         ]
         rpnl = {"2024-01-01": (0.0, {}), "2024-01-02": (0.0, {})}
 
@@ -89,7 +93,9 @@ class TestAssetReturnMetrics:
 
 
 def test_timeline_series_carries_unpriced_cost():
-    point = _point("2024-01-02", [_item(2, 0.0, 50.0, priced=False)], unpriced_cost=50.0)
+    point = _point(
+        "2024-01-02", [_item(2, 0.0, 50.0, priced=False)], unpriced_cost=50.0
+    )
 
     s = timeline_to_series([point])[0]
 

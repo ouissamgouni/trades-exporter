@@ -1233,60 +1233,60 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     );
 
     const renderTable = (flatRows: HoldingRow[] | null, withFooter: boolean, maxH = 'max-h-[70vh]') => (
-                <div className={`${maxH} overflow-auto`}>
-                    <table className="w-full border-collapse text-xs">
-                        <thead className="sticky top-0 z-[2] bg-slate-50">
-                            <tr className="border-b border-slate-200">
-                                <th className="sticky left-0 z-[3] cursor-pointer bg-slate-50 px-2 py-2 text-left text-[11px] font-semibold text-gray-600" onClick={() => toggleSort('asset')}>
-                                    Asset {effectiveSort.key === 'asset' && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
-                                </th>
-                                {visibleColumns.map(col => (
-                                    <th
-                                        key={col.id}
-                                        className={`whitespace-nowrap px-2 py-2 text-right text-[11px] font-semibold ${col.periodOnly ? 'text-blue-700' : 'text-gray-600'} ${col.sortable ? 'cursor-pointer hover:bg-slate-100' : ''}`}
-                                        onClick={col.sortable ? () => toggleSort(col.id) : undefined}
-                                    >
-                                        <span className="inline-flex items-center gap-1">
-                                            {col.label}{col.periodOnly && periodLabel ? ` ${periodLabel}` : ''}
-                                            {col.info && <InfoTip text={col.info} size={9} />}
-                                            {effectiveSort.key === col.id && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
-                                        </span>
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {flatRows
-                                ? flatRows.map(r => (
-                                    <Fragment key={r.key}>
-                                        {renderTableRow(r, 0)}
-                                        {renderExpansion(r)}
-                                    </Fragment>
-                                ))
-                                : (groups ?? []).map(g => (
-                                    <Fragment key={g.key}>
-                                        {renderGroupHeader(g)}
-                                        {!collapsedGroups.has(g.key) && g.rows.map(r => (
-                                            <Fragment key={`${g.key}-${r.key}`}>
-                                                {renderTableRow(r, 1)}
-                                                {effectiveGroupKey !== 'account' && renderExpansion(r)}
-                                            </Fragment>
-                                        ))}
+        <div className={`${maxH} overflow-auto`}>
+            <table className="w-full border-collapse text-xs">
+                <thead className="sticky top-0 z-[2] bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                        <th className="sticky left-0 z-[3] cursor-pointer bg-slate-50 px-2 py-2 text-left text-[11px] font-semibold text-gray-600" onClick={() => toggleSort('asset')}>
+                            Asset {effectiveSort.key === 'asset' && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
+                        </th>
+                        {visibleColumns.map(col => (
+                            <th
+                                key={col.id}
+                                className={`whitespace-nowrap px-2 py-2 text-right text-[11px] font-semibold ${col.periodOnly ? 'text-blue-700' : 'text-gray-600'} ${col.sortable ? 'cursor-pointer hover:bg-slate-100' : ''}`}
+                                onClick={col.sortable ? () => toggleSort(col.id) : undefined}
+                            >
+                                <span className="inline-flex items-center gap-1">
+                                    {col.label}{col.periodOnly && periodLabel ? ` ${periodLabel}` : ''}
+                                    {col.info && <InfoTip text={col.info} size={9} />}
+                                    {effectiveSort.key === col.id && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
+                                </span>
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {flatRows
+                        ? flatRows.map(r => (
+                            <Fragment key={r.key}>
+                                {renderTableRow(r, 0)}
+                                {renderExpansion(r)}
+                            </Fragment>
+                        ))
+                        : (groups ?? []).map(g => (
+                            <Fragment key={g.key}>
+                                {renderGroupHeader(g)}
+                                {!collapsedGroups.has(g.key) && g.rows.map(r => (
+                                    <Fragment key={`${g.key}-${r.key}`}>
+                                        {renderTableRow(r, 1)}
+                                        {effectiveGroupKey !== 'account' && renderExpansion(r)}
                                     </Fragment>
                                 ))}
-                        </tbody>
-                        {withFooter && <tfoot className="sticky bottom-0 z-[2] bg-slate-100">
-                            <tr className="border-t-2 border-slate-300">
-                                <td className="sticky left-0 z-[3] bg-slate-100 px-2 py-2 text-xs font-bold text-gray-800">
-                                    Total <span className="font-normal text-gray-500">({filtered.length})</span>
-                                </td>
-                                {visibleColumns.map(col => (
-                                    <td key={col.id} className="whitespace-nowrap px-2 py-2 text-right text-xs tabular-nums">{renderTotalCell(col, rowsForTotals)}</td>
-                                ))}
-                            </tr>
-                        </tfoot>}
-                    </table>
-                </div>
+                            </Fragment>
+                        ))}
+                </tbody>
+                {withFooter && <tfoot className="sticky bottom-0 z-[2] bg-slate-100">
+                    <tr className="border-t-2 border-slate-300">
+                        <td className="sticky left-0 z-[3] bg-slate-100 px-2 py-2 text-xs font-bold text-gray-800">
+                            Total <span className="font-normal text-gray-500">({filtered.length})</span>
+                        </td>
+                        {visibleColumns.map(col => (
+                            <td key={col.id} className="whitespace-nowrap px-2 py-2 text-right text-xs tabular-nums">{renderTotalCell(col, rowsForTotals)}</td>
+                        ))}
+                    </tr>
+                </tfoot>}
+            </table>
+        </div>
     );
 
     return (

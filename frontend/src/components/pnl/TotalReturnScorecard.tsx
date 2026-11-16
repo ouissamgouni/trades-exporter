@@ -585,19 +585,19 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                         {sideContent && <div className="lg:col-span-3">{sideContent}</div>}
                         <div className={`border border-slate-200 bg-white p-2 ${sideContent ? 'lg:col-span-2' : ''}`}>
                             <PeriodChartPanel
-                                    points={points}
-                                    baseCurrency={baseCurrency}
-                                    range={range}
-                                    isLoading={isLoading}
-                                    versionId={versionId}
-                                    assets={assetsProp}
-                                    contextLabel={contextLabel}
-                                    assetId={assetId}
-                                    assetSymbol={assetSymbol}
-                                    mainBenchmark={mainBenchmark}
-                                    returnMetrics={returnMetrics}
-                                    periodLabel={periodLabel}
-                                />
+                                points={points}
+                                baseCurrency={baseCurrency}
+                                range={range}
+                                isLoading={isLoading}
+                                versionId={versionId}
+                                assets={assetsProp}
+                                contextLabel={contextLabel}
+                                assetId={assetId}
+                                assetSymbol={assetSymbol}
+                                mainBenchmark={mainBenchmark}
+                                returnMetrics={returnMetrics}
+                                periodLabel={periodLabel}
+                            />
                         </div>
                     </div>
                 </>
