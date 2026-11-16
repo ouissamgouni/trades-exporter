@@ -28,6 +28,7 @@ import { getAccountColor } from '../../utils/accountColors';
 import { DeltaBar } from './DeltaBar';
 import { PnLBreakdownBar } from './PnLBreakdownBar';
 import { computeDelta, formatPct, type DeltaInfo } from './deltaUtils';
+import { ReturnRates } from './OverviewCards';
 
 // ------------------------------------------------------------------
 // Helpers (same logic as table version)
@@ -74,6 +75,9 @@ export interface AssetPnLCardProps {
     periodLabel?: string;
     /** PnL version ID to pass when opening asset detail panel */
     pnlVersionId?: number;
+    /** Time- / money-weighted return (%) over the selected period */
+    twr?: number | null;
+    mwr?: number | null;
 }
 
 // ------------------------------------------------------------------
@@ -130,6 +134,8 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
     periodDelta,
     periodLabel,
     pnlVersionId,
+    twr,
+    mwr,
 }) => {
     const assetPanelCtx = useContext(AssetDetailPanelContext);
     const assetId = row.asset.id;
@@ -388,9 +394,10 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                 </div>
             )}
 
-            {/* Live balance indicator — bottom right */}
+            {/* Return rates (left) + live balance indicator (right) */}
             {!isNoPnl && (
-                <div className="mt-0.5 flex justify-end">
+                <div className="mt-0.5 flex items-center justify-end">
+                    <ReturnRates twr={twr} mwr={mwr} className="mr-auto" />
                     {liveBalanceLoading ? (
                         <Spinner size="xs" className="text-gray-400" />
                     ) : (

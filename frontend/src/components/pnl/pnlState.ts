@@ -250,6 +250,9 @@ export function scopeToFilters(scope: ContextScope): {
 // Status Constants — single source of truth for magic strings
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Window event fired after warnings are acknowledged/reopened (open counts change) */
+export const PNL_WARNINGS_CHANGED_EVENT = 'pnl:warnings-changed';
+
 /** P&L calculation lifecycle statuses */
 export const PNL_STATUS = {
     IDLE: 'idle',

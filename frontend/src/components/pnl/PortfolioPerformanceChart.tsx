@@ -30,13 +30,34 @@ export const BENCHMARK_LINE_COLORS = ['#d4b872', '#9f7aea', '#38a169', '#dd6b20'
 
 export type PerformanceBasis = 'twr' | 'roi';
 
+export interface PriceIssueRange { from: string; to: string }
+
+const hasPriceIssue = (p: TimelinePoint) => (p.unpriced_count ?? 0) + (p.stale_count ?? 0) > 0;
+
+/** Consecutive dates where some holding has no price or a stale one. */
+export function priceIssueRanges(points: TimelinePoint[]): PriceIssueRange[] {
+    const ranges: PriceIssueRange[] = [];
+    let cur: PriceIssueRange | null = null;
+    for (const p of points) {
+        if (hasPriceIssue(p)) {
+            if (cur) cur.to = p.date;
+            else cur = { from: p.date, to: p.date };
+        } else if (cur) {
+            ranges.push(cur);
+            cur = null;
+        }
+    }
+    if (cur) ranges.push(cur);
+    return ranges;
+}
+
 // ---------------------------------------------------------------------------
 // Line layer: strong portfolio line, thin dashed benchmarks, shaded gap to the main benchmark
 // ---------------------------------------------------------------------------
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- nivo custom layer props are untyped */
-function makeLineLayer(portfolioId: string, shadeWithId: string | null) {
-    const Layer = ({ series, lineGenerator, xScale, yScale }: any) => {
+function makeLineLayer(portfolioId: string, shadeWithId: string | null, issueRanges: PriceIssueRange[] = []) {
+    const Layer = ({ series, lineGenerator, xScale, yScale, innerHeight }: any) => {
         const portfolio = series.find((s: any) => s.id === portfolioId);
         const shadeWith = shadeWithId ? series.find((s: any) => s.id === shadeWithId) : null;
         let shade: string | null = null;
@@ -56,6 +77,11 @@ function makeLineLayer(portfolioId: string, shadeWithId: string | null) {
         }
         return (
             <>
+                {issueRanges.map(r => {
+                    const x0 = xScale(new Date(`${r.from}T00:00:00`));
+                    const x1 = xScale(new Date(`${r.to}T00:00:00`));
+                    return <rect key={r.from} x={x0} y={0} width={Math.max(x1 - x0, 2)} height={innerHeight} fill="#f59e0b" fillOpacity={0.1} data-testid="price-issue-range" />;
+                })}
                 {shade && <path d={shade} fill={PORTFOLIO_COLOR} fillOpacity={0.08} stroke="none" />}
                 {series.map((s: any) => {
                     const isBenchmark = s.id !== portfolioId;
@@ -153,7 +179,9 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
     const labelOf = (ticker: string) => BENCHMARK_PRESETS.find(b => b.ticker === ticker)?.label ?? ticker;
     const shadeTicker = mainBenchmark && benchmarks.includes(mainBenchmark) ? mainBenchmark : benchmarks[0];
     const shadeWithId = showBenchmarks && shadeTicker ? labelOf(shadeTicker) : null;
-    const lineLayer = useMemo(() => makeLineLayer(portfolioLabel, shadeWithId), [portfolioLabel, shadeWithId]);
+    const issueRanges = useMemo(() => priceIssueRanges(filteredPoints), [filteredPoints]);
+    const lineLayer = useMemo(() => makeLineLayer(portfolioLabel, shadeWithId, issueRanges), [portfolioLabel, shadeWithId, issueRanges]);
+    const lastPoint = filteredPoints[filteredPoints.length - 1];
 
     // ---- Build chart series ----
     const { chartData, colorMap } = useMemo(() => {
@@ -172,7 +200,8 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
             for (const pt of filteredPoints) {
                 const costBasis = pt.cost_basis_in_base;
                 if (costBasis <= 0) continue;
-                const roi = ((pt.unrealized_pnl + pt.cumulative_realized_pnl + (pt.cumulative_income ?? 0)) / costBasis) * 100;
+                // Unpriced holdings are carried at cost rather than at zero
+                const roi = ((pt.unrealized_pnl + pt.cumulative_realized_pnl + (pt.cumulative_income ?? 0) + (pt.unpriced_cost_in_base ?? 0)) / costBasis) * 100;
                 if (roi0 === null) roi0 = roi;
                 portfolioData.push({ x: pt.date, y: roi - roi0 });
             }
@@ -265,6 +294,9 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                                 <div className="mb-1 text-xs font-bold text-slate-600">
                                     {slice.points[0]?.data.xFormatted}
                                 </div>
+                                {issueRanges.some(r => String(slice.points[0]?.data.xFormatted) >= r.from && String(slice.points[0]?.data.xFormatted) <= r.to) && (
+                                    <div className="mb-1 text-[10px] text-amber-700">Some prices missing or stale</div>
+                                )}
                                 {slice.points.map(p => (
                                     <div key={p.id} className="flex justify-between gap-3">
                                         <div className="flex items-center gap-1">
@@ -294,6 +326,17 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                             tooltip: { container: { fontFamily: 'inherit', fontSize: 11 } },
                         }}
                     />
+                </div>
+            )}
+            {issueRanges.length > 0 && !isLoading && (
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-amber-700" data-testid="price-issue-note">
+                    <span className="inline-block h-2 w-3 bg-amber-400/40" />
+                    Shaded: some holdings had no price (counted at cost) or a price over a week old
+                    {lastPoint && hasPriceIssue(lastPoint) && (
+                        <span className="text-amber-800">
+                            · today {lastPoint.unpriced_count ? `${lastPoint.unpriced_count} unpriced` : ''}{lastPoint.unpriced_count && lastPoint.stale_count ? ', ' : ''}{lastPoint.stale_count ? `${lastPoint.stale_count} stale` : ''}
+                        </span>
+                    )}
                 </div>
             )}
         </div>

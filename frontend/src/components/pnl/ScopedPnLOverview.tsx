@@ -66,6 +66,7 @@ export const ScopedPnLOverview: React.FC<ScopedPnLOverviewProps> = ({
             assetId={assetIds?.length === 1 ? assetIds[0] : undefined}
             assetSymbol={assetIds?.length === 1 ? contextLabel : undefined}
             returnMetrics={returns.data?.ranges?.[range as RangeKey] ?? null}
+            returnsScope={scope}
             mainBenchmark={mainBenchmark}
         />
     );

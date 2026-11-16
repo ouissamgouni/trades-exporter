@@ -14,6 +14,7 @@ import { API_URL } from '../../types';
 import { CostBasisChainTooltip } from './CostBasisChainTooltip';
 import { Tooltip } from '../ui/tooltip';
 import { toaster } from '../ui/toaster';
+import { PNL_WARNINGS_CHANGED_EVENT } from './pnlState';
 
 interface FilterOption { value: string; label?: string; count: number }
 interface WarningsFilterOptions {
@@ -161,6 +162,7 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
             if (!res.ok) throw new Error();
             toaster.success({ title: acknowledge ? `Acknowledged ${ids.length} warning(s)` : `Reopened ${ids.length} warning(s)` });
             refetch();
+            window.dispatchEvent(new Event(PNL_WARNINGS_CHANGED_EVENT));
         } catch {
             toaster.error({ title: acknowledge ? 'Acknowledge failed' : 'Reopen failed' });
         } finally {

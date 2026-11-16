@@ -309,6 +309,7 @@ const AccountHoldings: React.FC<{ account: Account; accounts: Account[]; version
             selectedCategoryIds={categoryIds}
             onSelectedCategoryIdsChange={setCategoryIds}
             pnlVersionId={versionId}
+            returnsAccountIds={accountIds}
             persistToUrl={false}
         />
     );

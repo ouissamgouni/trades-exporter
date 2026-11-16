@@ -65,6 +65,8 @@ class BreakdownItem:
     realized_pnl_to_date: float
     # Cumulative split ratio to apply to the unit price for a split-continuous price series
     split_factor: float = 1.0
+    priced: bool = True
+    stale: bool = False
 
 
 @dataclass
@@ -76,6 +78,10 @@ class TimelinePoint:
     cumulative_realized_pnl: float
     cumulative_income: float = 0.0
     breakdown: List[BreakdownItem] = field(default_factory=list)
+    # Cost of holdings with no price at this date (valued 0 in total_value_in_base)
+    unpriced_cost_in_base: float = 0.0
+    unpriced_count: int = 0
+    stale_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -386,8 +392,13 @@ def compute_portfolio_timeline(
     all_asset_ids_list = list(all_asset_ids)
 
     # 3. Get prices for those assets at each date
+    stale_by_date: Dict[str, set] = {}
     price_snapshots = _get_price_at_dates(
-        session, version.base_currency_id, all_asset_ids_list, buckets
+        session,
+        version.base_currency_id,
+        all_asset_ids_list,
+        buckets,
+        stale_out=stale_by_date,
     )
 
     # 4. Get cumulative realized P&L
@@ -425,6 +436,10 @@ def compute_portfolio_timeline(
 
         total_value = 0.0
         total_cost_basis = 0.0
+        unpriced_cost = 0.0
+        unpriced_count = 0
+        stale_count = 0
+        stale_ids = stale_by_date.get(date_str, set())
         breakdown: List[BreakdownItem] = []
 
         for asset_id in sorted(all_asset_ids):
@@ -439,6 +454,13 @@ def compute_portfolio_timeline(
 
             total_value += asset_value
             total_cost_basis += cost
+            priced = asset_id in prices
+            stale = priced and asset_id in stale_ids
+            if not priced:
+                unpriced_cost += cost
+                unpriced_count += 1
+            elif stale:
+                stale_count += 1
 
             breakdown.append(BreakdownItem(
                 asset_id=asset_id,
@@ -449,6 +471,8 @@ def compute_portfolio_timeline(
                 cost_basis_in_base=round(cost, 2),
                 realized_pnl_to_date=round(rpnl_by_asset.get(asset_id, 0.0), 2),
                 split_factor=split_factors.get(asset_id, {}).get(date_str, 1.0),
+                priced=priced,
+                stale=stale,
             ))
 
         unrealized = total_value - total_cost_basis
@@ -461,6 +485,9 @@ def compute_portfolio_timeline(
             cumulative_realized_pnl=round(rpnl_total, 2),
             cumulative_income=round(cumulative_income_by_date.get(date_str, 0.0), 2),
             breakdown=breakdown,
+            unpriced_cost_in_base=round(unpriced_cost, 2),
+            unpriced_count=unpriced_count,
+            stale_count=stale_count,
         ))
 
     log.info(
@@ -583,6 +610,7 @@ def compute_account_sparklines(
                 "value": pt.total_value_in_base,
                 "roi": roi,
                 "pnl": pt.unrealized_pnl + pt.cumulative_realized_pnl,
+                "unpriced_cost": pt.unpriced_cost_in_base,
             })
         result[account_id] = series
     return result

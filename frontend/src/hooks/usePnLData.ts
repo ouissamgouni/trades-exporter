@@ -14,7 +14,7 @@ import { toaster } from '../components/ui/toaster';
 import { usePnL } from '../components/pnl/PnLContext';
 import { usePnLCalculationStatus } from './usePnLCalculationStatus';
 import { applyPriceToAssetRow, balancesToAssetRows, buildPriceMap, computeSummaryTotals } from '../components/pnl/pnlCalculations';
-import { PNL_STATUS, VERSION_STATUS } from '../components/pnl/pnlState';
+import { PNL_STATUS, PNL_WARNINGS_CHANGED_EVENT, VERSION_STATUS } from '../components/pnl/pnlState';
 import type {
     PnLVersionResponse,
     AggregatedBalanceItem,
@@ -635,6 +635,18 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
             });
         }
     }, [showUnsettledNegative, currentVersionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (!currentVersionId) return;
+        const refresh = () => {
+            fetch(`${API_URL}/pnl/versions/${currentVersionId}/warnings/type-counts`)
+                .then(r => r.ok ? r.json() : {})
+                .then(data => dispatch({ type: 'SET_WARNING_TYPE_COUNTS', counts: data }))
+                .catch(() => { });
+        };
+        window.addEventListener(PNL_WARNINGS_CHANGED_EVENT, refresh);
+        return () => window.removeEventListener(PNL_WARNINGS_CHANGED_EVENT, refresh);
+    }, [currentVersionId, dispatch]);
 
     // Auto-load latest version on first mount
     useEffect(() => {

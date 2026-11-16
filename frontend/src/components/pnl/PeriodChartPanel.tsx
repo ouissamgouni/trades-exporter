@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FiAlertTriangle, FiChevronDown, FiMaximize2 } from 'react-icons/fi';
-import { BENCHMARK_PRESETS, type TimelinePoint } from '../../hooks/useChartData';
+import { BENCHMARK_PRESETS, type ReturnMetricsRange, type TimelinePoint } from '../../hooks/useChartData';
 import { usePriceGaps } from '../../hooks/usePriceGaps';
 import { useAsset } from '../../hooks/useAsset';
 import type { Range } from './TotalReturnScorecard';
@@ -21,7 +21,7 @@ import { ChartFullscreenModal } from './ChartFullscreenModal';
 import { GapFixPanel } from '../GapFixPanel';
 import { Badge } from '../ui/primitives';
 
-type ChartMode = 'performance' | 'cost-vs-value' | 'price';
+type ChartMode = 'performance' | 'cost-vs-value' | 'price' | 'compare';
 
 interface PeriodChartPanelProps {
     points: TimelinePoint[];
@@ -42,7 +42,18 @@ interface PeriodChartPanelProps {
     assetSymbol?: string;
     /** Page-wide main benchmark: shaded against the portfolio line */
     mainBenchmark?: string;
+    /** TWR / MWR of the selected period, shown in the fullscreen header */
+    returnMetrics?: ReturnMetricsRange | null;
+    periodLabel?: string;
 }
+
+const pct = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
+const MODE_TITLES: Record<ChartMode, string> = {
+    performance: 'Performance',
+    'cost-vs-value': 'Cost Basis vs Market Value',
+    price: 'Price',
+    compare: 'Compare assets (price return)',
+};
 
 const BENCHMARKS_KEY = 'pnl.chartBenchmarks';
 const BASIS_KEY = 'pnl.chartBasis';
@@ -68,6 +79,8 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
     assetId,
     assetSymbol,
     mainBenchmark = '^GSPC',
+    returnMetrics,
+    periodLabel,
 }) => {
     const { asset: scopedAsset } = useAsset(assetId ?? null, assetId != null);
     const firstTxDate = scopedAsset?.first_transaction_date ?? null;
@@ -129,6 +142,50 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
         ['cost-vs-value', 'Cost vs Value'],
         ...(assetId != null ? [['price', 'Price'] as [ChartMode, string]] : []),
     ];
+    const canCompare = versionId != null && !!assets?.length && assetId == null;
+    const fsModes: [ChartMode, string][] = canCompare ? [...modes, ['compare', 'Compare assets']] : modes;
+    const inlineMode: ChartMode = chartMode === 'compare' ? 'performance' : chartMode;
+
+    // Same controls inline and in fullscreen: TWR / ROI basis and the shared benchmark selection
+    const perfControls = (
+        <>
+            <div className="flex">
+                {(['twr', 'roi'] as PerformanceBasis[]).map(b => (
+                    <button
+                        key={b}
+                        type="button"
+                        onClick={() => setBasis(b)}
+                        title={b === 'twr' ? 'Time-weighted return: unaffected by deposits/withdrawals' : 'Return on cost (moves with deposits)'}
+                        className={`h-5 border px-1.5 text-[10px] font-semibold ${basis === b ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                    >
+                        {b.toUpperCase()}
+                    </button>
+                ))}
+            </div>
+            <div className="relative" ref={benchRef}>
+                <button
+                    type="button"
+                    onClick={() => setBenchOpen(v => !v)}
+                    className="flex h-5 items-center gap-1 border border-slate-200 bg-white px-1.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                    aria-expanded={benchOpen}
+                >
+                    Benchmarks ({benchmarks.length}) <FiChevronDown size={10} />
+                </button>
+                {benchOpen && (
+                    <div className="absolute right-0 top-6 z-30 w-[200px] border border-slate-200 bg-white p-2 shadow-lg">
+                        {BENCHMARK_PRESETS.map(b => (
+                            <label key={b.ticker} className="flex cursor-pointer items-center gap-1.5 py-0.5 text-[11px] text-gray-700">
+                                <input type="checkbox" checked={benchmarks.includes(b.ticker)} onChange={() => toggleBenchmark(b.ticker)} className="accent-blue-500" />
+                                {b.label}
+                                {b.ticker === mainBenchmark && <span className="ml-auto text-[9px] text-gray-400">main</span>}
+                            </label>
+                        ))}
+                        <div className="mt-1 border-t border-slate-100 pt-1 text-[9px] text-gray-400">Converted to {baseCurrency}</div>
+                    </div>
+                )}
+            </div>
+        </>
+    );
 
     const handleOpenFullscreen = () => {
         setFsZoom(periodZoom);
@@ -145,7 +202,7 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                         {modes.map(([mode, label]) => (
                             <Badge
                                 key={mode}
-                                className={`cursor-pointer px-1.5 ${chartMode === mode ? 'bg-blue-500 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}
+                                className={`cursor-pointer px-1.5 ${inlineMode === mode ? 'bg-blue-500 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}
                                 onClick={() => setChartMode(mode)}
                             >
                                 {label}
@@ -153,45 +210,7 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                         ))}
                     </div>
                     <div className="flex items-center gap-1.5">
-                        {chartMode === 'performance' && (
-                            <>
-                                <div className="flex">
-                                    {(['twr', 'roi'] as PerformanceBasis[]).map(b => (
-                                        <button
-                                            key={b}
-                                            type="button"
-                                            onClick={() => setBasis(b)}
-                                            title={b === 'twr' ? 'Time-weighted return: unaffected by deposits/withdrawals' : 'Return on cost (moves with deposits)'}
-                                            className={`h-5 border px-1.5 text-[10px] font-semibold ${basis === b ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-                                        >
-                                            {b.toUpperCase()}
-                                        </button>
-                                    ))}
-                                </div>
-                                <div className="relative" ref={benchRef}>
-                                    <button
-                                        type="button"
-                                        onClick={() => setBenchOpen(v => !v)}
-                                        className="flex h-5 items-center gap-1 border border-slate-200 bg-white px-1.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
-                                        aria-expanded={benchOpen}
-                                    >
-                                        Benchmarks ({benchmarks.length}) <FiChevronDown size={10} />
-                                    </button>
-                                    {benchOpen && (
-                                        <div className="absolute right-0 top-6 z-30 w-[200px] border border-slate-200 bg-white p-2 shadow-lg">
-                                            {BENCHMARK_PRESETS.map(b => (
-                                                <label key={b.ticker} className="flex cursor-pointer items-center gap-1.5 py-0.5 text-[11px] text-gray-700">
-                                                    <input type="checkbox" checked={benchmarks.includes(b.ticker)} onChange={() => toggleBenchmark(b.ticker)} className="accent-blue-500" />
-                                                    {b.label}
-                                                    {b.ticker === mainBenchmark && <span className="ml-auto text-[9px] text-gray-400">main</span>}
-                                                </label>
-                                            ))}
-                                            <div className="mt-1 border-t border-slate-100 pt-1 text-[9px] text-gray-400">Converted to {baseCurrency}</div>
-                                        </div>
-                                    )}
-                                </div>
-                            </>
-                        )}
+                        {inlineMode === 'performance' && !isFullscreen && perfControls}
                         <button
                             type="button"
                             className="text-slate-400 hover:text-blue-500"
@@ -205,17 +224,17 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                 </div>
 
                 {/* Error state */}
-                {error && chartMode !== 'price' ? (
+                {error && inlineMode !== 'price' ? (
                     <div className="flex h-[200px] flex-col items-center justify-center gap-1">
                         <span className="text-red-400"><FiAlertTriangle size={16} /></span>
                         <span className="text-xs text-red-500">Failed to load chart data</span>
                         <span className="text-xs text-red-400">{error}</span>
                     </div>
-                ) : !isLoading && points.length === 0 && chartMode !== 'price' ? (
+                ) : !isLoading && points.length === 0 && inlineMode !== 'price' ? (
                     <div className="flex h-[200px] flex-col items-center justify-center gap-1">
                         <span className="text-xs text-slate-400">No chart data available for this period</span>
                     </div>
-                ) : chartMode === 'performance' ? (
+                ) : inlineMode === 'performance' ? (
                     <PortfolioPerformanceChart
                         points={points}
                         baseCurrency={baseCurrency}
@@ -228,7 +247,7 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                         mainBenchmark={mainBenchmark}
                         basis={basis}
                     />
-                ) : chartMode === 'cost-vs-value' ? (
+                ) : inlineMode === 'cost-vs-value' ? (
                     <CostBasisVsMarketValueChart
                         points={points}
                         baseCurrency={baseCurrency}
@@ -243,7 +262,7 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                 ) : null}
 
                 {/* Period-scoped gap warning (Performance / Cost vs Value tabs only) */}
-                {chartMode !== 'price' && assetId != null && periodGapCount > 0 && (
+                {inlineMode !== 'price' && assetId != null && periodGapCount > 0 && (
                     <div className="mt-1 flex items-center gap-1 border border-orange-200 bg-orange-50 px-2 py-1">
                         <span className="text-orange-500"><FiAlertTriangle size={11} /></span>
                         <span className="text-[10px] text-orange-700">
@@ -263,14 +282,12 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
             <ChartFullscreenModal
                 isOpen={isFullscreen}
                 onClose={() => setIsFullscreen(false)}
-                title={contextLabel
-                    ? `${contextLabel} — ${chartMode === 'performance' ? 'Performance (Rebased)' : chartMode === 'cost-vs-value' ? 'Cost Basis vs Market Value' : 'Price'}`
-                    : chartMode === 'performance' ? 'Performance (Rebased)' : chartMode === 'cost-vs-value' ? 'Cost Basis vs Market Value' : 'Price'}
+                title={contextLabel ? `${contextLabel} — ${MODE_TITLES[chartMode]}` : MODE_TITLES[chartMode]}
             >
-                {/* Mode toggle + zoom badges */}
+                {/* Mode toggle + same performance controls as inline */}
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex gap-1">
-                        {modes.map(([mode, label]) => (
+                        {fsModes.map(([mode, label]) => (
                             <Badge
                                 key={mode}
                                 className={`cursor-pointer px-2 ${chartMode === mode ? 'bg-blue-500 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}
@@ -280,38 +297,47 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                             </Badge>
                         ))}
                     </div>
+                    {chartMode === 'performance' && (
+                        <div className="flex items-center gap-3">
+                            {returnMetrics && (
+                                <span className="text-[11px] text-gray-500" data-testid="fullscreen-return-rates" title="Money-weighted return is a single rate for the period, not a line: it depends on when money was added">
+                                    {periodLabel ?? 'Period'}: TWR <span className="font-semibold tabular-nums text-gray-800">{pct(returnMetrics.twr_pct)}</span>
+                                    {' · '}MWR <span className="font-semibold tabular-nums text-gray-800">{pct((returnMetrics.days ?? 0) >= 365 ? returnMetrics.irr_pct : returnMetrics.irr_period_pct)}{(returnMetrics.days ?? 0) >= 365 && returnMetrics.irr_pct != null ? '/y' : ''}</span>
+                                </span>
+                            )}
+                            <div className="flex items-center gap-1.5">{perfControls}</div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Full-size chart with own zoom controls */}
                 {chartMode === 'performance' ? (
-                    versionId != null && assets ? (
-                        <AssetPerformanceComparison
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            assets={assets}
-                            sharedTimeline={{
-                                data: points.length ? { points } : null,
-                                isLoading: !!isLoading,
-                                error: null,
-                            }}
-                            zoom={fsZoom}
-                            onZoomChange={setFsZoom}
-                            contextLabel={contextLabel}
-                        />
-                    ) : (
-                        <PortfolioPerformanceChart
-                            points={points}
-                            baseCurrency={baseCurrency}
-                            isLoading={isLoading}
-                            zoom={fsZoom}
-                            onZoomChange={setFsZoom}
-                            height="calc(90vh - 200px)"
-                            contextLabel={contextLabel}
-                            benchmarks={benchmarks}
-                            mainBenchmark={mainBenchmark}
-                            basis={basis}
-                        />
-                    )
+                    <PortfolioPerformanceChart
+                        points={points}
+                        baseCurrency={baseCurrency}
+                        isLoading={isLoading}
+                        zoom={fsZoom}
+                        onZoomChange={setFsZoom}
+                        height="calc(90vh - 220px)"
+                        contextLabel={contextLabel}
+                        benchmarks={benchmarks}
+                        mainBenchmark={mainBenchmark}
+                        basis={basis}
+                    />
+                ) : chartMode === 'compare' && canCompare ? (
+                    <AssetPerformanceComparison
+                        versionId={versionId!}
+                        baseCurrency={baseCurrency}
+                        assets={assets!}
+                        sharedTimeline={{
+                            data: points.length ? { points } : null,
+                            isLoading: !!isLoading,
+                            error: null,
+                        }}
+                        zoom={fsZoom}
+                        onZoomChange={setFsZoom}
+                        contextLabel={contextLabel}
+                    />
                 ) : chartMode === 'cost-vs-value' ? (
                     <CostBasisVsMarketValueChart
                         points={points}

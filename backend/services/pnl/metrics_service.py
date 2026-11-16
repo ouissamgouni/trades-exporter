@@ -746,11 +746,14 @@ def _get_price_at_dates(
     base_currency_id: Optional[int],
     asset_ids: List[int],
     bucket_dates: List[datetime],
+    stale_out: Optional[Dict[str, set]] = None,
+    stale_days: int = 7,
 ) -> Dict[str, Dict[int, float]]:
     """
     For each date bucket and asset, get the closest price snapshot.
 
-    Returns: { date_str: { asset_id: price } }
+    Returns: { date_str: { asset_id: price } }. When stale_out is given, it receives
+    { date_str: {asset_id} } for prices older than stale_days or back-filled from later.
     """
     if not asset_ids or not bucket_dates:
         if base_currency_id and bucket_dates:
@@ -808,14 +811,21 @@ def _get_price_at_dates(
                 continue
 
             best_price = None
+            best_ts = None
             for ts, price in price_list:
                 if _ensure_naive(ts) <= bd:
                     best_price = price
+                    best_ts = _ensure_naive(ts)
                 else:
                     break
 
             if best_price is None and price_list:
                 best_price = price_list[0][1]
+
+            if stale_out is not None and (
+                best_ts is None or (bd - best_ts).days > stale_days
+            ):
+                stale_out.setdefault(date_str, set()).add(asset_id)
 
             if best_price is not None:
                 prices[asset_id] = best_price
@@ -1083,12 +1093,15 @@ def _compute_fee_summary(
     session: Session,
     version_id: int,
     account_ids: Optional[List[int]] = None,
+    asset_ids: Optional[List[int]] = None,
 ) -> Tuple[float, int]:
     """Compute total fees and fee entry count for a version."""
     query = select(
         func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0).label("total_fees"),
         func.count(FeeEntry.id).label("fee_count"),
     ).where(FeeEntry.version_id == version_id)
+    if asset_ids:
+        query = query.where(FeeEntry.related_asset_id.in_(asset_ids))
     fee_summary = session.exec(_scope_fees_to_accounts(query, account_ids)).first()
     total_fees = float(fee_summary.total_fees) if fee_summary else 0.0
     fee_count = fee_summary.fee_count if fee_summary else 0
@@ -1101,6 +1114,7 @@ def _compute_fees_in_period(
     start_dt: datetime,
     end_dt: datetime,
     account_ids: Optional[List[int]] = None,
+    asset_ids: Optional[List[int]] = None,
 ) -> float:
     """Compute total fees within a date range by joining FeeEntry → CalculationUnit."""
     query = (
@@ -1112,6 +1126,8 @@ def _compute_fees_in_period(
             CalculationUnit.timestamp <= end_dt,
         )
     )
+    if asset_ids:
+        query = query.where(FeeEntry.related_asset_id.in_(asset_ids))
     result = session.exec(_scope_fees_to_accounts(query, account_ids)).first()
     return float(result or 0)
 
@@ -1142,22 +1158,48 @@ def _get_fees_by_asset(
 # ---------------------------------------------------------------------------
 
 
+def _scope_income(
+    query,
+    account_ids: Optional[List[int]],
+    asset_ids: Optional[List[int]],
+):
+    """Restrict an IncomeEvent query to position assets (attributed, else received) and accounts."""
+    if asset_ids:
+        query = query.where(
+            func.coalesce(IncomeEvent.attributed_asset_id, IncomeEvent.asset_id).in_(
+                asset_ids
+            )
+        )
+    if account_ids:
+        query = query.join(
+            NormalizedTransaction,
+            IncomeEvent.transaction_id == NormalizedTransaction.id,
+        ).where(NormalizedTransaction.account_id.in_(account_ids))
+    return query
+
+
 def _compute_income_summary(
     session: Session,
     version_id: int,
+    account_ids: Optional[List[int]] = None,
+    asset_ids: Optional[List[int]] = None,
 ) -> Tuple[float, float, int]:
     """Compute total income, withholding, and event count for a version."""
     try:
         result = session.exec(
-            select(
-                func.coalesce(func.sum(IncomeEvent.gross_amount_in_base), 0).label(
-                    "total_income"
-                ),
-                func.coalesce(
-                    func.sum(IncomeEvent.withholding_amount_in_base), 0
-                ).label("total_withholding"),
-                func.count(IncomeEvent.id).label("event_count"),
-            ).where(IncomeEvent.version_id == version_id)
+            _scope_income(
+                select(
+                    func.coalesce(func.sum(IncomeEvent.gross_amount_in_base), 0).label(
+                        "total_income"
+                    ),
+                    func.coalesce(
+                        func.sum(IncomeEvent.withholding_amount_in_base), 0
+                    ).label("total_withholding"),
+                    func.count(IncomeEvent.id).label("event_count"),
+                ).where(IncomeEvent.version_id == version_id),
+                account_ids,
+                asset_ids,
+            )
         ).first()
         if not result:
             return 0.0, 0.0, 0
@@ -1175,17 +1217,23 @@ def _compute_income_in_period(
     version_id: int,
     start_dt: datetime,
     end_dt: datetime,
+    account_ids: Optional[List[int]] = None,
+    asset_ids: Optional[List[int]] = None,
 ) -> Tuple[float, float]:
     """Compute income and withholding within a date range."""
     try:
         result = session.exec(
-            select(
-                func.coalesce(func.sum(IncomeEvent.gross_amount_in_base), 0),
-                func.coalesce(func.sum(IncomeEvent.withholding_amount_in_base), 0),
-            ).where(
-                IncomeEvent.version_id == version_id,
-                IncomeEvent.income_at >= start_dt,
-                IncomeEvent.income_at <= end_dt,
+            _scope_income(
+                select(
+                    func.coalesce(func.sum(IncomeEvent.gross_amount_in_base), 0),
+                    func.coalesce(func.sum(IncomeEvent.withholding_amount_in_base), 0),
+                ).where(
+                    IncomeEvent.version_id == version_id,
+                    IncomeEvent.income_at >= start_dt,
+                    IncomeEvent.income_at <= end_dt,
+                ),
+                account_ids,
+                asset_ids,
             )
         ).first()
         if not result:
@@ -1909,7 +1957,9 @@ def _compute_book_core(
     total_invested = sum(snap.now_lot_invested.get(aid, 0.0) for aid in all_asset_ids)
 
     # Fee summary
-    total_fees, fee_count = _compute_fee_summary(session, version_id, account_ids)
+    total_fees, fee_count = _compute_fee_summary(
+        session, version_id, account_ids, asset_ids
+    )
 
     # Realized PnL
     cumulative_rpnl = _build_realized_pnl_snapshots(
@@ -1955,7 +2005,7 @@ def _compute_book_core(
 
     # Income summary
     total_income, total_withholding, income_count = _compute_income_summary(
-        session, version_id
+        session, version_id, account_ids, asset_ids
     )
 
     summary = BookSummary(
@@ -1992,14 +2042,14 @@ def _compute_book_core(
             start_cost = sum(start_costs.get(aid, 0.0) for aid in all_asset_ids)
             cost_basis_in_period = cost_basis - start_cost
             fees_in_period = _compute_fees_in_period(
-                session, version_id, start_dt, snap.now, account_ids
+                session, version_id, start_dt, snap.now, account_ids, asset_ids
             )
             start_invested = snap.invested_snapshots.get(start_ds, {})
             invested_in_period = total_invested - sum(
                 start_invested.get(aid, 0.0) for aid in all_asset_ids
             )
             income_in_period, withholding_in_period = _compute_income_in_period(
-                session, version_id, start_dt, snap.now
+                session, version_id, start_dt, snap.now, account_ids, asset_ids
             )
             deposits_in_period = (
                 0.0
@@ -2164,7 +2214,9 @@ def compute_version_metrics(
         version = session.get(CalculationVersion, version_id)
         if not version:
             return None
-        total_fees, fee_count = _compute_fee_summary(session, version_id, account_ids)
+        total_fees, fee_count = _compute_fee_summary(
+            session, version_id, account_ids, asset_ids
+        )
         return VersionMetrics(
             version_id=version_id,
             summary=SummaryMetrics(
@@ -2357,7 +2409,9 @@ def compute_book_metrics(
         version = session.get(CalculationVersion, version_id)
         if not version:
             return None
-        total_fees, fee_count = _compute_fee_summary(session, version_id, account_ids)
+        total_fees, fee_count = _compute_fee_summary(
+            session, version_id, account_ids, asset_ids
+        )
         return BookVersionMetrics(
             version_id=version_id,
             summary=BookSummary(

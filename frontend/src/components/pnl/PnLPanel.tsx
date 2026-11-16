@@ -236,6 +236,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
     }, []);
 
     const handleWarningsClick = useCallback(() => {
+        dispatch({ type: 'SET_PNL_ACTIVE_TAB', tab: 'portfolio' });
         dispatch({ type: 'DRILL_RESET' });
         dispatch({ type: 'SET_AUDIT_DEFAULT_PANEL', panel: 'warnings' });
     }, [dispatch]);

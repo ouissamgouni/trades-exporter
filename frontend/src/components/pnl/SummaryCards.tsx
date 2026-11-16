@@ -125,12 +125,19 @@ interface WarningsCardProps {
     warningTypeCounts?: Record<string, number>;
 }
 
+/** Open warnings only: the version's warning ids also include acknowledged and dust ones. */
+export function openWarningCount(summary: PnLSummary, warningTypeCounts?: Record<string, number>): number {
+    if (!warningTypeCounts) return summary.warning_count;
+    return Object.values(warningTypeCounts).reduce((acc, n) => acc + n, 0);
+}
+
 export const WarningsCard: React.FC<WarningsCardProps> = ({
     summary,
     onWarningsClick,
     warningTypeCounts,
 }) => {
-    const hasWarnings = summary.warning_count > 0;
+    const warningCount = openWarningCount(summary, warningTypeCounts);
+    const hasWarnings = warningCount > 0;
 
     return (
         <Tooltip
@@ -144,7 +151,7 @@ export const WarningsCard: React.FC<WarningsCardProps> = ({
                                 <div key={type} className="text-xs">{type.replace(/_/g, ' ')}: {count}</div>
                             ))}
                     </div>
-                ) : hasWarnings ? `${summary.warning_count} warnings detected` : 'No warnings'
+                ) : hasWarnings ? `${warningCount} warnings detected` : 'No open warnings'
             }
         >
             <div
@@ -155,7 +162,7 @@ export const WarningsCard: React.FC<WarningsCardProps> = ({
                     <FiAlertTriangle size={12} color={hasWarnings ? '#dd6b20' : '#38a169'} style={{ flexShrink: 0 }} />
                     <span className="whitespace-nowrap text-[10px] font-semibold text-gray-700">Warnings</span>
                     <Badge colorScheme={summary.error_count > 0 ? 'red' : hasWarnings ? 'orange' : 'green'}>
-                        {hasWarnings ? summary.warning_count : '✓'}
+                        {hasWarnings ? warningCount : '✓'}
                     </Badge>
                     {/* Inline type breakdown */}
                     {warningTypeCounts && Object.keys(warningTypeCounts).length > 0 && (

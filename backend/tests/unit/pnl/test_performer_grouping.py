@@ -184,7 +184,7 @@ class TestAccountSparklines:
         ) as compute:
             out = pt.compute_account_sparklines(MagicMock(), 1, [4, 5])
         assert out[4] == [
-            {"date": "2026-11-02", "value": 120.0, "roi": 25.0, "pnl": 25.0}
+            {"date": "2026-11-02", "value": 120.0, "roi": 25.0, "pnl": 25.0, "unpriced_cost": 0.0}
         ]
         assert out[5][0]["roi"] is None
         assert compute.call_args_list[0].kwargs["account_ids"] == [4]

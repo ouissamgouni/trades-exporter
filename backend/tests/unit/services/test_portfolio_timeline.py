@@ -119,6 +119,24 @@ class TestGetPriceAtDatesBaseCurrency:
         assert _get_price_at_dates(session, 10, [], [datetime.now(timezone.utc)]) == {}
         assert _get_price_at_dates(session, 10, [10], []) == {}
 
+    def test_stale_out_flags_old_and_backfilled_prices(self):
+        session = MagicMock()
+        session.exec.return_value.all.return_value = [
+            MagicMock(asset_id=275, price=2500.0, snapshot_time=datetime(2025, 1, 1)),
+            MagicMock(asset_id=283, price=10.0, snapshot_time=datetime(2025, 3, 1)),
+        ]
+        stale: dict = {}
+
+        result = _get_price_at_dates(
+            session, None, [275, 283],
+            [datetime(2025, 1, 5, tzinfo=timezone.utc), datetime(2025, 2, 1, tzinfo=timezone.utc)],
+            stale_out=stale,
+        )
+
+        assert result["2025-02-01"][283] == 10.0  # back-filled from a later snapshot
+        assert stale["2025-01-05"] == {283}
+        assert stale["2025-02-01"] == {275, 283}
+
 
 # ---------------------------------------------------------------------------
 # current_value integration — base currency valued correctly

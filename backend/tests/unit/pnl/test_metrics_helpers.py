@@ -512,3 +512,53 @@ class TestFeeAccountScoping:
         _compute_fee_summary(session, 1)
 
         assert "normalized_transactions" not in str(session.exec.call_args.args[0])
+
+
+class TestAssetScopedFeesAndIncome:
+    def test_fee_helpers_scope_to_asset_ids(self):
+        from backend.services.pnl.metrics_service import (
+            _compute_fee_summary,
+            _compute_fees_in_period,
+        )
+
+        session = MagicMock()
+        session.exec.return_value.first.return_value = None
+
+        _compute_fee_summary(session, 1, None, [7])
+        _compute_fees_in_period(
+            session, 1, _utc(2024, 1, 1), _utc(2024, 12, 31), None, [7]
+        )
+
+        for call in session.exec.call_args_list:
+            assert "fee_entries.related_asset_id IN" in str(call.args[0])
+
+    def test_income_helpers_scope_to_asset_and_account_ids(self):
+        from backend.services.pnl.metrics_service import (
+            _compute_income_in_period,
+            _compute_income_summary,
+        )
+
+        session = MagicMock()
+        session.exec.return_value.first.return_value = None
+
+        _compute_income_summary(session, 1, [5], [7])
+        _compute_income_in_period(
+            session, 1, _utc(2024, 1, 1), _utc(2024, 12, 31), [5], [7]
+        )
+
+        for call in session.exec.call_args_list:
+            sql = str(call.args[0])
+            assert "coalesce(income_events.attributed_asset_id" in sql
+            assert "normalized_transactions.account_id IN" in sql
+
+    def test_income_summary_unscoped_by_default(self):
+        from backend.services.pnl.metrics_service import _compute_income_summary
+
+        session = MagicMock()
+        session.exec.return_value.first.return_value = None
+
+        _compute_income_summary(session, 1)
+
+        sql = str(session.exec.call_args.args[0])
+        assert "normalized_transactions" not in sql
+        assert "attributed_asset_id" not in sql
