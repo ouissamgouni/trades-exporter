@@ -95,12 +95,23 @@ interface OverviewCardsProps {
     onContributorsClick?: () => void;
     /** Held / sold-out / in gain / in loss counts are clickable when set */
     onPositionsClick?: (filter: PositionFilterKey) => void;
-    /** 'assets': totals of a filtered asset list (no TWR/MWR, benchmark or income; position insights instead) */
+    /** 'assets': totals of a filtered asset list (no benchmark or income, TWR/MWR only when returnMetrics is passed; position insights instead) */
     variant?: 'overview' | 'assets';
 }
 
 const pctText = (v: number | null | undefined, digits = 1) => v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`;
 const signClass = (v: number) => (v >= 0 ? 'text-green-600' : 'text-red-600');
+
+/** Compact "TWR · MWR" line for cards and rows; nothing when both are unknown. */
+export const ReturnRates: React.FC<{ twr?: number | null; mwr?: number | null; className?: string }> = ({ twr, mwr, className }) => {
+    if (twr == null && mwr == null) return null;
+    return (
+        <span className={`inline-flex items-center gap-1.5 text-[10px] text-gray-500 ${className ?? ''}`} data-testid="return-rates">
+            <span title={TWR_HELP}>TWR <span className={`font-semibold tabular-nums ${twr != null ? signClass(twr) : 'text-gray-400'}`}>{pctText(twr)}</span></span>
+            <span title={MWR_HELP}>MWR <span className={`font-semibold tabular-nums ${mwr != null ? signClass(mwr) : 'text-gray-400'}`}>{pctText(mwr)}</span></span>
+        </span>
+    );
+};
 
 const Line: React.FC<{ label: string; value: React.ReactNode; info?: string; className?: string }> = ({ label, value, info, className }) => (
     <div className="flex items-center justify-between gap-2 text-[11px] text-gray-500">
@@ -199,7 +210,7 @@ export const OverviewCards: React.FC<OverviewCardsProps> = ({
                             <Ratio label="ROI" help={ROI_HELP}>
                                 <span className={`font-bold tabular-nums ${signClass(m.roi)}`}>{live(pctText(m.roi, 2))}</span>
                             </Ratio>
-                            {!isAssets && (
+                            {(!isAssets || returnMetrics !== undefined) && (
                                 <>
                                     <Ratio label="TWR" help={TWR_HELP}>
                                         <span className={`font-bold tabular-nums ${signClass(returnMetrics?.twr_pct ?? 0)}`}>{pctText(returnMetrics?.twr_pct)}</span>

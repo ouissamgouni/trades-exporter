@@ -213,11 +213,12 @@ def compare_to_benchmark(
 
 
 def timeline_to_series(timeline_points) -> List[SeriesPoint]:
+    # Unpriced holdings are carried at cost: neither a loss nor a flow.
     return [
         SeriesPoint(
             date=p.date,
-            value=p.total_value_in_base,
-            pnl=p.unrealized_pnl + p.cumulative_realized_pnl,
+            value=p.total_value_in_base + p.unpriced_cost_in_base,
+            pnl=p.unrealized_pnl + p.cumulative_realized_pnl + p.unpriced_cost_in_base,
         )
         for p in timeline_points
     ]

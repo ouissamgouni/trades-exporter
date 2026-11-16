@@ -9,10 +9,10 @@ import { Tooltip } from '../ui/tooltip';
 import { GainsLossesBar } from './GainsLossesBar';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
-import type { GroupBy, PerformerItem } from '../../hooks/useChartData';
+import type { GroupBy, GroupReturns, PerformerItem } from '../../hooks/useChartData';
 import type { DimensionWithCategories } from '../../types';
 
-export type ContributorMetric = 'TR' | 'U' | 'MV' | 'Eff';
+export type ContributorMetric = 'TR' | 'U' | 'MV' | 'Eff' | 'TWR' | 'MWR';
 export type ContributorDisplay = '$' | '%';
 
 const METRICS: [ContributorMetric, string, string][] = [
@@ -20,10 +20,17 @@ const METRICS: [ContributorMetric, string, string][] = [
     ['U', 'Unreal.', 'Unrealized P&L'],
     ['MV', 'Value', 'Market value'],
     ['Eff', 'Eff.', 'Efficiency (return / cost)'],
+    ['TWR', 'TWR', 'Time-weighted return: not moved by money added or withdrawn'],
+    ['MWR', 'MWR', 'Money-weighted return (IRR) of the actual flows; yearly from 1Y on'],
 ];
 
-export function metricValue(p: PerformerItem, metric: ContributorMetric): number {
+const isRate = (metric: ContributorMetric) => metric === 'TWR' || metric === 'MWR';
+
+/** Groups without a TWR/MWR (no capital at work) get 0 and drop out of both lists. */
+export function metricValue(p: PerformerItem, metric: ContributorMetric, returns?: GroupReturns | null): number {
     switch (metric) {
+        case 'TWR': return returns?.twr[String(p.id)] ?? 0;
+        case 'MWR': return returns?.mwr[String(p.id)] ?? 0;
         case 'U': return p.unrealized_pnl ?? 0;
         case 'MV': return p.market_value ?? 0;
         case 'Eff': return p.efficiency ?? 0;
@@ -32,15 +39,17 @@ export function metricValue(p: PerformerItem, metric: ContributorMetric): number
 }
 
 /** Split into positive (desc) and negative (asc) lists by the chosen metric. */
-export function splitContributors(items: PerformerItem[], metric: ContributorMetric) {
-    const positives = items.filter(p => metricValue(p, metric) > 0).sort((a, b) => metricValue(b, metric) - metricValue(a, metric));
-    const negatives = items.filter(p => metricValue(p, metric) < 0).sort((a, b) => metricValue(a, metric) - metricValue(b, metric));
-    const sum = (list: PerformerItem[]) => list.reduce((acc, p) => acc + metricValue(p, metric), 0);
+export function splitContributors(items: PerformerItem[], metric: ContributorMetric, returns?: GroupReturns | null) {
+    const v = (p: PerformerItem) => metricValue(p, metric, returns);
+    const positives = items.filter(p => v(p) > 0).sort((a, b) => v(b) - v(a));
+    const negatives = items.filter(p => v(p) < 0).sort((a, b) => v(a) - v(b));
+    const sum = (list: PerformerItem[]) => list.reduce((acc, p) => acc + v(p), 0);
     return { positives, negatives, gains: sum(positives), losses: sum(negatives), net: sum(positives) + sum(negatives) };
 }
 
 function fmtMetric(v: number, metric: ContributorMetric, baseCurrency: string): string {
     if (metric === 'Eff') return `${v.toFixed(2)}x`;
+    if (isRate(metric)) return fmtPct(v);
     if (metric === 'MV') return fmtCurrency(v, baseCurrency);
     return fmtCurrencySigned(v, baseCurrency);
 }
@@ -61,6 +70,9 @@ interface ContributorsPanelProps {
     onDimensionChange?: (dimensionId: number) => void;
     onItemClick?: (item: PerformerItem) => void;
     versionId?: number | null;
+    /** TWR / MWR per item id, for the matching sort metrics */
+    returns?: GroupReturns | null;
+    isReturnsLoading?: boolean;
 }
 
 const Seg: React.FC<{ active: boolean; onClick: () => void; title?: string; children: React.ReactNode }> = ({ active, onClick, title, children }) => (
@@ -86,14 +98,16 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
     onDimensionChange,
     onItemClick,
     versionId,
+    returns,
+    isReturnsLoading,
 }) => {
     const [metric, setMetric] = useState<ContributorMetric>('TR');
     const [display, setDisplay] = useState<ContributorDisplay>('$');
     const [count, setCount] = useState(8);
     const assetPanelCtx = useContext(AssetDetailPanelContext);
 
-    const { positives, negatives, gains, losses, net } = useMemo(() => splitContributors(items, metric), [items, metric]);
-    const maxAbs = Math.max(...[...positives.slice(0, count), ...negatives.slice(0, count)].map(p => Math.abs(metricValue(p, metric))), 1);
+    const { positives, negatives, gains, losses, net } = useMemo(() => splitContributors(items, metric, returns), [items, metric, returns]);
+    const maxAbs = Math.max(...[...positives.slice(0, count), ...negatives.slice(0, count)].map(p => Math.abs(metricValue(p, metric, returns))), 1);
     const maxCount = Math.max(positives.length, negatives.length, 3);
 
     const totalCost = items.reduce((acc, p) => acc + (p.cost_basis ?? 0), 0);
@@ -101,11 +115,11 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
     const showPct = display === '%' && metric === 'TR';
 
     const renderRow = (p: PerformerItem, rank: number, positive: boolean) => {
-        const v = metricValue(p, metric);
+        const v = metricValue(p, metric, returns);
         const width = Math.max((Math.abs(v) / maxAbs) * 100, 4);
         const clickable = !!onItemClick && p.id >= 0;
-        const primary = display === '%' ? fmtPct(p.roi_pct) : fmtMetric(v, metric, baseCurrency);
-        const secondary = display === '%' ? fmtCurrencySigned(p.total_return, baseCurrency) : fmtPct(p.roi_pct);
+        const primary = isRate(metric) ? fmtPct(v) : display === '%' ? fmtPct(p.roi_pct) : fmtMetric(v, metric, baseCurrency);
+        const secondary = isRate(metric) || display === '%' ? fmtCurrencySigned(p.total_return, baseCurrency) : fmtPct(p.roi_pct);
         return (
             <div
                 key={`${p.group_type}-${p.id}`}
@@ -216,7 +230,7 @@ export const ContributorsPanel: React.FC<ContributorsPanelProps> = ({
                 </div>
             )}
 
-            {isLoading ? (
+            {isLoading || (isRate(metric) && isReturnsLoading) ? (
                 <div className="py-6 text-center text-xs text-gray-400">Loading contributors…</div>
             ) : positives.length + negatives.length === 0 ? (
                 <div className="py-6 text-center text-xs text-gray-400">No contributions in this period</div>

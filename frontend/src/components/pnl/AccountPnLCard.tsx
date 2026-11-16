@@ -18,6 +18,7 @@ import { ValueDisplay } from '../ValueDisplay';
 import { getAccountColor } from '../../utils/accountColors';
 import { formatPct } from './deltaUtils';
 import { Badge } from '../ui/primitives';
+import { ReturnRates } from './OverviewCards';
 
 // ------------------------------------------------------------------
 // Types (re-declared locally to avoid circular deps — mirrors AssetPnLTable)
@@ -128,6 +129,9 @@ export interface AccountPnLCardProps {
     liveBalanceValue?: number;
     /** True while live balances are being fetched */
     liveBalanceLoading?: boolean;
+    /** Whole-account time- / money-weighted return (%) over the selected period */
+    twr?: number | null;
+    mwr?: number | null;
 }
 
 // ------------------------------------------------------------------
@@ -158,6 +162,8 @@ export const AccountPnLCard: React.FC<AccountPnLCardProps> = ({
     details,
     liveBalanceValue,
     liveBalanceLoading = false,
+    twr,
+    mwr,
 }) => {
     const { account_id, account_name, asset_count, total_cost_basis, total_market_value, total_unrealized_pnl, total_lot_count } = row;
     const accountColor = getAccountColor(account_id);
@@ -223,6 +229,7 @@ export const AccountPnLCard: React.FC<AccountPnLCardProps> = ({
                         <div className="text-[10px] text-slate-500">{formatPct(unrealizedPct)}</div>
                     </Metric>
                 </div>
+                <ReturnRates twr={twr} mwr={mwr} className="mt-1" />
 
                 {/* ── Zone 4: Expandable asset breakdown ── */}
                 {isExpanded && (

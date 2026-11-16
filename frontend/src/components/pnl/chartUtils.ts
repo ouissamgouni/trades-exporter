@@ -82,19 +82,21 @@ export interface ValuePnlPoint {
     total_value_in_base: number;
     unrealized_pnl: number;
     cumulative_realized_pnl: number;
+    unpriced_cost_in_base?: number;
 }
 
-/** Cumulative TWR (%) from the first point; daily flow = ΔValue − Δ(unrealized + realized). */
+/** Cumulative TWR (%) from the first point; daily flow = ΔValue − Δ(unrealized + realized). Unpriced holdings count at cost. */
 export function cumulativeTwr(points: ValuePnlPoint[]): { x: string; y: number }[] {
     if (points.length < 2) return [];
-    const pnl = (p: ValuePnlPoint) => p.unrealized_pnl + p.cumulative_realized_pnl;
+    const value = (p: ValuePnlPoint) => p.total_value_in_base + (p.unpriced_cost_in_base ?? 0);
+    const pnl = (p: ValuePnlPoint) => p.unrealized_pnl + p.cumulative_realized_pnl + (p.unpriced_cost_in_base ?? 0);
     let growth = 1;
     const out = [{ x: points[0].date, y: 0 }];
     for (let i = 1; i < points.length; i++) {
         const prev = points[i - 1];
         const cur = points[i];
         const dPnl = pnl(cur) - pnl(prev);
-        const denom = cur.total_value_in_base - dPnl;
+        const denom = value(cur) - dPnl;
         if (denom > 1e-9) growth *= 1 + dPnl / denom;
         out.push({ x: cur.date, y: (growth - 1) * 100 });
     }

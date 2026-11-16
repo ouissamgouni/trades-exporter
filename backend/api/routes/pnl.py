@@ -6853,6 +6853,9 @@ def get_portfolio_timeline(
                 "unrealized_pnl": p.unrealized_pnl,
                 "cumulative_realized_pnl": p.cumulative_realized_pnl,
                 "cumulative_income": p.cumulative_income,
+                "unpriced_cost_in_base": p.unpriced_cost_in_base,
+                "unpriced_count": p.unpriced_count,
+                "stale_count": p.stale_count,
                 "breakdown": [
                     {
                         "asset_id": b.asset_id,
@@ -6863,6 +6866,8 @@ def get_portfolio_timeline(
                         "cost_basis_in_base": b.cost_basis_in_base,
                         "realized_pnl_to_date": b.realized_pnl_to_date,
                         "split_factor": b.split_factor,
+                        "priced": b.priced,
+                        "stale": b.stale,
                     }
                     for b in p.breakdown
                 ],
@@ -7191,7 +7196,14 @@ def get_account_sparklines(
 
     metrics = {
         str(k): compute_return_metrics(
-            [SeriesPoint(pt["date"], pt["value"] or 0.0, pt["pnl"] or 0.0) for pt in v]
+            [
+                SeriesPoint(
+                    pt["date"],
+                    (pt["value"] or 0.0) + (pt.get("unpriced_cost") or 0.0),
+                    (pt["pnl"] or 0.0) + (pt.get("unpriced_cost") or 0.0),
+                )
+                for pt in v
+            ]
         )
         for k, v in series.items()
     }
@@ -7725,6 +7737,59 @@ def get_return_metrics(
                 compute_return_metrics(slice_period(series, start))
             )
             for key, start in starts.items()
+        },
+    }
+
+
+@router.get("/versions/{version_id}/group-return-metrics")
+def get_group_return_metrics(
+    version_id: int,
+    group_by: str = Query("asset", pattern="^(asset|account|category)$"),
+    period: str = Query("all"),
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    dimension_id: Optional[int] = Query(None),
+    include_unsettled_negative: bool = Query(False),
+    session: Session = Depends(get_session_dependency),
+):
+    """TWR / MWR per asset, account or category over a period (null without capital at work)."""
+    from backend.services.pnl.group_returns import compute_group_return_metrics
+    from backend.services.pnl.metrics_service import PERIOD_RANGES
+
+    if period not in PERIOD_RANGES:
+        raise HTTPException(status_code=422, detail=f"Unknown period '{period}'")
+
+    def ids(raw: Optional[str]) -> Optional[List[int]]:
+        try:
+            return [int(x) for x in raw.split(",") if x.strip()] if raw else None
+        except ValueError:
+            raise HTTPException(
+                status_code=422, detail="ids must be comma-separated integers"
+            )
+
+    metrics = compute_group_return_metrics(
+        session,
+        version_id,
+        group_by,
+        period,
+        asset_ids=ids(asset_ids),
+        account_ids=ids(account_ids),
+        category_ids=ids(category_ids),
+        dimension_id=dimension_id,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    if metrics is None:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+    return {
+        "version_id": version_id,
+        "group_by": group_by,
+        "period": period,
+        "twr": {str(k): m.twr_pct for k, m in metrics.items()},
+        # Money-weighted (IRR): yearly from one year on, plain period rate below
+        "mwr": {
+            str(k): (m.irr_pct if (m.days or 0) >= 365 else m.irr_period_pct)
+            for k, m in metrics.items()
         },
     }
 

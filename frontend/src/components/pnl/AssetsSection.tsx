@@ -25,7 +25,8 @@ import { fmtCurrency, fmtCurrencySigned, type RangeMetrics } from './TotalReturn
 import { TERM_HELP, InfoTip } from './pnlTerms';
 import type { AccountBalanceBreakdown, AssetPnLRow } from './types';
 import type { Account, DimensionWithCategories } from '../../types';
-import type { AssetPeriodDelta, PerformerItem } from '../../hooks/useChartData';
+import type { AssetPeriodDelta, GroupReturns, PerformerItem } from '../../hooks/useChartData';
+import { useGroupReturnMetrics, useReturnMetrics } from '../../hooks/useChartData';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ export const POSITION_LABELS: Record<PositionFilter, string> = { all: 'All', ope
 
 export type ColumnId =
     | 'weight' | 'qty' | 'unitCost' | 'price' | 'value' | 'cost' | 'bought'
-    | 'unrealized' | 'realized' | 'totalReturn' | 'fees' | 'income'
+    | 'unrealized' | 'realized' | 'totalReturn' | 'fees' | 'income' | 'twr' | 'mwr'
     | 'taxRealized' | 'taxIfSold' | 'deferred' | 'live' | 'lots' | 'efficiency'
     | 'retDelta' | 'roiDelta' | 'unrealDelta' | 'realDelta';
 
@@ -65,6 +66,8 @@ export const COLUMNS: ColumnDef[] = [
     { id: 'totalReturn', label: 'Total return', group: 'P&L', sortable: true, summable: true },
     { id: 'fees', label: 'Fees', group: 'P&L', sortable: true, summable: true },
     { id: 'income', label: 'Income', group: 'P&L', sortable: true, summable: true },
+    { id: 'twr', label: 'TWR', group: 'P&L', sortable: true, info: 'Time-weighted return over the selected period: not moved by buys and sells' },
+    { id: 'mwr', label: 'MWR', group: 'P&L', sortable: true, info: 'Money-weighted return (IRR) of the buys and sells over the selected period; yearly from 1Y on' },
     { id: 'retDelta', label: 'Return Δ', group: 'Period', periodOnly: true, sortable: true, summable: true },
     { id: 'roiDelta', label: 'ROI Δ', group: 'Period', periodOnly: true, sortable: true },
     { id: 'unrealDelta', label: 'Unrealized Δ', group: 'Period', periodOnly: true, sortable: true, summable: true },
@@ -96,6 +99,8 @@ const SORT_BAR: { key: ColumnId; label: string; periodOnly?: boolean }[] = [
     { key: 'unrealized', label: 'Unrealized' },
     { key: 'realized', label: 'Realized' },
     { key: 'efficiency', label: 'Efficiency' },
+    { key: 'twr', label: 'TWR' },
+    { key: 'mwr', label: 'MWR' },
 ];
 
 /** One displayed line: a whole asset, or an asset's slice in one account (partial: no realized/fees split). */
@@ -110,9 +115,12 @@ export interface HoldingRow {
     value: number;
     unrealized: number;
     delta?: AssetPeriodDelta;
+    twr?: number | null;
+    mwr?: number | null;
 }
 
-function toRow(a: AssetPnLRow, delta?: AssetPeriodDelta): HoldingRow {
+function toRow(a: AssetPnLRow, delta?: AssetPeriodDelta, returns?: GroupReturns | null): HoldingRow {
+    const id = a.asset.id != null ? String(a.asset.id) : null;
     return {
         key: String(a.asset.id ?? `nopnl-${a.asset.symbol}`),
         src: a,
@@ -122,6 +130,8 @@ function toRow(a: AssetPnLRow, delta?: AssetPeriodDelta): HoldingRow {
         value: a.market_value,
         unrealized: a.unrealized_pnl,
         delta,
+        twr: id != null ? returns?.twr[id] ?? null : null,
+        mwr: id != null ? returns?.mwr[id] ?? null : null,
     };
 }
 
@@ -138,6 +148,15 @@ function toAccountRow(a: AssetPnLRow, b: AccountBalanceBreakdown): HoldingRow {
         value,
         unrealized: a.unit_value != null ? value - b.cost_basis_in_base : 0,
     };
+}
+
+/** For a selected period: open now, or some realized/income/return/cost movement within it. */
+export function isActiveInPeriod(a: AssetPnLRow, delta: AssetPeriodDelta | undefined): boolean {
+    if (!a.has_lots) return true;
+    if (a.has_open_position ?? Math.abs(a.quantity) > 1e-12) return true;
+    if (!delta) return false;
+    return [delta.realized_in_period, delta.income_in_period ?? 0, delta.total_return, delta.cost_change]
+        .some(v => Math.abs(v) >= 0.01);
 }
 
 /** Numeric value of a column for a row; null when not applicable (e.g. realized on an account slice). */
@@ -157,6 +176,8 @@ export function columnValue(id: ColumnId, r: HoldingRow, totalValue: number): nu
         case 'totalReturn': return r.partial ? null : a.unrealized_pnl + a.realized_pnl;
         case 'fees': return r.partial ? null : a.total_fees;
         case 'income': return r.partial ? null : r.delta?.income_in_period ?? null;
+        case 'twr': return r.partial ? null : r.twr ?? null;
+        case 'mwr': return r.partial ? null : r.mwr ?? null;
         case 'retDelta': return r.delta?.total_return ?? null;
         case 'roiDelta': return r.delta?.roi_pct ?? null;
         case 'unrealDelta': return r.delta?.unrealized_change ?? null;
@@ -184,16 +205,18 @@ export function sumColumn(id: ColumnId, rows: HoldingRow[], totalValue: number):
 
 const SIGNED: ReadonlySet<ColumnId> = new Set(['unrealized', 'realized', 'totalReturn', 'income', 'retDelta', 'unrealDelta', 'realDelta', 'taxRealized', 'taxIfSold', 'deferred']);
 
+const PCT: ReadonlySet<ColumnId> = new Set(['roiDelta', 'efficiency', 'twr', 'mwr']);
+
 function fmtCol(id: ColumnId, v: number, baseCurrency: string): string {
     if (id === 'weight') return `${v.toFixed(1)}%`;
-    if (id === 'roiDelta' || id === 'efficiency') return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+    if (PCT.has(id)) return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
     if (id === 'qty' || id === 'lots') return v.toLocaleString(undefined, { maximumFractionDigits: 6 });
     if (SIGNED.has(id)) return fmtCurrencySigned(v, baseCurrency);
     return fmtCurrency(v, baseCurrency);
 }
 
 function signClass(id: ColumnId, v: number): string {
-    if (!SIGNED.has(id) && id !== 'roiDelta' && id !== 'efficiency') return 'text-gray-700';
+    if (!SIGNED.has(id) && !PCT.has(id)) return 'text-gray-700';
     if (id === 'income') return 'text-teal-700';
     return v >= 0 ? 'text-green-600' : 'text-red-600';
 }
@@ -310,6 +333,10 @@ export interface AssetsSectionProps {
     periodDeltaMap?: Map<number, AssetPeriodDelta>;
     /** Period label when a period other than "All" is selected */
     periodLabel?: string;
+    /** Selected period key (all, 1y, …) for TWR / MWR */
+    period?: string;
+    /** Account scope of TWR / MWR when no account filter is ticked */
+    returnsAccountIds?: number[];
     /** Account performers for account group headers (period-aware realized/fees/return) */
     accountPerformers?: PerformerItem[];
     pnlVersionId?: number;
@@ -337,7 +364,7 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
         liveBalanceLoading = false, liveAccountErrors, search, onSearchChange, minMarketValue, onMinMarketValueChange,
         pnlStatus, onPnlStatusChange, balanceStatus, onBalanceStatusChange, selectedAccountIds, onSelectedAccountIdsChange,
         selectedCategoryIds, onSelectedCategoryIdsChange, periodDeltaMap, periodLabel, accountPerformers, pnlVersionId,
-        renderAllocation, positionRequest, persistToUrl = true,
+        renderAllocation, positionRequest, persistToUrl = true, period = 'all', returnsAccountIds,
     } = props;
     const urlParam = (name: string) => (persistToUrl ? readUrlParam(name) : null);
     const assetPanelCtx = useContext(AssetDetailPanelContext);
@@ -404,6 +431,13 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     const groupDimension = groupKey.startsWith('dim:') ? dimensions.find(d => `dim:${d.id}` === groupKey) : undefined;
     const effectiveGroupKey = groupKey === 'account' || groupDimension ? groupKey : 'none';
 
+    const returnsAccounts = selectedAccountIds.length ? selectedAccountIds : returnsAccountIds;
+    const assetReturns = useGroupReturnMetrics(pnlVersionId ?? null, 'asset', period, { accountIds: returnsAccounts });
+    const accountReturns = useGroupReturnMetrics(
+        pnlVersionId ?? null, 'account', period, { accountIds: returnsAccounts },
+        view === 'cards' && effectiveGroupKey === 'account',
+    );
+
     useEffect(() => {
         if (effectiveGroupKey === 'account' && onLoadAccountBalances && (!accountBalances || accountBalances.size === 0)) {
             onLoadAccountBalances();
@@ -420,6 +454,7 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
             if (selectedCategoryIds.length && !a.category_ids?.some(id => selectedCategoryIds.includes(id))) return false;
             if (pnlStatus === 'with_pnl' && !a.has_lots) return false;
             if (pnlStatus === 'no_pnl' && a.has_lots) return false;
+            if (isPeriod && periodDeltaMap && !isActiveInPeriod(a, a.asset.id != null ? periodDeltaMap.get(a.asset.id) : undefined)) return false;
             const open = a.has_open_position ?? Math.abs(a.quantity) > 1e-12;
             if (positionFilter === 'open' && !open) return false;
             if (positionFilter === 'closed' && open) return false;
@@ -440,11 +475,11 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
             return true;
         });
         return { filtered: out, dustHidden: dust };
-    }, [assets, search, selectedAccountIds, selectedCategoryIds, pnlStatus, positionFilter, balanceStatus, minMarketValue, liveBalances]);
+    }, [assets, search, selectedAccountIds, selectedCategoryIds, pnlStatus, positionFilter, balanceStatus, minMarketValue, liveBalances, isPeriod, periodDeltaMap]);
 
     const baseRows = useMemo(
-        () => filtered.map(a => toRow(a, a.asset.id != null ? periodDeltaMap?.get(a.asset.id) : undefined)),
-        [filtered, periodDeltaMap],
+        () => filtered.map(a => toRow(a, a.asset.id != null ? periodDeltaMap?.get(a.asset.id) : undefined, assetReturns.data)),
+        [filtered, periodDeltaMap, assetReturns.data],
     );
     const totalValue = useMemo(() => baseRows.reduce((acc, r) => acc + (r.src.has_lots && r.src.unit_value != null ? r.value : 0), 0), [baseRows]);
 
@@ -547,6 +582,16 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
         }
         return { cost, unrealized, realized, taxable, deferred, fees, value, invested, retDelta, unrealDelta, realDelta, costDelta, incomeDelta };
     }, [filtered, periodDeltaMap]);
+
+    const filteredAssetIds = useMemo(
+        () => filtered.filter(a => a.has_lots && a.asset.id != null).map(a => a.asset.id!).sort((x, y) => x - y),
+        [filtered],
+    );
+    const filteredReturns = useReturnMetrics(
+        pnlVersionId ?? null,
+        { assetIds: filteredAssetIds, accountIds: returnsAccounts },
+        filteredAssetIds.length > 0,
+    );
 
     // ── Account aggregate cards (cards view grouped by account) ──
     const accountCards = useMemo(
@@ -1032,6 +1077,7 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                 lossCount={lossRows.length}
                 assets={filtered}
                 onPositionsClick={(f) => setPositionFilter(f)}
+                returnMetrics={filteredReturns.data?.ranges?.[period] ?? null}
             />
         </div>
     );
@@ -1136,6 +1182,8 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                 periodDelta={r.delta}
                 periodLabel={periodLabel}
                 pnlVersionId={pnlVersionId}
+                twr={r.twr}
+                mwr={r.mwr}
             />
         );
     };
@@ -1155,11 +1203,11 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                 const key = String(r.src.asset.id);
                 if (seen.has(key)) continue;
                 seen.add(key);
-                rows.push(r.partial ? toRow(r.src, r.src.asset.id != null ? periodDeltaMap?.get(r.src.asset.id) : undefined) : r);
+                rows.push(r.partial ? toRow(r.src, r.src.asset.id != null ? periodDeltaMap?.get(r.src.asset.id) : undefined, assetReturns.data) : r);
             }
             return { ...g, rows };
         });
-    }, [effectiveGroupKey, groups, periodDeltaMap]);
+    }, [effectiveGroupKey, groups, periodDeltaMap, assetReturns.data]);
 
     const minPaged = isCards ? CARD_ROWS[0] * (splitActive ? splitCardCols * 2 : cardCols) : PAGE_SIZES[0];
     const pagination = view !== 'allocation' && effectiveGroupKey === 'none' && sortedFlat.length > minPaged && (
@@ -1185,60 +1233,60 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
     );
 
     const renderTable = (flatRows: HoldingRow[] | null, withFooter: boolean, maxH = 'max-h-[70vh]') => (
-                <div className={`${maxH} overflow-auto`}>
-                    <table className="w-full border-collapse text-xs">
-                        <thead className="sticky top-0 z-[2] bg-slate-50">
-                            <tr className="border-b border-slate-200">
-                                <th className="sticky left-0 z-[3] cursor-pointer bg-slate-50 px-2 py-2 text-left text-[11px] font-semibold text-gray-600" onClick={() => toggleSort('asset')}>
-                                    Asset {effectiveSort.key === 'asset' && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
-                                </th>
-                                {visibleColumns.map(col => (
-                                    <th
-                                        key={col.id}
-                                        className={`whitespace-nowrap px-2 py-2 text-right text-[11px] font-semibold ${col.periodOnly ? 'text-blue-700' : 'text-gray-600'} ${col.sortable ? 'cursor-pointer hover:bg-slate-100' : ''}`}
-                                        onClick={col.sortable ? () => toggleSort(col.id) : undefined}
-                                    >
-                                        <span className="inline-flex items-center gap-1">
-                                            {col.label}{col.periodOnly && periodLabel ? ` ${periodLabel}` : ''}
-                                            {col.info && <InfoTip text={col.info} size={9} />}
-                                            {effectiveSort.key === col.id && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
-                                        </span>
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {flatRows
-                                ? flatRows.map(r => (
-                                    <Fragment key={r.key}>
-                                        {renderTableRow(r, 0)}
-                                        {renderExpansion(r)}
-                                    </Fragment>
-                                ))
-                                : (groups ?? []).map(g => (
-                                    <Fragment key={g.key}>
-                                        {renderGroupHeader(g)}
-                                        {!collapsedGroups.has(g.key) && g.rows.map(r => (
-                                            <Fragment key={`${g.key}-${r.key}`}>
-                                                {renderTableRow(r, 1)}
-                                                {effectiveGroupKey !== 'account' && renderExpansion(r)}
-                                            </Fragment>
-                                        ))}
+        <div className={`${maxH} overflow-auto`}>
+            <table className="w-full border-collapse text-xs">
+                <thead className="sticky top-0 z-[2] bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                        <th className="sticky left-0 z-[3] cursor-pointer bg-slate-50 px-2 py-2 text-left text-[11px] font-semibold text-gray-600" onClick={() => toggleSort('asset')}>
+                            Asset {effectiveSort.key === 'asset' && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
+                        </th>
+                        {visibleColumns.map(col => (
+                            <th
+                                key={col.id}
+                                className={`whitespace-nowrap px-2 py-2 text-right text-[11px] font-semibold ${col.periodOnly ? 'text-blue-700' : 'text-gray-600'} ${col.sortable ? 'cursor-pointer hover:bg-slate-100' : ''}`}
+                                onClick={col.sortable ? () => toggleSort(col.id) : undefined}
+                            >
+                                <span className="inline-flex items-center gap-1">
+                                    {col.label}{col.periodOnly && periodLabel ? ` ${periodLabel}` : ''}
+                                    {col.info && <InfoTip text={col.info} size={9} />}
+                                    {effectiveSort.key === col.id && (effectiveSort.dir === 'asc' ? '↑' : '↓')}
+                                </span>
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {flatRows
+                        ? flatRows.map(r => (
+                            <Fragment key={r.key}>
+                                {renderTableRow(r, 0)}
+                                {renderExpansion(r)}
+                            </Fragment>
+                        ))
+                        : (groups ?? []).map(g => (
+                            <Fragment key={g.key}>
+                                {renderGroupHeader(g)}
+                                {!collapsedGroups.has(g.key) && g.rows.map(r => (
+                                    <Fragment key={`${g.key}-${r.key}`}>
+                                        {renderTableRow(r, 1)}
+                                        {effectiveGroupKey !== 'account' && renderExpansion(r)}
                                     </Fragment>
                                 ))}
-                        </tbody>
-                        {withFooter && <tfoot className="sticky bottom-0 z-[2] bg-slate-100">
-                            <tr className="border-t-2 border-slate-300">
-                                <td className="sticky left-0 z-[3] bg-slate-100 px-2 py-2 text-xs font-bold text-gray-800">
-                                    Total <span className="font-normal text-gray-500">({filtered.length})</span>
-                                </td>
-                                {visibleColumns.map(col => (
-                                    <td key={col.id} className="whitespace-nowrap px-2 py-2 text-right text-xs tabular-nums">{renderTotalCell(col, rowsForTotals)}</td>
-                                ))}
-                            </tr>
-                        </tfoot>}
-                    </table>
-                </div>
+                            </Fragment>
+                        ))}
+                </tbody>
+                {withFooter && <tfoot className="sticky bottom-0 z-[2] bg-slate-100">
+                    <tr className="border-t-2 border-slate-300">
+                        <td className="sticky left-0 z-[3] bg-slate-100 px-2 py-2 text-xs font-bold text-gray-800">
+                            Total <span className="font-normal text-gray-500">({filtered.length})</span>
+                        </td>
+                        {visibleColumns.map(col => (
+                            <td key={col.id} className="whitespace-nowrap px-2 py-2 text-right text-xs tabular-nums">{renderTotalCell(col, rowsForTotals)}</td>
+                        ))}
+                    </tr>
+                </tfoot>}
+            </table>
+        </div>
     );
 
     return (
@@ -1277,6 +1325,8 @@ export const AssetsSection: React.FC<AssetsSectionProps> = (props) => {
                                         details={expandedAccountIds.has(row.account_id) ? accountAssetDetails(row.account_id, filtered, accountBalances) : []}
                                         liveBalanceValue={accountLiveValues.get(row.account_id)}
                                         liveBalanceLoading={liveBalanceLoading}
+                                        twr={accountReturns.data?.twr[String(row.account_id)]}
+                                        mwr={accountReturns.data?.mwr[String(row.account_id)]}
                                     />
                                 ))}
                             </div>

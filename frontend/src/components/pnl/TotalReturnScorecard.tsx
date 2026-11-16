@@ -19,6 +19,7 @@ import { OverviewCards, type PositionFilterKey } from './OverviewCards';
 import { ContributorsPanel } from './ContributorsPanel';
 import { PeriodChartPanel } from './PeriodChartPanel';
 import type { TimelinePoint, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy, ReturnMetricsRange } from '../../hooks/useChartData';
+import { useGroupReturnMetrics } from '../../hooks/useChartData';
 import type { DimensionWithCategories } from '../../types';
 import type { AssetPnLRow } from './types';
 
@@ -323,6 +324,8 @@ interface TimeframeIndicatorsProps {
     mainBenchmark?: string;
     /** Held / sold-out / in gain / in loss counts in the cards */
     onPositionsClick?: (filter: PositionFilterKey) => void;
+    /** Scope of the contributors, for their TWR / MWR */
+    returnsScope?: { assetIds?: number[]; accountIds?: number[]; categoryIds?: number[] };
 }
 
 export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
@@ -363,8 +366,16 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     benchmarkSlot,
     mainBenchmark,
     onPositionsClick,
+    returnsScope,
 }) => {
     const periodLabel = RANGES.find(r => r.key === range)?.label ?? 'All';
+    const groupReturns = useGroupReturnMetrics(
+        versionId ?? null,
+        groupBy,
+        range,
+        { ...returnsScope, dimensionId: groupBy === 'category' ? selectedDimensionId : null },
+        !hidePerformers,
+    );
     const isPeriod = range !== 'all';
 
     // Pre-compute ROI% for all ranges: must use liveData (live-price-dependent)
@@ -496,6 +507,8 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 onDimensionChange={onDimensionChange}
                 onItemClick={handlePerformerClick}
                 versionId={versionId}
+                returns={groupReturns.data}
+                isReturnsLoading={groupReturns.isLoading}
             />
         );
 
@@ -572,17 +585,19 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                         {sideContent && <div className="lg:col-span-3">{sideContent}</div>}
                         <div className={`border border-slate-200 bg-white p-2 ${sideContent ? 'lg:col-span-2' : ''}`}>
                             <PeriodChartPanel
-                                    points={points}
-                                    baseCurrency={baseCurrency}
-                                    range={range}
-                                    isLoading={isLoading}
-                                    versionId={versionId}
-                                    assets={assetsProp}
-                                    contextLabel={contextLabel}
-                                    assetId={assetId}
-                                    assetSymbol={assetSymbol}
-                                    mainBenchmark={mainBenchmark}
-                                />
+                                points={points}
+                                baseCurrency={baseCurrency}
+                                range={range}
+                                isLoading={isLoading}
+                                versionId={versionId}
+                                assets={assetsProp}
+                                contextLabel={contextLabel}
+                                assetId={assetId}
+                                assetSymbol={assetSymbol}
+                                mainBenchmark={mainBenchmark}
+                                returnMetrics={returnMetrics}
+                                periodLabel={periodLabel}
+                            />
                         </div>
                     </div>
                 </>

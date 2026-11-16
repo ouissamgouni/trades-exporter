@@ -22,6 +22,10 @@ export interface TimelineBreakdownItem {
     realized_pnl_to_date: number;
     /** Cumulative stock-split ratio; multiply the unit price by it for a split-continuous series */
     split_factor?: number;
+    /** False when the asset has no price at this date (valued 0) */
+    priced?: boolean;
+    /** Price older than a week, or back-filled from a later snapshot */
+    stale?: boolean;
 }
 
 export interface TimelinePoint {
@@ -32,6 +36,10 @@ export interface TimelinePoint {
     cumulative_realized_pnl: number;
     cumulative_income: number;
     breakdown: TimelineBreakdownItem[];
+    /** Cost of holdings without a price at this date (not in total_value_in_base) */
+    unpriced_cost_in_base?: number;
+    unpriced_count?: number;
+    stale_count?: number;
 }
 
 export interface PortfolioTimelineResponse {
@@ -924,6 +932,35 @@ export function useReturnMetrics(versionId: number | null, scope: ScopeIds = {},
             const sp = new URLSearchParams();
             scopeParams(scope, sp);
             const res = await fetch(`${API_URL}/pnl/versions/${versionId}/return-metrics?${sp.toString()}`, { signal });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId,
+        staleTime: 5 * 60_000,
+    });
+    return { data: result.data ?? null, isLoading: result.isLoading };
+}
+
+/** TWR / MWR (%) per group id over a period; null when there was no capital at work. */
+export interface GroupReturns {
+    twr: Record<string, number | null>;
+    mwr: Record<string, number | null>;
+}
+
+export function useGroupReturnMetrics(
+    versionId: number | null,
+    groupBy: GroupBy,
+    period: string,
+    scope: ScopeIds & { dimensionId?: number | null } = {},
+    enabled = true,
+) {
+    const result = useQuery<GroupReturns>({
+        queryKey: ['group-return-metrics', versionId, groupBy, period, scope.assetIds?.join(','), scope.accountIds?.join(','), scope.categoryIds?.join(','), scope.dimensionId ?? null],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams({ group_by: groupBy, period });
+            scopeParams(scope, sp);
+            if (groupBy === 'category' && scope.dimensionId != null) sp.set('dimension_id', String(scope.dimensionId));
+            const res = await fetch(`${API_URL}/pnl/versions/${versionId}/group-return-metrics?${sp.toString()}`, { signal });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         },

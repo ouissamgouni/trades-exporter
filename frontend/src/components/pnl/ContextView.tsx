@@ -17,7 +17,7 @@ import { usePnL } from './PnLContext';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { TimeframeIndicators, RANGES, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import { AccountsStrip } from './AccountsStrip';
-import { AssetsSection, type PositionFilter } from './AssetsSection';
+import { AssetsSection, isActiveInPeriod, type PositionFilter } from './AssetsSection';
 import { PeriodPresets, PERIOD_METRICS, type PeriodMetric } from './PeriodPresets';
 import { BenchmarkSummary } from './BenchmarkSummary';
 import { seriesReturnBetween } from './chartUtils';
@@ -366,6 +366,14 @@ export const ContextView: React.FC<ContextViewProps> = ({
         hasLocalAccountFilter ? { ...scopeApiFilters, accountIds: localAccountIds } : scopeApiFilters,
     );
 
+    const loadedDeltaMap = assetPeriodDeltas.data ? assetPeriodDeltas.deltaMap : undefined;
+    const assetCount = useMemo(
+        () => (timeframeRange === 'all' || !loadedDeltaMap
+            ? scopedDisplayAssets.length
+            : scopedDisplayAssets.filter(a => isActiveInPeriod(a, a.asset.id != null ? loadedDeltaMap.get(a.asset.id) : undefined)).length),
+        [scopedDisplayAssets, timeframeRange, loadedDeltaMap],
+    );
+
     // ── Treemap asset filtering (uses scope-filtered assets, not local table filters) ──
     const filteredTreemapAssets = useMemo(() => {
         return scopedDisplayAssets.filter(a => {
@@ -539,7 +547,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             <span className="mr-0.5">Jump to</span>
                             <button type="button" className="border border-slate-200 bg-white px-1.5 py-0.5 text-gray-600 hover:border-blue-300 hover:text-blue-600" onClick={() => scrollTo(overviewRef)}>Overview</button>
                             <button type="button" className="border border-slate-200 bg-white px-1.5 py-0.5 text-gray-600 hover:border-blue-300 hover:text-blue-600" onClick={() => document.getElementById('pnl-contributors')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Contributors</button>
-                            <button type="button" className="border border-slate-200 bg-white px-1.5 py-0.5 text-gray-600 hover:border-blue-300 hover:text-blue-600" onClick={() => scrollTo(assetsRef)}>Assets ({scopedDisplayAssets.length})</button>
+                            <button type="button" className="border border-slate-200 bg-white px-1.5 py-0.5 text-gray-600 hover:border-blue-300 hover:text-blue-600" onClick={() => scrollTo(assetsRef)}>Assets ({assetCount})</button>
                         </div>
                     )}
                     <div className="ml-auto pb-2">
@@ -588,6 +596,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             hidePeriodCards
                             hidePerformers={isAsset}
                             returnMetrics={returnMetrics.data?.ranges?.[timeframeRange] ?? null}
+                            returnsScope={scopeApiFilters}
                             mainBenchmark={mainBenchmark}
                             onPositionsClick={isMultiAsset ? (filter) => {
                                 setPositionRequest(prev => ({ filter, nonce: (prev?.nonce ?? 0) + 1 }));
@@ -663,7 +672,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                         <div ref={assetsRef} className="scroll-mt-[calc(var(--app-header-h,0px)+8rem)]">
                             <div className="mb-2 flex items-center gap-2 border-b border-slate-200 pb-1">
                                 <span className="text-base font-semibold text-gray-800">Assets</span>
-                                <Badge colorScheme="gray">{scopedDisplayAssets.length}</Badge>
+                                <Badge colorScheme="gray">{assetCount}</Badge>
                                 <span className="border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-500">{periodLabel}</span>
                             </div>
                             <AssetsSection
@@ -694,8 +703,10 @@ export const ContextView: React.FC<ContextViewProps> = ({
                                 onSelectedAccountIdsChange={setLocalAccountIds}
                                 selectedCategoryIds={localCategoryIds}
                                 onSelectedCategoryIdsChange={setLocalCategoryIds}
-                                periodDeltaMap={assetPeriodDeltas.deltaMap}
+                                periodDeltaMap={loadedDeltaMap}
                                 periodLabel={timeframeRange !== 'all' ? periodLabel : undefined}
+                                period={timeframeRange}
+                                returnsAccountIds={scope.accountIds}
                                 accountPerformers={accountItems}
                                 pnlVersionId={currentVersionId ?? undefined}
                                 positionRequest={positionRequest}
